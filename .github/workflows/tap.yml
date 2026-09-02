@@ -72,7 +72,10 @@ jobs:
             mkdir -p /tmp/tag && tar -xzf /tmp/source.tar.gz -C /tmp/tag --strip-components=1
             sed -e "s|@URL@|$url|g" -e "s|@VERSION@|${tag#v}|g" -e "s|@SHA256@|$digest|g" \
               "/tmp/tag/$template" >"$output"
-            ! grep -q '@[A-Z0-9_]*@' "$output"
+            if grep -q '@[A-Z0-9_]*@' "$output"; then
+              echo "unrendered placeholder in $output" >&2
+              exit 1
+            fi
           fi
           brew style "$output"
       - name: Publish to the tap
