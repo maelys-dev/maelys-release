@@ -1,0 +1,161 @@
+name: release (reusable)
+
+# Reusable release of one Maelys product on a signed tag: verify the tag and
+# VERSION, build the packages on every target, attest their provenance and
+# publish one GitHub release with SHA256SUMS. The product supplies
+# `scripts/package-release.sh TARGET` writing into dist/, and the checkout
+# scripts of its pinned dependencies. Runner inputs are JSON: a label string
+# such as "macos-15" or a label array such as ["self-hosted","macOS","ARM64"].
+on:
+  workflow_call:
+    inputs:
+      product:
+        description: Package and binary name, for example maelys-egress
+        required: true
+        type: string
+      dependency_checkout:
+        description: Shell lines run before packaging (pinned dependency checkouts)
+        required: false
+        type: string
+        default: ""
+      linux_packages:
+        description: apt packages installed on Linux runners
+        required: false
+        type: string
+        default: build-essential dpkg-dev file rpm
+      macos_packages:
+        description: brew packages installed on macOS runners
+        required: false
+        type: string
+        default: ""
+      package_command:
+        description: Command producing dist/ for one target; TARGET is substituted
+        required: false
+        type: string
+        default: bash scripts/package-release.sh TARGET
+      linux_x86_64_runner:
+        required: false
+        type: string
+        default: '"ubuntu-24.04"'
+      linux_arm64_runner:
+        required: false
+        type: string
+        default: '"ubuntu-24.04-arm"'
+      macos_runner:
+        required: false
+        type: string
+        default: '"macos-15"'
+      release_environment:
+        required: false
+        type: string
+        default: release
+    outputs:
+      tag:
+        value: ${{ jobs.verify.outputs.tag }}
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          fetch-depth: 0
+      - name: Verify version and signed annotated tag
+        id: tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "v$(cat VERSION)" = "${GITHUB_REF_NAME}"
+          ref="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${GITHUB_REF_NAME}")"
+          test "$(jq -r .object.type <<<"$ref")" = tag || { echo "${GITHUB_REF_NAME} is not an annotated tag" >&2; exit 1; }
+          object="$(gh api "repos/${GITHUB_REPOSITORY}/git/tags/$(jq -r .object.sha <<<"$ref")")"
+          test "$(jq -r .verification.verified <<<"$object")" = true || { echo "${GITHUB_REF_NAME} is not verified by GitHub" >&2; exit 1; }
+          test "$(jq -r .object.sha <<<"$object")" = "${GITHUB_SHA}" || { echo "${GITHUB_REF_NAME} does not name ${GITHUB_SHA}" >&2; exit 1; }
+          echo "tag=${GITHUB_REF_NAME}" >>"$GITHUB_OUTPUT"
+
+  build:
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ${{ inputs.linux_x86_64_runner }}
+            target: linux-x86_64
+          - runner: ${{ inputs.linux_arm64_runner }}
+            target: linux-arm64
+          - runner: ${{ inputs.macos_runner }}
+            target: macos-arm64
+    runs-on: ${{ fromJSON(matrix.runner) }}
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          fetch-depth: 0
+      - name: Pinned dependency checkouts
+        if: inputs.dependency_checkout != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          ${{ inputs.dependency_checkout }}
+      - name: Install Linux packaging tools
+        if: runner.os == 'Linux' && inputs.linux_packages != ''
+        run: sudo apt-get update && sudo apt-get install -y ${{ inputs.linux_packages }}
+      - name: Install macOS packages
+        if: runner.os == 'macOS' && inputs.macos_packages != ''
+        run: brew install ${{ inputs.macos_packages }}
+      - name: Require Apple Silicon
+        if: runner.os == 'macOS'
+        run: test "$(uname -m)" = arm64
+      - name: Package
+        shell: bash
+        env:
+          PACKAGE_COMMAND: ${{ inputs.package_command }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          eval "${PACKAGE_COMMAND//TARGET/$TARGET}"
+          test -n "$(ls dist 2>/dev/null)"
+      - uses: actions/attest-build-provenance@ef244123eb79f2f7a7e75d99086184180e6d0018 # v1
+        with:
+          subject-path: dist/*
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dist-${{ matrix.target }}
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    needs: [verify, build]
+    runs-on: ubuntu-24.04
+    environment: ${{ inputs.release_environment }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: incoming
+      - name: Assemble and verify
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          find incoming -type f \( -name '*.tar.gz' -o -name '*.deb' -o -name '*.rpm' -o -name '*.sha256' \) -exec cp {} dist/ \;
+          (cd dist && sha256sum -c -- ./*.sha256)
+          (cd dist && sha256sum -- ./*.tar.gz ./*.deb ./*.rpm >SHA256SUMS)
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.verify.outputs.tag }}
+          PRODUCT: ${{ inputs.product }}
+        run: |
+          gh release create "$TAG" --repo "${GITHUB_REPOSITORY}" \
+            --title "$PRODUCT $TAG" --generate-notes --verify-tag dist/*

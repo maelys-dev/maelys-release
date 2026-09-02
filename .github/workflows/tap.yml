@@ -1,0 +1,123 @@
+name: homebrew tap (reusable)
+
+# Renders the product's formula template from the released tag's own copy
+# and pushes a signed commit to the shared Homebrew tap. Without tap
+# credentials the job renders, lints, prints the diff and succeeds, so a
+# release never fails on a missing secret. Products with dependency pins to
+# copy into the formula supply `render_command` (their own renderer).
+on:
+  workflow_call:
+    inputs:
+      product:
+        required: true
+        type: string
+      tag:
+        description: Release tag; defaults to the pushed tag
+        required: false
+        type: string
+        default: ""
+      formula_template:
+        description: Template path inside the product repository
+        required: false
+        type: string
+        default: ""
+      render_command:
+        description: Command rendering the formula; TAG and OUTPUT are substituted
+        required: false
+        type: string
+        default: ""
+      tap_repository:
+        required: false
+        type: string
+        default: maelys-dev/homebrew-tap
+    secrets:
+      tap_token:
+        required: false
+      tap_signing_key:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  tap:
+    runs-on: macos-15
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HAS_TAP_TOKEN: ${{ secrets.tap_token != '' }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          fetch-depth: 0
+      - name: Render the formula for the released tag
+        shell: bash
+        env:
+          PRODUCT: ${{ inputs.product }}
+          INPUT_TAG: ${{ inputs.tag }}
+          TEMPLATE: ${{ inputs.formula_template }}
+          RENDER_COMMAND: ${{ inputs.render_command }}
+        run: |
+          set -euo pipefail
+          tag="${INPUT_TAG:-${GITHUB_REF_NAME}}"
+          output="dist/homebrew/${PRODUCT}.rb"
+          mkdir -p dist/homebrew
+          if [ -n "$RENDER_COMMAND" ]; then
+            command="${RENDER_COMMAND//TAG/$tag}"
+            eval "${command//OUTPUT/$output}"
+          else
+            template="${TEMPLATE:-packaging/homebrew/${PRODUCT}.rb.in}"
+            url="https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${tag}.tar.gz"
+            curl -fsSL --retry 5 -o /tmp/source.tar.gz "$url"
+            digest="$(shasum -a 256 /tmp/source.tar.gz | awk '{print $1}')"
+            mkdir -p /tmp/tag && tar -xzf /tmp/source.tar.gz -C /tmp/tag --strip-components=1
+            sed -e "s|@URL@|$url|g" -e "s|@VERSION@|${tag#v}|g" -e "s|@SHA256@|$digest|g" \
+              "/tmp/tag/$template" >"$output"
+            ! grep -q '@[A-Z0-9_]*@' "$output"
+          fi
+          brew style "$output"
+      - name: Publish to the tap
+        shell: bash
+        env:
+          PRODUCT: ${{ inputs.product }}
+          INPUT_TAG: ${{ inputs.tag }}
+          TAP_REPOSITORY: ${{ inputs.tap_repository }}
+          TAP_TOKEN: ${{ secrets.tap_token }}
+          TAP_SIGNING_KEY: ${{ secrets.tap_signing_key }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          tag="${INPUT_TAG:-${GITHUB_REF_NAME}}"
+          formula="dist/homebrew/${PRODUCT}.rb"
+          tmp="$(mktemp -d)"
+          if [ "$HAS_TAP_TOKEN" = "true" ]; then
+            git clone -q "https://x-access-token:${TAP_TOKEN}@github.com/${TAP_REPOSITORY}.git" "$tmp/tap"
+          else
+            git clone -q "https://github.com/${TAP_REPOSITORY}.git" "$tmp/tap"
+          fi
+          mkdir -p "$tmp/tap/Formula"
+          cp "$formula" "$tmp/tap/Formula/${PRODUCT}.rb"
+          git -C "$tmp/tap" add "Formula/${PRODUCT}.rb"
+          if git -C "$tmp/tap" diff --cached --quiet; then
+            echo "tap already carries ${PRODUCT} ${tag#v}"
+            exit 0
+          fi
+          if [ "$HAS_TAP_TOKEN" != "true" ]; then
+            echo "::notice::no tap credentials configured; the rendered formula is kept as an artifact"
+            git -C "$tmp/tap" diff --cached --stat
+            exit 0
+          fi
+          sign=()
+          if [ -n "$TAP_SIGNING_KEY" ]; then
+            printf '%s\n' "$TAP_SIGNING_KEY" >"$tmp/signing-key"
+            chmod 0600 "$tmp/signing-key"
+            sign=(-c gpg.format=ssh -c "user.signingkey=$tmp/signing-key" -c commit.gpgsign=true)
+          fi
+          git -C "$tmp/tap" "${sign[@]}" \
+            -c "user.name=${ACTOR}" -c "user.email=${ACTOR}@users.noreply.github.com" \
+            commit -q -m "Update ${PRODUCT} to ${tag#v}"
+          git -C "$tmp/tap" push -q origin HEAD:main
+          echo "brew install ${TAP_REPOSITORY%/homebrew-*}/${TAP_REPOSITORY#*/homebrew-}/${PRODUCT}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: homebrew-formula-${{ inputs.product }}
+          path: dist/homebrew/
