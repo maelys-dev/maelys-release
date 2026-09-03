@@ -28,6 +28,7 @@ if "$self/scripts/adopt.sh" "$product" --check >/dev/null 2>&1; then echo "self-
 test -f "$product/.github/workflows/release.yml"
 grep -q 'product: maelys-fixture' "$product/.github/workflows/release.yml"
 grep -q '^  id-token: write' "$product/.github/workflows/release.yml"
+test "$(grep -c '^      id-token: write' "$product/.github/workflows/release.yml")" -ge 2
 grep -q 'scripts/checkout-system.sh' "$product/.github/workflows/release.yml"
 grep -q 'tap-maelys-fixture:' "$product/.github/workflows/release.yml"
 grep -q 'tap-libmaelys-fixture:' "$product/.github/workflows/release.yml"

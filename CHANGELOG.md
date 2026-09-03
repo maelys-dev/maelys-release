@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.3 — 2026-09-03
+
+- The generated `tap-<formula>` jobs are granted `id-token` and
+  `attestations` as well as `contents`: the `bottle` job of `tap.yml`
+  attests the bottles, and GitHub refuses a reusable workflow whose nested
+  job requests more than the calling job was granted (maelys-system v0.5.2
+  failed at startup on that rule).
+
 ## 0.2.2 — 2026-09-03
 
 - The generated caller workflow declares `contents`, `id-token` and

@@ -62,6 +62,8 @@ jobs:
     uses: maelys-dev/maelys-release/.github/workflows/tap.yml@<sha> # vX.Y.Z
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     with:
       product: maelys-egress
       # Products whose formula copies dependency pins supply their renderer:

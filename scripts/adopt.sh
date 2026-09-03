@@ -93,7 +93,7 @@ mkdir -p "$stage/.github/workflows" "$stage/.claude/skills/maelys-release"
     for formula in $formulas; do
         printf '\n  tap-%s:\n    needs: release\n' "$formula"
         printf '    uses: maelys-dev/maelys-release/.github/workflows/tap.yml@%s # %s\n' "$socle_sha" "$socle_tag"
-        printf '    permissions:\n      contents: write\n'
+        printf '    permissions:\n      contents: write\n      id-token: write\n      attestations: write\n'
         printf '    with:\n      product: %s\n' "$formula"
         if [ -n "$render_command" ]; then printf '      render_command: %s %s\n' "$render_command" "$formula"; fi
         printf '      bottles: %s\n' "'[\"macos-15\",\"macos-26\"]'"
