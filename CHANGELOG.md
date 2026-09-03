@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- `scripts/update-tap.sh` accepts pre-release tags (`v0.1.0-alpha.3`).
+
 ## 0.2.6 — 2026-09-03
 
 - `tap.yml` taps the shared tap before building bottles and merging their

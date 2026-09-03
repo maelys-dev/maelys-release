@@ -10,7 +10,7 @@ tag=${2:?TAG}
 formula=${3:?FORMULA_PATH}
 tap_repository=${TAP_REPOSITORY:-maelys-dev/homebrew-tap}
 version=${tag#v}
-[[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "usage: $0 PRODUCT vX.Y.Z FORMULA" >&2; exit 64; }
+[[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] || { echo "usage: $0 PRODUCT vX.Y.Z[-PRERELEASE] FORMULA" >&2; exit 64; }
 test -f "$formula" || { echo "missing rendered formula: $formula" >&2; exit 66; }
 
 tmp=$(mktemp -d)
