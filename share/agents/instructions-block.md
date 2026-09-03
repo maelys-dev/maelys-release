@@ -15,7 +15,7 @@ are in `docs/conventions.md` of maelys-release.
 - The workflow verifies the tag through the GitHub API, builds on Linux
   x86_64, Linux arm64 and macOS arm64 with `scripts/package-release.sh
   TARGET`, attests provenance, publishes the GitHub release, renders
-  `packaging/homebrew/@PRODUCT@.rb.in` from the tag's own copy, builds
+  @FORMULAS@ from the tag's own copy, builds
   bottles when configured and pushes the formula to `maelys-dev/homebrew-tap`.
 - Formula names: a command is named after its binary (`maelys-egress`), a
   library after its archive with a `lib` prefix (`libmaelys-sys`). Dependency

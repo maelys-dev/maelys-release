@@ -28,7 +28,7 @@ The product is `@PRODUCT@`; its release mechanics come from maelys-release
   tag; check drift with `--check`.
 - `scripts/package-release.sh TARGET`: must leave every artifact and its
   `.sha256` in `dist/`; keep it runnable locally.
-- `packaging/homebrew/@PRODUCT@.rb.in`: placeholders `@URL@`, `@VERSION@`,
+- @FORMULAS@: placeholders `@URL@`, `@VERSION@`,
   `@SHA256@`, plus any pin placeholder your renderer fills. Validate with
   `brew style`, `brew audit --strict` through a temporary tap, and
   `brew install --build-from-source` followed by `brew test`.

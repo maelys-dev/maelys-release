@@ -59,6 +59,9 @@ require_file "$project/CHANGELOG.md" "CHANGELOG.md"
 formulas=$(find "$project/packaging/homebrew" -maxdepth 1 -name '*.rb.in' 2>/dev/null | sed 's|.*/||; s|\.rb\.in$||' | sort)
 if [ -n "$formulas" ]; then echo "ok       Homebrew formula templates: $(printf '%s' "$formulas" | tr '\n' ' ')"
 else echo "note     no packaging/homebrew/*.rb.in: no tap job"; fi
+# The agent block and skill name the real template files, not the product.
+formula_paths=$(printf '%s\n' "$formulas" | sed '/^$/d; s|^|packaging/homebrew/|; s|$|.rb.in|' | paste -sd ',' - | sed 's|,|, |g')
+test -n "$formula_paths" || formula_paths='packaging/homebrew/<name>.rb.in'
 render_command=''
 if [ -x "$project/scripts/render-homebrew-formula.sh" ]; then
     render_command="sh scripts/render-homebrew-formula.sh TAG OUTPUT"
@@ -110,7 +113,7 @@ mkdir -p "$stage/.github/workflows" "$stage/.claude/skills/maelys-release"
     done
 } >"$stage/.github/workflows/release.yml"
 
-render_text() { sed -e "s|@PRODUCT@|$product|g" -e "s|@SOCLE_TAG@|$socle_tag|g" -e "s|@SOCLE_VERSION@|$socle_version|g" "$1"; }
+render_text() { sed -e "s|@PRODUCT@|$product|g" -e "s|@FORMULAS@|$formula_paths|g" -e "s|@SOCLE_TAG@|$socle_tag|g" -e "s|@SOCLE_VERSION@|$socle_version|g" "$1"; }
 render_text "$self/share/agents/claude-skill.md" >"$stage/.claude/skills/maelys-release/SKILL.md"
 render_text "$self/share/agents/instructions-block.md" >"$stage/block.md"
 
