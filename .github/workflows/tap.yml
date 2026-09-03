@@ -172,16 +172,13 @@ jobs:
         shell: bash
         env:
           PRODUCT: ${{ inputs.product }}
-          TAP_REPOSITORY: ${{ inputs.tap_repository }}
         run: |
           set -euo pipefail
           brew tap-new maelys-dev/staging >/dev/null
           # Recent Homebrew refuses to load formulas from a tap it does not trust.
           brew trust maelys-dev/staging >/dev/null 2>&1 || true
-          # The shared tap resolves the product's Maelys dependencies (depends_on).
-          shared_tap="${TAP_REPOSITORY%/homebrew-*}/${TAP_REPOSITORY#*/homebrew-}"
-          brew tap "$shared_tap"
-          brew trust "$shared_tap" >/dev/null 2>&1 || true
+          # No shared tap here: brew style would see the product's class twice
+          # (staging and shared) and fail on Lint/DuplicateMethods.
           tap="$(brew --repository maelys-dev/staging)"
           cp "formula/${PRODUCT}.rb" "$tap/Formula/${PRODUCT}.rb"
           if ls bottles/*.bottle.json >/dev/null 2>&1; then

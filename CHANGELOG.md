@@ -1,7 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.2.7 — 2026-09-03
 
+- The publish job of `tap.yml` no longer taps the shared tap before merging
+  the bottle digests: with the product's previous formula in the shared tap,
+  `brew style` saw its class twice and failed on `Lint/DuplicateMethods`
+  (maelys-system v0.5.4). Only the bottle job needs the shared tap, to
+  resolve dependencies.
 - `scripts/update-tap.sh` accepts pre-release tags (`v0.1.0-alpha.3`).
 
 ## 0.2.6 — 2026-09-03
