@@ -11,18 +11,33 @@ rest.
 - The tag is annotated and signed with a key registered on GitHub; the
   release workflow verifies it through the API and refuses lightweight,
   unsigned or unverified tags, and tags that do not name the workflow commit.
+  `adopt.sh DIR --preflight` checks the signing configuration and the
+  previous tag before the new one exists.
 - `CHANGELOG.md` has one dated `## X.Y.Z — YYYY-MM-DD` entry per release;
-  an `## Unreleased` section collects what the next one will carry.
+  an `## Unreleased` section collects what the next one will carry. The
+  entry for `VERSION` must exist: `adopt.sh` refuses a product without it,
+  so `make check` fails before the tag does.
 - A published tag is never moved, deleted or force-pushed. A mistake is
   fixed by the next patch release.
 
-## Dependencies
+## Dependencies and packages
 
 - A dependency on another Maelys repository is pinned by commit in an
-  `adapter/<NAME>_PIN` file, verified by the build (`git rev-parse HEAD`
-  equal to the pin, no local modification of the contract paths), and
-  fetched in CI by a `scripts/checkout-<name>.sh` that clones and checks out
-  the pin. Tags are recorded next to the commit for humans.
+  `adapter/<NAME>_PIN` file, `NAME` being the repository name upper-cased
+  with underscores (`MAELYS_SYSTEM_PIN`): the nearest tag on line 1 for
+  humans, the pinned commit on line 2. The build verifies the checkout
+  (`git rev-parse HEAD` equal to the pin, no local modification of the
+  contract paths).
+- The checkout is the managed `scripts/checkout-dependency.sh NAME`, written
+  by `adopt.sh` from the pins; it clones `maelys-dev/NAME` next to the
+  product at the pinned commit. The release workflow, the product's CI and
+  developers run that one script. A product writes no `scripts/checkout-*.sh`
+  of its own; `adopt.sh` refuses them.
+- The system packages the build needs on the runners are declared in
+  `adapter/PACKAGES`, one per line under `[linux]` (apt names) or `[macos]`
+  (brew names). `adopt.sh` emits them into the release workflow after the
+  socle's own packaging tools; nothing else installs packages during a
+  release.
 - The release workflow and any third-party action are pinned by full commit
   SHA with the tag in a trailing comment. `adopt.sh` writes the socle pin.
 
@@ -30,7 +45,9 @@ rest.
 
 - `scripts/package-release.sh TARGET` builds one target (`linux-x86_64`,
   `linux-arm64`, `macos-arm64`) and leaves every artifact with its
-  `.sha256` in `dist/`. It must run on a developer machine without CI.
+  `.sha256` in `dist/`. It must run on a developer machine without CI. It
+  may rebuild from clean (`make clean`) to package exactly what the commit
+  builds; a developer runs it expecting that rebuild.
 - Every artifact gets a provenance attestation; the release lists them with
   a `SHA256SUMS`.
 
@@ -71,6 +88,18 @@ rest.
 - `HOMEBREW_TAP_SIGNING_KEY`: SSH private key whose public half is registered
   on GitHub, used to sign tap commits.
 - No repository holds a credential or a private key.
+- The `publish` job runs in the `release` environment of the repository,
+  whose deployment policy is limited to tags `v*`: a `workflow_dispatch`
+  from a branch or a `release.yml` edited on a branch cannot publish. GitHub
+  creates a missing environment without any rule, so `--preflight` checks
+  the tag rule, not the presence. Set it once per repository:
+
+  ```bash
+  gh api -X PUT repos/OWNER/REPO/environments/release \
+    --input - <<<'{"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}'
+  gh api -X POST repos/OWNER/REPO/environments/release/deployment-branch-policies \
+    -f name='v*' -f type=tag
+  ```
 
 ## Agents
 
@@ -83,13 +112,15 @@ the managed block.
 
 ```sh
 git clone https://github.com/maelys-dev/maelys-release && git -C maelys-release checkout vX.Y.Z
-maelys-release/scripts/adopt.sh /path/to/product            # plan
-maelys-release/scripts/adopt.sh /path/to/product --apply    # write
-maelys-release/scripts/adopt.sh /path/to/product --check    # exit 2 on drift
+maelys-release/scripts/adopt.sh /path/to/product              # plan
+maelys-release/scripts/adopt.sh /path/to/product --apply      # write
+maelys-release/scripts/adopt.sh /path/to/product --check      # exit 2 on drift
+maelys-release/scripts/adopt.sh /path/to/product --preflight  # exit 3 when the tag would be refused
 ```
 
 `--check` belongs in the product's `make check` and in the fleet drift
-check of maelys-platform.
+check of maelys-platform; `--preflight` is the first step of a release, on
+the machine that will sign the tag.
 
 ## Replaying a tag's Homebrew publication
 

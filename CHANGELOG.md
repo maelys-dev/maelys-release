@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.3.0 — 2026-09-03
+
+Feedback from the adoption by maelys-oci: everything that failed there was
+upstream of the tag (declarations, checkouts, preconditions), not in the
+release itself.
+
+- `adapter/PACKAGES` declares the apt (`[linux]`) and brew (`[macos]`)
+  packages a build needs; `adopt.sh` emits them as `linux_packages` (after
+  the socle's packaging tools) and `macos_packages`, and `--check` covers
+  them. maelys-oci had to install jansson, libarchive, e2fsprogs and Mbed
+  TLS from a fake checkout script.
+- Dependency checkouts are generated: `adopt.sh` reads `adapter/*_PIN`,
+  installs the managed `scripts/checkout-dependency.sh NAME` and writes one
+  `dependency_checkout` line per pin. A product-written
+  `scripts/checkout-*.sh` is refused (four identical ones in maelys-oci,
+  diverging already on tag versus commit checkout); a pin whose line 2 is
+  not a commit is refused. Breaking: delete the product's checkout scripts,
+  point the product's CI at `scripts/checkout-dependency.sh NAME`.
+- `adopt.sh` requires a dated `## X.Y.Z` entry in `CHANGELOG.md` for
+  `VERSION`, so `make check` fails before the tag would.
+- `adopt.sh DIR --preflight`: `--check`, then `tag.gpgsign` and
+  `user.signingkey`, the previous `v*` tag annotated and signed, `vX.Y.Z`
+  free, the `release` environment limiting deployments to tags `v*` (with
+  `gh`); exit 3. Until now each of these was discovered by a failed
+  workflow. Presence of the environment is not enough: GitHub creates it
+  without rules on first use, and the five adopted repositories had it
+  that way or not at all.
+- Documentation: `render_command` receives `TAG OUTPUT NAME` in the README
+  as in the conventions; the README no longer mentions an
+  `extra_placeholders` input that `tap.yml` does not have; the adoption
+  snippet points at `vX.Y.Z`; the conventions say `package-release.sh` may
+  rebuild from clean. The skill and the managed block describe the
+  declarations and forbid installing packages from scripts.
+- `scripts/self-test.sh` covers the refusals, the generated lines, the
+  checkout against a local bare repository and the preflight against a
+  fixture repository with an SSH-signed tag.
+
 ## 0.2.9 — 2026-09-03
 
 - The managed AGENTS.md/CLAUDE.md block and the Claude skill name the

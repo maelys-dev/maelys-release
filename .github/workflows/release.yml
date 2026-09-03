@@ -3,9 +3,9 @@ name: release (reusable)
 # Reusable release of one Maelys product on a signed tag: verify the tag and
 # VERSION, build the packages on every target, attest their provenance and
 # publish one GitHub release with SHA256SUMS. The product supplies
-# `scripts/package-release.sh TARGET` writing into dist/, and the checkout
-# scripts of its pinned dependencies. Runner inputs are JSON: a label string
-# such as "macos-15" or a label array such as ["self-hosted","macOS","ARM64"].
+# `scripts/package-release.sh TARGET` writing into dist/, its `adapter/` pins
+# and packages. Runner inputs are JSON: a label string such as "macos-15" or
+# a label array such as ["self-hosted","macOS","ARM64"].
 on:
   workflow_call:
     inputs:
