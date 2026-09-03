@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.9 — 2026-09-03
 
 - The managed AGENTS.md/CLAUDE.md block and the Claude skill name the
   repository's actual formula templates (`packaging/homebrew/<name>.rb.in`
