@@ -43,6 +43,9 @@ rest.
 - A user-facing formula installs no build tools, libraries or headers it
   does not need at run time; a library formula installs the archive, headers
   and pkg-config file. Build-time dependencies are declared `=> :build`.
+- A repository publishes one formula per `packaging/homebrew/<name>.rb.in`;
+  `adopt.sh` writes one tap job each, so a repository may publish a command
+  and a library. A product renderer receives `TAG OUTPUT NAME`.
 - The formula template `packaging/homebrew/<name>.rb.in` lives in the
   product repository and is rendered from the released tag's copy, so the
   formula and the released source cannot drift. Dependency pins are copied

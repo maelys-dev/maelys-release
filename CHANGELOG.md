@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.1 — 2026-09-03
+
+- `adopt.sh` writes one tap job per `packaging/homebrew/*.rb.in`, named
+  after the formula, so a repository can publish a command and a library or
+  a formula named differently from the repository (`libmaelys-sys`). The
+  product renderer receives the formula name as a third argument.
+
 ## 0.2.0 — 2026-09-03
 
 - `scripts/adopt.sh DIR [--apply|--check]`: writes the product's

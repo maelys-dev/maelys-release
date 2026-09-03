@@ -53,10 +53,12 @@ if [ -f "$project/VERSION" ] && ! grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' "$project/
 fi
 require_exec "$project/scripts/package-release.sh" "scripts/package-release.sh TARGET writing dist/"
 require_file "$project/CHANGELOG.md" "CHANGELOG.md"
-template="$project/packaging/homebrew/$product.rb.in"
-tap=0
-if [ -f "$template" ]; then tap=1; echo "ok       Homebrew formula template packaging/homebrew/$product.rb.in"
-else echo "note     no packaging/homebrew/$product.rb.in: the tap job is omitted"; fi
+# Every packaging/homebrew/NAME.rb.in becomes one tap job publishing NAME:
+# a repository may publish several formulas (a command and a library) and a
+# formula is named after what it installs, not after the repository.
+formulas=$(find "$project/packaging/homebrew" -maxdepth 1 -name '*.rb.in' 2>/dev/null | sed 's|.*/||; s|\.rb\.in$||' | sort)
+if [ -n "$formulas" ]; then echo "ok       Homebrew formula templates: $(printf '%s' "$formulas" | tr '\n' ' ')"
+else echo "note     no packaging/homebrew/*.rb.in: no tap job"; fi
 render_command=''
 if [ -x "$project/scripts/render-homebrew-formula.sh" ]; then
     render_command="sh scripts/render-homebrew-formula.sh TAG OUTPUT"
@@ -85,16 +87,16 @@ mkdir -p "$stage/.github/workflows" "$stage/.claude/skills/maelys-release"
         printf '      dependency_checkout: |\n'
         printf '%s\n' "$checkouts" | sed 's|^|        |'
     fi
-    if [ "$tap" -eq 1 ]; then
-        printf '\n  tap:\n    needs: release\n'
+    for formula in $formulas; do
+        printf '\n  tap-%s:\n    needs: release\n' "$formula"
         printf '    uses: maelys-dev/maelys-release/.github/workflows/tap.yml@%s # %s\n' "$socle_sha" "$socle_tag"
         printf '    permissions:\n      contents: write\n'
-        printf '    with:\n      product: %s\n' "$product"
-        if [ -n "$render_command" ]; then printf '      render_command: %s\n' "$render_command"; fi
+        printf '    with:\n      product: %s\n' "$formula"
+        if [ -n "$render_command" ]; then printf '      render_command: %s %s\n' "$render_command" "$formula"; fi
         printf '      bottles: %s\n' "'[\"macos-15\",\"macos-26\"]'"
         # shellcheck disable=SC2016 # GitHub expressions are literal here
         printf '    secrets:\n      tap_token: ${{ secrets.HOMEBREW_TAP_TOKEN }}\n      tap_signing_key: ${{ secrets.HOMEBREW_TAP_SIGNING_KEY }}\n'
-    fi
+    done
 } >"$stage/.github/workflows/release.yml"
 
 render_text() { sed -e "s|@PRODUCT@|$product|g" -e "s|@SOCLE_TAG@|$socle_tag|g" -e "s|@SOCLE_VERSION@|$socle_version|g" "$1"; }

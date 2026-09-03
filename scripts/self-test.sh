@@ -14,6 +14,7 @@ printf '#!/bin/sh\nexit 0\n' >"$product/scripts/package-release.sh"
 chmod +x "$product/scripts/package-release.sh"
 printf '#!/bin/sh\nexit 0\n' >"$product/scripts/checkout-system.sh"
 printf 'class MaelysFixture < Formula\nend\n' >"$product/packaging/homebrew/maelys-fixture.rb.in"
+printf 'class LibmaelysFixture < Formula\nend\n' >"$product/packaging/homebrew/libmaelys-fixture.rb.in"
 printf '# Agent instructions\n\nKeep me.\n' >"$product/AGENTS.md"
 
 # missing prerequisite is refused
@@ -27,7 +28,9 @@ if "$self/scripts/adopt.sh" "$product" --check >/dev/null 2>&1; then echo "self-
 test -f "$product/.github/workflows/release.yml"
 grep -q 'product: maelys-fixture' "$product/.github/workflows/release.yml"
 grep -q 'scripts/checkout-system.sh' "$product/.github/workflows/release.yml"
-grep -q 'tap.yml@' "$product/.github/workflows/release.yml"
+grep -q 'tap-maelys-fixture:' "$product/.github/workflows/release.yml"
+grep -q 'tap-libmaelys-fixture:' "$product/.github/workflows/release.yml"
+grep -q 'product: libmaelys-fixture' "$product/.github/workflows/release.yml"
 grep -q 'Keep me.' "$product/AGENTS.md"
 grep -q 'maelys-release:begin' "$product/AGENTS.md"
 test -f "$product/CLAUDE.md" && test -f "$product/RELEASING.md"
@@ -41,7 +44,7 @@ status=0
 "$self/scripts/adopt.sh" "$product" --check >/dev/null 2>&1 || status=$?
 test "$status" = 2
 # a product without a formula template gets no tap job
-rm "$product/packaging/homebrew/maelys-fixture.rb.in"
+rm "$product/packaging/homebrew/maelys-fixture.rb.in" "$product/packaging/homebrew/libmaelys-fixture.rb.in"
 "$self/scripts/adopt.sh" "$product" --apply >/dev/null
 if grep -q 'tap.yml@' "$product/.github/workflows/release.yml"; then echo "self-test: tap job kept without template" >&2; exit 1; fi
 echo "self-test: adopt.sh ok"
