@@ -10,16 +10,28 @@ permissions:
 
 jobs:
   check:
-    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           fetch-depth: 0
-      - run: sudo apt-get update && sudo apt-get install -y shellcheck
-      - name: Install actionlint
+      - name: Install shellcheck and actionlint
+        if: runner.os == 'Linux'
         run: |
+          sudo apt-get update && sudo apt-get install -y shellcheck
           bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.7/scripts/download-actionlint.bash) 1.7.7 /usr/local/bin >/dev/null
-      - run: actionlint .github/workflows/*.yml
-      - run: shellcheck scripts/*.sh
-      - name: adopt.sh self-test on a fixture
-        run: scripts/self-test.sh
+      - if: runner.os == 'Linux'
+        run: actionlint .github/workflows/*.yml
+      - if: runner.os == 'Linux'
+        run: shellcheck share/templates/checkout-dependency.sh
+      - name: Contract of the CLI
+        run: |
+          python3 -m py_compile bin/maelys-release
+          bin/maelys-release describe --format json --compact >/dev/null
+          bin/maelys-release version --json --compact
+      - name: Self-test on a fixture
+        run: bin/maelys-release self-test

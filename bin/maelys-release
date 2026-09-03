@@ -1,0 +1,1352 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: MPL-2.0
+"""maelys-release: adopt, check, rehearse and publish through the Maelys
+release socle.
+
+A command-line program of the agent-cli/v2 contract of maelys-cli, in
+Python: one catalog drives the parser, help, describe and completion;
+success is a JSON envelope on stdout, failure an envelope on stderr; exit 0
+completed, 1 failed, 2 a validation that found violations. Transactional
+commands (adopt, tap) plan by default and write with --apply.
+
+Standard library only; python3 >= 3.9. The socle is the checkout (or the
+installed prefix) this file runs from: share/ holds the texts installed
+into products, VERSION its version.
+"""
+from __future__ import annotations
+
+import difflib
+import json
+import os
+import pathlib
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+
+PROGRAM = "maelys-release"
+PRODUCT = "Maelys Release"
+CONTRACT = "agent-cli/v2"
+SCHEMA_VERSION = 2
+CATALOG_SCHEMA = 1
+CLI_API = 1
+FRAMEWORK = f"python {sys.version_info.major}.{sys.version_info.minor}"
+
+EXIT_OK = 0
+EXIT_FAILURE = 1
+EXIT_VIOLATIONS = 2
+
+SOCLE_REPOSITORY = "maelys-dev/maelys-release"
+DEFAULT_TAP = "maelys-dev/homebrew-tap"
+DEFAULT_IMAGE = "ubuntu:24.04"
+SOCLE_LINUX_PACKAGES = "build-essential dpkg-dev file rpm"  # the release.yml default
+BOTTLES = '\'["macos-15","macos-26"]\''
+PLATFORMS = {"linux-x86_64": "linux/amd64", "linux-arm64": "linux/arm64"}
+MANAGED = (
+    ".github/workflows/release.yml",
+    "scripts/checkout-dependency.sh",
+    "AGENTS.md",
+    "CLAUDE.md",
+    ".claude/skills/maelys-release/SKILL.md",
+    "RELEASING.md",
+    ".github/workflows/ci.yml",
+)
+BEGIN = "<!-- maelys-release:begin -->"
+END = "<!-- maelys-release:end -->"
+EXIT_CODES = {"0": "command completed", "1": "execution failed", "2": "valid report with violations"}
+
+
+class Failure(Exception):
+    """A failure envelope: stable code, causal message, next safe action."""
+
+    def __init__(self, code: str, message: str, hint: str = "") -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.hint = hint
+
+
+# ---- the socle itself --------------------------------------------------------
+
+def socle_root() -> pathlib.Path:
+    return pathlib.Path(__file__).resolve().parent.parent
+
+
+def share_dir() -> pathlib.Path:
+    root = socle_root()
+    for candidate in (root / "share", root / "share" / "maelys-release"):
+        if (candidate / "agents").is_dir():
+            return candidate
+    raise Failure("NOT_FOUND", f"share/agents not found under {root}.",
+                  "Run from a maelys-release checkout or an installed prefix.")
+
+
+def socle_version() -> str:
+    for candidate in (socle_root() / "VERSION", share_dir() / "VERSION"):
+        if candidate.is_file():
+            return candidate.read_text(encoding="utf-8").strip()
+    raise Failure("NOT_FOUND", "VERSION of the socle not found.", "Run from a maelys-release checkout.")
+
+
+def run(command: list[str], cwd: pathlib.Path | None = None, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
+    return subprocess.run(command, cwd=cwd, env=env, check=False, text=True,
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+
+def git(*arguments: str, cwd: pathlib.Path | None = None, check: bool = True) -> str:
+    completed = run(["git", *arguments], cwd=cwd)
+    if check and completed.returncode != 0:
+        raise Failure("PROCESS_FAILED", f"git {' '.join(arguments)} failed: {completed.stderr.strip()}",
+                      "Fix the repository state and retry.")
+    return completed.stdout.strip() if completed.returncode == 0 else ""
+
+
+def socle_identity(sha: str, tag: str) -> tuple[str, str]:
+    """The commit and tag written into the managed files."""
+    if sha:
+        return sha, tag or "untagged"
+    root = socle_root()
+    if not (root / ".git").exists():
+        raise Failure("PRECONDITION_FAILED", "This socle is not a git checkout, so its commit is unknown.",
+                      "Pass --socle-sha SHA --socle-tag TAG, or run from a checkout.")
+    return git("rev-parse", "HEAD", cwd=root), git("describe", "--tags", "--exact-match", cwd=root, check=False) or "untagged"
+
+
+# ---- the product contract ----------------------------------------------------
+
+class Declarations:
+    """What a product declares, read once and used by every command."""
+
+    def __init__(self, project: pathlib.Path, product: str) -> None:
+        self.project = project
+        self.product = product
+        self.version = ""
+        self.formulas: list[str] = []
+        self.render_command = ""
+        self.dependencies: list[str] = []
+        self.linux_packages = ""
+        self.macos_packages = ""
+        self.checks: list[dict] = []
+
+    @property
+    def valid(self) -> bool:
+        return all(check["status"] in ("ok", "note") for check in self.checks)
+
+    def add(self, status: str, message: str) -> None:
+        self.checks.append({"status": status, "message": message})
+
+
+def parse_packages(text: str) -> tuple[str, str]:
+    """adapter/PACKAGES: one package per line under [linux] or [macos]."""
+    packages: dict[str, list[str]] = {"linux": [], "macos": []}
+    section = ""
+    for number, raw in enumerate(text.splitlines(), 1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("["):
+            if line in ("[linux]", "[macos]"):
+                section = line[1:-1]
+                continue
+            raise ValueError(f"unknown section {line} at line {number}")
+        if not section:
+            raise ValueError(f"package outside a [linux] or [macos] section at line {number}")
+        if len(line.split()) != 1 or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9+._@:-]*", line):
+            raise ValueError(f"one package per line at line {number}: {raw}")
+        packages[section].append(line)
+    return " ".join(packages["linux"]), " ".join(packages["macos"])
+
+
+def read_declarations(project: pathlib.Path, product: str) -> Declarations:
+    decl = Declarations(project, product)
+    version_file = project / "VERSION"
+    if not version_file.is_file():
+        decl.add("missing", "VERSION file")
+    else:
+        text = version_file.read_text(encoding="utf-8").strip()
+        if re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", text):
+            decl.version = text
+            decl.add("ok", "VERSION file")
+        else:
+            decl.add("missing", "VERSION must be X.Y.Z")
+    packager = project / "scripts" / "package-release.sh"
+    decl.add("ok" if packager.is_file() and os.access(packager, os.X_OK) else "missing",
+             "scripts/package-release.sh TARGET writing dist/")
+    changelog = project / "CHANGELOG.md"
+    if not changelog.is_file():
+        decl.add("missing", "CHANGELOG.md")
+    else:
+        decl.add("ok", "CHANGELOG.md")
+        # The release of VERSION needs its dated entry; the workflow only
+        # compares VERSION with the tag, so the entry is checked here.
+        if decl.version:
+            pattern = rf"^## {re.escape(decl.version)}\s.*[0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}}"
+            if re.search(pattern, changelog.read_text(encoding="utf-8"), re.MULTILINE):
+                decl.add("ok", f"CHANGELOG.md has a dated ## {decl.version} entry")
+            else:
+                decl.add("missing", f"CHANGELOG.md needs a dated entry: ## {decl.version} — YYYY-MM-DD")
+    # Every packaging/homebrew/NAME.rb.in becomes one tap job publishing NAME:
+    # a formula is named after what it installs, not after the repository.
+    homebrew = project / "packaging" / "homebrew"
+    decl.formulas = sorted(path.name[: -len(".rb.in")] for path in homebrew.glob("*.rb.in")) if homebrew.is_dir() else []
+    if decl.formulas:
+        decl.add("ok", "Homebrew formula templates: " + " ".join(decl.formulas))
+    else:
+        decl.add("note", "no packaging/homebrew/*.rb.in: no tap job")
+    renderer = project / "scripts" / "render-homebrew-formula.sh"
+    if renderer.is_file() and os.access(renderer, os.X_OK):
+        decl.render_command = "sh scripts/render-homebrew-formula.sh TAG OUTPUT"
+        decl.add("ok", "scripts/render-homebrew-formula.sh renders the formula")
+    # Dependencies: one adapter/<NAME>_PIN per Maelys repository, nearest tag
+    # on line 1 for humans and the pinned commit on line 2. The managed
+    # scripts/checkout-dependency.sh clones each of them from the pin.
+    adapter = project / "adapter"
+    for pin in sorted(adapter.glob("*_PIN")) if adapter.is_dir() else []:
+        name = pin.name[: -len("_PIN")].lower().replace("_", "-")
+        lines = pin.read_text(encoding="utf-8").splitlines()
+        if len(lines) >= 2 and re.fullmatch(r"[0-9a-f]{40}", lines[1].strip()):
+            decl.dependencies.append(name)
+        else:
+            decl.add("missing", f"adapter/{pin.name}: line 2 must be the pinned commit (line 1 its tag)")
+    if decl.dependencies:
+        decl.add("ok", "pinned dependencies: " + " ".join(decl.dependencies))
+    scripts = project / "scripts"
+    stray = sorted(path.name for path in scripts.glob("checkout-*.sh")
+                   if path.name != "checkout-dependency.sh") if scripts.is_dir() else []
+    if stray:
+        decl.add("refused", "scripts/" + " scripts/".join(stray)
+                 + ": dependencies are cloned from adapter/*_PIN by the managed"
+                 " scripts/checkout-dependency.sh NAME; delete these")
+    packages = adapter / "PACKAGES"
+    if packages.is_file():
+        try:
+            decl.linux_packages, decl.macos_packages = parse_packages(packages.read_text(encoding="utf-8"))
+            decl.add("ok", f"adapter/PACKAGES: linux [{decl.linux_packages}] macos [{decl.macos_packages}]")
+        except ValueError as error:
+            decl.add("missing", f"adapter/PACKAGES: {error}")
+    return decl
+
+
+def project_of(invocation: Invocation) -> tuple[pathlib.Path, str]:
+    directory = pathlib.Path(invocation.operands[0])
+    if not directory.is_dir():
+        raise Failure("NOT_FOUND", f"DIR is not a directory: {directory}.", "Pass the product repository.")
+    project = directory.resolve()
+    product = invocation.option("--product") or project.name
+    if not re.fullmatch(r"[a-z0-9-]+", product):
+        raise Failure("VALIDATION_FAILED", f"Product name must be [a-z0-9-]: {product}.",
+                      "Pass --product NAME with a valid name.")
+    return project, product
+
+
+def require_valid(decl: Declarations, action: str) -> None:
+    if not decl.valid:
+        problems = [check["message"] for check in decl.checks if check["status"] not in ("ok", "note")]
+        raise Failure("PRECONDITION_FAILED", f"{decl.project} does not meet the product contract, so {action} is refused: "
+                      + "; ".join(problems) + ".", f"Run '{PROGRAM} check {decl.project}' and fix every violation.")
+
+
+# ---- the managed files -------------------------------------------------------
+
+def render_text(template: pathlib.Path, mapping: dict[str, str]) -> str:
+    text = template.read_text(encoding="utf-8")
+    for key, value in mapping.items():
+        text = text.replace(f"@{key}@", value)
+    return text
+
+
+def release_workflow(decl: Declarations, sha: str, tag: str, version: str) -> str:
+    lines = [
+        "name: release",
+        "",
+        f"# Managed by maelys-release {tag} ({version}). Regenerate with",
+        f"# '{PROGRAM} adopt' of maelys-release; do not edit by hand.",
+        # A job that calls a reusable workflow cannot be granted more than the
+        # caller workflow declares at the top level, so the ceiling is set
+        # here and each job narrows it.
+        "on:",
+        "  push:",
+        '    tags: ["v*"]',
+        "  workflow_dispatch:",
+        "    inputs:",
+        "      tag:",
+        "        description: Existing signed tag whose Homebrew publication is replayed",
+        "        required: true",
+        "        type: string",
+        "",
+        "permissions:",
+        "  contents: write",
+        "  id-token: write",
+        "  attestations: write",
+        "",
+        "jobs:",
+        "  release:",
+        "    if: github.event_name == 'push'",
+        f"    uses: {SOCLE_REPOSITORY}/.github/workflows/release.yml@{sha} # {tag}",
+        "    permissions:",
+        "      contents: write",
+        "      id-token: write",
+        "      attestations: write",
+        "    with:",
+        f"      product: {decl.product}",
+    ]
+    if decl.dependencies:
+        lines.append("      dependency_checkout: |")
+        lines.extend(f"        sh scripts/checkout-dependency.sh {name}" for name in decl.dependencies)
+    if decl.linux_packages:
+        lines.append(f"      linux_packages: {SOCLE_LINUX_PACKAGES} {decl.linux_packages}")
+    if decl.macos_packages:
+        lines.append(f"      macos_packages: {decl.macos_packages}")
+    for formula in decl.formulas:
+        lines.extend([
+            "",
+            f"  tap-{formula}:",
+            "    needs: release",
+            "    if: always() && (needs.release.result == 'success' || needs.release.result == 'skipped')",
+            f"    uses: {SOCLE_REPOSITORY}/.github/workflows/tap.yml@{sha} # {tag}",
+            "    permissions:",
+            "      contents: write",
+            "      id-token: write",
+            "      attestations: write",
+            "    with:",
+            f"      product: {formula}",
+            "      tag: ${{ inputs.tag }}",
+        ])
+        if decl.render_command:
+            lines.append(f"      render_command: {decl.render_command} {formula}")
+        lines.extend([
+            f"      bottles: {BOTTLES}",
+            "    secrets:",
+            "      tap_token: ${{ secrets.HOMEBREW_TAP_TOKEN }}",
+            "      tap_signing_key: ${{ secrets.HOMEBREW_TAP_SIGNING_KEY }}",
+        ])
+    return "\n".join(lines) + "\n"
+
+
+def ci_workflow(decl: Declarations, sha: str, tag: str, version: str) -> str:
+    """Created once from the same declarations, then owned by the product."""
+    lines = [
+        "name: ci",
+        "",
+        f"# Created by maelys-release {tag} ({version}) and owned by this repository: add jobs",
+        "# next to check, keep check on the socle version of release.yml.",
+        "on:",
+        "  push:",
+        "    branches: [main]",
+        "  pull_request:",
+        "",
+        "permissions:",
+        "  contents: read",
+        "",
+        "jobs:",
+        "  check:",
+        f"    uses: {SOCLE_REPOSITORY}/.github/workflows/check-product.yml@{sha} # {tag}",
+        "    with:",
+        f"      product: {decl.product}",
+    ]
+    if decl.dependencies:
+        lines.append("      dependency_checkout: |")
+        lines.extend(f"        sh scripts/checkout-dependency.sh {name}" for name in decl.dependencies)
+    if decl.linux_packages:
+        lines.append(f"      linux_packages: {decl.linux_packages}")
+    if decl.macos_packages:
+        lines.append(f"      macos_packages: {decl.macos_packages}")
+    return "\n".join(lines) + "\n"
+
+
+def managed_block(existing: str | None, block: str) -> str:
+    """Replace the block between the markers, or append it."""
+    if existing is not None and BEGIN in existing:
+        out: list[str] = []
+        skipping = False
+        for line in existing.splitlines():
+            if line.strip() == BEGIN:
+                out.extend([BEGIN, *block.rstrip("\n").splitlines(), END])
+                skipping = True
+            elif line.strip() == END:
+                skipping = False
+            elif not skipping:
+                out.append(line)
+        return "\n".join(out) + "\n"
+    head = (existing.rstrip("\n") + "\n\n") if existing else ""
+    return head + BEGIN + "\n" + block.rstrip("\n") + "\n" + END + "\n"
+
+
+def stage(decl: Declarations, sha: str, tag: str) -> dict[str, tuple[str, bool]]:
+    """Every managed file as (content, executable), rendered for the product."""
+    version = socle_version()
+    share = share_dir()
+    formulas = ", ".join(f"packaging/homebrew/{name}.rb.in" for name in decl.formulas) \
+        or "packaging/homebrew/<name>.rb.in"
+    mapping = {"PRODUCT": decl.product, "FORMULAS": formulas, "SOCLE_TAG": tag, "SOCLE_VERSION": version}
+    staged: dict[str, tuple[str, bool]] = {
+        ".github/workflows/release.yml": (release_workflow(decl, sha, tag, version), False),
+        ".claude/skills/maelys-release/SKILL.md": (render_text(share / "agents" / "claude-skill.md", mapping), False),
+    }
+    if decl.dependencies:
+        staged["scripts/checkout-dependency.sh"] = (
+            render_text(share / "templates" / "checkout-dependency.sh", mapping), True)
+    block = render_text(share / "agents" / "instructions-block.md", mapping)
+    for name in ("AGENTS.md", "CLAUDE.md"):
+        path = decl.project / name
+        existing = path.read_text(encoding="utf-8") if path.is_file() else None
+        staged[name] = (managed_block(existing, block), False)
+    if not (decl.project / "RELEASING.md").is_file():
+        staged["RELEASING.md"] = (render_text(share / "templates" / "RELEASING.md", mapping), False)
+    if not (decl.project / ".github" / "workflows" / "ci.yml").is_file():
+        staged[".github/workflows/ci.yml"] = (ci_workflow(decl, sha, tag, version), False)
+    return staged
+
+
+def plan(decl: Declarations, staged: dict[str, tuple[str, bool]], apply: bool) -> list[dict]:
+    """One entry per managed file: create, update or same; written when applying."""
+    files: list[dict] = []
+    for relative in MANAGED:
+        if relative not in staged:
+            continue
+        content, executable = staged[relative]
+        path = decl.project / relative
+        entry: dict = {"path": relative}
+        if not path.is_file():
+            entry["action"] = "create"
+        else:
+            current = path.read_text(encoding="utf-8")
+            if current != content:
+                entry["action"] = "update"
+                entry["diff"] = "".join(difflib.unified_diff(
+                    current.splitlines(keepends=True), content.splitlines(keepends=True), relative, relative))
+            elif executable and not os.access(path, os.X_OK):
+                entry["action"] = "update"
+                entry["reason"] = "not executable"
+            else:
+                entry["action"] = "same"
+        if apply and entry["action"] != "same":
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+            if executable:
+                path.chmod(path.stat().st_mode | 0o111)
+        files.append(entry)
+    return files
+
+
+def pinned_socle(project: pathlib.Path) -> dict | None:
+    """The socle sha and tag the product's release.yml pins, if any."""
+    workflow = project / ".github" / "workflows" / "release.yml"
+    if not workflow.is_file():
+        return None
+    match = re.search(rf"{re.escape(SOCLE_REPOSITORY)}/\.github/workflows/release\.yml@([0-9a-f]{{40}}) # (\S+)",
+                      workflow.read_text(encoding="utf-8"))
+    return {"sha": match.group(1), "tag": match.group(2)} if match else None
+
+
+def socle_data(sha: str, tag: str) -> dict:
+    return {"version": socle_version(), "tag": tag, "sha": sha}
+
+
+# ---- handlers: each returns (data, exit code) ---------------------------------
+
+class Invocation:
+    def __init__(self, command: dict, operands: list[str], options: dict[str, object],
+                 fmt: str, compact: bool, non_interactive: bool) -> None:
+        self.command = command
+        self.operands = operands
+        self.options = options
+        self.format = fmt
+        self.compact = compact
+        self.non_interactive = non_interactive
+
+    def option(self, name: str, default: object = None) -> object:
+        return self.options.get(name, default)
+
+    def flag(self, name: str) -> bool:
+        return bool(self.options.get(name, False))
+
+
+def handle_adopt(invocation: Invocation) -> tuple[dict, int]:
+    project, product = project_of(invocation)
+    apply = invocation.flag("--apply")
+    decl = read_declarations(project, product)
+    require_valid(decl, "adopt")
+    sha, tag = socle_identity(str(invocation.option("--socle-sha", "")), str(invocation.option("--socle-tag", "")))
+    files = plan(decl, stage(decl, sha, tag), apply)
+    changed = any(entry["action"] != "same" for entry in files)
+    return {"mode": "apply" if apply else "plan", "product": product, "project": str(project),
+            "socle": socle_data(sha, tag), "changed": changed, "checks": decl.checks, "files": files}, EXIT_OK
+
+
+def check_data(invocation: Invocation) -> tuple[Declarations, dict]:
+    project, product = project_of(invocation)
+    decl = read_declarations(project, product)
+    sha, tag = socle_identity(str(invocation.option("--socle-sha", "")), str(invocation.option("--socle-tag", "")))
+    data: dict = {"product": product, "project": str(project), "socle": socle_data(sha, tag),
+                  "pinned": pinned_socle(project), "checks": decl.checks, "files": [], "violations": []}
+    data["violations"].extend(check["message"] for check in decl.checks if check["status"] not in ("ok", "note"))
+    if decl.valid:
+        if data["pinned"] and data["pinned"]["sha"] != sha:
+            data["violations"].append(
+                f"{product} pins maelys-release {data['pinned']['tag']} ({data['pinned']['sha'][:7]}) but this is"
+                f" {tag} ({sha[:7]}): run the pinned socle, or adopt --apply to upgrade")
+        else:
+            data["files"] = plan(decl, stage(decl, sha, tag), apply=False)
+            data["violations"].extend(f"{entry['path']}: {entry['action']}" + (f" ({entry['reason']})" if "reason" in entry else "")
+                                      for entry in data["files"] if entry["action"] != "same")
+    data["valid"] = not data["violations"]
+    return decl, data
+
+
+def handle_check(invocation: Invocation) -> tuple[dict, int]:
+    _, data = check_data(invocation)
+    return data, EXIT_OK if data["valid"] else EXIT_VIOLATIONS
+
+
+def github_api(path: str) -> dict | None:
+    """GET through gh (its credentials); None when gh is missing or the call fails."""
+    if not shutil.which("gh"):
+        return None
+    completed = run(["gh", "api", path])
+    return json.loads(completed.stdout) if completed.returncode == 0 else None
+
+
+def handle_preflight(invocation: Invocation) -> tuple[dict, int]:
+    """What the release workflow will demand of the tag, before it exists."""
+    decl, data = check_data(invocation)
+    project = decl.project
+    preflight: list[dict] = []
+
+    def add(status: str, message: str) -> None:
+        preflight.append({"status": status, "message": message})
+
+    def config(key: str) -> str:
+        return git("config", "--get", key, cwd=project, check=False)
+
+    if data["valid"]:
+        add("ok" if config("tag.gpgsign") == "true" else "fail",
+            "tag.gpgsign = true" if config("tag.gpgsign") == "true" else "tag.gpgsign is not true: git config tag.gpgsign true")
+        fmt = config("gpg.format") or "openpgp"
+        if config("user.signingkey"):
+            add("ok", f"gpg.format = {fmt}, user.signingkey set")
+        else:
+            add("fail", f"user.signingkey is not set (gpg.format = {fmt}); the key must be registered on GitHub")
+        if git("rev-parse", "--is-shallow-repository", cwd=project, check=False) == "true":
+            add("fail", "shallow clone: previous tags are not visible; run from a full clone")
+        else:
+            tags = git("tag", "--list", "v*", "--sort=-v:refname", cwd=project, check=False).split()
+            if not tags:
+                add("note", "no v* tag yet")
+            else:
+                last = tags[0]
+                if git("cat-file", "-t", last, cwd=project, check=False) != "tag":
+                    add("fail", f"{last} is a lightweight tag; the workflow requires annotated signed tags")
+                elif not re.search(r"-----BEGIN .*SIGNATURE-----", git("cat-file", "-p", last, cwd=project, check=False)):
+                    add("fail", f"{last} is not signed")
+                else:
+                    add("ok", f"{last} is annotated and signed")
+        if git("rev-parse", "-q", "--verify", f"refs/tags/v{decl.version}", cwd=project, check=False):
+            add("fail", f"tag v{decl.version} already exists; bump VERSION")
+        else:
+            add("ok", f"tag v{decl.version} is free")
+        # GitHub creates a missing environment on first use, without rules,
+        # so presence proves nothing: the environment must limit deployments
+        # to tags v*, which keeps a workflow_dispatch from a branch or a
+        # release.yml edited on a branch from publishing.
+        remote = git("remote", "get-url", "origin", cwd=project, check=False)
+        match = re.search(r"github\.com[:/]([^/]+/[^/]+?)(?:\.git)?$", remote)
+        if not match:
+            add("note", "origin is not on GitHub: release environment not checked")
+        elif not shutil.which("gh"):
+            add("note", f"gh is not installed: release environment of {match.group(1)} not checked")
+        else:
+            repository = match.group(1)
+            environment = github_api(f"repos/{repository}/environments/release")
+            if environment is None:
+                add("fail", f"environment release is missing in {repository}; create it and limit its deployments to tags v*")
+            elif not (environment.get("deployment_branch_policy") or {}).get("custom_branch_policies"):
+                add("fail", f"environment release of {repository} has no deployment policy: any branch,"
+                    " workflow_dispatch or edited release.yml can publish; limit it to tags v*")
+            else:
+                policies = github_api(f"repos/{repository}/environments/release/deployment-branch-policies") or {}
+                if any(policy.get("type") == "tag" and policy.get("name") == "v*"
+                       for policy in policies.get("branch_policies", [])):
+                    add("ok", f"environment release of {repository} limits deployments to tags v*")
+                else:
+                    add("fail", f"environment release of {repository} has a deployment policy without the tag rule v*")
+    data["preflight"] = preflight
+    data["violations"].extend(item["message"] for item in preflight if item["status"] == "fail")
+    data["ready"] = data["valid"] and not any(item["status"] == "fail" for item in preflight)
+    return data, EXIT_OK if data["ready"] else EXIT_VIOLATIONS
+
+
+REHEARSAL = r"""
+set -euo pipefail
+export DEBIAN_FRONTEND=noninteractive
+echo "== Install Linux packaging tools and declared packages"
+apt-get update -q >/dev/null
+# git and certificates are on the runner already; the image has neither.
+apt-get install -y -q --no-install-recommends git ca-certificates $LINUX_PACKAGES >/dev/null
+echo "== Copy the working tree (dist/ excluded)"
+mkdir -p /work/product && cd /work/product
+tar -C /src --exclude=./dist -cf - . | tar -xf -
+git config --global --add safe.directory "*"
+echo "== Pinned dependency checkouts"
+for name in $DEPENDENCIES; do sh scripts/checkout-dependency.sh "$name"; done
+echo "== Package: ${PACKAGE_COMMAND//TARGET/$TARGET}"
+eval "${PACKAGE_COMMAND//TARGET/$TARGET}"
+test -n "$(ls dist 2>/dev/null)" || { echo "rehearse: dist/ is empty" >&2; exit 1; }
+cp dist/* /dist/
+echo "== Artifacts in dist/"
+ls -l /dist
+"""
+
+
+def handle_rehearse(invocation: Invocation) -> tuple[dict, int]:
+    """Replay the build job of release.yml for one Linux target in Docker."""
+    project, product = project_of(invocation)
+    target = invocation.operands[1]
+    if not shutil.which("docker"):
+        raise Failure("NOT_FOUND", "docker is required to rehearse a Linux build.", "Install Docker and retry.")
+    decl = read_declarations(project, product)
+    require_valid(decl, "rehearse")
+    if decl.dependencies and not os.access(project / "scripts" / "checkout-dependency.sh", os.X_OK):
+        raise Failure("PRECONDITION_FAILED", "scripts/checkout-dependency.sh is missing in the product.",
+                      f"Run '{PROGRAM} adopt {project} --apply' first.")
+    (project / "dist").mkdir(exist_ok=True)
+    image = str(invocation.option("--image", os.environ.get("REHEARSE_IMAGE", DEFAULT_IMAGE)))
+    package_command = str(invocation.option("--package-command", "bash scripts/package-release.sh TARGET"))
+    command = ["docker", "run", f"--name=rehearse-{target}" if invocation.flag("--keep") else "--rm",
+               "--platform", PLATFORMS[target],
+               "-v", f"{project}:/src:ro", "-v", f"{project / 'dist'}:/dist",
+               "-e", f"TARGET={target}",
+               "-e", f"LINUX_PACKAGES={SOCLE_LINUX_PACKAGES} {decl.linux_packages}".rstrip(),
+               "-e", f"DEPENDENCIES={' '.join(decl.dependencies)}",
+               "-e", f"PACKAGE_COMMAND={package_command}",
+               image, "bash", "-c", REHEARSAL]
+    # The container's output is a log: it stays on stdout for a human and
+    # moves to stderr when the envelope owns stdout.
+    log = sys.stderr if invocation.format != "text" else sys.stdout
+    print(f"rehearse: {target} on {image} ({PLATFORMS[target]})", file=log)
+    log.flush()
+    completed = subprocess.run(command, check=False, stdout=log, stderr=subprocess.STDOUT)
+    if completed.returncode != 0:
+        raise Failure("PROCESS_FAILED", f"The rehearsal of {target} failed with exit {completed.returncode}.",
+                      "Read the container log above; fix the product and retry.")
+    artifacts = sorted(path.name for path in (project / "dist").iterdir() if target in path.name)
+    return {"product": product, "target": target, "platform": PLATFORMS[target], "image": image,
+            "artifacts": artifacts}, EXIT_OK
+
+
+def handle_render(invocation: Invocation) -> tuple[dict, int]:
+    template, output = pathlib.Path(invocation.operands[0]), pathlib.Path(invocation.operands[1])
+    mapping: dict[str, str] = {}
+    for pair in invocation.operands[2:]:
+        key, separator, value = pair.partition("=")
+        if not separator or not re.fullmatch(r"[A-Z0-9_]+", key):
+            raise Failure("VALIDATION_FAILED", f"Placeholder assignments are KEY=VALUE with KEY in [A-Z0-9_]: {pair}.",
+                          "Use the synopsis returned by describe and retry.")
+        mapping[key] = value
+    if not template.is_file():
+        raise Failure("NOT_FOUND", f"Template not found: {template}.", "Pass an existing template file.")
+    text = render_text(template, mapping)
+    left = sorted(set(re.findall(r"@[A-Z0-9_]*@", text)))
+    if left:
+        raise Failure("VALIDATION_FAILED", f"Unrendered placeholders in {template}: {' '.join(left)}.",
+                      "Pass a KEY=VALUE for each of them.")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(text, encoding="utf-8")
+    return {"template": str(template), "output": str(output), "placeholders": sorted(mapping)}, EXIT_OK
+
+
+def handle_tap(invocation: Invocation) -> tuple[dict, int]:
+    """Plan or publish one rendered formula into the tap with a signed commit."""
+    product, tag, formula = invocation.operands[0], invocation.operands[1], pathlib.Path(invocation.operands[2])
+    apply = invocation.flag("--apply")
+    if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?", tag):
+        raise Failure("VALIDATION_FAILED", f"TAG is vX.Y.Z or vX.Y.Z-PRERELEASE: {tag}.", "Pass the release tag.")
+    if not formula.is_file():
+        raise Failure("NOT_FOUND", f"Rendered formula not found: {formula}.", "Render the formula first.")
+    version = tag[1:]
+    repository = os.environ.get("TAP_REPOSITORY", DEFAULT_TAP)
+    token = os.environ.get("TAP_TOKEN", "")
+    url = os.environ.get("TAP_URL") or (
+        f"https://x-access-token:{token}@github.com/{repository}.git" if token
+        else f"https://github.com/{repository}.git")
+    owner, _, name = repository.partition("/")
+    data: dict = {"mode": "apply" if apply else "plan", "product": product, "version": version,
+                  "repository": repository, "formula": f"Formula/{product}.rb", "changed": False}
+    with tempfile.TemporaryDirectory(prefix="maelys-release-tap.") as temp:
+        tap = pathlib.Path(temp) / "tap"
+        git("clone", "-q", url, str(tap))
+        (tap / "Formula").mkdir(exist_ok=True)
+        shutil.copyfile(formula, tap / "Formula" / f"{product}.rb")
+        if shutil.which("brew") and not invocation.flag("--skip-style"):
+            style = run(["brew", "style", str(tap / "Formula" / f"{product}.rb")])
+            if style.returncode != 0:
+                raise Failure("VALIDATION_FAILED", f"brew style refused the formula: {style.stdout.strip()}",
+                              "Fix the formula template and render it again.")
+        git("add", f"Formula/{product}.rb", cwd=tap)
+        if run(["git", "diff", "--cached", "--quiet"], cwd=tap).returncode == 0:
+            return data, EXIT_OK
+        data["changed"] = True
+        data["diff"] = git("diff", "--cached", cwd=tap)
+        if not apply:
+            return data, EXIT_OK
+        sign: list[str] = []
+        key = os.environ.get("TAP_SIGNING_KEY", "")
+        if key:
+            key_file = pathlib.Path(temp) / "signing-key"
+            key_file.write_text(key + "\n", encoding="utf-8")
+            key_file.chmod(0o600)
+            sign = ["-c", "gpg.format=ssh", "-c", f"user.signingkey={key_file}", "-c", "commit.gpgsign=true"]
+        author = os.environ.get("GIT_AUTHOR_NAME", PROGRAM)
+        email = os.environ.get("GIT_AUTHOR_EMAIL", f"{PROGRAM}@users.noreply.github.com")
+        git(*sign, "-c", f"user.name={author}", "-c", f"user.email={email}",
+            "commit", "-q", "-m", f"Update {product} to {version}", cwd=tap)
+        data["commit"] = git("rev-parse", "HEAD", cwd=tap)
+        git("push", "-q", "origin", "HEAD:main", cwd=tap)
+    data["install"] = f"brew install {owner}/{name.replace('homebrew-', '', 1)}/{product}"
+    return data, EXIT_OK
+
+
+def handle_self_test(invocation: Invocation) -> tuple[dict, int]:
+    tests = socle_root() / "tests"
+    if not tests.is_dir():
+        raise Failure("NOT_FOUND", f"{tests} is not part of this installation.", "Run from a maelys-release checkout.")
+    command = [sys.executable, "-W", "error", "-m", "unittest", "discover", "-s", str(tests)]
+    if invocation.flag("--verbose"):
+        command.append("-v")
+    log = sys.stderr if invocation.format != "text" else sys.stdout
+    log.flush()
+    completed = subprocess.run(command, check=False, stdout=log, stderr=subprocess.STDOUT)
+    if completed.returncode != 0:
+        raise Failure("PROCESS_FAILED", f"The self-test failed with exit {completed.returncode}.", "Read the report above.")
+    return {"tests": str(tests), "passed": True}, EXIT_OK
+
+
+def handle_version(invocation: Invocation) -> tuple[dict, int]:
+    del invocation
+    return {"product": PRODUCT, "program": PROGRAM, "version": socle_version(), "contract": CONTRACT,
+            "cliApi": CLI_API, "framework": FRAMEWORK}, EXIT_OK
+
+
+def handle_help(invocation: Invocation) -> tuple[dict, int]:
+    if invocation.operands:
+        command = command_by_id(invocation.operands[0])
+        return {"text": command_help(command), "commands": [command["id"]]}, EXIT_OK
+    return {"text": guide(), "commands": [command["id"] for command in CATALOG if not command["hidden"]]}, EXIT_OK
+
+
+def handle_describe(invocation: Invocation) -> tuple[dict, int]:
+    data: dict = {"schemaVersion": CATALOG_SCHEMA, "program": PROGRAM, "product": PRODUCT,
+                  "version": socle_version(), "contract": CONTRACT, "cliApi": CLI_API, "framework": FRAMEWORK}
+    if invocation.operands:
+        data["kind"] = "command"
+        data["commands"] = [descriptor(command_by_id(invocation.operands[0]))]
+    elif invocation.flag("--summary"):
+        data["kind"] = "summary"
+        data["commands"] = [descriptor(command, summary=True) for command in CATALOG]
+    else:
+        data["kind"] = "catalog"
+        data["globalOptions"] = GLOBAL_OPTIONS
+        data["invariants"] = INVARIANTS
+        data["output"] = {"contract": CONTRACT, "schemaVersion": SCHEMA_VERSION,
+                          "stdout": "success data only", "stderr": "diagnostics and failure envelopes"}
+        data["commands"] = [descriptor(command) for command in CATALOG]
+    return data, EXIT_OK
+
+
+def handle_completion(invocation: Invocation) -> tuple[dict, int]:
+    shell = invocation.operands[0]
+    function = f"_{PROGRAM.replace('-', '_')}_complete"
+    if shell == "bash":
+        script = "\n".join([
+            f"# bash completion for {PROGRAM}, generated from its catalog",
+            f"{function}() {{",
+            "    local IFS=$'\\n'",
+            '    local words=("${COMP_WORDS[@]:1:COMP_CWORD}")',
+            f'    COMPREPLY=($("{PROGRAM}" __complete -- "${{words[@]}}" 2>/dev/null))',
+            "    if [ ${#COMPREPLY[@]} -eq 0 ]; then",
+            '        COMPREPLY=($(compgen -f -- "${COMP_WORDS[COMP_CWORD]}"))',
+            "    fi",
+            "}",
+            f"complete -o filenames -F {function} {PROGRAM}",
+        ]) + "\n"
+    elif shell == "zsh":
+        script = "\n".join([
+            f"#compdef {PROGRAM}",
+            f"{function}() {{",
+            "    local -a candidates",
+            f'    candidates=("${{(@f)$("{PROGRAM}" __complete -- "${{words[@]:1}}" 2>/dev/null)}}")',
+            "    if (( ${#candidates} )); then compadd -- $candidates; else _files; fi",
+            "}",
+            f"compdef {function} {PROGRAM}",
+        ]) + "\n"
+    else:
+        script = "\n".join([
+            f"# fish completion for {PROGRAM}, generated from its catalog",
+            f"complete -c {PROGRAM} -f -a '({PROGRAM} __complete -- (commandline -opc)[2..-1] (commandline -ct))'",
+        ]) + "\n"
+    return {"shell": shell, "script": script}, EXIT_OK
+
+
+def handle_complete(invocation: Invocation) -> tuple[dict, int]:
+    words = list(invocation.operands)
+    current = words[-1] if words else ""
+    previous = words[:-1]
+    candidates: list[str] = []
+    command, consumed = resolve(previous)
+    if command is None or consumed == len(previous) and not current.startswith("-") and \
+            any(other["pattern"][:len(previous) + 1] != command["pattern"][:len(previous) + 1]
+                for other in CATALOG if other["pattern"][:len(previous)] == previous):
+        # still inside the pattern: the next words of every matching command
+        for other in CATALOG:
+            if other["hidden"] or len(other["pattern"]) <= len(previous):
+                continue
+            if other["pattern"][:len(previous)] == previous:
+                candidates.append(other["pattern"][len(previous)])
+    if command is not None:
+        given = {word.split("=", 1)[0] for word in previous[consumed:] if word.startswith("--")}
+        if current.startswith("-") or not current:
+            candidates.extend(item["long"] for item in command["options"] + GLOBAL_OPTIONS
+                              if item["long"] not in given and not item.get("hidden"))
+        if command["id"] in ("help", "describe") and consumed == len(previous):
+            candidates.extend(other["id"] for other in CATALOG if not other["hidden"])
+        if command["id"] == "rehearse" and len(previous) - consumed == 1:
+            candidates.extend(PLATFORMS)
+        if command["id"] == "completion" and consumed == len(previous):
+            candidates.extend(("bash", "zsh", "fish"))
+        if previous[consumed:] and previous[-1] == "--format":
+            candidates = ["text", "json", "jsonl"]
+    matching = sorted({word for word in candidates if word.startswith(current)})
+    return {"count": len(matching), "records": [{"word": word} for word in matching]}, EXIT_OK
+
+
+# ---- text renderers ----------------------------------------------------------
+
+def render_checks(checks: list[dict], stream) -> None:
+    labels = {"ok": "ok", "note": "note", "missing": "MISSING", "refused": "REFUSED", "fail": "FAIL"}
+    for check in checks:
+        print(f"{labels.get(check['status'], check['status']):<8} {check['message']}", file=stream)
+
+
+def text_adopt(data: dict) -> str:
+    lines = []
+    for entry in data["files"]:
+        lines.append(f"{entry['action']:<8} {entry['path']}" + (f" ({entry['reason']})" if "reason" in entry else ""))
+        if data["mode"] == "plan" and entry.get("diff"):
+            lines.extend("         " + line for line in entry["diff"].rstrip("\n").split("\n"))
+    tag = data["socle"]["tag"]
+    if data["mode"] == "apply":
+        lines.append(f"adopt: wrote maelys-release {tag} into {data['project']}")
+    elif data["changed"]:
+        lines.append("adopt: plan only; add --apply to write")
+    else:
+        lines.append("adopt: nothing to do")
+    return "\n".join(lines) + "\n"
+
+
+def text_check(data: dict) -> str:
+    lines = [f"{entry['action']:<8} {entry['path']}" + (f" ({entry['reason']})" if "reason" in entry else "")
+             for entry in data["files"]]
+    if data["valid"]:
+        lines.append(f"check: {data['product']} is on maelys-release {data['socle']['tag']}")
+    else:
+        # the contract lines and the file lines already show their violations
+        shown = {check["message"] for check in data["checks"]}
+        shown.update(f"{entry['path']}: {entry['action']}" + (f" ({entry['reason']})" if "reason" in entry else "")
+                     for entry in data["files"])
+        lines.extend(f"drift    {violation}" for violation in data["violations"] if violation not in shown)
+        lines.append(f"check: {data['product']} drifts from maelys-release {data['socle']['tag']}")
+    return "\n".join(lines) + "\n"
+
+
+def text_preflight(data: dict) -> str:
+    lines = [text_check(data).rstrip("\n")] if data["valid"] else [f"{entry['action']:<8} {entry['path']}" for entry in data["files"]]
+    labels = {"ok": "ok", "note": "note", "fail": "FAIL"}
+    lines.extend(f"{labels[item['status']]:<8} {item['message']}" for item in data["preflight"])
+    state = "ready to tag" if data["ready"] else "not ready to tag"
+    lines.append(f"preflight: {data['product']} is {state}")
+    return "\n".join(lines) + "\n"
+
+
+def text_tap(data: dict) -> str:
+    if not data["changed"]:
+        return f"tap already carries {data['product']} {data['version']}\n"
+    if data["mode"] == "plan":
+        return data["diff"] + "\ntap: plan only; add --apply to commit and push\n"
+    return f"{data['install']}\n"
+
+
+TEXT = {
+    "adopt": text_adopt,
+    "check": text_check,
+    "preflight": text_preflight,
+    "rehearse": lambda data: f"rehearse: {data['target']} built " + ", ".join(data["artifacts"]) + "\n",
+    "render": lambda data: f"rendered {data['output']}\n",
+    "tap": text_tap,
+    "self-test": lambda data: "self-test: ok\n",
+    "version": lambda data: f"{PROGRAM} {data['version']}\n",
+    "help": lambda data: data["text"],
+    "describe": lambda data: json.dumps(data, indent=2) + "\n",
+    "completion": lambda data: data["script"],
+    "complete.candidates": lambda data: "".join(record["word"] + "\n" for record in data["records"]),
+}
+
+
+# ---- the catalog --------------------------------------------------------------
+
+def option(long: str, summary: str, argument: dict | None = None, default: str | None = None,
+           required: bool = False, repeatable: bool = False, hidden: bool = False) -> dict:
+    entry: dict = {"long": long, "required": required, "repeatable": repeatable, "summary": summary,
+                   "requires": [], "conflictsWith": []}
+    if argument:
+        entry["argument"] = argument
+    if default is not None:
+        entry["default"] = default
+    if hidden:
+        entry["hidden"] = True
+    return entry
+
+
+def operand(name: str, summary: str, required: bool = True, variadic: bool = False,
+            choices: list[str] | None = None) -> dict:
+    entry: dict = {"name": name, "required": required, "variadic": variadic, "summary": summary}
+    if choices:
+        entry["type"] = "choice"
+        entry["choices"] = choices
+    return entry
+
+
+CHECKS_SCHEMA = {"type": "array", "items": {"type": "object", "required": ["status", "message"],
+                                           "properties": {"status": {"type": "string"}, "message": {"type": "string"}}}}
+FILES_SCHEMA = {"type": "array", "items": {"type": "object", "required": ["path", "action"],
+                                          "properties": {"path": {"type": "string"},
+                                                         "action": {"enum": ["create", "update", "same"]},
+                                                         "diff": {"type": "string"}, "reason": {"type": "string"}}}}
+SOCLE_SCHEMA = {"type": "object", "required": ["version", "tag", "sha"],
+                "properties": {"version": {"type": "string"}, "tag": {"type": "string"}, "sha": {"type": "string"}}}
+STRINGS = {"type": "array", "items": {"type": "string"}}
+SOCLE_OPTIONS = [
+    option("--product", "Product name; defaults to the directory name.", {"name": "NAME", "type": "string"}),
+    option("--socle-sha", "Socle commit to pin instead of this checkout's HEAD.", {"name": "SHA", "type": "hex"}, hidden=True),
+    option("--socle-tag", "Socle tag written next to --socle-sha.", {"name": "TAG", "type": "string"}, hidden=True),
+]
+DIR_OPERAND = operand("DIR", "Product repository.")
+
+CATALOG: list[dict] = [
+    {
+        "id": "help", "pattern": ["help"], "usage": "help [COMMAND_ID] | --help",
+        "purpose": "Show the generated CLI guide or one command's help.", "effect": "read",
+        "operands": [operand("COMMAND_ID", "Stable command identifier whose help is shown.", required=False)],
+        "options": [], "hidden": False, "handler": handle_help,
+        "outputSchema": {"type": "object", "additionalProperties": False, "required": ["text", "commands"],
+                         "properties": {"text": {"type": "string"}, "commands": STRINGS}},
+    },
+    {
+        "id": "version", "pattern": ["version"], "usage": "version | --version",
+        "purpose": "Return product identity.", "effect": "read", "operands": [], "options": [],
+        "hidden": False, "handler": handle_version,
+        "outputSchema": {"type": "object", "additionalProperties": False,
+                         "required": ["product", "program", "version", "contract", "cliApi", "framework"],
+                         "properties": {"product": {"type": "string"}, "program": {"type": "string"},
+                                        "version": {"type": "string"}, "contract": {"const": CONTRACT},
+                                        "cliApi": {"type": "integer"}, "framework": {"type": "string"}}},
+    },
+    {
+        "id": "describe", "pattern": ["describe"], "usage": "describe [COMMAND_ID] [--summary]",
+        "purpose": "Return the machine-readable catalog, summary or one descriptor.", "effect": "read",
+        "operands": [operand("COMMAND_ID", "Stable command identifier returned by the catalog.", required=False)],
+        "options": [option("--summary", "Return every descriptor without schemas and exit codes.")],
+        "hidden": False, "handler": handle_describe,
+        "outputSchema": {"type": "object", "required": ["schemaVersion", "kind", "program", "commands"]},
+    },
+    {
+        "id": "completion", "pattern": ["completion"], "usage": "completion SHELL",
+        "purpose": "Print the shell completion script generated from the catalog.", "effect": "read",
+        "operands": [operand("SHELL", "bash, zsh or fish.", choices=["bash", "zsh", "fish"])], "options": [],
+        "hidden": False, "handler": handle_completion,
+        "outputSchema": {"type": "object", "additionalProperties": False, "required": ["shell", "script"],
+                         "properties": {"shell": {"type": "string"}, "script": {"type": "string"}}},
+    },
+    {
+        "id": "complete.candidates", "pattern": ["__complete"], "usage": "__complete -- WORDS...",
+        "purpose": "Return completion candidates for the words typed so far.", "effect": "read",
+        "operands": [operand("WORDS", "Words of the command line, the last one being completed.", required=False, variadic=True)],
+        "options": [], "hidden": True, "handler": handle_complete, "outputMode": "json-records",
+        "outputSchema": {"type": "object", "additionalProperties": False, "required": ["count", "records"],
+                         "properties": {"count": {"type": "integer"},
+                                        "records": {"type": "array", "items": {"type": "object", "required": ["word"],
+                                                                               "properties": {"word": {"type": "string"}}}}}},
+    },
+    {
+        "id": "adopt", "pattern": ["adopt"], "usage": "adopt DIR [--product NAME] [--apply]",
+        "purpose": "Write the managed files of the socle into a product; plan without --apply.",
+        "effect": {"plan": "preview", "apply": "apply"},
+        "operands": [DIR_OPERAND],
+        "options": [*SOCLE_OPTIONS, option("--apply", "Write the files instead of planning.")],
+        "hidden": False, "handler": handle_adopt,
+        "outputSchema": {"type": "object", "additionalProperties": False,
+                         "required": ["mode", "product", "project", "socle", "changed", "checks", "files"],
+                         "properties": {"mode": {"enum": ["plan", "apply"]}, "product": {"type": "string"},
+                                        "project": {"type": "string"}, "socle": SOCLE_SCHEMA,
+                                        "changed": {"type": "boolean"}, "checks": CHECKS_SCHEMA, "files": FILES_SCHEMA}},
+    },
+    {
+        "id": "check", "pattern": ["check"], "usage": "check DIR [--product NAME]",
+        "purpose": "Report the product contract and the drift of the managed files; exit 2 on any violation.",
+        "effect": "read", "operands": [DIR_OPERAND], "options": SOCLE_OPTIONS, "hidden": False, "handler": handle_check,
+        "outputSchema": {"type": "object", "additionalProperties": False,
+                         "required": ["valid", "product", "project", "socle", "pinned", "checks", "files", "violations"],
+                         "properties": {"valid": {"type": "boolean"}, "product": {"type": "string"},
+                                        "project": {"type": "string"}, "socle": SOCLE_SCHEMA,
+                                        "pinned": {"type": ["object", "null"]}, "checks": CHECKS_SCHEMA,
+                                        "files": FILES_SCHEMA, "violations": STRINGS}},
+    },
+    {
+        "id": "preflight", "pattern": ["preflight"], "usage": "preflight DIR [--product NAME]",
+        "purpose": "Check, then report what the release workflow would refuse of the next tag; exit 2 when not ready.",
+        "effect": "read", "operands": [DIR_OPERAND], "options": SOCLE_OPTIONS, "hidden": False, "handler": handle_preflight,
+        "outputSchema": {"type": "object", "additionalProperties": False,
+                         "required": ["ready", "valid", "product", "project", "socle", "pinned", "checks", "files",
+                                      "preflight", "violations"],
+                         "properties": {"ready": {"type": "boolean"}, "valid": {"type": "boolean"},
+                                        "product": {"type": "string"}, "project": {"type": "string"},
+                                        "socle": SOCLE_SCHEMA, "pinned": {"type": ["object", "null"]},
+                                        "checks": CHECKS_SCHEMA, "files": FILES_SCHEMA,
+                                        "preflight": CHECKS_SCHEMA, "violations": STRINGS}},
+    },
+    {
+        "id": "rehearse", "pattern": ["rehearse"],
+        "usage": "rehearse DIR TARGET [--product NAME] [--image IMAGE] [--package-command COMMAND] [--keep]",
+        "purpose": "Replay the Linux build job of the release in a Docker container on a copy of the working tree.",
+        "effect": "execute",
+        "operands": [DIR_OPERAND, operand("TARGET", "linux-x86_64 or linux-arm64.", choices=list(PLATFORMS))],
+        "options": [*SOCLE_OPTIONS,
+                    option("--image", "Container image.", {"name": "IMAGE", "type": "string"}, default=DEFAULT_IMAGE),
+                    option("--package-command", "Command producing dist/; TARGET is substituted.",
+                           {"name": "COMMAND", "type": "string"}, default="bash scripts/package-release.sh TARGET"),
+                    option("--keep", "Keep the container for inspection.")],
+        "hidden": False, "handler": handle_rehearse,
+        "outputSchema": {"type": "object", "additionalProperties": False,
+                         "required": ["product", "target", "platform", "image", "artifacts"],
+                         "properties": {"product": {"type": "string"}, "target": {"type": "string"},
+                                        "platform": {"type": "string"}, "image": {"type": "string"}, "artifacts": STRINGS}},
+    },
+    {
+        "id": "render", "pattern": ["render"], "usage": "render TEMPLATE OUTPUT [KEY=VALUE...]",
+        "purpose": "Replace @KEY@ placeholders of a template, refusing to leave one unrendered.", "effect": "execute",
+        "operands": [operand("TEMPLATE", "Template file."), operand("OUTPUT", "File written."),
+                     operand("KEY=VALUE", "Placeholder values.", required=False, variadic=True)],
+        "options": [], "hidden": False, "handler": handle_render,
+        "outputSchema": {"type": "object", "additionalProperties": False, "required": ["template", "output", "placeholders"],
+                         "properties": {"template": {"type": "string"}, "output": {"type": "string"}, "placeholders": STRINGS}},
+    },
+    {
+        "id": "tap", "pattern": ["tap"], "usage": "tap PRODUCT TAG FORMULA [--skip-style] [--apply]",
+        "purpose": "Publish a rendered formula into the Homebrew tap with a signed commit; plan without --apply.",
+        "effect": {"plan": "preview", "apply": "commit"},
+        "operands": [operand("PRODUCT", "Formula name."), operand("TAG", "Release tag vX.Y.Z."),
+                     operand("FORMULA", "Rendered formula file.")],
+        "options": [option("--skip-style", "Do not run brew style."),
+                    option("--apply", "Commit and push instead of planning.")],
+        "hidden": False, "handler": handle_tap,
+        "outputSchema": {"type": "object", "additionalProperties": False,
+                         "required": ["mode", "product", "version", "repository", "formula", "changed"],
+                         "properties": {"mode": {"enum": ["plan", "apply"]}, "product": {"type": "string"},
+                                        "version": {"type": "string"}, "repository": {"type": "string"},
+                                        "formula": {"type": "string"}, "changed": {"type": "boolean"},
+                                        "diff": {"type": "string"}, "commit": {"type": "string"}, "install": {"type": "string"}}},
+    },
+    {
+        "id": "self-test", "pattern": ["self-test"], "usage": "self-test [--verbose]",
+        "purpose": "Run the socle's own tests.", "effect": "execute", "operands": [],
+        "options": [option("--verbose", "Report every test.")], "hidden": False, "handler": handle_self_test,
+        "outputSchema": {"type": "object", "additionalProperties": False, "required": ["tests", "passed"],
+                         "properties": {"tests": {"type": "string"}, "passed": {"type": "boolean"}}},
+    },
+]
+
+GLOBAL_OPTIONS = [
+    option("--format", "Select text for humans, json for one envelope or jsonl for records.",
+           {"name": "VALUE", "type": "choice", "choices": ["text", "json", "jsonl"]}, default="text"),
+    option("--json", "Exact alias of --format json."),
+    option("--compact", "Render JSON on a single line."),
+    option("--pretty", "--pretty=false selects compact JSON."),
+    option("--non-interactive", "Never prompt; fail instead of asking a question."),
+    option("--color", "Control ANSI colors on terminals.",
+           {"name": "VALUE", "type": "choice", "choices": ["auto", "always", "never"]}, default="auto"),
+    option("--help", "Show the help of the selected command."),
+]
+INVARIANTS = [
+    "usage and agent discovery share one catalog",
+    "transactional commands plan by default and require --apply",
+    "stdout carries success data; stderr carries failures",
+    "--json and --format json are identical",
+    "unknown or duplicated options are refused",
+]
+
+
+def descriptor(command: dict, summary: bool = False) -> dict:
+    entry = {
+        "id": command["id"], "pattern": command["pattern"], "usage": command["usage"],
+        "purpose": command["purpose"], "effect": command["effect"],
+        "outputMode": command.get("outputMode", "json-envelope"), "external": False,
+        "hidden": command["hidden"], "available": True,
+        "input": {"synopsis": command["usage"], "operands": command["operands"],
+                  "options": [{key: value for key, value in item.items() if key != "hidden"}
+                              for item in command["options"] if not item.get("hidden")],
+                  "constraints": [], "passthrough": False},
+    }
+    if not summary:
+        entry["outputSchema"] = command["outputSchema"]
+        entry["exitCodes"] = EXIT_CODES
+    return entry
+
+
+def command_by_id(identifier: str) -> dict:
+    for command in CATALOG:
+        if command["id"] == identifier:
+            return command
+    raise Failure("INVALID_COMMAND", f"Unknown command identifier '{identifier}'.",
+                  "Run describe --summary to list the command identifiers.")
+
+
+def command_help(command: dict) -> str:
+    lines = [f"{PROGRAM} {command['usage']}", "", command["purpose"], ""]
+    if command["operands"]:
+        lines.append("OPERANDS")
+        lines.extend(f"  {item['name']:<18} {item['summary']}" for item in command["operands"])
+        lines.append("")
+    visible = [item for item in command["options"] if not item.get("hidden")]
+    if visible:
+        lines.append("OPTIONS")
+        for item in visible:
+            spelled = item["long"] + (f" {item['argument']['name']}" if "argument" in item else "")
+            default = f" (default {item['default']})" if "default" in item else ""
+            lines.append(f"  {spelled:<28} {item['summary']}{default}")
+        lines.append("")
+    return "\n".join(lines).rstrip("\n") + "\n"
+
+
+def guide() -> str:
+    lines = [f"{PROGRAM} {socle_version()} - release socle of the Maelys repositories", "",
+             "USAGE", f"  {PROGRAM} COMMAND [OPERANDS] [OPTIONS]", "", "COMMANDS"]
+    width = max(len(command["usage"]) for command in CATALOG if not command["hidden"])
+    lines.extend(f"  {command['usage']:<{width}}  {command['purpose']}" for command in CATALOG if not command["hidden"])
+    lines.extend(["", "GLOBAL OPTIONS"])
+    for item in GLOBAL_OPTIONS:
+        spelled = item["long"] + (f" {'|'.join(item['argument']['choices'])}" if "argument" in item else "")
+        lines.append(f"  {spelled:<28} {item['summary']}")
+    lines.extend(["", f"Run '{PROGRAM} describe --format json' for the machine-readable catalog."])
+    return "\n".join(lines) + "\n"
+
+
+# ---- parsing --------------------------------------------------------------------
+
+def resolve(words: list[str]) -> tuple[dict | None, int]:
+    """The command whose pattern starts the words, and the words consumed."""
+    best: dict | None = None
+    for command in CATALOG:
+        pattern = command["pattern"]
+        if words[:len(pattern)] == pattern and (best is None or len(pattern) > len(best["pattern"])):
+            best = command
+    return best, len(best["pattern"]) if best else 0
+
+
+def parse(argv: list[str]) -> tuple[Invocation, dict]:
+    """Validate the command line in the contract's causal order."""
+    words: list[str] = []
+    raw_options: list[tuple[str, str | None]] = []
+    index = 0
+    passthrough: list[str] = []
+    while index < len(argv):
+        word = argv[index]
+        if word == "--":
+            passthrough = argv[index + 1:]
+            break
+        if word.startswith("--") and len(word) > 2:
+            name, separator, value = word.partition("=")
+            raw_options.append((name, value if separator else None))
+            index += 1
+            # an option that takes an argument consumes the next word
+            definition = next((item for item in GLOBAL_OPTIONS if item["long"] == name), None)
+            if definition is None:
+                command, _ = resolve(words)
+                if command is not None:
+                    definition = next((item for item in command["options"] if item["long"] == name), None)
+            if definition and "argument" in definition and not separator:
+                if index >= len(argv):
+                    raise Failure("VALIDATION_FAILED", f"Option {name} needs a value {definition['argument']['name']}.",
+                                  "Run describe for this command and pass the option's argument.")
+                raw_options[-1] = (name, argv[index])
+                index += 1
+            continue
+        if word.startswith("-") and word != "-":
+            raise Failure("VALIDATION_FAILED", f"Option {word} is not supported: options are spelled --name.",
+                          "Run describe for this command and use only its declared options.")
+        words.append(word)
+        index += 1
+    if not words and any(name in ("--help", "--version") for name, _ in raw_options):
+        words = ["help"] if any(name == "--help" for name, _ in raw_options) else ["version"]
+        raw_options = [(name, value) for name, value in raw_options if name not in ("--help", "--version")]
+    if not words:
+        raise Failure("INVALID_COMMAND", "No command given.", f"Run '{PROGRAM} help' or 'describe --summary'.")
+    command, consumed = resolve(words)
+    if command is None:
+        raise Failure("INVALID_COMMAND", f"Unknown command '{' '.join(words)}'.",
+                      "Run describe --summary and use one of the listed command identifiers.")
+    operands = words[consumed:] + passthrough
+    # rendering options
+    fmt = os.environ.get("MAELYS_CLI_FORMAT", "text")
+    compact = False
+    non_interactive = False
+    rendering = False
+    help_requested = False
+    options: dict[str, object] = {}
+    seen: set[str] = set()
+    known = {item["long"]: item for item in command["options"]}
+    for name, value in raw_options:
+        if name in seen and not (name in known and known[name]["repeatable"]):
+            raise Failure("VALIDATION_FAILED", f"Option {name} is given twice.", "Give each option once.")
+        seen.add(name)
+        if name == "--format":
+            if value not in ("text", "json", "jsonl"):
+                raise Failure("VALIDATION_FAILED", f"--format takes text, json or jsonl, not '{value}'.", "Use one of the choices.")
+            fmt, rendering = value, True
+        elif name == "--json":
+            fmt, rendering = "json", True
+        elif name == "--compact":
+            compact, rendering = value != "false", True
+        elif name == "--pretty":
+            compact, rendering = value == "false", True
+        elif name == "--non-interactive":
+            non_interactive = value != "false"
+        elif name == "--color":
+            if value not in ("auto", "always", "never"):
+                raise Failure("VALIDATION_FAILED", f"--color takes auto, always or never, not '{value}'.", "Use one of the choices.")
+        elif name == "--help":
+            help_requested = True
+        elif name in ("--dry-run", "--plan") and isinstance(command["effect"], dict):
+            raise Failure("VALIDATION_FAILED", f"Option {name} is not supported by '{command['id']}': it plans by default.",
+                          "Run without --apply to plan, then add --apply to write.")
+        elif name not in known:
+            raise Failure("VALIDATION_FAILED", f"Option {name} is not supported by '{command['id']}'. Use '{command['usage']}'.",
+                          "Run describe for this command and use only its declared options.")
+        else:
+            definition = known[name]
+            if "argument" in definition:
+                argument = definition["argument"]
+                if value is None:
+                    raise Failure("VALIDATION_FAILED", f"Option {name} needs a value {argument['name']}.",
+                                  "Pass the option's argument.")
+                if argument["type"] == "choice" and value not in argument["choices"]:
+                    raise Failure("VALIDATION_FAILED", f"Option {name} takes {', '.join(argument['choices'])}, not '{value}'.",
+                                  "Use one of the choices.")
+                if argument["type"] == "hex" and not re.fullmatch(r"[0-9a-f]+", value):
+                    raise Failure("VALIDATION_FAILED", f"Option {name} takes lowercase hexadecimal, not '{value}'.",
+                                  "Pass a commit sha.")
+                options[name] = value
+            else:
+                options[name] = value != "false"
+    for definition in command["options"]:
+        if definition["required"] and definition["long"] not in options:
+            raise Failure("VALIDATION_FAILED", f"Option {definition['long']} is required by '{command['id']}'.",
+                          f"Use '{command['usage']}'.")
+    if help_requested:
+        command, operands, options = command_by_id("help"), [command["id"]], {}
+    required = sum(1 for item in command["operands"] if item["required"])
+    variadic = any(item["variadic"] for item in command["operands"])
+    if len(operands) < required or (not variadic and len(operands) > len(command["operands"])):
+        raise Failure("VALIDATION_FAILED", f"Operands do not match '{command['id']}'. Use '{command['usage']}'.",
+                      "Use the synopsis returned by describe and retry.")
+    for item, value in zip(command["operands"], operands):
+        if item.get("choices") and value not in item["choices"]:
+            raise Failure("VALIDATION_FAILED", f"{item['name']} takes {', '.join(item['choices'])}, not '{value}'.",
+                          f"Use '{command['usage']}'.")
+    if fmt == "jsonl" and command.get("outputMode") != "json-records":
+        raise Failure("VALIDATION_FAILED", f"--format jsonl is accepted only by json-records commands, not '{command['id']}'.",
+                      "Use --format json.")
+    del rendering
+    return Invocation(command, operands, options, fmt, compact, non_interactive), command
+
+
+# ---- rendering ---------------------------------------------------------------------
+
+def envelope(command_id: str, ok: bool, exit_code: int, payload: dict, compact: bool) -> str:
+    body: dict = {"schemaVersion": SCHEMA_VERSION, "contract": CONTRACT, "command": command_id, "ok": ok,
+                  "exitCode": exit_code}
+    body["data" if ok else "error"] = payload
+    return json.dumps(body, separators=(",", ":") if compact else None, indent=None if compact else 2,
+                      ensure_ascii=False) + "\n"
+
+
+def colored(text: str, argv: list[str]) -> str:
+    wants = "always" in [value for name, value in _color_options(argv)] and True
+    never = any(value == "never" for _, value in _color_options(argv)) or os.environ.get("NO_COLOR") \
+        or os.environ.get("TERM") == "dumb"
+    if never or not (wants or sys.stderr.isatty()):
+        return text
+    return f"\033[31m{text}\033[0m"
+
+
+def _color_options(argv: list[str]) -> list[tuple[str, str]]:
+    found = []
+    for index, word in enumerate(argv):
+        if word.startswith("--color="):
+            found.append(("--color", word.split("=", 1)[1]))
+        elif word == "--color" and index + 1 < len(argv):
+            found.append(("--color", argv[index + 1]))
+    return found
+
+
+def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    command_id = ""
+    # The rendering of a parse failure follows the rendering options as
+    # given, before the parser validates them.
+    fmt = os.environ.get("MAELYS_CLI_FORMAT", "text")
+    for index, word in enumerate(argv):
+        if word == "--json" or word == "--format=json":
+            fmt = "json"
+        elif word == "--format" and index + 1 < len(argv) and argv[index + 1] in ("json", "jsonl"):
+            fmt = "json"
+        elif word == "--format=jsonl":
+            fmt = "json"
+    compact = "--compact" in argv or "--pretty=false" in argv
+    try:
+        invocation, command = parse(argv)
+        command_id, fmt, compact = command["id"], invocation.format, invocation.compact
+        data, exit_code = command["handler"](invocation)
+        if fmt == "text":
+            if command_id in ("adopt", "check", "preflight"):
+                render_checks(data["checks"], sys.stdout)
+            sys.stdout.write(TEXT[command_id](data))
+        elif fmt == "jsonl":
+            for record in data["records"]:
+                sys.stdout.write(json.dumps(record, separators=(",", ":")) + "\n")
+        else:
+            sys.stdout.write(envelope(command_id, True, exit_code, data, compact))
+        sys.stdout.flush()
+        return exit_code
+    except Failure as failure:
+        error = {"code": failure.code, "message": failure.message}
+        if failure.hint:
+            error["hint"] = failure.hint
+        if fmt == "text":
+            sys.stderr.write(colored(f"{PROGRAM}: [{failure.code}] {failure.message}", argv) + "\n")
+            if failure.hint:
+                sys.stderr.write(f"Hint: {failure.hint}\n")
+        else:
+            sys.stderr.write(envelope(command_id or "unknown", False, EXIT_FAILURE, error, compact))
+        return EXIT_FAILURE
+    except OSError as error:
+        message = {"code": "IO_FAILED", "message": f"{error.strerror}: {error.filename}" if error.filename else str(error),
+                   "hint": "Check the path and its permissions."}
+        if fmt == "text":
+            sys.stderr.write(f"{PROGRAM}: [IO_FAILED] {message['message']}\nHint: {message['hint']}\n")
+        else:
+            sys.stderr.write(envelope(command_id or "unknown", False, EXIT_FAILURE, message, compact))
+        return EXIT_FAILURE
+
+
+if __name__ == "__main__":
+    sys.exit(main())

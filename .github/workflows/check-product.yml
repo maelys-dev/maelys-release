@@ -1,0 +1,106 @@
+name: check (reusable)
+
+# Reusable CI of one Maelys product, from the same declarations as its
+# release: the pinned dependency checkouts, the packages of adapter/PACKAGES
+# and `make check` on the three release targets (Linux x86_64, Linux arm64,
+# macOS arm64), plus the sanitizers on Linux x86_64 and the socle drift
+# check. The product's ci.yml calls it as one job and adds its own jobs
+# next to it. A release is never the first Linux run of a product.
+on:
+  workflow_call:
+    inputs:
+      product:
+        description: Product name, as given to maelys-release adopt
+        required: true
+        type: string
+      dependency_checkout:
+        description: Shell lines run before the checks (pinned dependency checkouts)
+        required: false
+        type: string
+        default: ""
+      linux_packages:
+        description: apt packages the build needs, from adapter/PACKAGES
+        required: false
+        type: string
+        default: ""
+      macos_packages:
+        description: brew packages the build needs, from adapter/PACKAGES
+        required: false
+        type: string
+        default: ""
+      check_command:
+        required: false
+        type: string
+        default: make check
+      sanitizer_command:
+        description: Run on Linux x86_64 with clang; empty disables the job
+        required: false
+        type: string
+        default: make asan-ubsan
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm, macos-15]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          fetch-depth: 0
+      - name: Pinned dependency checkouts
+        if: inputs.dependency_checkout != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          ${{ inputs.dependency_checkout }}
+      - name: Install Linux packages
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y build-essential clang ${{ inputs.linux_packages }}
+      - name: Install macOS packages
+        if: runner.os == 'macOS' && inputs.macos_packages != ''
+        run: brew install ${{ inputs.macos_packages }}
+      - name: Require Apple Silicon
+        if: runner.os == 'macOS'
+        run: test "$(uname -m)" = arm64
+      - name: Check
+        shell: bash
+        run: ${{ inputs.check_command }}
+      - name: Release socle drift
+        if: matrix.runner == 'ubuntu-24.04'
+        shell: bash
+        env:
+          PRODUCT: ${{ inputs.product }}
+        # The socle pinned by release.yml is the pin of record: check from
+        # that checkout regenerates the managed files and fails on any drift,
+        # including declarations changed without adopt --apply.
+        run: |
+          set -euo pipefail
+          sha="$(sed -n 's|.*maelys-release/.github/workflows/release.yml@\([0-9a-f]\{40\}\).*|\1|p' .github/workflows/release.yml)"
+          test -n "$sha" || { echo "release.yml does not pin maelys-release" >&2; exit 1; }
+          git clone -q https://github.com/maelys-dev/maelys-release.git "$RUNNER_TEMP/maelys-release"
+          git -C "$RUNNER_TEMP/maelys-release" checkout -q "$sha"
+          "$RUNNER_TEMP/maelys-release/bin/maelys-release" check . --product "$PRODUCT"
+
+  sanitizers:
+    if: inputs.sanitizer_command != ''
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          fetch-depth: 0
+      - name: Pinned dependency checkouts
+        if: inputs.dependency_checkout != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          ${{ inputs.dependency_checkout }}
+      - name: Install Linux packages
+        run: sudo apt-get update && sudo apt-get install -y build-essential clang libclang-rt-18-dev ${{ inputs.linux_packages }}
+      - name: Sanitizers
+        shell: bash
+        run: ${{ inputs.sanitizer_command }}

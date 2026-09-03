@@ -1,7 +1,8 @@
 # maelys-release
 
 Shared release mechanics of the Maelys repositories: one reusable release
-workflow, one reusable Homebrew tap workflow and the scripts they run. A
+workflow, one reusable Homebrew tap workflow, one reusable product CI
+workflow, and the `maelys-release` command that adopts them. A
 product repository keeps only what is specific to it: its `VERSION`, its
 `CHANGELOG.md`, its `scripts/package-release.sh`, its `adapter/` pins and
 packages, and its `packaging/homebrew/<name>.rb.in` templates.
@@ -17,19 +18,28 @@ product repository                      maelys-release
                                            brew style, signed commit to homebrew-tap
 ```
 
-## Adopting the socle
+## The command
+
+`bin/maelys-release` is a command-line program of the agent-cli/v2
+contract of maelys-cli, in Python (standard library, 3.9 or later): one
+catalog drives the parser, `help`, `describe` and the shell completion;
+success is a JSON envelope on stdout with `--format json`, failure an
+envelope on stderr; exit 0 completed, 1 failed, 2 a validation that found
+violations. It runs from a checkout at a tag, or installed.
 
 ```sh
 git clone https://github.com/maelys-dev/maelys-release && git -C maelys-release checkout vX.Y.Z
-maelys-release/scripts/adopt.sh /path/to/product              # plan
-maelys-release/scripts/adopt.sh /path/to/product --apply      # write the managed files
-maelys-release/scripts/adopt.sh /path/to/product --check      # exit 2 on drift; add it to make check
-maelys-release/scripts/adopt.sh /path/to/product --preflight  # --check, then the tag preconditions; exit 3
+maelys-release/bin/maelys-release adopt /path/to/product            # plan
+maelys-release/bin/maelys-release adopt /path/to/product --apply    # write the managed files
+maelys-release/bin/maelys-release check /path/to/product            # exit 2 on any violation; add it to make check
+maelys-release/bin/maelys-release preflight /path/to/product        # check, then the tag preconditions; exit 2
+maelys-release/bin/maelys-release rehearse /path/to/product linux-arm64
+maelys-release/bin/maelys-release describe --summary --format json  # the catalog, for an agent
 ```
 
-`adopt.sh` reads the product contract and writes the managed files from it:
+`adopt` reads the product contract and writes the managed files from it:
 
-| Product declares | `adopt.sh` checks | `adopt.sh` writes |
+| Product declares | `check` verifies | `adopt` writes |
 | --- | --- | --- |
 | `VERSION` as `X.Y.Z` | a dated `## X.Y.Z` entry in `CHANGELOG.md` | |
 | `scripts/package-release.sh TARGET` | executable | |
@@ -40,9 +50,11 @@ maelys-release/scripts/adopt.sh /path/to/product --preflight  # --check, then th
 
 The managed files are `.github/workflows/release.yml`,
 `scripts/checkout-dependency.sh`, the maelys-release block of `AGENTS.md`
-and `CLAUDE.md`, the Claude skill and, when absent, `RELEASING.md`. None of
-them is edited by hand; `--check` fails on any drift, and on a product
-whose declarations no longer match the generated workflow.
+and `CLAUDE.md` and the Claude skill. None of them is edited by hand;
+`check` reports any drift, and a product whose declarations no longer
+match the generated workflow, and refuses to run a socle other than the
+one `release.yml` pins. `RELEASING.md` and `.github/workflows/ci.yml` are
+created once when absent and then belong to the product.
 
 ### Dependencies and packages
 
@@ -70,16 +82,38 @@ libarchive
 The socle's own Linux packaging tools (`build-essential dpkg-dev file rpm`)
 are always installed in front of them.
 
+### Continuous integration from the same declarations
+
+`check-product.yml` is the reusable CI of a product: the same dependency
+checkouts and packages as the release, `make check` on the three release
+targets, the sanitizers (`make asan-ubsan` by default, `sanitizer_command`
+overrides or disables) on Linux x86_64, and the socle drift check. The
+`ci.yml` that `adopt` creates calls it as one job; the product adds its
+own jobs next to it and upgrades the socle pin with `adopt --apply`. A
+release is never the first Linux run of a product.
+
+### Rehearsing the Linux build
+
+`rehearse DIR linux-arm64` (native on Apple Silicon) or `linux-x86_64`
+(emulated, slow) replays the build job of the release in an `ubuntu:24.04`
+container: the socle's and the declared packages, the pinned checkouts
+through `scripts/checkout-dependency.sh`, then `scripts/package-release.sh
+TARGET`, on a copy of the working tree. Only `dist/` receives the
+artifacts. It runs before a tag what the workflow would otherwise discover
+on the first one; the defects maelys-oci found this way (a library without
+pkg-config files on Debian, a host-dependent contract, objects that did not
+depend on `VERSION`) would all have failed the first release.
+
 ### Preflight
 
-`--preflight` runs `--check`, then what the release workflow will demand of
+`preflight DIR` runs `check`, then what the release workflow will demand of
 the next tag, on the developer machine before it exists: `tag.gpgsign` and a
-`user.signingkey`, the previous `v*` tag annotated and signed, `vX.Y.Z` not
-yet taken, and, when `gh` is available, the `release` environment of the
-GitHub repository limiting its deployments to tags `v*`. GitHub creates a
-missing environment on first use without any rule, so presence alone is
-not checked. It exits 3 on the first refusal the workflow would otherwise
-report.
+`user.signingkey`, a full clone, the previous `v*` tag annotated and signed,
+`vX.Y.Z` not yet taken, and, when `gh` is available, the `release`
+environment of the GitHub repository limiting its deployments to tags `v*`.
+GitHub creates a missing environment on first use without any rule, so
+presence alone is not checked. Exit 2 reports what the workflow would
+otherwise refuse.
 
 ## Consuming the release workflow
 
@@ -169,19 +203,21 @@ bottles only, from a private repository.
 Conventions for versions, tags, pins, packages, packaging, formula names,
 runners and secrets are normative in [docs/conventions.md](docs/conventions.md).
 
-## Scripts
+## Other commands
 
-- `scripts/adopt.sh DIR [--apply|--check|--preflight]` as above;
-  `scripts/self-test.sh` exercises it on a fixture and runs in CI.
-- `share/templates/checkout-dependency.sh` is the checkout script
-  `adopt.sh` installs into products that pin dependencies.
-- `scripts/render-formula.sh TEMPLATE OUTPUT KEY=VALUE...` replaces
-  `@KEY@` placeholders and refuses unrendered ones.
-- `scripts/update-tap.sh PRODUCT TAG FORMULA_PATH` is the same publication
-  step for a developer machine: clones the tap, copies the rendered formula,
-  runs `brew style`, commits with the configured signing key and pushes;
-  `DRY_RUN=1` prints the diff instead. The workflows inline these steps so a
-  release depends on nothing but the caller's repository.
+- `render TEMPLATE OUTPUT KEY=VALUE...` replaces `@KEY@` placeholders and
+  refuses unrendered ones.
+- `tap PRODUCT TAG FORMULA [--apply]` is the publication step of `tap.yml`
+  for a developer machine: clones the tap, copies the rendered formula,
+  runs `brew style`, and shows the diff; with `--apply` it commits with the
+  configured signing key (`TAP_SIGNING_KEY`, `TAP_TOKEN`, `TAP_REPOSITORY`)
+  and pushes. The workflows inline these steps so a release depends on
+  nothing but the caller's repository.
+- `self-test` runs `tests/` on a fixture product; the socle's CI runs it on
+  Linux and macOS with actionlint and shellcheck.
+- `share/templates/checkout-dependency.sh` is the one shell script left:
+  `adopt` installs it into products that pin dependencies, and it runs
+  where nothing else can be assumed.
 
 Code is MPL-2.0; `share/` texts and scripts installed into consumer
 repositories are CC0-1.0 (`share/LICENSE`).

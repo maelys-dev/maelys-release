@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.5.0 — 2026-09-03
+
+The rest of the maelys-oci feedback, and the socle's scripts become one
+command of the agent-cli/v2 contract.
+
+- `bin/maelys-release`, in Python (standard library, 3.9 or later),
+  replaces `scripts/adopt.sh`, `rehearse.sh`, `render-formula.sh`,
+  `update-tap.sh` and `self-test.sh` with the commands `adopt`, `check`,
+  `preflight`, `rehearse`, `render`, `tap` and `self-test`, plus `help`,
+  `version`, `describe`, `completion` and `__complete` as maelys-cli
+  defines them. One catalog drives the parser, the help, `describe` and the
+  completion; `--format json` renders an envelope on stdout, failures an
+  envelope on stderr with a stable code and a hint; exit 0, 1 or 2 (a
+  validation that found violations: `check` on drift, `preflight` when the
+  tag would be refused). `adopt` and `tap` plan by default and write with
+  `--apply`; `--dry-run` is refused as the contract requires. Breaking for
+  products: their CI steps call `bin/maelys-release check . --product NAME`
+  instead of `scripts/adopt.sh . --check`.
+- `check` refuses to run from a socle other than the one `release.yml`
+  pins: upgrading is `adopt --apply` from the new socle, never an
+  accidental regeneration by whichever checkout is at hand.
+- `rehearse DIR TARGET` replays the build job of `release.yml` for
+  `linux-x86_64` or `linux-arm64` in an `ubuntu:24.04` container: socle
+  and declared packages, pinned checkouts through the managed
+  `scripts/checkout-dependency.sh`, `package-release.sh TARGET`, on a copy
+  of the working tree; `dist/` receives the artifacts. Verified on
+  maelys-oci 0.2.0 (linux-arm64, native).
+- `check-product.yml`, a reusable CI workflow from the same declarations:
+  checkouts, packages, `make check` on the three release targets, the
+  sanitizers on Linux x86_64 (`sanitizer_command`), and the socle drift
+  check against the version `release.yml` pins. `adopt` creates
+  `.github/workflows/ci.yml` calling it when the product has none; the
+  file then belongs to the product.
+- Conventions: a formula depending on a sibling formula is published after
+  it, in the order of the `adapter/*_PIN` graph; until then the product
+  ships without a template.
+- `tests/test_maelys_release.py` (18 tests) covers the contract surface,
+  the refusals, the generated files, the checkout against a local bare
+  repository, the preflight with an SSH-signed tag, `render` and `tap`
+  against a local tap. The socle's CI runs it on Linux and macOS.
+
 ## 0.3.0 — 2026-09-03
 
 Feedback from the adoption by maelys-oci: everything that failed there was

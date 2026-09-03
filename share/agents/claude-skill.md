@@ -10,13 +10,13 @@ The product is `@PRODUCT@`; its release mechanics come from maelys-release
 
 ## Cut a release
 
-1. On `main`, set `VERSION`, date the `CHANGELOG.md` entry (`adopt.sh`
-   refuses a `VERSION` without one), regenerate any generated
+1. On `main`, set `VERSION`, date the `CHANGELOG.md` entry (`check`
+   reports a `VERSION` without one), regenerate any generated
    documentation, and run `make check`; it must pass on the exact commit
    that will be tagged.
 2. Merge through a pull request with green CI.
-3. Run `scripts/adopt.sh . --preflight` from a maelys-release checkout at
-   @SOCLE_TAG@; it exits 3 on anything the workflow would refuse (signing
+3. Run `bin/maelys-release preflight .` from a maelys-release checkout at
+   @SOCLE_TAG@; it exits 2 on anything the workflow would refuse (signing
    configuration, previous tag, existing `vX.Y.Z`, `release` environment
    not limited to tags `v*`).
 4. Tag the merge commit: `git tag -s vX.Y.Z -m "@PRODUCT@ X.Y.Z"`, then
@@ -26,18 +26,30 @@ The product is `@PRODUCT@`; its release mechanics come from maelys-release
    environment. Verify with `gh release view vX.Y.Z` and
    `gh attestation verify <asset> --repo <owner>/<repo>`.
 
+## Before the first tag, or after changing packaging
+
+Run `bin/maelys-release rehearse . linux-arm64` (and `linux-x86_64`,
+emulated) from a maelys-release checkout: it replays the Linux build job of the
+release in Docker on a copy of the working tree. The release must never be
+the first Linux build of the product.
+
 ## Change release or packaging files
 
 - `.github/workflows/release.yml` and `scripts/checkout-dependency.sh`:
   never by hand. They are generated from `adapter/*_PIN`, `adapter/PACKAGES`
   and `packaging/homebrew/*.rb.in`; change those, then run
-  `scripts/adopt.sh DIR --apply` from a maelys-release checkout at the
-  target tag; check drift with `--check`.
+  `bin/maelys-release adopt DIR --apply` from a maelys-release checkout at
+  the target tag; check drift with `bin/maelys-release check DIR`. Every
+  command answers `--format json` with an agent-cli/v2 envelope and
+  `describe --format json` returns the catalog.
 - `adapter/<NAME>_PIN`: nearest tag on line 1, pinned commit on line 2.
   `scripts/checkout-dependency.sh NAME` clones the dependency at that
   commit; write no other checkout script.
 - `adapter/PACKAGES`: the apt (`[linux]`) and brew (`[macos]`) packages the
-  build needs, one per line. Nothing else installs packages in a release.
+  build needs, one per line. Nothing else installs packages in a release
+  or in CI: `.github/workflows/ci.yml` calls the socle's
+  `check-product.yml` with the same declarations; keep that job, add yours
+  next to it.
 - `scripts/package-release.sh TARGET`: must leave every artifact and its
   `.sha256` in `dist/`; keep it runnable locally.
 - @FORMULAS@: placeholders `@URL@`, `@VERSION@`,

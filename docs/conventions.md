@@ -11,12 +11,12 @@ rest.
 - The tag is annotated and signed with a key registered on GitHub; the
   release workflow verifies it through the API and refuses lightweight,
   unsigned or unverified tags, and tags that do not name the workflow commit.
-  `adopt.sh DIR --preflight` checks the signing configuration and the
+  `maelys-release preflight DIR` checks the signing configuration and the
   previous tag before the new one exists.
 - `CHANGELOG.md` has one dated `## X.Y.Z — YYYY-MM-DD` entry per release;
   an `## Unreleased` section collects what the next one will carry. The
-  entry for `VERSION` must exist: `adopt.sh` refuses a product without it,
-  so `make check` fails before the tag does.
+  entry for `VERSION` must exist: `maelys-release check` reports a product
+  without it, so `make check` fails before the tag does.
 - A published tag is never moved, deleted or force-pushed. A mistake is
   fixed by the next patch release.
 
@@ -29,17 +29,18 @@ rest.
   (`git rev-parse HEAD` equal to the pin, no local modification of the
   contract paths).
 - The checkout is the managed `scripts/checkout-dependency.sh NAME`, written
-  by `adopt.sh` from the pins; it clones `maelys-dev/NAME` next to the
+  by `maelys-release adopt` from the pins; it clones `maelys-dev/NAME` next to the
   product at the pinned commit. The release workflow, the product's CI and
   developers run that one script. A product writes no `scripts/checkout-*.sh`
-  of its own; `adopt.sh` refuses them.
+  of its own; `adopt` refuses them.
 - The system packages the build needs on the runners are declared in
   `adapter/PACKAGES`, one per line under `[linux]` (apt names) or `[macos]`
-  (brew names). `adopt.sh` emits them into the release workflow after the
+  (brew names). `adopt` emits them into the release workflow after the
   socle's own packaging tools; nothing else installs packages during a
   release.
 - The release workflow and any third-party action are pinned by full commit
-  SHA with the tag in a trailing comment. `adopt.sh` writes the socle pin.
+  SHA with the tag in a trailing comment. `adopt` writes the socle pin, and
+  `check` refuses to run from any other socle version than the pinned one.
 
 ## Packaging
 
@@ -61,7 +62,7 @@ rest.
   does not need at run time; a library formula installs the archive, headers
   and pkg-config file. Build-time dependencies are declared `=> :build`.
 - A repository publishes one formula per `packaging/homebrew/<name>.rb.in`;
-  `adopt.sh` writes one tap job each, so a repository may publish a command
+  `adopt` writes one tap job each, so a repository may publish a command
   and a library. A product renderer receives `TAG OUTPUT NAME`.
 - The formula template `packaging/homebrew/<name>.rb.in` lives in the
   product repository and is rendered from the released tag's copy, so the
@@ -71,7 +72,26 @@ rest.
   and `brew install --build-from-source` always works. Closed products ship
   bottles only, from a private repository, and say so in their formula.
 - The tap is `maelys-dev/homebrew-tap`; it is updated only by the release
-  workflows or by `scripts/update-tap.sh`, with signed commits.
+  workflows or by `maelys-release tap --apply`, with signed commits.
+- A formula that depends on another Maelys formula (`depends_on
+  "libmaelys-sys"`) is published after it: the bottle job resolves
+  `depends_on` from the shared tap, so the dependency's formula must be in
+  the tap before the dependent's first tap job. Until every sibling
+  dependency has its formula, the product ships no
+  `packaging/homebrew/*.rb.in`; its release still publishes the archives,
+  and the formula follows in a later patch release. The order is the
+  dependency graph of `adapter/*_PIN` (maelys-json, then maelys-system and
+  maelys-cli, then maelys-http, then maelys-egress and maelys-oci).
+
+## Continuous integration
+
+- The product's `ci.yml` calls `check-product.yml` of the socle at the
+  version pinned by `release.yml`: same checkouts, same packages, `make
+  check` on the three release targets, sanitizers, socle drift. Its other
+  jobs are the product's own.
+- Before the first tag of a product, and after any change to
+  `adapter/PACKAGES` or `package-release.sh`, `maelys-release rehearse DIR
+  TARGET` replays the Linux build job in Docker.
 
 ## Runners
 
@@ -91,7 +111,7 @@ rest.
 - The `publish` job runs in the `release` environment of the repository,
   whose deployment policy is limited to tags `v*`: a `workflow_dispatch`
   from a branch or a `release.yml` edited on a branch cannot publish. GitHub
-  creates a missing environment without any rule, so `--preflight` checks
+  creates a missing environment without any rule, so `preflight` checks
   the tag rule, not the presence. Set it once per repository:
 
   ```bash
@@ -103,7 +123,7 @@ rest.
 
 ## Agents
 
-`adopt.sh` installs a managed block in `AGENTS.md` and `CLAUDE.md` and a
+`adopt` installs a managed block in `AGENTS.md` and `CLAUDE.md` and a
 Claude skill under `.claude/skills/maelys-release/`; they carry the rules
 above in the form an agent needs. Products may add their own rules outside
 the managed block.
@@ -112,15 +132,18 @@ the managed block.
 
 ```sh
 git clone https://github.com/maelys-dev/maelys-release && git -C maelys-release checkout vX.Y.Z
-maelys-release/scripts/adopt.sh /path/to/product              # plan
-maelys-release/scripts/adopt.sh /path/to/product --apply      # write
-maelys-release/scripts/adopt.sh /path/to/product --check      # exit 2 on drift
-maelys-release/scripts/adopt.sh /path/to/product --preflight  # exit 3 when the tag would be refused
+maelys-release/bin/maelys-release adopt /path/to/product            # plan
+maelys-release/bin/maelys-release adopt /path/to/product --apply    # write
+maelys-release/bin/maelys-release check /path/to/product            # exit 2 on any violation
+maelys-release/bin/maelys-release preflight /path/to/product        # exit 2 when the tag would be refused
 ```
 
-`--check` belongs in the product's `make check` and in the fleet drift
-check of maelys-platform; `--preflight` is the first step of a release, on
-the machine that will sign the tag.
+The command follows the agent-cli/v2 contract of maelys-cli: `describe
+--format json` returns its catalog, every command renders a JSON envelope
+with `--format json`, failures are envelopes on stderr. `check` belongs in
+the product's `make check` and in the fleet drift check of maelys-platform;
+`preflight` is the first step of a release, on the machine that will sign
+the tag.
 
 ## Replaying a tag's Homebrew publication
 
