@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.8 — 2026-09-03
+
+- The publish job of `tap.yml` styles the merged formula inside the staging
+  tap instead of the loose copy: with the same class present in the staging
+  tap, `brew style` on the loose file fails on `Lint/DuplicateMethods`
+  (maelys-egress v0.13.1). Reproduced and verified locally.
+
 ## 0.2.7 — 2026-09-03
 
 - The publish job of `tap.yml` no longer taps the shared tap before merging

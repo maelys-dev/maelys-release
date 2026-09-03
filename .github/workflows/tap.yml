@@ -185,7 +185,9 @@ jobs:
             brew bottle --merge --write --no-commit bottles/*.bottle.json
           fi
           cp "$tap/Formula/${PRODUCT}.rb" "formula/${PRODUCT}.rb"
-          brew style "formula/${PRODUCT}.rb"
+          # Style the copy inside the staging tap: styling the loose file while
+          # the tap holds the same class fails on Lint/DuplicateMethods.
+          brew style "$tap/Formula/${PRODUCT}.rb"
       - name: Publish to the tap
         shell: bash
         env:
