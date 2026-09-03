@@ -1,10 +1,11 @@
 name: homebrew tap (reusable)
 
-# Renders the product's formula template from the released tag's own copy
-# and pushes a signed commit to the shared Homebrew tap. Without tap
-# credentials the job renders, lints, prints the diff and succeeds, so a
-# release never fails on a missing secret. Products with dependency pins to
-# copy into the formula supply `render_command` (their own renderer).
+# Renders the product's formula from the released tag's own template, builds
+# bottles on the requested macOS runners, attaches them to the GitHub release,
+# merges their digests into the formula and pushes a signed commit to the
+# shared Homebrew tap. Without tap credentials the publish step renders,
+# lints, prints the diff and succeeds, so a release never fails on a missing
+# secret. The formula keeps its source URL: bottles are an addition.
 on:
   workflow_call:
     inputs:
@@ -26,6 +27,11 @@ on:
         required: false
         type: string
         default: ""
+      bottles:
+        description: JSON array of macOS runner labels that build bottles; [] disables them
+        required: false
+        type: string
+        default: "[]"
       tap_repository:
         required: false
         type: string
@@ -40,11 +46,10 @@ permissions:
   contents: read
 
 jobs:
-  tap:
+  render:
     runs-on: macos-15
     env:
       HOMEBREW_NO_AUTO_UPDATE: "1"
-      HAS_TAP_TOKEN: ${{ secrets.tap_token != '' }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
@@ -78,6 +83,98 @@ jobs:
             fi
           fi
           brew style "$output"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: homebrew-formula-${{ inputs.product }}
+          path: dist/homebrew/
+
+  bottle:
+    needs: render
+    if: inputs.bottles != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: ${{ fromJSON(inputs.bottles) }}
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: homebrew-formula-${{ inputs.product }}
+          path: formula
+      - name: Build the bottle from the rendered formula
+        shell: bash
+        env:
+          PRODUCT: ${{ inputs.product }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          tag="${INPUT_TAG:-${GITHUB_REF_NAME}}"
+          test "$(uname -m)" = arm64
+          brew tap-new maelys-dev/staging >/dev/null
+          tap="$(brew --repository maelys-dev/staging)"
+          cp "formula/${PRODUCT}.rb" "$tap/Formula/${PRODUCT}.rb"
+          brew install --build-bottle "maelys-dev/staging/${PRODUCT}"
+          mkdir -p bottles && cd bottles
+          brew bottle --json --root-url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${tag}" \
+            "maelys-dev/staging/${PRODUCT}"
+          # Homebrew writes NAME--VERSION locally but references NAME-VERSION at root_url.
+          for file in ./*--*; do mv "$file" "${file/--/-}"; done
+          ls -l
+      - uses: actions/attest-build-provenance@ef244123eb79f2f7a7e75d99086184180e6d0018 # v1
+        with:
+          subject-path: bottles/*.bottle.tar.gz
+      - name: Attach the bottle to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          tag="${INPUT_TAG:-${GITHUB_REF_NAME}}"
+          gh release upload "$tag" --repo "${GITHUB_REPOSITORY}" --clobber bottles/*.bottle.tar.gz bottles/*.bottle.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: homebrew-bottle-${{ inputs.product }}-${{ matrix.runner }}
+          path: bottles/*.bottle.json
+
+  publish:
+    needs: [render, bottle]
+    if: always() && needs.render.result == 'success' && (needs.bottle.result == 'success' || needs.bottle.result == 'skipped')
+    runs-on: macos-15
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HAS_TAP_TOKEN: ${{ secrets.tap_token != '' }}
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: homebrew-formula-${{ inputs.product }}
+          path: formula
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: needs.bottle.result == 'success'
+        with:
+          pattern: homebrew-bottle-${{ inputs.product }}-*
+          path: bottles
+          merge-multiple: true
+      - name: Merge bottle digests into the formula
+        shell: bash
+        env:
+          PRODUCT: ${{ inputs.product }}
+        run: |
+          set -euo pipefail
+          brew tap-new maelys-dev/staging >/dev/null
+          tap="$(brew --repository maelys-dev/staging)"
+          cp "formula/${PRODUCT}.rb" "$tap/Formula/${PRODUCT}.rb"
+          if ls bottles/*.bottle.json >/dev/null 2>&1; then
+            brew bottle --merge --write --no-commit bottles/*.bottle.json
+          fi
+          cp "$tap/Formula/${PRODUCT}.rb" "formula/${PRODUCT}.rb"
+          brew style "formula/${PRODUCT}.rb"
       - name: Publish to the tap
         shell: bash
         env:
@@ -90,7 +187,6 @@ jobs:
         run: |
           set -euo pipefail
           tag="${INPUT_TAG:-${GITHUB_REF_NAME}}"
-          formula="dist/homebrew/${PRODUCT}.rb"
           tmp="$(mktemp -d)"
           if [ "$HAS_TAP_TOKEN" = "true" ]; then
             git clone -q "https://x-access-token:${TAP_TOKEN}@github.com/${TAP_REPOSITORY}.git" "$tmp/tap"
@@ -98,7 +194,7 @@ jobs:
             git clone -q "https://github.com/${TAP_REPOSITORY}.git" "$tmp/tap"
           fi
           mkdir -p "$tmp/tap/Formula"
-          cp "$formula" "$tmp/tap/Formula/${PRODUCT}.rb"
+          cp "formula/${PRODUCT}.rb" "$tmp/tap/Formula/${PRODUCT}.rb"
           git -C "$tmp/tap" add "Formula/${PRODUCT}.rb"
           if git -C "$tmp/tap" diff --cached --quiet; then
             echo "tap already carries ${PRODUCT} ${tag#v}"
@@ -122,5 +218,5 @@ jobs:
           echo "brew install ${TAP_REPOSITORY%/homebrew-*}/${TAP_REPOSITORY#*/homebrew-}/${PRODUCT}"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: homebrew-formula-${{ inputs.product }}
-          path: dist/homebrew/
+          name: homebrew-formula-${{ inputs.product }}-published
+          path: formula/

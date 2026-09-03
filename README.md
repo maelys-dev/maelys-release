@@ -17,6 +17,21 @@ product repository                      maelys-release
                                            brew style, signed commit to homebrew-tap
 ```
 
+## Adopting the socle
+
+```sh
+git clone https://github.com/maelys-dev/maelys-release && git -C maelys-release checkout v0.2.0
+maelys-release/scripts/adopt.sh /path/to/product            # plan
+maelys-release/scripts/adopt.sh /path/to/product --apply    # write release.yml, agent block, skill, RELEASING.md
+maelys-release/scripts/adopt.sh /path/to/product --check    # exit 2 on drift; add it to make check
+```
+
+Prerequisites checked: `VERSION` as `X.Y.Z`, `CHANGELOG.md`, an executable
+`scripts/package-release.sh TARGET` writing `dist/`, optionally
+`scripts/checkout-*.sh` for pinned dependencies and
+`packaging/homebrew/<product>.rb.in` with `scripts/render-homebrew-formula.sh`
+for the tap job. The generated workflow is below.
+
 ## Consuming the release workflow
 
 ```yaml
@@ -43,10 +58,13 @@ jobs:
   tap:
     needs: release
     uses: maelys-dev/maelys-release/.github/workflows/tap.yml@<sha> # vX.Y.Z
+    permissions:
+      contents: write
     with:
       product: maelys-egress
       # Products whose formula copies dependency pins supply their renderer:
-      render_command: scripts/render-homebrew-formula.sh TAG OUTPUT
+      render_command: sh scripts/render-homebrew-formula.sh TAG OUTPUT
+      bottles: '["macos-15","macos-26"]'   # [] disables bottles
     secrets:
       tap_token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
       tap_signing_key: ${{ secrets.HOMEBREW_TAP_SIGNING_KEY }}
@@ -76,8 +94,15 @@ commit to `maelys-dev/homebrew-tap`. When the secrets are absent the job
 prints a notice and succeeds, so a fork or a first release without tap
 credentials does not fail the whole release.
 
-Formulas build from the released source; prebuilt binaries stay on the
-GitHub release. Bottles are a later, opt-in job.
+Formulas build from the released source. With `bottles`, the tap workflow
+also builds a bottle per listed macOS runner, attests it, attaches it to the
+GitHub release and merges its digest into the formula, so `brew install`
+takes the bottle when the platform matches and compiles otherwise;
+`--build-from-source` always works for an open product. Closed products ship
+bottles only, from a private repository.
+
+Conventions for versions, tags, pins, packaging, formula names, runners and
+secrets are normative in [docs/conventions.md](docs/conventions.md).
 
 ## Scripts
 
@@ -89,4 +114,4 @@ GitHub release. Bottles are a later, opt-in job.
   `DRY_RUN=1` prints the diff instead. The workflows inline these steps so a
   release depends on nothing but the caller's repository.
 
-MPL-2.0.
+Code is MPL-2.0; `share/` texts installed into consumer repositories are CC0-1.0 (`share/LICENSE`).
