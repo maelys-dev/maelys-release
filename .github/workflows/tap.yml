@@ -118,6 +118,8 @@ jobs:
           tag="${INPUT_TAG:-${GITHUB_REF_NAME}}"
           test "$(uname -m)" = arm64
           brew tap-new maelys-dev/staging >/dev/null
+          # Recent Homebrew refuses to load formulas from a tap it does not trust.
+          brew trust maelys-dev/staging >/dev/null 2>&1 || true
           tap="$(brew --repository maelys-dev/staging)"
           cp "formula/${PRODUCT}.rb" "$tap/Formula/${PRODUCT}.rb"
           brew install --build-bottle "maelys-dev/staging/${PRODUCT}"
@@ -168,6 +170,8 @@ jobs:
         run: |
           set -euo pipefail
           brew tap-new maelys-dev/staging >/dev/null
+          # Recent Homebrew refuses to load formulas from a tap it does not trust.
+          brew trust maelys-dev/staging >/dev/null 2>&1 || true
           tap="$(brew --repository maelys-dev/staging)"
           cp "formula/${PRODUCT}.rb" "$tap/Formula/${PRODUCT}.rb"
           if ls bottles/*.bottle.json >/dev/null 2>&1; then

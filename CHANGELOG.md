@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.4 — 2026-09-03
+
+- `tap.yml` trusts its local staging tap before loading the formula:
+  recent Homebrew refuses formulas from untrusted taps ("Refusing to load
+  formula maelys-dev/staging/libmaelys-sys from untrusted tap"), which
+  failed the publish job of maelys-system v0.5.3 after the bottles were
+  built and attached to the release.
+
 ## 0.2.3 — 2026-09-03
 
 - The generated `tap-<formula>` jobs are granted `id-token` and
