@@ -81,8 +81,13 @@ mkdir -p "$stage/.github/workflows" "$stage/.claude/skills/maelys-release"
     # A job that calls a reusable workflow cannot be granted more than the
     # caller workflow declares at the top level, so the ceiling is set here
     # and each job narrows it.
-    printf 'on:\n  push:\n    tags: ["v*"]\n\npermissions:\n  contents: write\n  id-token: write\n  attestations: write\n\njobs:\n'
+    printf 'on:\n  push:\n    tags: ["v*"]\n'
+    printf '  workflow_dispatch:\n    inputs:\n      tag:\n'
+    printf '        description: Existing signed tag whose Homebrew publication is replayed\n'
+    printf '        required: true\n        type: string\n'
+    printf '\npermissions:\n  contents: write\n  id-token: write\n  attestations: write\n\njobs:\n'
     printf '  release:\n'
+    printf "    if: github.event_name == 'push'\n"
     printf '    uses: maelys-dev/maelys-release/.github/workflows/release.yml@%s # %s\n' "$socle_sha" "$socle_tag"
     printf '    permissions:\n      contents: write\n      id-token: write\n      attestations: write\n'
     printf '    with:\n      product: %s\n' "$product"
@@ -92,9 +97,12 @@ mkdir -p "$stage/.github/workflows" "$stage/.claude/skills/maelys-release"
     fi
     for formula in $formulas; do
         printf '\n  tap-%s:\n    needs: release\n' "$formula"
+        printf "    if: always() && (needs.release.result == 'success' || needs.release.result == 'skipped')\n"
         printf '    uses: maelys-dev/maelys-release/.github/workflows/tap.yml@%s # %s\n' "$socle_sha" "$socle_tag"
         printf '    permissions:\n      contents: write\n      id-token: write\n      attestations: write\n'
         printf '    with:\n      product: %s\n' "$formula"
+        # shellcheck disable=SC2016 # GitHub expression, literal here
+        printf '      tag: ${{ inputs.tag }}\n'
         if [ -n "$render_command" ]; then printf '      render_command: %s %s\n' "$render_command" "$formula"; fi
         printf '      bottles: %s\n' "'[\"macos-15\",\"macos-26\"]'"
         # shellcheck disable=SC2016 # GitHub expressions are literal here

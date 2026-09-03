@@ -90,3 +90,15 @@ maelys-release/scripts/adopt.sh /path/to/product --check    # exit 2 on drift
 
 `--check` belongs in the product's `make check` and in the fleet drift
 check of maelys-platform.
+
+## Replaying a tag's Homebrew publication
+
+The generated caller workflow also accepts `workflow_dispatch` with a `tag`
+input: it skips the release job and runs the tap jobs again for that
+existing signed tag, from the workflow definition of the default branch. Use
+it after adopting a corrected socle when a tag's release was published but
+its formula or bottles were not; never re-tag for that.
+
+```bash
+gh workflow run release.yml --repo maelys-dev/PRODUCT -f tag=vX.Y.Z
+```

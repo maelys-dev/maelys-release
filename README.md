@@ -119,3 +119,15 @@ secrets are normative in [docs/conventions.md](docs/conventions.md).
   release depends on nothing but the caller's repository.
 
 Code is MPL-2.0; `share/` texts installed into consumer repositories are CC0-1.0 (`share/LICENSE`).
+
+## Replaying a tag's Homebrew publication
+
+The generated caller workflow also accepts `workflow_dispatch` with a `tag`
+input: it skips the release job and runs the tap jobs again for that
+existing signed tag, from the workflow definition of the default branch. Use
+it after adopting a corrected socle when a tag's release was published but
+its formula or bottles were not; never re-tag for that.
+
+```bash
+gh workflow run release.yml --repo maelys-dev/PRODUCT -f tag=vX.Y.Z
+```

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.6 — 2026-09-03
+
+- `tap.yml` taps the shared tap before building bottles and merging their
+  digests, so a formula that depends on another Maelys formula
+  (`maelys-egress` on `libmaelys-sys`, `libmaelys-cli` on `libmaelys-json`)
+  resolves it; both failed with "No available formula" on their first run.
+- The generated caller workflow accepts `workflow_dispatch` with a `tag`
+  input that replays the tap jobs of an existing signed tag and skips the
+  release job, so a corrected socle publishes the formula of a release that
+  already exists without a new tag.
+
 ## 0.2.5 — 2026-09-03
 
 - The publish job writes `SHA256SUMS` from the archives that exist instead
