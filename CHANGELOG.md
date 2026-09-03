@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.5 — 2026-09-03
+
+- The publish job writes `SHA256SUMS` from the archives that exist instead
+  of expanding `*.deb` and `*.rpm` literally: a product that ships tarballs
+  only (maelys-json v0.1.1, maelys-cli v0.5.3) failed there after its
+  builds succeeded.
+
 ## 0.2.4 — 2026-09-03
 
 - `tap.yml` trusts its local staging tap before loading the formula:

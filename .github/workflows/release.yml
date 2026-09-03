@@ -150,7 +150,11 @@ jobs:
           mkdir -p dist
           find incoming -type f \( -name '*.tar.gz' -o -name '*.deb' -o -name '*.rpm' -o -name '*.sha256' \) -exec cp {} dist/ \;
           (cd dist && sha256sum -c -- ./*.sha256)
-          (cd dist && sha256sum -- ./*.tar.gz ./*.deb ./*.rpm >SHA256SUMS)
+          # Only the archive kinds the product actually built: a library ships
+          # tarballs alone, a command may add deb and rpm packages.
+          (cd dist && find . -maxdepth 1 -type f \( -name '*.tar.gz' -o -name '*.deb' -o -name '*.rpm' \) \
+            | sed 's|^\./||' | sort | xargs sha256sum >SHA256SUMS)
+          test -s dist/SHA256SUMS
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
