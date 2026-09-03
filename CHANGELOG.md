@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.2 — 2026-09-03
+
+- The generated caller workflow declares `contents`, `id-token` and
+  `attestations` write permissions at the top level: GitHub refuses a job
+  calling a reusable workflow with more permissions than its workflow
+  declares (`is requesting 'attestations: write, id-token: write', but is
+  only allowed ... none`), which made the first real release start-fail.
+
 ## 0.2.1 — 2026-09-03
 
 - `adopt.sh` writes one tap job per `packaging/homebrew/*.rb.in`, named

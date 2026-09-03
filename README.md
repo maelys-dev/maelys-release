@@ -39,8 +39,10 @@ name: release
 on:
   push:
     tags: ["v*"]
-permissions:
-  contents: read
+permissions:            # the ceiling; a calling job cannot exceed it
+  contents: write
+  id-token: write
+  attestations: write
 jobs:
   release:
     uses: maelys-dev/maelys-release/.github/workflows/release.yml@<sha> # vX.Y.Z

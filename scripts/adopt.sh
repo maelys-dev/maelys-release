@@ -78,7 +78,10 @@ mkdir -p "$stage/.github/workflows" "$stage/.claude/skills/maelys-release"
     printf 'name: release\n\n'
     printf '# Managed by maelys-release %s (%s). Regenerate with\n' "$socle_tag" "$socle_version"
     printf '# scripts/adopt.sh of maelys-release; do not edit by hand.\n'
-    printf 'on:\n  push:\n    tags: ["v*"]\n\npermissions:\n  contents: read\n\njobs:\n'
+    # A job that calls a reusable workflow cannot be granted more than the
+    # caller workflow declares at the top level, so the ceiling is set here
+    # and each job narrows it.
+    printf 'on:\n  push:\n    tags: ["v*"]\n\npermissions:\n  contents: write\n  id-token: write\n  attestations: write\n\njobs:\n'
     printf '  release:\n'
     printf '    uses: maelys-dev/maelys-release/.github/workflows/release.yml@%s # %s\n' "$socle_sha" "$socle_tag"
     printf '    permissions:\n      contents: write\n      id-token: write\n      attestations: write\n'
