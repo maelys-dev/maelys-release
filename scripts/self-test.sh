@@ -39,6 +39,10 @@ grep -q 'tap-libmaelys-fixture:' "$product/.github/workflows/release.yml"
 grep -q 'product: libmaelys-fixture' "$product/.github/workflows/release.yml"
 grep -q 'Keep me.' "$product/AGENTS.md"
 grep -q 'maelys-release:begin' "$product/AGENTS.md"
+# the agent block and the skill name the real formula templates
+grep -q 'packaging/homebrew/libmaelys-fixture.rb.in, packaging/homebrew/maelys-fixture.rb.in' "$product/AGENTS.md"
+grep -q 'packaging/homebrew/libmaelys-fixture.rb.in' "$product/.claude/skills/maelys-release/SKILL.md"
+if grep -q '@FORMULAS@\|@PRODUCT@' "$product/AGENTS.md" "$product/.claude/skills/maelys-release/SKILL.md"; then echo "self-test: placeholder unrendered" >&2; exit 1; fi
 test -f "$product/CLAUDE.md" && test -f "$product/RELEASING.md"
 test -f "$product/.claude/skills/maelys-release/SKILL.md"
 "$self/scripts/adopt.sh" "$product" --check >/dev/null
@@ -53,4 +57,5 @@ test "$status" = 2
 rm "$product/packaging/homebrew/maelys-fixture.rb.in" "$product/packaging/homebrew/libmaelys-fixture.rb.in"
 "$self/scripts/adopt.sh" "$product" --apply >/dev/null
 if grep -q 'tap.yml@' "$product/.github/workflows/release.yml"; then echo "self-test: tap job kept without template" >&2; exit 1; fi
+grep -q 'packaging/homebrew/<name>.rb.in' "$product/AGENTS.md"
 echo "self-test: adopt.sh ok"

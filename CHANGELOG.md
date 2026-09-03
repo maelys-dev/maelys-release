@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- The managed AGENTS.md/CLAUDE.md block and the Claude skill name the
+  repository's actual formula templates (`packaging/homebrew/<name>.rb.in`
+  for each template found, rendered through `@FORMULAS@`) instead of
+  `packaging/homebrew/<product>.rb.in`, which does not exist when the
+  formula is named after what it installs (`libmaelys-sys` in
+  maelys-system).
+
 ## 0.2.8 — 2026-09-03
 
 - The publish job of `tap.yml` styles the merged formula inside the staging
