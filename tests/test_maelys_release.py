@@ -375,6 +375,31 @@ class AdoptTest(unittest.TestCase):
                                   env=product.env, check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         self.assertEqual(labelled.returncode, 0, labelled.stdout + labelled.stderr)
         self.assertEqual(json.loads(labelled.stdout)["data"]["socle"]["tag"], "v7.7.7")
+        # another socle re-executes check from a cached checkout of the pinned one
+        bare = product.work / "remotes" / "maelys-release.git"
+        product.git(product.work, "clone", "-q", "--bare", str(copy), str(bare))
+        env = {**product.env, "XDG_CACHE_HOME": str(product.work / "cache"), "MAELYS_RELEASE_NO_RELOCATE": ""}
+        env.pop("MAELYS_RELEASE_NO_RELOCATE")
+        relocated = subprocess.run([str(CLI), "check", self.dir, "--format", "json"], env=env, check=False, text=True,
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(relocated.returncode, 0, relocated.stdout + relocated.stderr)
+        self.assertEqual(relocated.stderr, "")                     # an envelope owns stdout, nothing on stderr
+        pinned_sha = product.git(copy, "rev-parse", "HEAD")
+        self.assertEqual(json.loads(relocated.stdout)["data"]["socle"]["sha"], pinned_sha)
+        self.assertTrue((product.work / "cache" / "maelys-release" / pinned_sha / "bin" / "maelys-release").is_file())
+        text = subprocess.run([str(CLI), "check", self.dir], env=env, check=False, text=True,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(text.returncode, 0, text.stdout + text.stderr)
+        self.assertIn("running the pinned socle", text.stderr)
+        kept = subprocess.run([str(CLI), "check", self.dir, "--format", "json"], env={**env, "MAELYS_RELEASE_NO_RELOCATE": "1"},
+                              check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(kept.returncode, 1)                       # this checkout is dirty, and says so
+        # preflight names the cause when the check part fails
+        cause = subprocess.run([str(CLI), "preflight", self.dir, "--socle-sha", "f" * 40, "--socle-tag", "v9.9.9"],
+                               env=env, check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(cause.returncode, 2)
+        self.assertIn("drift    maelys-fixture pins maelys-release", cause.stdout)
+        self.assertIn("preflight: maelys-fixture is not ready to tag", cause.stdout)
 
     def test_checkout_dependency(self) -> None:
         product = self.product

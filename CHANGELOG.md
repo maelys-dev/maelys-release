@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.8.0 — 2026-09-04
+
+Feedback from the maelys-cli release on 0.6.1, with the sibling socle
+checkout already at 0.7.0.
+
+- `check`, `preflight` and `rehearse` answer as the socle the product pins:
+  started from another checkout, they fetch the pinned commit once into
+  `~/.cache/maelys-release/<sha>` (`MAELYS_GIT_BASE` overrides the origin)
+  and re-execute themselves from it, with a note on stderr in text mode. A
+  sibling checkout that moved on no longer blocks a release;
+  `MAELYS_RELEASE_NO_RELOCATE=1` keeps the running socle, `--socle-sha`
+  names one. `adopt` does not relocate: moving the pin is its purpose.
+- `preflight` in text mode prints the check part as `check` does, drift
+  lines included, so the cause of "not ready to tag" is on the terminal
+  and not only in `data.violations`.
+- Not a change: an exit 2 envelope carries `ok: true`. The contract says so
+  (agent-cli-spec §8: "a validation correctly executed that found
+  violations (the envelope has `ok: true` and reports them in `data`)"),
+  as maelys-cli's `MAELYS_CLI_EXIT_VIOLATIONS` and `maelys-hello check` do.
+
 ## 0.7.0 — 2026-09-04
 
 - `describe --summary --prefix PREFIX`, the filtered discovery form that

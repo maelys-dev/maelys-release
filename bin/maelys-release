@@ -464,6 +464,52 @@ def socle_data(sha: str, tag: str) -> dict:
     return {"version": socle_version(), "tag": tag, "sha": sha}
 
 
+def pinned_socle_checkout(sha: str) -> pathlib.Path:
+    """A checkout of the socle at `sha`, fetched once into the user's cache."""
+    cache = pathlib.Path(os.environ.get("XDG_CACHE_HOME") or pathlib.Path.home() / ".cache") / "maelys-release" / sha
+    if not (cache / "bin" / "maelys-release").is_file():
+        base = os.environ.get("MAELYS_GIT_BASE", "https://github.com/maelys-dev")
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        git("init", "-q", str(cache))
+        git("fetch", "-q", "--depth", "1", f"{base}/maelys-release.git", sha, cwd=cache)
+        git("checkout", "-q", "FETCH_HEAD", cwd=cache)
+        (cache / "bin" / "maelys-release").chmod(0o755)
+    return cache
+
+
+def run_pinned_socle(invocation: Invocation, project: pathlib.Path) -> None:
+    """Hand the invocation to the socle the product pins, when this is another one.
+
+    A product's CI fetches the pinned socle itself; a developer's sibling
+    checkout drifts as soon as anyone moves it. check, preflight and
+    rehearse therefore re-execute themselves from a cached checkout at the
+    pinned commit, so the answer is always the pinned socle's. adopt does
+    not: moving the pin is exactly its purpose. MAELYS_RELEASE_NO_RELOCATE=1
+    keeps the running socle, and --socle-sha names one explicitly.
+    """
+    if invocation.option("--socle-sha") or os.environ.get("MAELYS_RELEASE_NO_RELOCATE") == "1":
+        return
+    pinned = pinned_socle(project)
+    if not pinned:
+        return
+    root = socle_root()
+    if (root / ".git").exists() and git("rev-parse", "HEAD", cwd=root, check=False) == pinned["sha"]:
+        return
+    try:
+        checkout = pinned_socle_checkout(pinned["sha"])
+    except Failure as failure:
+        raise Failure("PRECONDITION_FAILED",
+                      f"{project.name} pins maelys-release {pinned['tag']} ({pinned['sha'][:7]}) but this is another"
+                      f" socle, and the pinned one could not be fetched: {failure.message}",
+                      "Check out the pinned tag, or set MAELYS_RELEASE_NO_RELOCATE=1 to run this socle anyway.") from failure
+    if invocation.format == "text":
+        print(f"note     running the pinned socle {pinned['tag']} ({pinned['sha'][:7]}) from {checkout}", file=sys.stderr)
+        sys.stderr.flush()
+    sys.stdout.flush()
+    environment = {**os.environ, "MAELYS_RELEASE_NO_RELOCATE": "1"}
+    os.execve(str(checkout / "bin" / "maelys-release"), [PROGRAM, *sys.argv[1:]], environment)
+
+
 # ---- handlers: each returns (data, exit code) ---------------------------------
 
 class Invocation:
@@ -497,6 +543,7 @@ def handle_adopt(invocation: Invocation) -> tuple[dict, int]:
 
 def check_data(invocation: Invocation) -> tuple[Declarations, dict]:
     project, product = project_of(invocation)
+    run_pinned_socle(invocation, project)
     decl = read_declarations(project, product)
     sha, tag = socle_identity(str(invocation.option("--socle-sha", "")), str(invocation.option("--socle-tag", "")))
     pinned = pinned_socle(project)
@@ -638,6 +685,7 @@ ls -l /dist
 def handle_rehearse(invocation: Invocation) -> tuple[dict, int]:
     """Replay the build job of release.yml for one Linux target in Docker."""
     project, product = project_of(invocation)
+    run_pinned_socle(invocation, project)
     target = invocation.operands[1]
     if not shutil.which("docker"):
         raise Failure("NOT_FOUND", "docker is required to rehearse a Linux build.", "Install Docker and retry.")
@@ -921,7 +969,8 @@ def text_check(data: dict) -> str:
 
 
 def text_preflight(data: dict) -> str:
-    lines = [text_check(data).rstrip("\n")] if data["valid"] else [f"{entry['action']:<8} {entry['path']}" for entry in data["files"]]
+    # the check part first, with its drift lines when it fails; then the tag preconditions
+    lines = [text_check(data).rstrip("\n")]
     labels = {"ok": "ok", "note": "note", "fail": "FAIL"}
     lines.extend(f"{labels[item['status']]:<8} {item['message']}" for item in data["preflight"])
     state = "ready to tag" if data["ready"] else "not ready to tag"

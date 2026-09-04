@@ -52,8 +52,12 @@ The managed files are `.github/workflows/release.yml`,
 `scripts/checkout-dependency.sh`, the maelys-release block of `AGENTS.md`
 and `CLAUDE.md` and the Claude skill. None of them is edited by hand;
 `check` reports any drift, and a product whose declarations no longer
-match the generated workflow, and refuses to run a socle other than the
-one `release.yml` pins. `RELEASING.md` is created once when absent and
+match the generated workflow. `check`, `preflight` and `rehearse` always
+answer as the socle `release.yml` pins: run from another checkout, they
+fetch the pinned commit once into `~/.cache/maelys-release/<sha>` and
+re-execute themselves from it, so a sibling checkout that moved on does
+not block a product (`MAELYS_RELEASE_NO_RELOCATE=1` keeps the running
+socle). `adopt` never relocates: moving the pin is its purpose. `RELEASING.md` is created once when absent and
 then belongs to the product; so does `.github/workflows/ci.yml`, except
 for the one line naming the socle, which `adopt` keeps current. A `ci.yml`
 that does not call `check-product.yml` is a warning of `check`.

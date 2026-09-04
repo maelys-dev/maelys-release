@@ -39,8 +39,10 @@ rest.
   socle's own packaging tools; nothing else installs packages during a
   release.
 - The release workflow and any third-party action are pinned by full commit
-  SHA with the tag in a trailing comment. `adopt` writes the socle pin, and
-  `check` refuses to run from any other socle version than the pinned one.
+  SHA with the tag in a trailing comment. `adopt` writes the socle pin;
+  `check`, `preflight` and `rehearse` run as the pinned socle wherever they
+  are started from, fetching it into the user's cache when the checkout at
+  hand is another version.
 
 ## Packaging
 
