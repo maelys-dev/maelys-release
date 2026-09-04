@@ -13,6 +13,7 @@ import importlib.util
 import json
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import tempfile
@@ -91,7 +92,13 @@ class Product:
     def read(self, relative: str) -> str:
         return (self.dir / relative).read_text(encoding="utf-8")
 
+    SOCLE = ("--socle-sha", "f" * 40, "--socle-tag", "v9.9.9")
+
     def cli(self, *arguments: str) -> subprocess.CompletedProcess:
+        # The checkout under test may carry uncommitted changes, which adopt
+        # refuses; the tests name the socle commit explicitly instead.
+        if arguments and arguments[0] in ("adopt", "check", "preflight", "rehearse") and "--socle-sha" not in arguments:
+            arguments = (*arguments, *self.SOCLE)
         return subprocess.run([str(CLI), *arguments], cwd=self.work, env=self.env, check=False, text=True,
                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
@@ -181,7 +188,7 @@ class ContractTest(unittest.TestCase):
         self.assertIn("--apply", self.product.run("__complete", "--", "adopt", "x", "--").stdout.split())
         self.assertEqual(self.product.run("__complete", "--", "rehearse", "x", "li").stdout, "linux-arm64\nlinux-x86_64\n")
         completed = self.product.run("__complete", "--format", "json", "--compact", "--", "de")
-        self.assertEqual(json.loads(completed.stdout)["data"]["records"], [{"word": "describe"}])
+        self.assertEqual(json.loads(completed.stdout)["data"]["records"], [{"word": "declarations"}, {"word": "describe"}])
         jsonl = self.product.run("__complete", "--format", "jsonl", "--", "ver").stdout
         self.assertEqual(json.loads(jsonl), {"word": "version"})
         for shell in ("bash", "zsh", "fish"):
@@ -272,22 +279,41 @@ class AdoptTest(unittest.TestCase):
         self.assertTrue((product.dir / "RELEASING.md").is_file())
         self.assertTrue(os.access(product.dir / "scripts" / "checkout-dependency.sh", os.X_OK))
         ci = product.read(".github/workflows/ci.yml")
-        for expected in ("check-product.yml@", "      product: maelys-fixture\n",
-                         "        sh scripts/checkout-dependency.sh maelys-system\n",
-                         "      linux_packages: pkg-config libjansson-dev\n", "      macos_packages: jansson\n"):
-            self.assertIn(expected, ci)
+        self.assertIn("check-product.yml@", ci)
+        self.assertIn("      product: maelys-fixture\n", ci)
+        self.assertNotIn("dependency_checkout", ci)          # the job reads adapter/ itself
         # idempotence, then the product's own edits of the created-once files
         self.assertTrue(product.json("check", self.dir)["data"]["valid"])
         self.assertFalse(product.json("adopt", self.dir)["data"]["changed"])
-        (product.dir / ".github" / "workflows" / "ci.yml").open("a").write("  mine:\n    runs-on: ubuntu-24.04\n")
+        with (product.dir / ".github" / "workflows" / "ci.yml").open("a") as ci_file:
+            ci_file.write("  mine:\n    runs-on: ubuntu-24.04\n")
         product.run("adopt", self.dir, "--apply")
         self.assertIn("  mine:", product.read(".github/workflows/ci.yml"))
         self.assertEqual(product.read("AGENTS.md").count("maelys-release:begin"), 1)
+        # the socle line of a product-owned ci.yml is managed; its absence is a warning
+        ci_path = product.dir / ".github" / "workflows" / "ci.yml"
+        stale = re.sub(r"check-product\.yml@[0-9a-f]{40} # \S+", "check-product.yml@" + "0" * 40 + " # v0.0.0", ci_path.read_text())
+        ci_path.write_text(stale)
+        drift = product.json("check", self.dir, expect=2)["data"]
+        self.assertIn(".github/workflows/ci.yml: update", drift["violations"])
+        product.run("adopt", self.dir, "--apply")
+        self.assertNotIn("0" * 40, ci_path.read_text())
+        self.assertIn("  mine:", ci_path.read_text())
+        ci_path.write_text("name: ci\non: [push]\njobs:\n  mine:\n    runs-on: ubuntu-24.04\n")
+        data = product.json("check", self.dir, expect=2)["data"]
+        self.assertTrue(any("does not call the socle's check-product.yml" in violation for violation in data["violations"]))
+        self.assertEqual(product.json("adopt", self.dir)["data"]["mode"], "plan")   # a warning does not block adopt
+        self.assertIn("WARN", product.run("adopt", self.dir).stdout)
+        declarations = product.json("declarations", self.dir)["data"]
+        self.assertEqual(declarations["dependencies"], ["maelys-system"])
+        self.assertEqual(declarations["linuxPackages"], "pkg-config libjansson-dev")
+        self.assertEqual(product.run("declarations", self.dir).stdout.splitlines()[-4], "dependencies  maelys-system")
 
     def test_drift(self) -> None:
         product = self.product
         product.run("adopt", self.dir, "--apply")
-        (product.dir / ".github" / "workflows" / "release.yml").open("a").write("\n# edited\n")
+        with (product.dir / ".github" / "workflows" / "release.yml").open("a") as workflow_file:
+            workflow_file.write("\n# edited\n")
         drift = product.json("check", self.dir, expect=2)["data"]
         self.assertIn(".github/workflows/release.yml: update", drift["violations"])
         self.assertIn("-# edited", product.run("adopt", self.dir).stdout)
@@ -314,6 +340,30 @@ class AdoptTest(unittest.TestCase):
         self.assertNotIn("dependency_checkout", workflow)
         self.assertFalse((product.dir / "scripts" / "checkout-dependency.sh").exists())
         self.assertIn("packaging/homebrew/<name>.rb.in", product.read("AGENTS.md"))
+
+    def test_dirty_socle_checkout_is_refused(self) -> None:
+        product = self.product
+        copy = product.work / "socle-copy"
+        product.git(product.work, "clone", "-q", str(ROOT), str(copy))
+        # the copy runs the program under test, committed there so it is clean
+        shutil.copy2(CLI, copy / "bin" / "maelys-release")
+        shutil.rmtree(copy / "share")
+        shutil.copytree(ROOT / "share", copy / "share")
+        product.git(copy, "add", "-A")
+        product.git(copy, "-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m", "under test")
+        with (copy / "share" / "agents" / "instructions-block.md").open("a") as block:
+            block.write("\nedited\n")
+        dirty = subprocess.run([str(copy / "bin" / "maelys-release"), "adopt", self.dir, "--format", "json"],
+                               env=product.env, check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(dirty.returncode, 1)
+        error = json.loads(dirty.stderr)["error"]
+        self.assertEqual(error["code"], "PRECONDITION_FAILED")
+        self.assertIn("uncommitted changes", error["message"])
+        product.git(copy, "checkout", "-q", "--", "share")
+        clean = subprocess.run([str(copy / "bin" / "maelys-release"), "adopt", self.dir, "--format", "json"],
+                               env=product.env, check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(clean.returncode, 0, clean.stderr)
+        self.assertEqual(json.loads(clean.stdout)["data"]["socle"]["sha"], product.git(copy, "rev-parse", "HEAD"))
 
     def test_checkout_dependency(self) -> None:
         product = self.product

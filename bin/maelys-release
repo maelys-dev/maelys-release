@@ -52,6 +52,7 @@ MANAGED = (
     "RELEASING.md",
     ".github/workflows/ci.yml",
 )
+CI_USES = re.compile(rf"({re.escape(SOCLE_REPOSITORY)}/\.github/workflows/check-product\.yml@)[0-9a-f]{{40}} # \S+")
 BEGIN = "<!-- maelys-release:begin -->"
 END = "<!-- maelys-release:end -->"
 EXIT_CODES = {"0": "command completed", "1": "execution failed", "2": "valid report with violations"}
@@ -103,13 +104,24 @@ def git(*arguments: str, cwd: pathlib.Path | None = None, check: bool = True) ->
 
 
 def socle_identity(sha: str, tag: str) -> tuple[str, str]:
-    """The commit and tag written into the managed files."""
+    """The commit and tag written into the managed files.
+
+    The files a product receives must be exactly what the pinned socle
+    regenerates, so a checkout with uncommitted changes to what adopt
+    writes (share/, bin/) is refused: its output would name a commit that
+    does not produce it.
+    """
     if sha:
         return sha, tag or "untagged"
     root = socle_root()
     if not (root / ".git").exists():
         raise Failure("PRECONDITION_FAILED", "This socle is not a git checkout, so its commit is unknown.",
                       "Pass --socle-sha SHA --socle-tag TAG, or run from a checkout.")
+    dirty = git("status", "--porcelain", "--", "share", "bin", "VERSION", cwd=root, check=False)
+    if dirty:
+        raise Failure("PRECONDITION_FAILED", "This socle checkout has uncommitted changes in share/, bin/ or VERSION;"
+                      " what it would write names a commit that does not produce it.",
+                      "Commit or stash the socle's changes, or run the socle at a tag.")
     return git("rev-parse", "HEAD", cwd=root), git("describe", "--tags", "--exact-match", cwd=root, check=False) or "untagged"
 
 
@@ -131,7 +143,8 @@ class Declarations:
 
     @property
     def valid(self) -> bool:
-        return all(check["status"] in ("ok", "note") for check in self.checks)
+        """Whether adopt may proceed; a warning is reported by check only."""
+        return all(check["status"] in ("ok", "note", "warn") for check in self.checks)
 
     def add(self, status: str, message: str) -> None:
         self.checks.append({"status": status, "message": message})
@@ -218,6 +231,14 @@ def read_declarations(project: pathlib.Path, product: str) -> Declarations:
         decl.add("refused", "scripts/" + " scripts/".join(stray)
                  + ": dependencies are cloned from adapter/*_PIN by the managed"
                  " scripts/checkout-dependency.sh NAME; delete these")
+    ci = project / ".github" / "workflows" / "ci.yml"
+    if ci.is_file():
+        if CI_USES.search(ci.read_text(encoding="utf-8")):
+            decl.add("ok", ".github/workflows/ci.yml calls check-product.yml of the socle")
+        else:
+            decl.add("warn", ".github/workflows/ci.yml does not call the socle's check-product.yml: add a job"
+                     f" 'uses: {SOCLE_REPOSITORY}/.github/workflows/check-product.yml@SHA # TAG'"
+                     f" with 'product: {product}', as adopt would create it")
     packages = adapter / "PACKAGES"
     if packages.is_file():
         try:
@@ -329,8 +350,8 @@ def ci_workflow(decl: Declarations, sha: str, tag: str, version: str) -> str:
     lines = [
         "name: ci",
         "",
-        f"# Created by maelys-release {tag} ({version}) and owned by this repository: add jobs",
-        "# next to check, keep check on the socle version of release.yml.",
+        f"# Created by maelys-release {tag} ({version}) and owned by this repository: add",
+        "# jobs next to check; adopt keeps the socle line of check current.",
         "on:",
         "  push:",
         "    branches: [main]",
@@ -345,13 +366,6 @@ def ci_workflow(decl: Declarations, sha: str, tag: str, version: str) -> str:
         "    with:",
         f"      product: {decl.product}",
     ]
-    if decl.dependencies:
-        lines.append("      dependency_checkout: |")
-        lines.extend(f"        sh scripts/checkout-dependency.sh {name}" for name in decl.dependencies)
-    if decl.linux_packages:
-        lines.append(f"      linux_packages: {decl.linux_packages}")
-    if decl.macos_packages:
-        lines.append(f"      macos_packages: {decl.macos_packages}")
     return "\n".join(lines) + "\n"
 
 
@@ -394,8 +408,14 @@ def stage(decl: Declarations, sha: str, tag: str) -> dict[str, tuple[str, bool]]
         staged[name] = (managed_block(existing, block), False)
     if not (decl.project / "RELEASING.md").is_file():
         staged["RELEASING.md"] = (render_text(share / "templates" / "RELEASING.md", mapping), False)
-    if not (decl.project / ".github" / "workflows" / "ci.yml").is_file():
+    ci = decl.project / ".github" / "workflows" / "ci.yml"
+    if not ci.is_file():
         staged[".github/workflows/ci.yml"] = (ci_workflow(decl, sha, tag, version), False)
+    else:
+        # The product owns its ci.yml; only the line naming the socle is managed.
+        existing = ci.read_text(encoding="utf-8")
+        if CI_USES.search(existing):
+            staged[".github/workflows/ci.yml"] = (CI_USES.sub(rf"\g<1>{sha} # {tag}", existing), False)
     return staged
 
 
@@ -493,6 +513,16 @@ def check_data(invocation: Invocation) -> tuple[Declarations, dict]:
                                       for entry in data["files"] if entry["action"] != "same")
     data["valid"] = not data["violations"]
     return decl, data
+
+
+def handle_declarations(invocation: Invocation) -> tuple[dict, int]:
+    """The product contract as data, for a CI job that installs what it declares."""
+    project, product = project_of(invocation)
+    decl = read_declarations(project, product)
+    return {"valid": decl.valid, "product": product, "project": str(project), "version": decl.version,
+            "dependencies": decl.dependencies, "linuxPackages": decl.linux_packages,
+            "macosPackages": decl.macos_packages, "formulas": decl.formulas, "checks": decl.checks}, \
+        EXIT_OK if decl.valid else EXIT_VIOLATIONS
 
 
 def handle_check(invocation: Invocation) -> tuple[dict, int]:
@@ -749,7 +779,8 @@ def handle_describe(invocation: Invocation) -> tuple[dict, int]:
         data["globalOptions"] = GLOBAL_OPTIONS
         data["invariants"] = INVARIANTS
         data["output"] = {"contract": CONTRACT, "schemaVersion": SCHEMA_VERSION,
-                          "stdout": "success data only", "stderr": "diagnostics and failure envelopes"}
+                          "stdout": "success data only; protocol streams are explicit exceptions",
+                          "stderr": "diagnostics and failure envelopes"}
         data["commands"] = [descriptor(command) for command in CATALOG]
     return data, EXIT_OK
 
@@ -823,7 +854,7 @@ def handle_complete(invocation: Invocation) -> tuple[dict, int]:
 # ---- text renderers ----------------------------------------------------------
 
 def render_checks(checks: list[dict], stream) -> None:
-    labels = {"ok": "ok", "note": "note", "missing": "MISSING", "refused": "REFUSED", "fail": "FAIL"}
+    labels = {"ok": "ok", "note": "note", "warn": "WARN", "missing": "MISSING", "refused": "REFUSED", "fail": "FAIL"}
     for check in checks:
         print(f"{labels.get(check['status'], check['status']):<8} {check['message']}", file=stream)
 
@@ -879,6 +910,9 @@ def text_tap(data: dict) -> str:
 TEXT = {
     "adopt": text_adopt,
     "check": text_check,
+    "declarations": lambda data: "".join(f"{key:<13} {value}\n" for key, value in (
+        ("dependencies", " ".join(data["dependencies"])), ("linux", data["linuxPackages"]),
+        ("macos", data["macosPackages"]), ("formulas", " ".join(data["formulas"])))),
     "preflight": text_preflight,
     "rehearse": lambda data: f"rehearse: {data['target']} built " + ", ".join(data["artifacts"]) + "\n",
     "render": lambda data: f"rendered {data['output']}\n",
@@ -1000,6 +1034,19 @@ CATALOG: list[dict] = [
                                         "project": {"type": "string"}, "socle": SOCLE_SCHEMA,
                                         "pinned": {"type": ["object", "null"]}, "checks": CHECKS_SCHEMA,
                                         "files": FILES_SCHEMA, "violations": STRINGS}},
+    },
+    {
+        "id": "declarations", "pattern": ["declarations"], "usage": "declarations DIR [--product NAME]",
+        "purpose": "Return the product contract as data: pinned dependencies, packages, formulas; exit 2 when invalid.",
+        "effect": "read", "operands": [DIR_OPERAND], "options": [SOCLE_OPTIONS[0]], "hidden": False,
+        "handler": handle_declarations,
+        "outputSchema": {"type": "object", "additionalProperties": False,
+                         "required": ["valid", "product", "project", "version", "dependencies", "linuxPackages",
+                                      "macosPackages", "formulas", "checks"],
+                         "properties": {"valid": {"type": "boolean"}, "product": {"type": "string"},
+                                        "project": {"type": "string"}, "version": {"type": "string"},
+                                        "dependencies": STRINGS, "linuxPackages": {"type": "string"},
+                                        "macosPackages": {"type": "string"}, "formulas": STRINGS, "checks": CHECKS_SCHEMA}},
     },
     {
         "id": "preflight", "pattern": ["preflight"], "usage": "preflight DIR [--product NAME]",
@@ -1317,7 +1364,7 @@ def main(argv: list[str] | None = None) -> int:
         command_id, fmt, compact = command["id"], invocation.format, invocation.compact
         data, exit_code = command["handler"](invocation)
         if fmt == "text":
-            if command_id in ("adopt", "check", "preflight"):
+            if command_id in ("adopt", "check", "preflight", "declarations"):
                 render_checks(data["checks"], sys.stdout)
             sys.stdout.write(TEXT[command_id](data))
         elif fmt == "jsonl":

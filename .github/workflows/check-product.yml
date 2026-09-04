@@ -1,11 +1,13 @@
 name: check (reusable)
 
 # Reusable CI of one Maelys product, from the same declarations as its
-# release: the pinned dependency checkouts, the packages of adapter/PACKAGES
-# and `make check` on the three release targets (Linux x86_64, Linux arm64,
-# macOS arm64), plus the sanitizers on Linux x86_64 and the socle drift
-# check. The product's ci.yml calls it as one job and adds its own jobs
-# next to it. A release is never the first Linux run of a product.
+# release and without repeating them: the job fetches the socle that the
+# product's release.yml pins, asks it for the pinned dependencies and the
+# packages of adapter/PACKAGES, installs them, runs `make check` on the
+# three release targets, the sanitizers on Linux x86_64 with clang, and
+# the socle drift check. The product's ci.yml calls it as one job and adds
+# its own jobs next to it. A release is never the first Linux run of a
+# product.
 on:
   workflow_call:
     inputs:
@@ -13,21 +15,6 @@ on:
         description: Product name, as given to maelys-release adopt
         required: true
         type: string
-      dependency_checkout:
-        description: Shell lines run before the checks (pinned dependency checkouts)
-        required: false
-        type: string
-        default: ""
-      linux_packages:
-        description: apt packages the build needs, from adapter/PACKAGES
-        required: false
-        type: string
-        default: ""
-      macos_packages:
-        description: brew packages the build needs, from adapter/PACKAGES
-        required: false
-        type: string
-        default: ""
       check_command:
         required: false
         type: string
@@ -37,6 +24,20 @@ on:
         required: false
         type: string
         default: make asan-ubsan
+      # Accepted for ci.yml files created by maelys-release 0.5.0; ignored
+      # since 0.6.0, when the job started reading adapter/ itself.
+      dependency_checkout:
+        required: false
+        type: string
+        default: ""
+      linux_packages:
+        required: false
+        type: string
+        default: ""
+      macos_packages:
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -52,18 +53,38 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           fetch-depth: 0
-      - name: Pinned dependency checkouts
-        if: inputs.dependency_checkout != ''
+      - name: Fetch the socle pinned by release.yml
+        id: socle
         shell: bash
         run: |
           set -euo pipefail
-          ${{ inputs.dependency_checkout }}
+          sha="$(sed -n 's|.*maelys-release/.github/workflows/release.yml@\([0-9a-f]\{40\}\).*|\1|p' .github/workflows/release.yml)"
+          test -n "$sha" || { echo "release.yml does not pin maelys-release" >&2; exit 1; }
+          socle="$RUNNER_TEMP/maelys-release"
+          git init -q "$socle"
+          git -C "$socle" fetch -q --depth 1 https://github.com/maelys-dev/maelys-release.git "$sha"
+          git -C "$socle" checkout -q FETCH_HEAD
+          echo "dir=$socle" >>"$GITHUB_OUTPUT"
+          "$socle/bin/maelys-release" declarations . --product "${{ inputs.product }}" --format json --compact >"$RUNNER_TEMP/declarations.json"
+          python3 - "$RUNNER_TEMP/declarations.json" >>"$GITHUB_OUTPUT" <<'PY'
+          import json, sys
+          data = json.load(open(sys.argv[1]))["data"]
+          print("dependencies=" + " ".join(data["dependencies"]))
+          print("linux_packages=" + data["linuxPackages"])
+          print("macos_packages=" + data["macosPackages"])
+          PY
+      - name: Pinned dependency checkouts
+        if: steps.socle.outputs.dependencies != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in ${{ steps.socle.outputs.dependencies }}; do sh scripts/checkout-dependency.sh "$name"; done
       - name: Install Linux packages
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y build-essential clang ${{ inputs.linux_packages }}
+        run: sudo apt-get update && sudo apt-get install -y build-essential clang ${{ steps.socle.outputs.linux_packages }}
       - name: Install macOS packages
-        if: runner.os == 'macOS' && inputs.macos_packages != ''
-        run: brew install ${{ inputs.macos_packages }}
+        if: runner.os == 'macOS' && steps.socle.outputs.macos_packages != ''
+        run: brew install ${{ steps.socle.outputs.macos_packages }}
       - name: Require Apple Silicon
         if: runner.os == 'macOS'
         run: test "$(uname -m)" = arm64
@@ -73,34 +94,47 @@ jobs:
       - name: Release socle drift
         if: matrix.runner == 'ubuntu-24.04'
         shell: bash
-        env:
-          PRODUCT: ${{ inputs.product }}
         # The socle pinned by release.yml is the pin of record: check from
         # that checkout regenerates the managed files and fails on any drift,
         # including declarations changed without adopt --apply.
-        run: |
-          set -euo pipefail
-          sha="$(sed -n 's|.*maelys-release/.github/workflows/release.yml@\([0-9a-f]\{40\}\).*|\1|p' .github/workflows/release.yml)"
-          test -n "$sha" || { echo "release.yml does not pin maelys-release" >&2; exit 1; }
-          git clone -q https://github.com/maelys-dev/maelys-release.git "$RUNNER_TEMP/maelys-release"
-          git -C "$RUNNER_TEMP/maelys-release" checkout -q "$sha"
-          "$RUNNER_TEMP/maelys-release/bin/maelys-release" check . --product "$PRODUCT"
+        run: ${{ steps.socle.outputs.dir }}/bin/maelys-release check . --product "${{ inputs.product }}"
 
   sanitizers:
     if: inputs.sanitizer_command != ''
     runs-on: ubuntu-24.04
+    env:
+      CC: clang
+      CXX: clang++
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           fetch-depth: 0
-      - name: Pinned dependency checkouts
-        if: inputs.dependency_checkout != ''
+      - name: Fetch the socle pinned by release.yml
+        id: socle
         shell: bash
         run: |
           set -euo pipefail
-          ${{ inputs.dependency_checkout }}
-      - name: Install Linux packages
-        run: sudo apt-get update && sudo apt-get install -y build-essential clang libclang-rt-18-dev ${{ inputs.linux_packages }}
-      - name: Sanitizers
+          sha="$(sed -n 's|.*maelys-release/.github/workflows/release.yml@\([0-9a-f]\{40\}\).*|\1|p' .github/workflows/release.yml)"
+          test -n "$sha" || { echo "release.yml does not pin maelys-release" >&2; exit 1; }
+          socle="$RUNNER_TEMP/maelys-release"
+          git init -q "$socle"
+          git -C "$socle" fetch -q --depth 1 https://github.com/maelys-dev/maelys-release.git "$sha"
+          git -C "$socle" checkout -q FETCH_HEAD
+          "$socle/bin/maelys-release" declarations . --product "${{ inputs.product }}" --format json --compact >"$RUNNER_TEMP/declarations.json"
+          python3 - "$RUNNER_TEMP/declarations.json" >>"$GITHUB_OUTPUT" <<'PY'
+          import json, sys
+          data = json.load(open(sys.argv[1]))["data"]
+          print("dependencies=" + " ".join(data["dependencies"]))
+          print("linux_packages=" + data["linuxPackages"])
+          PY
+      - name: Pinned dependency checkouts
+        if: steps.socle.outputs.dependencies != ''
         shell: bash
-        run: ${{ inputs.sanitizer_command }}
+        run: |
+          set -euo pipefail
+          for name in ${{ steps.socle.outputs.dependencies }}; do sh scripts/checkout-dependency.sh "$name"; done
+      - name: Install Linux packages
+        run: sudo apt-get update && sudo apt-get install -y build-essential clang libclang-rt-18-dev ${{ steps.socle.outputs.linux_packages }}
+      - name: Sanitizers with clang
+        shell: bash
+        run: ${{ inputs.sanitizer_command }} CC=clang CXX=clang++

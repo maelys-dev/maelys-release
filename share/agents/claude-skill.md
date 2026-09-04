@@ -48,8 +48,9 @@ the first Linux build of the product.
 - `adapter/PACKAGES`: the apt (`[linux]`) and brew (`[macos]`) packages the
   build needs, one per line. Nothing else installs packages in a release
   or in CI: `.github/workflows/ci.yml` calls the socle's
-  `check-product.yml` with the same declarations; keep that job, add yours
-  next to it.
+  `check-product.yml`, which reads the declarations itself; keep that job,
+  add yours next to it. `adopt` updates its socle line, `check` warns when
+  it is missing.
 - `scripts/package-release.sh TARGET`: must leave every artifact and its
   `.sha256` in `dist/`; keep it runnable locally.
 - @FORMULAS@: placeholders `@URL@`, `@VERSION@`,

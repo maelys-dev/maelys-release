@@ -86,9 +86,12 @@ rest.
 ## Continuous integration
 
 - The product's `ci.yml` calls `check-product.yml` of the socle at the
-  version pinned by `release.yml`: same checkouts, same packages, `make
-  check` on the three release targets, sanitizers, socle drift. Its other
-  jobs are the product's own.
+  version pinned by `release.yml`; that line is the only one `adopt`
+  manages in a `ci.yml` the product owns, and `check` warns when no job
+  calls it. The job reads the declarations from `adapter/` through the
+  pinned socle, so `ci.yml` repeats nothing: same checkouts, same packages,
+  `make check` on the three release targets, sanitizers with clang, socle
+  drift. Its other jobs are the product's own.
 - Before the first tag of a product, and after any change to
   `adapter/PACKAGES` or `package-release.sh`, `maelys-release rehearse DIR
   TARGET` replays the Linux build job in Docker.
@@ -138,7 +141,8 @@ maelys-release/bin/maelys-release check /path/to/product            # exit 2 on 
 maelys-release/bin/maelys-release preflight /path/to/product        # exit 2 when the tag would be refused
 ```
 
-The command follows the agent-cli/v2 contract of maelys-cli: `describe
+The command follows the agent-cli/v2 contract (maelys-dev/agent-cli-spec,
+pinned in `adapter/AGENT_CLI_SPEC_PIN` for its conformance kit): `describe
 --format json` returns its catalog, every command renders a JSON envelope
 with `--format json`, failures are envelopes on stderr. `check` belongs in
 the product's `make check` and in the fleet drift check of maelys-platform;

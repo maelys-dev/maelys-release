@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.6.0 — 2026-09-04
+
+Feedback from the second adoption round (maelys-cli, three socle versions,
+six tags): the two structural returns and the two small ones.
+
+- `check-product.yml` no longer takes the declarations as inputs: its job
+  fetches the socle pinned by `release.yml` (a depth-1 fetch by commit, no
+  full clone), runs `maelys-release declarations` on the product and
+  installs what it says. A `ci.yml` cannot drift from `release.yml` any
+  more, and one created by 0.5.0 keeps working: the old inputs are
+  accepted and ignored.
+- `adopt` manages the socle line of a `ci.yml` the product owns
+  (`uses: .../check-product.yml@SHA # TAG`), as it manages the block of
+  `AGENTS.md`; `check` reports a `ci.yml` that calls no `check-product.yml`
+  as a warning, counted as a violation (exit 2) without blocking `adopt`.
+  maelys-cli's CI stayed on `scripts/adopt.sh` after adopting 0.5.0 and
+  broke at the first check; this names it before the merge.
+- `declarations DIR`: the product contract as data (dependencies, packages,
+  formulas, checks), exit 2 when invalid.
+- `tests/test_contract_conformance.py`: the agent-cli/v2 conformance of
+  `bin/maelys-release`, checked by the kit of maelys-dev/agent-cli-spec at
+  `adapter/AGENT_CLI_SPEC_PIN` (v2.0.0), the repository where the contract
+  born in Hermes and made a framework by maelys-cli is now written once,
+  with its schemas. No pin on maelys-cli: the socle and the framework both
+  pin the specification.
+- `adopt`, `check`, `preflight` and `rehearse` refuse a socle checkout with
+  uncommitted changes in `share/`, `bin/` or `VERSION`: what it writes
+  names a commit that does not produce it, and the product's CI then
+  reports a drift it cannot explain (agent-cli-spec's first CI run).
+- The sanitizers job of `check-product.yml` runs with `CC=clang
+  CXX=clang++` and says so; it ran gcc's sanitizers under a clang name.
+- README: how the socle itself is released, on one product first.
+
 ## 0.5.0 — 2026-09-03
 
 The rest of the maelys-oci feedback, and the socle's scripts become one

@@ -20,8 +20,8 @@ product repository                      maelys-release
 
 ## The command
 
-`bin/maelys-release` is a command-line program of the agent-cli/v2
-contract of maelys-cli, in Python (standard library, 3.9 or later): one
+`bin/maelys-release` is a command-line program of the
+[agent-cli/v2](https://github.com/maelys-dev/agent-cli-spec) contract, in Python (standard library, 3.9 or later): one
 catalog drives the parser, `help`, `describe` and the shell completion;
 success is a JSON envelope on stdout with `--format json`, failure an
 envelope on stderr; exit 0 completed, 1 failed, 2 a validation that found
@@ -53,8 +53,10 @@ The managed files are `.github/workflows/release.yml`,
 and `CLAUDE.md` and the Claude skill. None of them is edited by hand;
 `check` reports any drift, and a product whose declarations no longer
 match the generated workflow, and refuses to run a socle other than the
-one `release.yml` pins. `RELEASING.md` and `.github/workflows/ci.yml` are
-created once when absent and then belong to the product.
+one `release.yml` pins. `RELEASING.md` is created once when absent and
+then belongs to the product; so does `.github/workflows/ci.yml`, except
+for the one line naming the socle, which `adopt` keeps current. A `ci.yml`
+that does not call `check-product.yml` is a warning of `check`.
 
 ### Dependencies and packages
 
@@ -84,13 +86,17 @@ are always installed in front of them.
 
 ### Continuous integration from the same declarations
 
-`check-product.yml` is the reusable CI of a product: the same dependency
-checkouts and packages as the release, `make check` on the three release
-targets, the sanitizers (`make asan-ubsan` by default, `sanitizer_command`
-overrides or disables) on Linux x86_64, and the socle drift check. The
-`ci.yml` that `adopt` creates calls it as one job; the product adds its
-own jobs next to it and upgrades the socle pin with `adopt --apply`. A
-release is never the first Linux run of a product.
+`check-product.yml` is the reusable CI of a product. Its job fetches the
+socle that the product's `release.yml` pins, asks it for the declarations
+(`maelys-release declarations DIR`), clones the pinned dependencies,
+installs the packages of `adapter/PACKAGES`, runs `make check` on the
+three release targets, the sanitizers with clang on Linux x86_64
+(`make asan-ubsan CC=clang CXX=clang++` by default; `sanitizer_command`
+overrides or disables), and the socle drift check. Nothing is repeated in
+`ci.yml`: it names the socle and the product, and cannot drift from
+`release.yml`. The `ci.yml` that `adopt` creates calls it as one job; the
+product adds its own jobs next to it. A release is never the first Linux
+run of a product.
 
 ### Rehearsing the Linux build
 
@@ -213,14 +219,29 @@ runners and secrets are normative in [docs/conventions.md](docs/conventions.md).
   configured signing key (`TAP_SIGNING_KEY`, `TAP_TOKEN`, `TAP_REPOSITORY`)
   and pushes. The workflows inline these steps so a release depends on
   nothing but the caller's repository.
-- `self-test` runs `tests/` on a fixture product; the socle's CI runs it on
-  Linux and macOS with actionlint and shellcheck.
+- `declarations DIR` returns the product contract as data; the CI job of
+  `check-product.yml` reads it instead of repeating it.
+- `self-test` runs `tests/` on a fixture product, including the conformance
+  kit of [agent-cli-spec](https://github.com/maelys-dev/agent-cli-spec) at
+  `adapter/AGENT_CLI_SPEC_PIN`, which drives this program from the outside
+  and must pass every check. The socle's CI runs it on Linux and macOS with
+  actionlint and shellcheck.
 - `share/templates/checkout-dependency.sh` is the one shell script left:
   `adopt` installs it into products that pin dependencies, and it runs
   where nothing else can be assumed.
 
 Code is MPL-2.0; `share/` texts and scripts installed into consumer
 repositories are CC0-1.0 (`share/LICENSE`).
+
+## Releasing the socle
+
+A change of the socle is discovered by the first product that adopts it,
+and a defect there is a failed or empty release of that product. So before
+a socle tag: `self-test` green, then the change tried on one product in a
+scratch clone (`adopt --apply`, `check`, `rehearse` when packaging moved,
+its CI green on a branch), then the tag. Products re-adopt at their next
+release, never in a dedicated pull request; the changelog names what they
+must change by hand.
 
 ## Replaying a tag's Homebrew publication
 
