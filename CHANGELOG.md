@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.7.0 — 2026-09-04
+
+- `describe --summary --prefix PREFIX`, the filtered discovery form that
+  agent-cli-spec v2.1.0 adds: the descriptors of one command namespace,
+  `filter: {"kind": "command-prefix", "value": PREFIX}`, `INVALID_COMMAND`
+  when nothing matches, `VALIDATION_FAILED` on a misuse. `describe` declares
+  the option with its grammar, `requires` and `conflictsWith`, and its
+  `input.constraints`. The pin moves to v2.1.0 (kit: 111 checks).
+- The attestation of a release is signed by the socle's reusable workflow,
+  so verifying it needs `--signer-repo maelys-dev/maelys-release`; the skill
+  and the `RELEASING.md` template said `--repo` alone, which fails with
+  "verifying with issuer sigstore.dev" (found on agent-cli-spec v2.1.0).
+
 ## 0.6.1 — 2026-09-04
 
 - `check` from a socle fetched by commit alone, as `check-product.yml` does

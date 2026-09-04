@@ -24,7 +24,10 @@ The product is `@PRODUCT@`; its release mechanics come from maelys-release
    registered on GitHub; the workflow refuses anything else.
 5. Watch the `release` workflow; the `publish` job runs in the `release`
    environment. Verify with `gh release view vX.Y.Z` and
-   `gh attestation verify <asset> --repo <owner>/<repo>`.
+   `gh attestation verify <asset> --repo <owner>/<repo> --signer-repo maelys-dev/maelys-release`
+   (the attestation is signed by the socle's reusable workflow, so `gh` must
+   be told that signer; without it verification fails with "verifying with
+   issuer sigstore.dev").
 
 ## Before the first tag, or after changing packaging
 

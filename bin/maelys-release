@@ -771,9 +771,33 @@ def handle_help(invocation: Invocation) -> tuple[dict, int]:
     return {"text": guide(), "commands": [command["id"] for command in CATALOG if not command["hidden"]]}, EXIT_OK
 
 
+PREFIX_GRAMMAR = re.compile(r"^[a-z](?:[a-z0-9.-]*[a-z0-9-])?$")
+
+
 def handle_describe(invocation: Invocation) -> tuple[dict, int]:
     data: dict = {"schemaVersion": CATALOG_SCHEMA, "program": PROGRAM, "product": PRODUCT,
                   "version": socle_version(), "contract": CONTRACT, "cliApi": CLI_API, "framework": FRAMEWORK}
+    prefix = invocation.option("--prefix")
+    if prefix is not None:
+        # Resolved here, after option validation: a misuse is VALIDATION_FAILED
+        # whatever the prefix; only a well-formed request without a match is
+        # INVALID_COMMAND.
+        if not invocation.flag("--summary"):
+            raise Failure("VALIDATION_FAILED", "Option --prefix requires --summary.",
+                          "Use 'describe --summary --prefix PREFIX'.")
+        if invocation.operands:
+            raise Failure("VALIDATION_FAILED", "Option --prefix conflicts with the COMMAND_ID operand.",
+                          "Use 'describe --summary --prefix PREFIX', or 'describe COMMAND_ID'.")
+        if not PREFIX_GRAMMAR.match(str(prefix)):
+            raise Failure("VALIDATION_FAILED", f"PREFIX is a command identifier without a trailing dot, not {prefix!r}.",
+                          "Use the identifiers returned by describe --summary.")
+        selected = [descriptor(command, summary=True) for command in CATALOG
+                    if command["id"] == prefix or command["id"].startswith(f"{prefix}.")]
+        if not selected:
+            raise Failure("INVALID_COMMAND", f"No command identifier equals or starts with '{prefix}.'.",
+                          "Run describe --summary to list the command identifiers.")
+        data.update({"kind": "summary", "filter": {"kind": "command-prefix", "value": prefix}, "commands": selected})
+        return data, EXIT_OK
     if invocation.operands:
         data["kind"] = "command"
         data["commands"] = [descriptor(command_by_id(invocation.operands[0]))]
@@ -992,10 +1016,14 @@ CATALOG: list[dict] = [
                                         "cliApi": {"type": "integer"}, "framework": {"type": "string"}}},
     },
     {
-        "id": "describe", "pattern": ["describe"], "usage": "describe [COMMAND_ID] [--summary]",
-        "purpose": "Return the machine-readable catalog, summary or one descriptor.", "effect": "read",
+        "id": "describe", "pattern": ["describe"], "usage": "describe [COMMAND_ID] [--summary] [--prefix PREFIX]",
+        "purpose": "Return the machine-readable catalog, summary, one namespace or one descriptor.", "effect": "read",
         "operands": [operand("COMMAND_ID", "Stable command identifier returned by the catalog.", required=False)],
-        "options": [option("--summary", "Return every descriptor without schemas and exit codes.")],
+        "options": [option("--summary", "Return every descriptor without schemas and exit codes."),
+                    {**option("--prefix", "Select the command namespace PREFIX: PREFIX itself and PREFIX.* (with --summary).",
+                              {"name": "PREFIX", "type": "string", "pattern": r"^[a-z](?:[a-z0-9.-]*[a-z0-9-])?$"}),
+                     "requires": ["--summary"], "conflictsWith": ["COMMAND_ID"]}],
+        "constraints": [{"kind": "requires", "options": ["--prefix", "--summary"]}],
         "hidden": False, "handler": handle_describe,
         "outputSchema": {"type": "object", "required": ["schemaVersion", "kind", "program", "commands"]},
     },
@@ -1147,7 +1175,7 @@ def descriptor(command: dict, summary: bool = False) -> dict:
         "input": {"synopsis": command["usage"], "operands": command["operands"],
                   "options": [{key: value for key, value in item.items() if key != "hidden"}
                               for item in command["options"] if not item.get("hidden")],
-                  "constraints": [], "passthrough": False},
+                  "constraints": command.get("constraints", []), "passthrough": False},
     }
     if not summary:
         entry["outputSchema"] = command["outputSchema"]
