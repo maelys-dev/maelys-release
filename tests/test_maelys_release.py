@@ -393,7 +393,13 @@ class AdoptTest(unittest.TestCase):
         self.assertIn("running the pinned socle", text.stderr)
         kept = subprocess.run([str(CLI), "check", self.dir, "--format", "json"], env={**env, "MAELYS_RELEASE_NO_RELOCATE": "1"},
                               check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        self.assertEqual(kept.returncode, 1)                       # this checkout is dirty, and says so
+        # without relocation this checkout answers for itself: refused when it
+        # is dirty (a developer's tree), a pin mismatch when it is clean (CI)
+        if kept.returncode == 1:
+            self.assertIn("uncommitted changes", json.loads(kept.stderr)["error"]["message"])
+        else:
+            self.assertEqual(kept.returncode, 2, kept.stdout + kept.stderr)
+            self.assertTrue(any("pins maelys-release" in item for item in json.loads(kept.stdout)["data"]["violations"]))
         # preflight names the cause when the check part fails
         cause = subprocess.run([str(CLI), "preflight", self.dir, "--socle-sha", "f" * 40, "--socle-tag", "v9.9.9"],
                                env=env, check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
