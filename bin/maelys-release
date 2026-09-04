@@ -499,8 +499,14 @@ def check_data(invocation: Invocation) -> tuple[Declarations, dict]:
     project, product = project_of(invocation)
     decl = read_declarations(project, product)
     sha, tag = socle_identity(str(invocation.option("--socle-sha", "")), str(invocation.option("--socle-tag", "")))
+    pinned = pinned_socle(project)
+    # A socle fetched by commit alone (a depth-1 fetch in CI) knows no tag;
+    # the tag is only a label next to the pinned commit, so when the commits
+    # agree the product's label stands and regeneration compares content.
+    if tag == "untagged" and pinned and pinned["sha"] == sha:
+        tag = pinned["tag"]
     data: dict = {"product": product, "project": str(project), "socle": socle_data(sha, tag),
-                  "pinned": pinned_socle(project), "checks": decl.checks, "files": [], "violations": []}
+                  "pinned": pinned, "checks": decl.checks, "files": [], "violations": []}
     data["violations"].extend(check["message"] for check in decl.checks if check["status"] not in ("ok", "note"))
     if decl.valid:
         if data["pinned"] and data["pinned"]["sha"] != sha:

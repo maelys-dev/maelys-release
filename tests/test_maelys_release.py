@@ -364,6 +364,17 @@ class AdoptTest(unittest.TestCase):
                                env=product.env, check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         self.assertEqual(clean.returncode, 0, clean.stderr)
         self.assertEqual(json.loads(clean.stdout)["data"]["socle"]["sha"], product.git(copy, "rev-parse", "HEAD"))
+        # a socle that knows no tag (a depth-1 fetch in CI) takes the label the product pins
+        subprocess.run([str(copy / "bin" / "maelys-release"), "adopt", self.dir, "--apply"], env=product.env, check=True,
+                       stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        for name in (".github/workflows/release.yml", ".github/workflows/ci.yml", "AGENTS.md", "CLAUDE.md",
+                     ".claude/skills/maelys-release/SKILL.md", "scripts/checkout-dependency.sh"):
+            path = product.dir / name
+            path.write_text(path.read_text().replace("untagged", "v7.7.7"))
+        labelled = subprocess.run([str(copy / "bin" / "maelys-release"), "check", self.dir, "--format", "json"],
+                                  env=product.env, check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(labelled.returncode, 0, labelled.stdout + labelled.stderr)
+        self.assertEqual(json.loads(labelled.stdout)["data"]["socle"]["tag"], "v7.7.7")
 
     def test_checkout_dependency(self) -> None:
         product = self.product

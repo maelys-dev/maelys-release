@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.1 — 2026-09-04
+
+- `check` from a socle fetched by commit alone, as `check-product.yml` does
+  (a depth-1 fetch, no tags), regenerated every managed file with the label
+  `untagged` and reported a drift on all of them: the first CI run of
+  agent-cli-spec on 0.6.0. When the running commit is the pinned one, the
+  label the product pins stands; the commit remains the pin of record.
+
 ## 0.6.0 — 2026-09-04
 
 Feedback from the second adoption round (maelys-cli, three socle versions,
