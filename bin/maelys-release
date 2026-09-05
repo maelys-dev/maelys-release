@@ -78,7 +78,11 @@ def share_dir() -> pathlib.Path:
 def socle_version() -> str:
     for candidate in (socle_root() / "VERSION", share_dir() / "VERSION"):
         if candidate.is_file():
-            return candidate.read_text(encoding="utf-8").strip()
+            version = candidate.read_text(encoding="utf-8").strip()
+            if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version):
+                raise Failure("PRECONDITION_FAILED", f"The socle's VERSION is not X.Y.Z: {version!r}.",
+                              "Fix VERSION of the socle; nothing generated from it can be trusted.")
+            return version
     raise Failure("NOT_FOUND", "VERSION of the socle not found.", "Run from a maelys-release checkout.")
 
 
@@ -107,8 +111,11 @@ def socle_identity(sha: str, tag: str) -> tuple[str, str]:
         return sha, tag or "untagged"
     root = socle_root()
     if not (root / ".git").exists():
-        raise Failure("PRECONDITION_FAILED", "This socle is not a git checkout, so its commit is unknown.",
-                      "Pass --socle-sha SHA --socle-tag TAG, or run from a checkout.")
+        version = socle_version()
+        raise Failure("PRECONDITION_FAILED", "This socle is not a git checkout (an archive of a tag, or an installed"
+                      " copy), so its commit is unknown, and the pin must name the commit.",
+                      f"Pass the commit of the tag: --socle-sha \"$(git ls-remote https://github.com/{SOCLE_REPOSITORY}.git"
+                      f" 'v{version}^{{}}' | cut -f1)\" --socle-tag v{version}; or run from a checkout at that tag.")
     dirty = git("status", "--porcelain", "--", "share", "bin", "VERSION", cwd=root, check=False)
     if dirty:
         raise Failure("PRECONDITION_FAILED", "This socle checkout has uncommitted changes in share/, bin/ or VERSION;"

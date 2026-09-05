@@ -366,6 +366,7 @@ class AdoptTest(unittest.TestCase):
         # the copy runs the program under test, committed there so it is clean
         shutil.copy2(CLI, copy / "bin" / "maelys-release")
         shutil.copy2(ROOT / "bin" / "maelys_cli.py", copy / "bin" / "maelys_cli.py")   # the vendored framework
+        shutil.copy2(ROOT / "VERSION", copy / "VERSION")
         for directory in ("share", "dependencies"):
             shutil.rmtree(copy / directory, ignore_errors=True)
             shutil.copytree(ROOT / directory, copy / directory)
@@ -675,6 +676,11 @@ class UnitTest(unittest.TestCase):
                 self.assertTrue(any(item["long"] == "--apply" for item in command["options"]))
             self.assertIn("outputSchema", command)
         self.assertEqual(MODULE.cli.FRAMEWORK.split()[0], "maelys_cli")
+
+    def test_socle_version_is_a_bare_version(self) -> None:
+        raw = (ROOT / "VERSION").read_bytes()
+        self.assertRegex(raw.decode(), r"^[0-9]+\.[0-9]+\.[0-9]+\n$")            # one line, a real newline
+        self.assertNotIn(b"\\", raw)                                                # not a literal backslash-n
 
     def test_release_workflow_text(self) -> None:
         decl = MODULE.Declarations(pathlib.Path("/p"), "maelys-x")
