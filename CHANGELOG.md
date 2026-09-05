@@ -13,6 +13,8 @@
 - The workflow supply-chain pins are refreshed to `actions/checkout` v7.0.1,
   `upload-artifact` v7.0.1, `download-artifact` v8.0.1,
   `attest-build-provenance` v4.2.2 and actionlint v1.7.12.
+- The relocation test uses a fully qualified destination ref, so it also runs
+  from the detached checkout used for pull requests.
 
 ## 0.14.2 — 2026-09-05
 

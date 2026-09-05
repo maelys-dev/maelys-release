@@ -430,7 +430,7 @@ class AdoptTest(unittest.TestCase):
         product.git(copy, "rm", "-q", "bin/maelys-release")
         product.git(copy, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "before the command")
         old = product.git(copy, "rev-parse", "HEAD")
-        product.git(copy, "push", "-q", str(bare), "HEAD:main")
+        product.git(copy, "push", "-q", str(bare), "HEAD:refs/heads/main")
         workflow = product.dir / ".github" / "workflows" / "release.yml"
         workflow.write_text(re.sub(r"release\.yml@[0-9a-f]{40} # \S+", f"release.yml@{old} # v0.2.8", workflow.read_text()))
         ancient = subprocess.run([str(CLI), "check", self.dir, "--format", "json"], env=env, check=False, text=True,
