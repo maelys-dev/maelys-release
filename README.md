@@ -154,14 +154,13 @@ on:
     tags: ["v*"]
   workflow_dispatch:
     inputs:
-      tag: { description: Existing signed tag whose Homebrew publication is replayed, required: true, type: string }
+      tag: { description: Existing signed tag whose release and Homebrew publication are replayed, required: true, type: string }
 permissions:            # the ceiling; a calling job cannot exceed it
   contents: write
   id-token: write
   attestations: write
 jobs:
   release:
-    if: github.event_name == 'push'
     uses: maelys-dev/maelys-release/.github/workflows/release.yml@<sha> # vX.Y.Z
     permissions:
       contents: write
@@ -283,13 +282,13 @@ its CI green on a branch), then the tag. Products re-adopt at their next
 release, never in a dedicated pull request; the changelog names what they
 must change by hand.
 
-## Replaying a tag's Homebrew publication
+## Replaying a tag's release
 
 The generated caller workflow also accepts `workflow_dispatch` with a `tag`
-input: it skips the release job and runs the tap jobs again for that
-existing signed tag, from the workflow definition of the default branch. Use
-it after adopting a corrected socle when a tag's release was published but
-its formula or bottles were not; never re-tag for that.
+input. It rebuilds the existing signed tag through the current socle, uploads
+the packages to a protected draft release, verifies them, publishes the
+release, then runs the tap jobs. Use it after adopting a corrected socle when
+a release or its formula failed; never re-tag for that.
 
 ```bash
 gh workflow run release.yml --repo maelys-dev/PRODUCT -f tag=vX.Y.Z

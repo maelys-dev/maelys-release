@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.15.1 — 2026-09-05
+
+- Release packages are uploaded directly to a protected draft GitHub release,
+  verified there, and then published. Release publication no longer depends on
+  the repository's GitHub Actions artifact-storage quota.
+- A `workflow_dispatch` replay now runs the complete release and Homebrew flow
+  for an existing signed tag through the current socle, while building the
+  requested tag rather than the default branch.
+
 ## 0.15.0 — 2026-09-05
 
 - Linux checks, sanitizers, tag verification and publication now run on the

@@ -308,7 +308,7 @@ def release_workflow(decl: Declarations, sha: str, tag: str, version: str) -> st
         "  workflow_dispatch:",
         "    inputs:",
         "      tag:",
-        "        description: Existing signed tag whose Homebrew publication is replayed",
+        "        description: Existing signed tag whose release and Homebrew publication are replayed",
         "        required: true",
         "        type: string",
         "",
@@ -319,7 +319,6 @@ def release_workflow(decl: Declarations, sha: str, tag: str, version: str) -> st
         "",
         "jobs:",
         "  release:",
-        "    if: github.event_name == 'push'",
         f"    uses: {SOCLE_REPOSITORY}/.github/workflows/release.yml@{sha} # {tag}",
         "    permissions:",
         "      contents: write",
@@ -327,6 +326,7 @@ def release_workflow(decl: Declarations, sha: str, tag: str, version: str) -> st
         "      attestations: write",
         "    with:",
         f"      product: {decl.product}",
+        "      tag: ${{ inputs.tag || github.ref_name }}",
     ]
     if decl.dependencies:
         lines.append("      dependency_checkout: |")
@@ -340,7 +340,7 @@ def release_workflow(decl: Declarations, sha: str, tag: str, version: str) -> st
             "",
             f"  tap-{formula}:",
             "    needs: release",
-            "    if: always() && (needs.release.result == 'success' || needs.release.result == 'skipped')",
+            "    if: needs.release.result == 'success'",
             f"    uses: {SOCLE_REPOSITORY}/.github/workflows/tap.yml@{sha} # {tag}",
             "    permissions:",
             "      contents: write",
@@ -348,7 +348,7 @@ def release_workflow(decl: Declarations, sha: str, tag: str, version: str) -> st
             "      attestations: write",
             "    with:",
             f"      product: {formula}",
-            "      tag: ${{ inputs.tag }}",
+            "      tag: ${{ inputs.tag || github.ref_name }}",
         ])
         if decl.render_command:
             lines.append(f"      render_command: {decl.render_command} {formula}")
