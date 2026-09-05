@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MPL-2.0
 """Conformance of bin/maelys-release to agent-cli/v2.
 
-The contract lives in maelys-dev/agent-cli-spec; adapter/AGENT_CLI_SPEC_PIN
+The contract lives in maelys-dev/agent-cli-spec; dependencies/agent-cli-spec.pin
 names the tag and commit this program is held to. The kit of that
 repository drives the program from the outside; every one of its checks
 must pass. AGENT_CLI_SPEC_DIR names a checkout to use; otherwise
@@ -20,7 +20,7 @@ import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 CLI = ROOT / "bin" / "maelys-release"
-PIN = ROOT / "adapter" / "AGENT_CLI_SPEC_PIN"
+PIN = ROOT / "dependencies" / "agent-cli-spec.pin"
 
 
 def spec_checkout() -> pathlib.Path:

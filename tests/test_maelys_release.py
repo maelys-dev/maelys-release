@@ -63,12 +63,12 @@ class Product:
         self.dir = self.work / "maelys-fixture"
         (self.dir / "scripts").mkdir(parents=True)
         (self.dir / "packaging" / "homebrew").mkdir(parents=True)
-        (self.dir / "adapter").mkdir()
+        (self.dir / "dependencies").mkdir()
         self.write("VERSION", "1.2.3\n")
         self.write("CHANGELOG.md", "# Changelog\n\n## Unreleased\n\n## 1.2.3 — 2026-09-03\n\n- Something.\n")
         self.write("scripts/package-release.sh", "#!/bin/sh\nexit 0\n", executable=True)
-        self.write("adapter/MAELYS_SYSTEM_PIN", f"{PINNED_TAG}-1-g{self.pinned[:7]}\n{self.pinned}\n")
-        self.write("adapter/PACKAGES", "# build inputs\n[linux]\npkg-config\nlibjansson-dev\n\n[macos]\njansson\n")
+        self.write("dependencies/maelys-system.pin", f"{PINNED_TAG}-1-g{self.pinned[:7]}\n{self.pinned}\n")
+        self.write("dependencies/packages", "# build inputs\n[linux]\npkg-config\nlibjansson-dev\n\n[macos]\njansson\n")
         self.write("packaging/homebrew/maelys-fixture.rb.in", "class MaelysFixture < Formula\nend\n")
         self.write("packaging/homebrew/libmaelys-fixture.rb.in", "class LibmaelysFixture < Formula\nend\n")
         self.write("AGENTS.md", "# Agent instructions\n\nKeep me.\n")
@@ -213,10 +213,12 @@ class AdoptTest(unittest.TestCase):
             ("VERSION", None, "VERSION file"),
             ("CHANGELOG.md", "# Changelog\n\n## Unreleased\n", "dated entry"),
             ("scripts/checkout-system.sh", "#!/bin/sh\nexit 0\n", "delete these"),
-            ("adapter/MAELYS_SYSTEM_PIN", "v0.0.1\nnot-a-commit\n", "line 2 must be the pinned commit"),
-            ("adapter/PACKAGES", "pkg-config\n[linux]\n", "outside a [linux] or [macos] section"),
-            ("adapter/PACKAGES", "[windows]\nfoo\n", "unknown section"),
-            ("adapter/PACKAGES", "[linux]\nfoo bar\n", "one package per line"),
+            ("dependencies/maelys-system.pin", "v0.0.1\nnot-a-commit\n", "line 2 must be the pinned commit"),
+            ("dependencies/packages", "pkg-config\n[linux]\n", "outside a [linux] or [macos] section"),
+            ("dependencies/packages", "[windows]\nfoo\n", "unknown section"),
+            ("dependencies/packages", "[linux]\nfoo bar\n", "one package per line"),
+            ("adapter/MAELYS_SYSTEM_PIN", "v0\n" + "a" * 40 + "\n", "adapter/ is the pre-0.14 layout"),
+            ("dependencies/Bad_Name.pin", "v0\n" + "a" * 40 + "\n", "named after the repository"),
         ]
         for relative, content, expected in cases:
             with self.subTest(relative=relative, expected=expected):
@@ -225,6 +227,7 @@ class AdoptTest(unittest.TestCase):
                 if content is None:
                     path.unlink()
                 else:
+                    path.parent.mkdir(parents=True, exist_ok=True)
                     path.write_text(content)
                 error = product.json("adopt", self.dir, expect=1)["error"]
                 self.assertEqual(error["code"], "PRECONDITION_FAILED")
@@ -234,6 +237,8 @@ class AdoptTest(unittest.TestCase):
                 self.assertTrue(any(expected in violation for violation in check["violations"]))
                 if backup is None:
                     path.unlink()
+                    if path.parent.name == "adapter":
+                        path.parent.rmdir()
                 else:
                     path.write_text(backup)
 
@@ -282,7 +287,7 @@ class AdoptTest(unittest.TestCase):
         ci = product.read(".github/workflows/ci.yml")
         self.assertIn("check-product.yml@", ci)
         self.assertIn("      product: maelys-fixture\n", ci)
-        self.assertNotIn("dependency_checkout", ci)          # the job reads adapter/ itself
+        self.assertNotIn("dependency_checkout", ci)          # the job reads dependencies/ itself
         # idempotence, then the product's own edits of the created-once files
         self.assertTrue(product.json("check", self.dir)["data"]["valid"])
         self.assertFalse(product.json("adopt", self.dir)["data"]["changed"])
@@ -346,7 +351,7 @@ class AdoptTest(unittest.TestCase):
         product = self.product
         for path in (product.dir / "packaging" / "homebrew").glob("*.rb.in"):
             path.unlink()
-        (product.dir / "adapter" / "MAELYS_SYSTEM_PIN").unlink()
+        (product.dir / "dependencies" / "maelys-system.pin").unlink()
         product.run("adopt", self.dir, "--apply")
         workflow = product.read(".github/workflows/release.yml")
         self.assertNotIn("tap.yml@", workflow)
@@ -361,7 +366,7 @@ class AdoptTest(unittest.TestCase):
         # the copy runs the program under test, committed there so it is clean
         shutil.copy2(CLI, copy / "bin" / "maelys-release")
         shutil.copy2(ROOT / "bin" / "maelys_cli.py", copy / "bin" / "maelys_cli.py")   # the vendored framework
-        for directory in ("share", "adapter"):
+        for directory in ("share", "dependencies"):
             shutil.rmtree(copy / directory, ignore_errors=True)
             shutil.copytree(ROOT / directory, copy / directory)
         product.git(copy, "add", "-A")
@@ -456,7 +461,7 @@ class GoldenTest(unittest.TestCase):
         ok       Homebrew formula templates: libmaelys-fixture maelys-fixture
         ok       pinned dependencies: maelys-system
         ok       .github/workflows/ci.yml calls check-product.yml of the socle
-        ok       adapter/PACKAGES: linux [pkg-config libjansson-dev] macos [jansson]
+        ok       dependencies/packages: linux [pkg-config libjansson-dev] macos [jansson]
         """)
     FILES = textwrap.dedent("""\
         same     .github/workflows/release.yml

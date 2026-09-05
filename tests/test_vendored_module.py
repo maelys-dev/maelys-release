@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MPL-2.0
 """bin/maelys_cli.py is python/maelys_cli.py of maelys-cli at the pinned commit, byte for byte.
 
-Two levels: offline, the digest recorded on line 3 of adapter/MAELYS_CLI_PIN
+Two levels: offline, the digest recorded on line 3 of dependencies/maelys-cli.pin
 matches the copy; online, the file at the pinned commit matches the copy
 (../maelys-cli when it holds that commit, otherwise a depth-1 fetch).
 """
@@ -16,7 +16,7 @@ import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 COPY = ROOT / "bin" / "maelys_cli.py"
-PIN = ROOT / "adapter" / "MAELYS_CLI_PIN"
+PIN = ROOT / "dependencies" / "maelys-cli.pin"
 
 
 def pinned() -> tuple[str, str, str]:
@@ -49,7 +49,7 @@ class VendoredModuleTest(unittest.TestCase):
     def test_copy_matches_recorded_digest(self) -> None:
         _, _, digest = pinned()
         self.assertEqual(hashlib.sha256(COPY.read_bytes()).hexdigest(), digest,
-                         "bin/maelys_cli.py differs from adapter/MAELYS_CLI_PIN; run maelys-release vendor")
+                         "bin/maelys_cli.py differs from dependencies/maelys-cli.pin; run maelys-release vendor")
 
     def test_copy_matches_the_pinned_commit(self) -> None:
         _, commit, _ = pinned()

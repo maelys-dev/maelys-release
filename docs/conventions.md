@@ -23,8 +23,8 @@ rest.
 ## Dependencies and packages
 
 - A dependency on another Maelys repository is pinned by commit in an
-  `adapter/<NAME>_PIN` file, `NAME` being the repository name upper-cased
-  with underscores (`MAELYS_SYSTEM_PIN`): the nearest tag on line 1 for
+  `dependencies/<name>.pin` file, `name` being the repository name
+  (`maelys-system.pin`): the nearest tag on line 1 for
   humans, the pinned commit on line 2. The build verifies the checkout
   (`git rev-parse HEAD` equal to the pin, no local modification of the
   contract paths).
@@ -34,7 +34,7 @@ rest.
   developers run that one script. A product writes no `scripts/checkout-*.sh`
   of its own; `adopt` refuses them.
 - The system packages the build needs on the runners are declared in
-  `adapter/PACKAGES`, one per line under `[linux]` (apt names) or `[macos]`
+  `dependencies/packages`, one per line under `[linux]` (apt names) or `[macos]`
   (brew names). `adopt` emits them into the release workflow after the
   socle's own packaging tools; nothing else installs packages during a
   release.
@@ -72,7 +72,7 @@ rest.
 - The formula template `packaging/homebrew/<name>.rb.in` lives in the
   product repository and is rendered from the released tag's copy, so the
   formula and the released source cannot drift. Dependency pins are copied
-  from the tag's `adapter/` files by the product's renderer.
+  from the tag's `dependencies/` files by the product's renderer.
 - Open products keep a source URL with its sha256; bottles are an addition
   and `brew install --build-from-source` always works. Closed products ship
   bottles only, from a private repository, and say so in their formula.
@@ -85,7 +85,7 @@ rest.
   dependency has its formula, the product ships no
   `packaging/homebrew/*.rb.in`; its release still publishes the archives,
   and the formula follows in a later patch release. The order is the
-  dependency graph of `adapter/*_PIN` (maelys-json, then maelys-system and
+  dependency graph of `dependencies/*.pin` (maelys-json, then maelys-system and
   maelys-cli, then maelys-http, then maelys-egress and maelys-oci).
 
 ## Continuous integration
@@ -93,12 +93,12 @@ rest.
 - The product's `ci.yml` calls `check-product.yml` of the socle at the
   version pinned by `release.yml`; that line is the only one `adopt`
   manages in a `ci.yml` the product owns, and `check` warns when no job
-  calls it. The job reads the declarations from `adapter/` through the
+  calls it. The job reads the declarations from `dependencies/` through the
   pinned socle, so `ci.yml` repeats nothing: same checkouts, same packages,
   `make check` on the three release targets, sanitizers with clang, socle
   drift. Its other jobs are the product's own.
 - Before the first tag of a product, and after any change to
-  `adapter/PACKAGES` or `package-release.sh`, `maelys-release rehearse DIR
+  `dependencies/packages` or `package-release.sh`, `maelys-release rehearse DIR
   TARGET` replays the Linux build job in Docker.
 
 ## Runners
@@ -165,7 +165,7 @@ maelys-release/bin/maelys-release preflight /path/to/product        # exit 2 whe
 ```
 
 The command follows the agent-cli/v2 contract (maelys-dev/agent-cli-spec,
-pinned in `adapter/AGENT_CLI_SPEC_PIN` for its conformance kit): `describe
+pinned in `dependencies/agent-cli-spec.pin` for its conformance kit): `describe
 --format json` returns its catalog, every command renders a JSON envelope
 with `--format json`, failures are envelopes on stderr. `check` belongs in
 the product's `make check` and in the fleet drift check of maelys-platform;

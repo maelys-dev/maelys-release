@@ -4,7 +4,7 @@ name: release (reusable)
 # VERSION, build the packages on every target, attest their provenance and
 # publish one GitHub release with SHA256SUMS. On a private repository the
 # attestation is skipped (input `attestation`). The product supplies
-# `scripts/package-release.sh TARGET` writing into dist/, its `adapter/` pins
+# `scripts/package-release.sh TARGET` writing into dist/, its `dependencies/` pins
 # and packages. Runner inputs are JSON: a label string such as "macos-15" or
 # a label array such as ["self-hosted","macOS","ARM64"].
 on:

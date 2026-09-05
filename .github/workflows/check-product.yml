@@ -3,7 +3,7 @@ name: check (reusable)
 # Reusable CI of one Maelys product, from the same declarations as its
 # release and without repeating them: the job fetches the socle that the
 # product's release.yml pins, asks it for the pinned dependencies and the
-# packages of adapter/PACKAGES, installs them, runs `make check` on the
+# packages of dependencies/packages, installs them, runs `make check` on the
 # three release targets, the sanitizers on Linux x86_64 with clang, and
 # the socle drift check. The product's ci.yml calls it as one job and adds
 # its own jobs next to it. A release is never the first Linux run of a
@@ -25,7 +25,7 @@ on:
         type: string
         default: make asan-ubsan
       # Accepted for ci.yml files created by maelys-release 0.5.0; ignored
-      # since 0.6.0, when the job started reading adapter/ itself.
+      # since 0.6.0, when the job started reading the product's declarations itself.
       dependency_checkout:
         required: false
         type: string

@@ -5,8 +5,7 @@
 # usage: scripts/checkout-dependency.sh NAME [DESTINATION]
 #
 # Clones the Maelys repository NAME (maelys-cli, maelys-system, ...) next to
-# this one at the commit on line 2 of adapter/<NAME>_PIN, where <NAME> is
-# the name upper-cased with hyphens turned to underscores; line 1 holds the
+# this one at the commit on line 2 of dependencies/NAME.pin; line 1 holds the
 # nearest tag for humans. The release socle runs it before packaging, the
 # product's CI before `make check`, a developer once by hand. It refuses to
 # replace an existing DESTINATION. MAELYS_GIT_BASE (default
@@ -16,7 +15,7 @@ name=${1:?NAME}
 case $name in *[!a-z0-9-]*|'') echo "checkout-dependency: NAME must be [a-z0-9-]: $name" >&2; exit 64 ;; esac
 root=$(CDPATH='' cd -- "$(dirname "$0")/.." && pwd)
 destination=${2:-$root/../$name}
-pin_file="$root/adapter/$(printf '%s' "$name" | tr '[:lower:]-' '[:upper:]_')_PIN"
+pin_file="$root/dependencies/$name.pin"
 test -f "$pin_file" || { echo "checkout-dependency: no pin for $name: $pin_file" >&2; exit 66; }
 tag=$(sed -n '1p' "$pin_file")
 pin=$(sed -n '2p' "$pin_file")

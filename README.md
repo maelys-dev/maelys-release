@@ -4,7 +4,7 @@ Shared release mechanics of the Maelys repositories: one reusable release
 workflow, one reusable Homebrew tap workflow, one reusable product CI
 workflow, and the `maelys-release` command that adopts them. A
 product repository keeps only what is specific to it: its `VERSION`, its
-`CHANGELOG.md`, its `scripts/package-release.sh`, its `adapter/` pins and
+`CHANGELOG.md`, its `scripts/package-release.sh`, its `dependencies/` pins and
 packages, and its `packaging/homebrew/<name>.rb.in` templates.
 
 ```text
@@ -24,7 +24,7 @@ product repository                      maelys-release
 [agent-cli/v2](https://github.com/maelys-dev/agent-cli-spec) contract,
 built on `maelys_cli`, the Python framework of maelys-cli: `bin/maelys_cli.py`
 is that framework's `python/maelys_cli.py` at the commit
-`adapter/MAELYS_CLI_PIN` names, byte for byte, with its digest on the pin's
+`dependencies/maelys-cli.pin` names, byte for byte, with its digest on the pin's
 third line; `self-test` verifies both, and `maelys-release vendor` refreshes
 the copy after a pin bump. The socle stays one fetch of one commit: the
 framework travels inside it. The program is Python (standard library, 3.9 or later): one
@@ -53,8 +53,8 @@ worktree or a scratch clone is rarely named after its product.
 | --- | --- | --- |
 | `VERSION` as `X.Y.Z` | a dated `## X.Y.Z` entry in `CHANGELOG.md` | |
 | `scripts/package-release.sh TARGET` | executable | |
-| `adapter/<NAME>_PIN` (tag, commit) | line 2 is a commit; no product `checkout-*.sh` | `scripts/checkout-dependency.sh`, one `dependency_checkout` line each |
-| `adapter/PACKAGES` (`[linux]`, `[macos]`) | one package per line in a known section | `linux_packages`, `macos_packages` |
+| `dependencies/<name>.pin` (tag, commit) | line 2 is a commit; no product `checkout-*.sh` | `scripts/checkout-dependency.sh`, one `dependency_checkout` line each |
+| `dependencies/packages` (`[linux]`, `[macos]`) | one package per line in a known section | `linux_packages`, `macos_packages` |
 | `packaging/homebrew/<name>.rb.in` | | one `tap-<name>` job each |
 | `scripts/render-homebrew-formula.sh` | executable | `render_command: ... TAG OUTPUT <name>` |
 
@@ -81,15 +81,14 @@ that does not call `check-product.yml` is a warning of `check`.
 
 ### Dependencies and packages
 
-A dependency on another Maelys repository is one `adapter/<NAME>_PIN` file:
-the nearest tag on line 1 for humans, the pinned commit on line 2. `NAME` is
-the repository name upper-cased with underscores (`MAELYS_SYSTEM_PIN` for
-`maelys-system`). The managed `scripts/checkout-dependency.sh maelys-system`
+A dependency on another Maelys repository is one `dependencies/<name>.pin` file:
+the nearest tag on line 1 for humans, the pinned commit on line 2, `name`
+being the repository name (`maelys-system.pin`). The managed `scripts/checkout-dependency.sh maelys-system`
 clones it next to the product at that commit; the release workflow, the
 product's CI and a developer all run the same script.
 
 The packages the build needs on the runners are declared in
-`adapter/PACKAGES`, one per line under `[linux]` (apt) or `[macos]` (brew):
+`dependencies/packages`, one per line under `[linux]` (apt) or `[macos]` (brew):
 
 ```ini
 [linux]
@@ -110,7 +109,7 @@ are always installed in front of them.
 `check-product.yml` is the reusable CI of a product. Its job fetches the
 socle that the product's `release.yml` pins, asks it for the declarations
 (`maelys-release declarations DIR`), clones the pinned dependencies,
-installs the packages of `adapter/PACKAGES`, runs `make check` on the
+installs the packages of `dependencies/packages`, runs `make check` on the
 three release targets, the sanitizers with clang on Linux x86_64
 (`make asan-ubsan CC=clang CXX=clang++` by default; `sanitizer_command`
 overrides or disables), and the socle drift check. Nothing is repeated in
@@ -260,11 +259,11 @@ runners and secrets are normative in [docs/conventions.md](docs/conventions.md).
 - `declarations DIR` returns the product contract as data; the CI job of
   `check-product.yml` reads it instead of repeating it.
 - `vendor` refreshes `bin/maelys_cli.py` from maelys-cli at
-  `adapter/MAELYS_CLI_PIN` and records its digest; bump the pin's first two
+  `dependencies/maelys-cli.pin` and records its digest; bump the pin's first two
   lines, run it, run `self-test`.
 - `self-test` runs `tests/` on a fixture product, including the conformance
   kit of [agent-cli-spec](https://github.com/maelys-dev/agent-cli-spec) at
-  `adapter/AGENT_CLI_SPEC_PIN`, which drives this program from the outside
+  `dependencies/agent-cli-spec.pin`, which drives this program from the outside
   and must pass every check. The socle's CI runs it on Linux and macOS with
   actionlint and shellcheck.
 - `share/templates/checkout-dependency.sh` is the one shell script left:

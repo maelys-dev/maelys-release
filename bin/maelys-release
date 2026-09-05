@@ -5,7 +5,7 @@ release socle.
 
 A command-line program of the agent-cli/v2 contract, built on maelys_cli,
 the Python framework of maelys-cli: bin/maelys_cli.py is that framework's
-python/maelys_cli.py at the commit adapter/MAELYS_CLI_PIN names, byte for
+python/maelys_cli.py at the commit dependencies/maelys-cli.pin names, byte for
 byte, and `maelys-release vendor` refreshes it. One catalog drives the
 parser, help, describe and completion; success is a JSON envelope on
 stdout, failure an envelope on stderr; exit 0 completed, 1 failed, 2 a
@@ -143,7 +143,7 @@ class Declarations:
 
 
 def parse_packages(text: str) -> tuple[str, str]:
-    """adapter/PACKAGES: one package per line under [linux] or [macos]."""
+    """dependencies/packages: one package per line under [linux] or [macos]."""
     packages: dict[str, list[str]] = {"linux": [], "macos": []}
     section = ""
     for number, raw in enumerate(text.splitlines(), 1):
@@ -203,17 +203,22 @@ def read_declarations(project: pathlib.Path, product: str) -> Declarations:
     if renderer.is_file() and os.access(renderer, os.X_OK):
         decl.render_command = "sh scripts/render-homebrew-formula.sh TAG OUTPUT"
         decl.add("ok", "scripts/render-homebrew-formula.sh renders the formula")
-    # Dependencies: one adapter/<NAME>_PIN per Maelys repository, nearest tag
-    # on line 1 for humans and the pinned commit on line 2. The managed
+    # Dependencies: one dependencies/NAME.pin per Maelys repository, nearest
+    # tag on line 1 for humans and the pinned commit on line 2. The managed
     # scripts/checkout-dependency.sh clones each of them from the pin.
-    adapter = project / "adapter"
-    for pin in sorted(adapter.glob("*_PIN")) if adapter.is_dir() else []:
-        name = pin.name[: -len("_PIN")].lower().replace("_", "-")
+    dependencies = project / "dependencies"
+    for pin in sorted(dependencies.glob("*.pin")) if dependencies.is_dir() else []:
+        name = pin.name[: -len(".pin")]
         lines = pin.read_text(encoding="utf-8").splitlines()
-        if len(lines) >= 2 and re.fullmatch(r"[0-9a-f]{40}", lines[1].strip()):
+        if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", name):
+            decl.add("missing", f"dependencies/{pin.name}: the file is named after the repository, [a-z0-9-]")
+        elif len(lines) >= 2 and re.fullmatch(r"[0-9a-f]{40}", lines[1].strip()):
             decl.dependencies.append(name)
         else:
-            decl.add("missing", f"adapter/{pin.name}: line 2 must be the pinned commit (line 1 its tag)")
+            decl.add("missing", f"dependencies/{pin.name}: line 2 must be the pinned commit (line 1 its tag)")
+    if (project / "adapter").is_dir():
+        decl.add("refused", "adapter/ is the pre-0.14 layout: git mv adapter/<NAME>_PIN dependencies/<name>.pin"
+                 " and adapter/PACKAGES dependencies/packages, then delete adapter/ and the Makefile lines that read it")
     if decl.dependencies:
         decl.add("ok", "pinned dependencies: " + " ".join(decl.dependencies))
     scripts = project / "scripts"
@@ -221,7 +226,7 @@ def read_declarations(project: pathlib.Path, product: str) -> Declarations:
                    if path.name != "checkout-dependency.sh") if scripts.is_dir() else []
     if stray:
         decl.add("refused", "scripts/" + " scripts/".join(stray)
-                 + ": dependencies are cloned from adapter/*_PIN by the managed"
+                 + ": dependencies are cloned from dependencies/*.pin by the managed"
                  " scripts/checkout-dependency.sh NAME; delete these")
     ci = project / ".github" / "workflows" / "ci.yml"
     if ci.is_file():
@@ -231,13 +236,13 @@ def read_declarations(project: pathlib.Path, product: str) -> Declarations:
             decl.add("warn", ".github/workflows/ci.yml does not call the socle's check-product.yml: add a job"
                      f" 'uses: {SOCLE_REPOSITORY}/.github/workflows/check-product.yml@SHA # TAG'"
                      f" with 'product: {product}', as adopt would create it")
-    packages = adapter / "PACKAGES"
+    packages = dependencies / "packages"
     if packages.is_file():
         try:
             decl.linux_packages, decl.macos_packages = parse_packages(packages.read_text(encoding="utf-8"))
-            decl.add("ok", f"adapter/PACKAGES: linux [{decl.linux_packages}] macos [{decl.macos_packages}]")
+            decl.add("ok", f"dependencies/packages: linux [{decl.linux_packages}] macos [{decl.macos_packages}]")
         except ValueError as error:
-            decl.add("missing", f"adapter/PACKAGES: {error}")
+            decl.add("missing", f"dependencies/packages: {error}")
     return decl
 
 
@@ -815,8 +820,8 @@ def handle_self_test(invocation: Invocation) -> tuple[dict, int]:
 # ---- the vendored framework ---------------------------------------------------
 
 def vendored_pin() -> tuple[str, str, str]:
-    """(tag, commit, sha256) of adapter/MAELYS_CLI_PIN; the third line may be absent."""
-    lines = (socle_root() / "adapter" / "MAELYS_CLI_PIN").read_text(encoding="utf-8").split()
+    """(tag, commit, sha256) of dependencies/maelys-cli.pin; the third line may be absent."""
+    lines = (socle_root() / "dependencies" / "maelys-cli.pin").read_text(encoding="utf-8").split()
     digest = lines[2].partition(":")[2] if len(lines) > 2 else ""
     return lines[0], lines[1], digest
 
@@ -839,7 +844,7 @@ def handle_vendor(invocation: Invocation) -> tuple[dict, int]:
     target = socle_root() / "bin" / "maelys_cli.py"
     changed = not target.is_file() or target.read_bytes() != content or previous != digest
     target.write_bytes(content)
-    (socle_root() / "adapter" / "MAELYS_CLI_PIN").write_text(f"{tag}\n{commit}\nsha256:{digest}\n", encoding="utf-8")
+    (socle_root() / "dependencies" / "maelys-cli.pin").write_text(f"{tag}\n{commit}\nsha256:{digest}\n", encoding="utf-8")
     return {"tag": tag, "commit": commit, "sha256": digest, "path": str(target), "changed": changed}, EXIT_OK
 
 
@@ -1016,7 +1021,7 @@ APP = cli.Program(PROGRAM, PRODUCT, socle_version(), [
                 options=[cli.flag("--verbose", "Report every test.")],
                 schema={"type": "object", "additionalProperties": False, "required": ["tests", "passed"],
                         "properties": {"tests": {"type": "string"}, "passed": {"type": "boolean"}}}),
-    cli.execute("vendor", "vendor", "Refresh bin/maelys_cli.py from maelys-cli at adapter/MAELYS_CLI_PIN and record its digest.",
+    cli.execute("vendor", "vendor", "Refresh bin/maelys_cli.py from maelys-cli at dependencies/maelys-cli.pin and record its digest.",
                 handle_vendor,
                 schema={"type": "object", "additionalProperties": False,
                         "required": ["tag", "commit", "sha256", "path", "changed"],
