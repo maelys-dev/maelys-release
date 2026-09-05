@@ -535,6 +535,13 @@ def handle_adopt(invocation: Invocation) -> tuple[dict, int]:
     decl = read_declarations(project, product)
     require_valid(decl, "adopt")
     sha, tag = socle_identity(str(invocation.option("--socle-sha", "")), str(invocation.option("--socle-tag", "")))
+    # A product pins releases of the socle: a commit without a tag has no
+    # changelog entry, no trial and no compatibility promise. Trials of a
+    # candidate say so explicitly.
+    if tag == "untagged" and not invocation.option("--socle-sha") and not invocation.flag("--allow-untagged"):
+        described = git("describe", "--tags", "--always", cwd=socle_root(), check=False) or sha[:7]
+        raise Failure("PRECONDITION_FAILED", f"This socle is {described}, not a release: a product pins tagged versions only.",
+                      "Check out a tag of maelys-release, or pass --allow-untagged for a trial of a candidate.")
     files = plan(decl, stage(decl, sha, tag), apply)
     changed = any(entry["action"] != "same" for entry in files)
     return {"mode": "apply" if apply else "plan", "product": product, "project": str(project),
@@ -1108,11 +1115,12 @@ CATALOG: list[dict] = [
                                                                                "properties": {"word": {"type": "string"}}}}}},
     },
     {
-        "id": "adopt", "pattern": ["adopt"], "usage": "adopt DIR [--product NAME] [--apply]",
+        "id": "adopt", "pattern": ["adopt"], "usage": "adopt DIR [--product NAME] [--apply] [--allow-untagged]",
         "purpose": "Write the managed files of the socle into a product; plan without --apply.",
         "effect": {"plan": "preview", "apply": "apply"},
         "operands": [DIR_OPERAND],
-        "options": [*SOCLE_OPTIONS, option("--apply", "Write the files instead of planning.")],
+        "options": [*SOCLE_OPTIONS, option("--apply", "Write the files instead of planning."),
+                    option("--allow-untagged", "Accept a socle commit without a tag (a trial of a candidate).")],
         "hidden": False, "handler": handle_adopt,
         "outputSchema": {"type": "object", "additionalProperties": False,
                          "required": ["mode", "product", "project", "socle", "changed", "checks", "files"],

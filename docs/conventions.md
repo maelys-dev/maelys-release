@@ -170,7 +170,9 @@ pinned in `adapter/AGENT_CLI_SPEC_PIN` for its conformance kit): `describe
 with `--format json`, failures are envelopes on stderr. `check` belongs in
 the product's `make check` and in the fleet drift check of maelys-platform;
 `preflight` is the first step of a release, on the machine that will sign
-the tag.
+the tag. `adopt` runs from a checkout of the socle at a tag: a commit
+without a tag is refused, `--allow-untagged` being the trial of a
+candidate before its tag.
 
 ## Replaying a tag's Homebrew publication
 

@@ -48,6 +48,10 @@ maelys-release/bin/maelys-release describe --summary --format json  # the catalo
 | `packaging/homebrew/<name>.rb.in` | | one `tap-<name>` job each |
 | `scripts/render-homebrew-formula.sh` | executable | `render_command: ... TAG OUTPUT <name>` |
 
+`adopt` refuses a socle commit that carries no tag, because a product pins
+releases (`--allow-untagged` is the trial of a candidate); the other
+commands run as the pinned socle wherever they start from.
+
 The managed files are `.github/workflows/release.yml`,
 `scripts/checkout-dependency.sh`, the maelys-release block of `AGENTS.md`
 and `CLAUDE.md` and the Claude skill. None of them is edited by hand;

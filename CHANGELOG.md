@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.11.0 — 2026-09-05
+
+- `adopt` refuses a socle commit without a tag: a product pins releases of
+  the socle, and a commit past the tag (maelys-cli's sibling checkout was
+  `v0.10.0-2-g9dccfe0`) has no changelog entry, no trial and no
+  compatibility promise. The refusal names the commit and the way out:
+  check out a tag, or `--allow-untagged` for the trial of a candidate,
+  which is how the socle itself is tried on a product before its tag.
+
 ## 0.10.0 — 2026-09-05
 
 Feedback from maelys-cli after four socle versions in three days: the

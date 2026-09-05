@@ -155,7 +155,7 @@ class ContractTest(unittest.TestCase):
 
     def test_help(self) -> None:
         text = self.product.run("help").stdout
-        self.assertIn("adopt DIR [--product NAME] [--apply]", text)
+        self.assertIn("adopt DIR [--product NAME] [--apply] [--allow-untagged]", text)
         self.assertEqual(self.product.run("--help").stdout, text)
         self.assertIn("OPTIONS", self.product.run("help", "adopt").stdout)
         self.assertEqual(self.product.run("adopt", "--help").stdout, self.product.run("help", "adopt").stdout)
@@ -353,19 +353,24 @@ class AdoptTest(unittest.TestCase):
         product.git(copy, "-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m", "under test")
         with (copy / "share" / "agents" / "instructions-block.md").open("a") as block:
             block.write("\nedited\n")
-        dirty = subprocess.run([str(copy / "bin" / "maelys-release"), "adopt", self.dir, "--format", "json"],
+        dirty = subprocess.run([str(copy / "bin" / "maelys-release"), "adopt", self.dir, "--allow-untagged", "--format", "json"],
                                env=product.env, check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         self.assertEqual(dirty.returncode, 1)
         error = json.loads(dirty.stderr)["error"]
         self.assertEqual(error["code"], "PRECONDITION_FAILED")
         self.assertIn("uncommitted changes", error["message"])
         product.git(copy, "checkout", "-q", "--", "share")
-        clean = subprocess.run([str(copy / "bin" / "maelys-release"), "adopt", self.dir, "--format", "json"],
+        # clean but without a tag: refused unless the caller says it is a trial
+        untagged = subprocess.run([str(copy / "bin" / "maelys-release"), "adopt", self.dir, "--format", "json"],
+                                  env=product.env, check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(untagged.returncode, 1)
+        self.assertIn("not a release", json.loads(untagged.stderr)["error"]["message"])
+        clean = subprocess.run([str(copy / "bin" / "maelys-release"), "adopt", self.dir, "--allow-untagged", "--format", "json"],
                                env=product.env, check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         self.assertEqual(clean.returncode, 0, clean.stderr)
         self.assertEqual(json.loads(clean.stdout)["data"]["socle"]["sha"], product.git(copy, "rev-parse", "HEAD"))
         # a socle that knows no tag (a depth-1 fetch in CI) takes the label the product pins
-        subprocess.run([str(copy / "bin" / "maelys-release"), "adopt", self.dir, "--apply"], env=product.env, check=True,
+        subprocess.run([str(copy / "bin" / "maelys-release"), "adopt", self.dir, "--apply", "--allow-untagged"], env=product.env, check=True,
                        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         for name in (".github/workflows/release.yml", ".github/workflows/ci.yml", "AGENTS.md", "CLAUDE.md",
                      ".claude/skills/maelys-release/SKILL.md", "scripts/checkout-dependency.sh"):
