@@ -47,10 +47,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [ubuntu-24.04, ubuntu-24.04-arm, macos-15]
+        runner: [ubuntu-26.04, ubuntu-26.04-arm, macos-15]
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - name: Fetch the socle pinned by release.yml
@@ -92,7 +92,7 @@ jobs:
         shell: bash
         run: ${{ inputs.check_command }}
       - name: Release socle drift
-        if: matrix.runner == 'ubuntu-24.04'
+        if: matrix.runner == 'ubuntu-26.04'
         shell: bash
         # The socle pinned by release.yml is the pin of record: check from
         # that checkout regenerates the managed files and fails on any drift,
@@ -101,12 +101,12 @@ jobs:
 
   sanitizers:
     if: inputs.sanitizer_command != ''
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     env:
       CC: clang
       CXX: clang++
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - name: Fetch the socle pinned by release.yml

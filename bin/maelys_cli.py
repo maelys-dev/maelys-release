@@ -8,7 +8,7 @@ stderr; exit 0 completed, 1 failed, 2 a validation that found violations.
 Transactions plan by default and write with --apply; --dry-run and --plan
 are refused. Standard library only, Python 3.9 or later, one file: a
 product copies it next to its program or puts it on its path, pinned by
-adapter/MAELYS_CLI_PIN like the C library.
+dependencies/maelys-cli.pin like the C library.
 
     import maelys_cli as cli
 

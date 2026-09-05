@@ -42,7 +42,7 @@ EXIT_VIOLATIONS = cli.EXIT_VIOLATIONS
 
 SOCLE_REPOSITORY = "maelys-dev/maelys-release"
 DEFAULT_TAP = "maelys-dev/homebrew-tap"
-DEFAULT_IMAGE = "ubuntu:24.04"
+DEFAULT_IMAGE = "ubuntu:26.04"
 SOCLE_LINUX_PACKAGES = "build-essential dpkg-dev file rpm"  # the release.yml default
 BOTTLES = '\'["macos-15","macos-26"]\''
 PLATFORMS = {"linux-x86_64": "linux/amd64", "linux-arm64": "linux/arm64"}

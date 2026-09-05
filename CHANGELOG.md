@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.15.0 — 2026-09-05
+
+- Linux checks, sanitizers, tag verification and publication now run on the
+  GitHub-hosted Ubuntu 26.04 x86_64 and arm64 runners. The rehearsal image is
+  `ubuntu:26.04`. This raises the shared build baseline past Ubuntu 24.04's
+  Mbed TLS 2.28.8, which lacks the security fix required by current Maelys
+  products.
+- `maelys-cli` is pinned at v0.5.15 and the vendored Python framework is
+  refreshed from that immutable commit. `agent-cli-spec` remains current at
+  v2.2.0.
+- The workflow supply-chain pins are refreshed to `actions/checkout` v7.0.1,
+  `upload-artifact` v7.0.1, `download-artifact` v8.0.1,
+  `attest-build-provenance` v4.2.2 and actionlint v1.7.12.
+
 ## 0.14.2 — 2026-09-05
 
 - The socle's `VERSION` of 0.12.0, 0.13.1, 0.14.0 and 0.14.1 ended with a
