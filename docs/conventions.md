@@ -51,8 +51,11 @@ rest.
   `.sha256` in `dist/`. It must run on a developer machine without CI. It
   may rebuild from clean (`make clean`) to package exactly what the commit
   builds; a developer runs it expecting that rebuild.
-- Every artifact gets a provenance attestation; the release lists them with
-  a `SHA256SUMS`.
+- Every artifact gets a provenance attestation on a public repository; the
+  release lists them with a `SHA256SUMS`. A private repository ships the
+  signed tag and `SHA256SUMS` without attestation, because GitHub reserves
+  attestations there to paid plans; the workflow skips the step by
+  itself (`attestation: auto`) and `preflight` says so before the tag.
 
 ## Homebrew
 

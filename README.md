@@ -12,7 +12,7 @@ product repository                      maelys-release
   .github/workflows/release.yml  --->   .github/workflows/release.yml (workflow_call)
      on: push tags v*                      verify signed tag + VERSION
      uses: maelys-release/...              build matrix (Linux x86_64, arm64, macOS arm64)
-                                           attest provenance, publish GitHub release
+                                           attest provenance (public repository), publish GitHub release
                                         .github/workflows/tap.yml (workflow_call)
                                            render formula from the tag's template
                                            brew style, signed commit to homebrew-tap
@@ -180,7 +180,10 @@ The product's `scripts/package-release.sh TARGET` must leave its artifacts
 and `.sha256` files in `dist/`. The workflow is pinned by commit SHA, as
 for any third-party action, with the tag in a comment. Other inputs of
 `release.yml` (`package_command`, the three runner inputs,
-`release_environment`) keep their defaults in the generated file.
+`release_environment`, `attestation`) keep their defaults in the generated
+file. `attestation: auto` attests provenance on a public repository and
+skips it on a private one, where GitHub reserves attestations to paid
+plans: the release then carries the signed tag and `SHA256SUMS` only.
 
 ## Runners
 

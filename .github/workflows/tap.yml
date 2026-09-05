@@ -36,6 +36,11 @@ on:
         required: false
         type: string
         default: maelys-dev/homebrew-tap
+      attestation:
+        description: auto (by repository visibility), always or never, as in release.yml
+        required: false
+        type: string
+        default: auto
     secrets:
       tap_token:
         required: false
@@ -134,7 +139,9 @@ jobs:
           # Homebrew writes NAME--VERSION locally but references NAME-VERSION at root_url.
           for file in ./*--*; do mv "$file" "${file/--/-}"; done
           ls -l
-      - uses: actions/attest-build-provenance@ef244123eb79f2f7a7e75d99086184180e6d0018 # v1
+      - name: Provenance attestation
+        if: inputs.attestation == 'always' || (inputs.attestation == 'auto' && !github.event.repository.private)
+        uses: actions/attest-build-provenance@ef244123eb79f2f7a7e75d99086184180e6d0018 # v1
         with:
           subject-path: bottles/*.bottle.tar.gz
       - name: Attach the bottle to the release

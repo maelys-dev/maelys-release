@@ -2,7 +2,8 @@ name: release (reusable)
 
 # Reusable release of one Maelys product on a signed tag: verify the tag and
 # VERSION, build the packages on every target, attest their provenance and
-# publish one GitHub release with SHA256SUMS. The product supplies
+# publish one GitHub release with SHA256SUMS. On a private repository the
+# attestation is skipped (input `attestation`). The product supplies
 # `scripts/package-release.sh TARGET` writing into dist/, its `adapter/` pins
 # and packages. Runner inputs are JSON: a label string such as "macos-15" or
 # a label array such as ["self-hosted","macOS","ARM64"].
@@ -49,6 +50,14 @@ on:
         required: false
         type: string
         default: release
+      attestation:
+        description: >-
+          auto attests provenance on a public repository and skips it on a
+          private one (GitHub reserves attestations there to paid plans);
+          always and never force it
+        required: false
+        type: string
+        default: auto
     outputs:
       tag:
         value: ${{ jobs.verify.outputs.tag }}
@@ -125,9 +134,19 @@ jobs:
           set -euo pipefail
           eval "${PACKAGE_COMMAND//TARGET/$TARGET}"
           test -n "$(ls dist 2>/dev/null)"
-      - uses: actions/attest-build-provenance@ef244123eb79f2f7a7e75d99086184180e6d0018 # v1
+      - name: Provenance attestation
+        if: inputs.attestation == 'always' || (inputs.attestation == 'auto' && !github.event.repository.private)
+        uses: actions/attest-build-provenance@ef244123eb79f2f7a7e75d99086184180e6d0018 # v1
         with:
           subject-path: dist/*
+      - name: No provenance attestation
+        if: inputs.attestation == 'never' || (inputs.attestation == 'auto' && github.event.repository.private)
+        env:
+          ATTESTATION: ${{ inputs.attestation }}
+        run: |
+          reason="private repository: GitHub reserves attestations to paid plans"
+          test "$ATTESTATION" != never || reason="the attestation input is never"
+          echo "::notice::no provenance attestation ($reason); the signed tag and SHA256SUMS remain"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: dist-${{ matrix.target }}

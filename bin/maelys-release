@@ -641,6 +641,10 @@ def handle_preflight(invocation: Invocation) -> tuple[dict, int]:
             add("note", f"gh is not installed: release environment of {match.group(1)} not checked")
         else:
             repository = match.group(1)
+            repository_data = github_api(f"repos/{repository}") or {}
+            if repository_data.get("private"):
+                add("note", f"{repository} is private: the release ships no provenance attestation (GitHub reserves"
+                    " them to paid plans); the signed tag and SHA256SUMS remain")
             environment = github_api(f"repos/{repository}/environments/release")
             if environment is None:
                 add("fail", f"environment release is missing in {repository}; create it and limit its deployments to tags v*")

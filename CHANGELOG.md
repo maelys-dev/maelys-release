@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.9.0 — 2026-09-05
+
+- The provenance attestation follows the repository's visibility:
+  `release.yml` and `tap.yml` take an `attestation` input, `auto` by
+  default, which attests on a public repository and skips the step on a
+  private one, where GitHub reserves attestations to paid plans (`Feature
+  not available for the maelys-dev organization`, maelys-oci v0.3.0, three
+  builds failed after packaging). `always` and `never` force it. A private
+  release keeps the signed tag, the `.sha256` files and `SHA256SUMS`.
+- `preflight` notes a private repository and what its release will lack,
+  before the tag.
+
 ## 0.8.0 — 2026-09-04
 
 Feedback from the maelys-cli release on 0.6.1, with the sibling socle
