@@ -482,7 +482,8 @@ def pinned_socle_checkout(sha: str) -> pathlib.Path:
         git("init", "-q", str(cache))
         git("fetch", "-q", "--depth", "1", f"{base}/maelys-release.git", sha, cwd=cache)
         git("checkout", "-q", "FETCH_HEAD", cwd=cache)
-        (cache / "bin" / "maelys-release").chmod(0o755)
+        if (cache / "bin" / "maelys-release").is_file():
+            (cache / "bin" / "maelys-release").chmod(0o755)
     return cache
 
 
@@ -511,6 +512,12 @@ def run_pinned_socle(invocation: Invocation, project: pathlib.Path) -> None:
                       f"{project.name} pins maelys-release {pinned['tag']} ({pinned['sha'][:7]}) but this is another"
                       f" socle, and the pinned one could not be fetched: {failure.message}",
                       "Check out the pinned tag, or set MAELYS_RELEASE_NO_RELOCATE=1 to run this socle anyway.") from failure
+    if not (checkout / "bin" / "maelys-release").is_file():
+        # before 0.5.0 the socle was scripts/adopt.sh: it cannot answer for itself
+        raise Failure("PRECONDITION_FAILED",
+                      f"{pinned_product(project) or project.name} pins maelys-release {pinned['tag']} ({pinned['sha'][:7]}), which predates the"
+                      " maelys-release command (0.5.0) and cannot answer for itself.",
+                      f"Upgrade it from a current socle at a tag: 'adopt {project} --apply', then check.")
     if invocation.format == "text":
         print(f"note     running the pinned socle {pinned['tag']} ({pinned['sha'][:7]}) from {checkout}", file=sys.stderr)
         sys.stderr.flush()

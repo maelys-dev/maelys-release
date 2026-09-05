@@ -425,6 +425,20 @@ class AdoptTest(unittest.TestCase):
         else:
             self.assertEqual(kept.returncode, 2, kept.stdout + kept.stderr)
             self.assertTrue(any("pins maelys-release" in item for item in json.loads(kept.stdout)["data"]["violations"]))
+        # a product pinned before the command existed gets the upgrade path, not a missing file
+        product.git(copy, "rm", "-q", "bin/maelys-release")
+        product.git(copy, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "before the command")
+        old = product.git(copy, "rev-parse", "HEAD")
+        product.git(copy, "push", "-q", str(bare), "HEAD:main")
+        workflow = product.dir / ".github" / "workflows" / "release.yml"
+        workflow.write_text(re.sub(r"release\.yml@[0-9a-f]{40} # \S+", f"release.yml@{old} # v0.2.8", workflow.read_text()))
+        ancient = subprocess.run([str(CLI), "check", self.dir, "--format", "json"], env=env, check=False, text=True,
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(ancient.returncode, 1, ancient.stdout + ancient.stderr)
+        error = json.loads(ancient.stderr)["error"]
+        self.assertEqual(error["code"], "PRECONDITION_FAILED")
+        self.assertIn("predates the maelys-release command", error["message"])
+        self.assertIn("adopt", error["hint"])
         # preflight names the cause when the check part fails
         cause = subprocess.run([str(CLI), "preflight", self.dir, "--socle-sha", "f" * 40, "--socle-tag", "v9.9.9"],
                                env=env, check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
