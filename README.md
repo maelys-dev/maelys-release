@@ -45,6 +45,10 @@ maelys-release/bin/maelys-release describe --summary --format json  # the catalo
 
 `adopt` reads the product contract and writes the managed files from it:
 
+The product name is `--product NAME`, else the `product:` of the
+`release.yml` the product already carries, else the directory name; a
+worktree or a scratch clone is rarely named after its product.
+
 | Product declares | `check` verifies | `adopt` writes |
 | --- | --- | --- |
 | `VERSION` as `X.Y.Z` | a dated `## X.Y.Z` entry in `CHANGELOG.md` | |

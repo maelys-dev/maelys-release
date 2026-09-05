@@ -241,12 +241,24 @@ def read_declarations(project: pathlib.Path, product: str) -> Declarations:
     return decl
 
 
+def pinned_product(project: pathlib.Path) -> str:
+    """The product name the existing release.yml carries, or ''."""
+    workflow = project / ".github" / "workflows" / "release.yml"
+    if not workflow.is_file():
+        return ""
+    match = re.search(r"^\s+product:\s+(\S+)\s*$", workflow.read_text(encoding="utf-8"), re.MULTILINE)
+    return match.group(1) if match else ""
+
+
 def project_of(invocation: Invocation) -> tuple[pathlib.Path, str]:
     directory = pathlib.Path(invocation.operands[0])
     if not directory.is_dir():
         raise Failure("NOT_FOUND", f"DIR is not a directory: {directory}.", "Pass the product repository.")
     project = directory.resolve()
-    product = invocation.option("--product") or project.name
+    # The product name comes from --product, else from the release.yml the
+    # product already carries, else from the directory: a worktree or a
+    # scratch clone is rarely named after the product it holds.
+    product = invocation.option("--product") or pinned_product(project) or project.name
     if not re.fullmatch(r"[a-z0-9-]+", product):
         raise Failure("VALIDATION_FAILED", f"Product name must be [a-z0-9-]: {product}.",
                       "Pass --product NAME with a valid name.")
@@ -541,7 +553,7 @@ def check_data(invocation: Invocation) -> tuple[Declarations, dict]:
         if data["pinned"] and data["pinned"]["sha"] != sha:
             data["violations"].append(
                 f"{product} pins maelys-release {data['pinned']['tag']} ({data['pinned']['sha'][:7]}) but this is"
-                f" {tag} ({sha[:7]}): run the pinned socle, or adopt --apply to upgrade")
+                f" {tag} ({sha[:7]}): run the pinned socle, or 'adopt {project} --apply' from this one to upgrade")
         else:
             data["files"] = plan(decl, stage(decl, sha, tag), apply=False)
             data["violations"].extend(f"{entry['path']}: {entry['action']}" + (f" ({entry['reason']})" if "reason" in entry else "")

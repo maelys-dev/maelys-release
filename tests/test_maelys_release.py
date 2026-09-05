@@ -330,6 +330,18 @@ class AdoptTest(unittest.TestCase):
         drift = product.json("check", self.dir, expect=2)["data"]
         self.assertTrue(any("pins maelys-release v0.0.0" in violation for violation in drift["violations"]))
 
+    def test_product_name_comes_from_release_yml(self) -> None:
+        product = self.product
+        product.run("adopt", self.dir, "--apply")
+        elsewhere = product.work / "worktree-7f3a"
+        shutil.copytree(product.dir, elsewhere)
+        data = product.json("check", str(elsewhere))["data"]
+        self.assertEqual(data["product"], "maelys-fixture")            # not "worktree-7f3a"
+        self.assertTrue(data["valid"])
+        self.assertEqual(product.json("declarations", str(elsewhere))["data"]["product"], "maelys-fixture")
+        (elsewhere / ".github" / "workflows" / "release.yml").unlink()
+        self.assertEqual(product.json("adopt", str(elsewhere))["data"]["product"], "worktree-7f3a")
+
     def test_without_pins_or_formulas(self) -> None:
         product = self.product
         for path in (product.dir / "packaging" / "homebrew").glob("*.rb.in"):
@@ -484,7 +496,7 @@ class GoldenTest(unittest.TestCase):
         completed = self.product.run("check", self.dir, expect=2)
         self.assertEqual(completed.stdout, self.CONTRACT
                          + "drift    maelys-fixture pins maelys-release v0.0.0 (0000000) but this is v9.9.9 (fffffff):"
-                           " run the pinned socle, or adopt --apply to upgrade\n"
+                           f" run the pinned socle, or 'adopt {self.product.dir.resolve()} --apply' from this one to upgrade\n"
                          + "check: maelys-fixture drifts from maelys-release v9.9.9\n")
 
     def test_preflight_not_ready(self) -> None:
