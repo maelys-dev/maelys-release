@@ -103,10 +103,14 @@ def argument(name: str, kind: str = "string", choices: Optional[list] = None, mi
 
 def option(long: str, summary: str, argument: Optional[dict] = None, default: Optional[str] = None,
            required: bool = False, repeatable: bool = False, requires: tuple = (), conflicts_with: tuple = (),
-           group: Optional[str] = None) -> dict:
-    """One option descriptor; `argument` from argument(), None for a flag."""
+           group: Optional[str] = None, hidden: bool = False) -> dict:
+    """One option descriptor; `argument` from argument(), None for a flag. `hidden`
+    keeps it out of the synopsis, the help and the completion; describe lists it
+    with `hidden: true` and the parser accepts it (spec 2.2)."""
     if not long.startswith("--") or len(long) < 3:
         raise ValueError(f"an option is spelled --name, not {long!r}")
+    if hidden and required:
+        raise ValueError(f"{long} is hidden and required; a required option must be shown")
     entry: dict = {"long": long, "required": required, "repeatable": repeatable, "summary": summary,
                    "requires": list(requires), "conflictsWith": list(conflicts_with)}
     if argument is not None:
@@ -115,6 +119,8 @@ def option(long: str, summary: str, argument: Optional[dict] = None, default: Op
         entry["default"] = default
     if group is not None:
         entry["group"] = group
+    if hidden:
+        entry["hidden"] = True
     return entry
 
 
@@ -139,7 +145,8 @@ def operand(name: str, summary: str, required: bool = True, variadic: bool = Fal
 def _command(identifier: str, pattern: str, purpose: str, handler: Optional[Handler], effect: Any,
              operands: tuple = (), options: tuple = (), schema: Optional[dict] = None, mode: str = "json-envelope",
              protocol: Optional[str] = None, external: bool = False, hidden: bool = False,
-             unavailable: Optional[str] = None, passthrough: bool = False) -> dict:
+             unavailable: Optional[str] = None, passthrough: bool = False,
+             synopsis: Optional[str] = None) -> dict:
     if not IDENTIFIER.match(identifier):
         raise ValueError(f"a command identifier is [a-z][a-z0-9.-]*, not {identifier!r}")
     words = pattern.split()
@@ -148,15 +155,22 @@ def _command(identifier: str, pattern: str, purpose: str, handler: Optional[Hand
     variadic = [item for item in operands if item["variadic"]]
     if len(variadic) > 1 or (variadic and operands[-1] is not variadic[0]):
         raise ValueError(f"{identifier}: at most one operand is variadic, and it is the last one")
-    synopsis = pattern
-    for item in operands:
-        piece = item["name"] + ("..." if item["variadic"] else "")
-        synopsis += " " + (piece if item["required"] else f"[{piece}]")
-    for item in options:
-        piece = item["long"] + (f" {item['argument']['name']}" if "argument" in item else "")
-        synopsis += " " + (piece if item["required"] else f"[{piece}]")
-    if passthrough:
-        synopsis += " [ARGUMENTS...]"
+    # `synopsis` overrides the derived usage, as `.synopsis` does in C: the
+    # catalog still declares every option and describe still lists it.
+    if synopsis is None:
+        synopsis = pattern
+        for item in operands:
+            piece = item["name"] + ("..." if item["variadic"] else "")
+            synopsis += " " + (piece if item["required"] else f"[{piece}]")
+        for item in options:
+            if item.get("hidden"):
+                continue
+            piece = item["long"] + (f" {item['argument']['name']}" if "argument" in item else "")
+            synopsis += " " + (piece if item["required"] else f"[{piece}]")
+        if passthrough:
+            synopsis += " [ARGUMENTS...]"
+    elif not synopsis.startswith(pattern):
+        raise ValueError(f"{identifier}: a synopsis starts with the pattern {pattern!r}, not {synopsis!r}")
     return {"id": identifier, "pattern": words, "usage": synopsis, "purpose": purpose, "effect": effect,
             "outputMode": mode, "protocol": protocol, "external": external, "hidden": hidden,
             "unavailable": unavailable, "operands": operands, "options": options, "passthrough": passthrough,
@@ -638,14 +652,20 @@ class Program:
             lines.append("OPERANDS")
             lines.extend(f"  {item['name']:<18} {item['summary']}" for item in command["operands"])
             lines.append("")
-        if command["options"]:
+        shown = [item for item in command["options"] if not item.get("hidden")]
+        if shown:
             lines.append("OPTIONS")
-            for item in command["options"]:
+            for item in shown:
                 spelled = item["long"] + (f" {item['argument']['name']}" if "argument" in item else "")
                 default = f" (default {item['default']})" if "default" in item else ""
                 lines.append(f"  {spelled:<28} {item['summary']}{default}")
             lines.append("")
         return "\n".join(lines).rstrip("\n") + "\n"
+
+    def warn(self, message: str) -> None:
+        """A diagnostic on stderr, `program: warning: message`, as maelys_cli_warn(); never stdout."""
+        sys.stderr.write(f"{self.program}: warning: {message}\n")
+        sys.stderr.flush()
 
     def guide(self) -> str:
         visible = [command for command in self.catalog if not command["hidden"]]
@@ -758,7 +778,7 @@ class Program:
             else:
                 if current.startswith("-") or not current:
                     candidates.extend(item["long"] for item in command["options"] + GLOBAL_OPTIONS
-                                      if item["long"] not in given)
+                                      if item["long"] not in given and not item.get("hidden"))
                 position = len(previous) - consumed
                 if command["id"] in ("help", "describe") and position == 0:
                     candidates.extend(other["id"] for other in self.catalog

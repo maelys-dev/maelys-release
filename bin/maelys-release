@@ -923,8 +923,8 @@ STRINGS = {"type": "array", "items": {"type": "string"}}
 SOCLE_OPTIONS = (
     cli.option("--product", "Product name; defaults to the directory name.", cli.argument("NAME")),
     cli.option("--socle-sha", "Socle commit to pin instead of this checkout's HEAD (trials and tests).",
-               cli.argument("SHA", "string", pattern="^[0-9a-f]{40}$")),
-    cli.option("--socle-tag", "Socle tag written next to --socle-sha.", cli.argument("TAG")),
+               cli.argument("SHA", "string", pattern="^[0-9a-f]{40}$"), hidden=True),
+    cli.option("--socle-tag", "Socle tag written next to --socle-sha.", cli.argument("TAG"), hidden=True),
 )
 DIR_OPERAND = cli.operand("DIR", "Product repository.")
 CHECK_SCHEMA = {"type": "object", "additionalProperties": False,

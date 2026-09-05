@@ -155,7 +155,8 @@ class ContractTest(unittest.TestCase):
 
     def test_help(self) -> None:
         text = self.product.run("help").stdout
-        self.assertIn("adopt DIR [--product NAME] [--socle-sha SHA] [--socle-tag TAG] [--allow-untagged] [--apply]", text)
+        self.assertIn("adopt DIR [--product NAME] [--allow-untagged] [--apply]", text)
+        self.assertNotIn("--socle-sha", text)                       # hidden: parsed, described, never shown
         self.assertEqual(self.product.run("--help").stdout, text)
         self.assertIn("OPTIONS", self.product.run("help", "adopt").stdout)
         self.assertEqual(self.product.run("adopt", "--help").stdout, self.product.run("help", "adopt").stdout)

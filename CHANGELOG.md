@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.13.0 — 2026-09-05
+
+- agent-cli-spec pinned at v2.2.0 and maelys-cli at v0.5.14, `bin/maelys_cli.py`
+  refreshed by `vendor`: the trial options `--socle-sha` and `--socle-tag`
+  are hidden as the contract now allows, listed by `describe` with
+  `hidden: true`, accepted by the parser, absent from the synopses, the
+  help and the completion. The kit's checks of hidden options pass.
+
 ## 0.11.0 — 2026-09-05
 
 - `adopt` refuses a socle commit without a tag: a product pins releases of
