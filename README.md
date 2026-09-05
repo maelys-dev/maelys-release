@@ -189,6 +189,19 @@ file. `attestation: auto` attests provenance on a public repository and
 skips it on a private one, where GitHub reserves attestations to paid
 plans: the release then carries the signed tag and `SHA256SUMS` only.
 
+## Operations live in maelys-platform
+
+This repository is the mechanism: it acts on one product repository at a
+time. What concerns the fleet lives in
+[maelys-dev/maelys-platform](https://github.com/maelys-dev/maelys-platform):
+the inventory of the repositories and of the self-hosted runners, the runner
+and secret policies, the licensing policy, the runbook that walks an
+operator through publishing a product with this socle, and a read-only
+drift check that compares every consumer's pinned socle, latest tag, GitHub
+release and tap formula with that inventory. When `check` reports a drift
+on one product, the platform's check reports which products drift; neither
+replaces the other.
+
 ## Runners
 
 `macos_runner`, `linux_x86_64_runner` and `linux_arm64_runner` are JSON
