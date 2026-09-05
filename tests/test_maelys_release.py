@@ -682,6 +682,15 @@ class UnitTest(unittest.TestCase):
         self.assertRegex(raw.decode(), r"^[0-9]+\.[0-9]+\.[0-9]+\n$")            # one line, a real newline
         self.assertNotIn(b"\\", raw)                                                # not a literal backslash-n
 
+    def test_socle_changelog_has_the_dated_entry(self) -> None:
+        """The socle holds itself to the product rule it enforces."""
+        version = (ROOT / "VERSION").read_text().strip()
+        changelog = (ROOT / "CHANGELOG.md").read_text()
+        self.assertRegex(changelog, rf"(?m)^## {re.escape(version)} — [0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}}$")
+        entries = re.findall(r"^## ([0-9]+\.[0-9]+\.[0-9]+) ", changelog, re.MULTILINE)
+        self.assertEqual(entries[0], version)
+        self.assertEqual(len(entries), len(set(entries)), "duplicate entries")
+
     def test_release_workflow_text(self) -> None:
         decl = MODULE.Declarations(pathlib.Path("/p"), "maelys-x")
         decl.dependencies = ["maelys-json"]

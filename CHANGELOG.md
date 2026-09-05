@@ -1,5 +1,61 @@
 # Changelog
 
+## 0.14.2 — 2026-09-05
+
+- The socle's `VERSION` of 0.12.0, 0.13.1, 0.14.0 and 0.14.1 ended with a
+  literal backslash-n instead of a newline, so every file generated from
+  those tags carried `(0.14.1\n)` in its header (found by maelys-json,
+  planning its adoption from a `git archive` of v0.14.1); 0.13.0 was
+  correct. `VERSION` is fixed, `socle_version` refuses anything but
+  `X.Y.Z`, and the self-test reads the file's bytes. A product that
+  adopted one of those tags regenerates its header at its next
+  re-adoption.
+- The same escape had dropped the changelog entries of 0.13.1, 0.14.0 and
+  0.14.1; they are restored below, and the self-test now holds the socle
+  to its own rule: a dated entry for `VERSION`.
+- The refusal to run from an archive of a tag gives the complete command:
+  `--socle-sha` with the tag's commit obtained by `git ls-remote`, and
+  `--socle-tag`.
+
+## 0.14.1 — 2026-09-05
+
+- `check`, `preflight` and `rehearse` on a product pinned before 0.5.0
+  (maelys-json, on 0.2.8) relocated to a socle that had no
+  `bin/maelys-release` and failed on a missing file. They now say that the
+  pinned socle predates the command and cannot answer for itself, and name
+  the way out: `adopt DIR --apply` from a current socle at a tag.
+
+## 0.14.0 — 2026-09-05
+
+Breaking, without a transition: the declarations of a product live in
+`dependencies/`, named after what they hold.
+
+- `dependencies/<name>.pin` replaces `adapter/<NAME>_PIN`: the file is named
+  after the repository (`maelys-system.pin`), line 1 the nearest tag, line 2
+  the pinned commit; no more upper-casing in two scripts.
+  `dependencies/packages` replaces `adapter/PACKAGES`, same content. The
+  socle's own pins move the same way (`dependencies/agent-cli-spec.pin`,
+  `dependencies/maelys-cli.pin`).
+- A product with an `adapter/` directory is refused by `adopt`, `check` and
+  `preflight` with the migration in the message: `git mv` the files, delete
+  `adapter/`, update the Makefile lines that read the pins. Every product
+  re-adopts anyway for the unstamped texts; this is the same re-adoption.
+- The managed `scripts/checkout-dependency.sh` reads `dependencies/NAME.pin`;
+  `check-product.yml` is unchanged, it reads the declarations through the
+  pinned socle.
+
+## 0.13.1 — 2026-09-05
+
+Found by maelys-egress's adoption of 0.13.0, the first by a product that
+did not take part in the socle's design.
+
+- The product name defaults to the `product:` of the `release.yml` the
+  product already carries before falling back to the directory name: from
+  a git worktree or a scratch clone, `adopt`, `check` and `preflight` used
+  the directory name, regenerated `release.yml` for that wrong product and
+  reported a drift, and Egress had to pass `--product` by hand. The drift
+  hint names the command with its directory.
+
 ## 0.13.0 — 2026-09-05
 
 - agent-cli-spec pinned at v2.2.0 and maelys-cli at v0.5.14, `bin/maelys_cli.py`
@@ -7,6 +63,27 @@
   are hidden as the contract now allows, listed by `describe` with
   `hidden: true`, accepted by the parser, absent from the synopses, the
   help and the completion. The kit's checks of hidden options pass.
+
+## 0.12.0 — 2026-09-05
+
+- `bin/maelys-release` is built on `maelys_cli`, the Python framework that
+  maelys-cli 0.5.12 ships (`python/maelys_cli.py`), instead of its own
+  implementation of the agent-cli/v2 contract: the parser, the envelopes,
+  `help`, `describe`, the completion and the causal order of refusals come
+  from the framework; the socle keeps its business logic and its text
+  renderers. About 500 lines gone, one implementation of the contract in
+  Python left, held by maelys-cli's rule that the Python follows the C.
+- The framework is vendored: `bin/maelys_cli.py` is `python/maelys_cli.py`
+  at the commit `dependencies/maelys-cli.pin` names (then
+  `adapter/MAELYS_CLI_PIN`), byte for byte, its digest on the pin's third
+  line. `self-test` verifies the digest offline and the file at the pinned
+  commit online; `maelys-release vendor` refreshes the copy after a pin
+  bump. The socle stays one fetch of one commit, in every product's CI and
+  in the relocation cache; no checkout of maelys-cli is needed anywhere.
+- Visible consequences: `version` reports `framework: maelys_cli python
+  3.x`; the synopses listed every option, so `--socle-sha` and
+  `--socle-tag` appeared in `adopt`, `check`, `preflight` and `rehearse`
+  until 0.13.0 hid them.
 
 ## 0.11.0 — 2026-09-05
 
