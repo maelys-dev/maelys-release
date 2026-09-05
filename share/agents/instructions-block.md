@@ -40,6 +40,6 @@ are in `docs/conventions.md` of maelys-release.
   GitHub-hosted runners only. A self-hosted runner is reserved for hardware
   gates, on signed tags or `workflow_dispatch`, behind the `release`
   environment.
-- A tag whose release exists but whose formula or bottles failed is
-  replayed with `gh workflow run release.yml -f tag=vX.Y.Z` after adopting
-  a corrected socle; a tag is never moved or recreated.
+- A tag whose release or formula failed is replayed in full with
+  `gh workflow run release.yml -f tag=vX.Y.Z` after adopting a corrected
+  socle; a tag is never moved or recreated.

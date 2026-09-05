@@ -262,8 +262,7 @@ class AdoptTest(unittest.TestCase):
             "product: maelys-fixture",
             "\n  id-token: write",
             "  workflow_dispatch:",
-            "    if: github.event_name == 'push'",
-            "      tag: ${{ inputs.tag }}",
+            "      tag: ${{ inputs.tag || github.ref_name }}",
             "        sh scripts/checkout-dependency.sh maelys-system\n",
             "      linux_packages: build-essential dpkg-dev file rpm pkg-config libjansson-dev\n",
             "      macos_packages: jansson\n",
@@ -272,6 +271,7 @@ class AdoptTest(unittest.TestCase):
             "      product: libmaelys-fixture",
         ):
             self.assertIn(expected, workflow)
+        self.assertNotIn("if: github.event_name == 'push'", workflow)
         self.assertGreaterEqual(workflow.count("      id-token: write"), 2)
         agents = product.read("AGENTS.md")
         self.assertIn("Keep me.", agents)
@@ -712,6 +712,21 @@ class UnitTest(unittest.TestCase):
             dependency_checkout: |
                     sh scripts/checkout-dependency.sh maelys-json
             """).strip(), text)
+        self.assertIn("tag: ${{ inputs.tag || github.ref_name }}", text)
+        self.assertNotIn("if: github.event_name == 'push'", text)
+        self.assertIn("if: needs.release.result == 'success'", text)
+
+    def test_reusable_release_avoids_actions_artifact_storage(self) -> None:
+        text = (ROOT / ".github" / "workflows" / "release.yml").read_text()
+        self.assertIn("ref: ${{ inputs.tag || github.ref }}", text)
+        self.assertIn("Prepare draft GitHub release", text)
+        self.assertIn('gh release edit "$TAG" --repo "${GITHUB_REPOSITORY}" --draft', text)
+        self.assertIn("releases/assets/$asset_id", text)
+        self.assertIn('gh release upload "$TAG"', text)
+        self.assertIn('gh release download "$TAG"', text)
+        self.assertIn('--draft=false', text)
+        self.assertNotIn("actions/upload-artifact", text)
+        self.assertNotIn("actions/download-artifact", text)
 
 
 if __name__ == "__main__":

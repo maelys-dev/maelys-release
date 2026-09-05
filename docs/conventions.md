@@ -174,13 +174,13 @@ the tag. `adopt` runs from a checkout of the socle at a tag: a commit
 without a tag is refused, `--allow-untagged` being the trial of a
 candidate before its tag.
 
-## Replaying a tag's Homebrew publication
+## Replaying a tag's release
 
 The generated caller workflow also accepts `workflow_dispatch` with a `tag`
-input: it skips the release job and runs the tap jobs again for that
-existing signed tag, from the workflow definition of the default branch. Use
-it after adopting a corrected socle when a tag's release was published but
-its formula or bottles were not; never re-tag for that.
+input. It rebuilds the existing signed tag through the current socle, uploads
+the packages to a protected draft release, verifies them, publishes the
+release, then runs the tap jobs. Use it after adopting a corrected socle when
+a release or its formula failed; never re-tag for that.
 
 ```bash
 gh workflow run release.yml --repo maelys-dev/PRODUCT -f tag=vX.Y.Z
