@@ -155,7 +155,7 @@ class ContractTest(unittest.TestCase):
 
     def test_help(self) -> None:
         text = self.product.run("help").stdout
-        self.assertIn("adopt DIR [--product NAME] [--apply] [--allow-untagged]", text)
+        self.assertIn("adopt DIR [--product NAME] [--socle-sha SHA] [--socle-tag TAG] [--allow-untagged] [--apply]", text)
         self.assertEqual(self.product.run("--help").stdout, text)
         self.assertIn("OPTIONS", self.product.run("help", "adopt").stdout)
         self.assertEqual(self.product.run("adopt", "--help").stdout, self.product.run("help", "adopt").stdout)
@@ -347,8 +347,10 @@ class AdoptTest(unittest.TestCase):
         product.git(product.work, "clone", "-q", str(ROOT), str(copy))
         # the copy runs the program under test, committed there so it is clean
         shutil.copy2(CLI, copy / "bin" / "maelys-release")
-        shutil.rmtree(copy / "share")
-        shutil.copytree(ROOT / "share", copy / "share")
+        shutil.copy2(ROOT / "bin" / "maelys_cli.py", copy / "bin" / "maelys_cli.py")   # the vendored framework
+        for directory in ("share", "adapter"):
+            shutil.rmtree(copy / directory, ignore_errors=True)
+            shutil.copytree(ROOT / directory, copy / directory)
         product.git(copy, "add", "-A")
         product.git(copy, "-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m", "under test")
         with (copy / "share" / "agents" / "instructions-block.md").open("a") as block:
@@ -630,20 +632,17 @@ class UnitTest(unittest.TestCase):
         self.assertEqual(MODULE.managed_block(existing, block), f"head\n{MODULE.BEGIN}\nnew\n{MODULE.END}\ntail\n")
 
     def test_catalog_consistency(self) -> None:
-        identifiers = [command["id"] for command in MODULE.CATALOG]
+        built_in = {"help", "version", "describe", "completion", "complete.candidates"}
+        identifiers = [command["id"] for command in MODULE.APP.catalog]
         self.assertEqual(len(identifiers), len(set(identifiers)))
-        for command in MODULE.CATALOG:
-            self.assertIn(command["id"], MODULE.TEXT)
+        for command in MODULE.APP.catalog:
+            if command["id"] not in built_in:
+                self.assertIn(command["id"], MODULE.TEXT)          # every socle command renders text
             self.assertTrue(command["usage"].startswith(" ".join(command["pattern"])))
             if isinstance(command["effect"], dict):
                 self.assertTrue(any(item["long"] == "--apply" for item in command["options"]))
             self.assertIn("outputSchema", command)
-
-    def test_resolve(self) -> None:
-        command, consumed = MODULE.resolve(["adopt", "dir"])
-        self.assertEqual((command["id"], consumed), ("adopt", 1))
-        self.assertEqual(MODULE.resolve(["nope"]), (None, 0))
-        self.assertEqual(MODULE.resolve(["__complete", "--"])[0]["id"], "complete.candidates")
+        self.assertEqual(MODULE.cli.FRAMEWORK.split()[0], "maelys_cli")
 
     def test_release_workflow_text(self) -> None:
         decl = MODULE.Declarations(pathlib.Path("/p"), "maelys-x")

@@ -3,11 +3,14 @@
 """maelys-release: adopt, check, rehearse and publish through the Maelys
 release socle.
 
-A command-line program of the agent-cli/v2 contract of maelys-cli, in
-Python: one catalog drives the parser, help, describe and completion;
-success is a JSON envelope on stdout, failure an envelope on stderr; exit 0
-completed, 1 failed, 2 a validation that found violations. Transactional
-commands (adopt, tap) plan by default and write with --apply.
+A command-line program of the agent-cli/v2 contract, built on maelys_cli,
+the Python framework of maelys-cli: bin/maelys_cli.py is that framework's
+python/maelys_cli.py at the commit adapter/MAELYS_CLI_PIN names, byte for
+byte, and `maelys-release vendor` refreshes it. One catalog drives the
+parser, help, describe and completion; success is a JSON envelope on
+stdout, failure an envelope on stderr; exit 0 completed, 1 failed, 2 a
+validation that found violations. Transactional commands (adopt, tap) plan
+by default and write with --apply.
 
 Standard library only; python3 >= 3.9. The socle is the checkout (or the
 installed prefix) this file runs from: share/ holds the texts installed
@@ -16,6 +19,7 @@ into products, VERSION its version.
 from __future__ import annotations
 
 import difflib
+import hashlib
 import json
 import os
 import pathlib
@@ -25,17 +29,16 @@ import subprocess
 import sys
 import tempfile
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import maelys_cli as cli  # noqa: E402
+
 PROGRAM = "maelys-release"
 PRODUCT = "Maelys Release"
-CONTRACT = "agent-cli/v2"
-SCHEMA_VERSION = 2
-CATALOG_SCHEMA = 1
-CLI_API = 1
-FRAMEWORK = f"python {sys.version_info.major}.{sys.version_info.minor}"
-
-EXIT_OK = 0
-EXIT_FAILURE = 1
-EXIT_VIOLATIONS = 2
+Failure = cli.Failure
+Invocation = cli.Invocation
+EXIT_OK = cli.EXIT_OK
+EXIT_FAILURE = cli.EXIT_FAILURE
+EXIT_VIOLATIONS = cli.EXIT_VIOLATIONS
 
 SOCLE_REPOSITORY = "maelys-dev/maelys-release"
 DEFAULT_TAP = "maelys-dev/homebrew-tap"
@@ -55,17 +58,6 @@ MANAGED = (
 CI_USES = re.compile(rf"({re.escape(SOCLE_REPOSITORY)}/\.github/workflows/check-product\.yml@)[0-9a-f]{{40}} # \S+")
 BEGIN = "<!-- maelys-release:begin -->"
 END = "<!-- maelys-release:end -->"
-EXIT_CODES = {"0": "command completed", "1": "execution failed", "2": "valid report with violations"}
-
-
-class Failure(Exception):
-    """A failure envelope: stable code, causal message, next safe action."""
-
-    def __init__(self, code: str, message: str, hint: str = "") -> None:
-        super().__init__(message)
-        self.code = code
-        self.message = message
-        self.hint = hint
 
 
 # ---- the socle itself --------------------------------------------------------
@@ -512,23 +504,6 @@ def run_pinned_socle(invocation: Invocation, project: pathlib.Path) -> None:
 
 # ---- handlers: each returns (data, exit code) ---------------------------------
 
-class Invocation:
-    def __init__(self, command: dict, operands: list[str], options: dict[str, object],
-                 fmt: str, compact: bool, non_interactive: bool) -> None:
-        self.command = command
-        self.operands = operands
-        self.options = options
-        self.format = fmt
-        self.compact = compact
-        self.non_interactive = non_interactive
-
-    def option(self, name: str, default: object = None) -> object:
-        return self.options.get(name, default)
-
-    def flag(self, name: str) -> bool:
-        return bool(self.options.get(name, False))
-
-
 def handle_adopt(invocation: Invocation) -> tuple[dict, int]:
     project, product = project_of(invocation)
     apply = invocation.flag("--apply")
@@ -825,135 +800,44 @@ def handle_self_test(invocation: Invocation) -> tuple[dict, int]:
     return {"tests": str(tests), "passed": True}, EXIT_OK
 
 
-def handle_version(invocation: Invocation) -> tuple[dict, int]:
+# ---- the vendored framework ---------------------------------------------------
+
+def vendored_pin() -> tuple[str, str, str]:
+    """(tag, commit, sha256) of adapter/MAELYS_CLI_PIN; the third line may be absent."""
+    lines = (socle_root() / "adapter" / "MAELYS_CLI_PIN").read_text(encoding="utf-8").split()
+    digest = lines[2].partition(":")[2] if len(lines) > 2 else ""
+    return lines[0], lines[1], digest
+
+
+def handle_vendor(invocation: Invocation) -> tuple[dict, int]:
+    """Refresh bin/maelys_cli.py from maelys-cli at the pinned commit, and record its digest."""
     del invocation
-    return {"product": PRODUCT, "program": PROGRAM, "version": socle_version(), "contract": CONTRACT,
-            "cliApi": CLI_API, "framework": FRAMEWORK}, EXIT_OK
-
-
-def handle_help(invocation: Invocation) -> tuple[dict, int]:
-    if invocation.operands:
-        command = command_by_id(invocation.operands[0])
-        return {"text": command_help(command), "commands": [command["id"]]}, EXIT_OK
-    return {"text": guide(), "commands": [command["id"] for command in CATALOG if not command["hidden"]]}, EXIT_OK
-
-
-PREFIX_GRAMMAR = re.compile(r"^[a-z](?:[a-z0-9.-]*[a-z0-9-])?$")
-
-
-def handle_describe(invocation: Invocation) -> tuple[dict, int]:
-    data: dict = {"schemaVersion": CATALOG_SCHEMA, "program": PROGRAM, "product": PRODUCT,
-                  "version": socle_version(), "contract": CONTRACT, "cliApi": CLI_API, "framework": FRAMEWORK}
-    prefix = invocation.option("--prefix")
-    if prefix is not None:
-        # Resolved here, after option validation: a misuse is VALIDATION_FAILED
-        # whatever the prefix; only a well-formed request without a match is
-        # INVALID_COMMAND.
-        if not invocation.flag("--summary"):
-            raise Failure("VALIDATION_FAILED", "Option --prefix requires --summary.",
-                          "Use 'describe --summary --prefix PREFIX'.")
-        if invocation.operands:
-            raise Failure("VALIDATION_FAILED", "Option --prefix conflicts with the COMMAND_ID operand.",
-                          "Use 'describe --summary --prefix PREFIX', or 'describe COMMAND_ID'.")
-        if not PREFIX_GRAMMAR.match(str(prefix)):
-            raise Failure("VALIDATION_FAILED", f"PREFIX is a command identifier without a trailing dot, not {prefix!r}.",
-                          "Use the identifiers returned by describe --summary.")
-        selected = [descriptor(command, summary=True) for command in CATALOG
-                    if command["id"] == prefix or command["id"].startswith(f"{prefix}.")]
-        if not selected:
-            raise Failure("INVALID_COMMAND", f"No command identifier equals or starts with '{prefix}.'.",
-                          "Run describe --summary to list the command identifiers.")
-        data.update({"kind": "summary", "filter": {"kind": "command-prefix", "value": prefix}, "commands": selected})
-        return data, EXIT_OK
-    if invocation.operands:
-        data["kind"] = "command"
-        data["commands"] = [descriptor(command_by_id(invocation.operands[0]))]
-    elif invocation.flag("--summary"):
-        data["kind"] = "summary"
-        data["commands"] = [descriptor(command, summary=True) for command in CATALOG]
-    else:
-        data["kind"] = "catalog"
-        data["globalOptions"] = GLOBAL_OPTIONS
-        data["invariants"] = INVARIANTS
-        data["output"] = {"contract": CONTRACT, "schemaVersion": SCHEMA_VERSION,
-                          "stdout": "success data only; protocol streams are explicit exceptions",
-                          "stderr": "diagnostics and failure envelopes"}
-        data["commands"] = [descriptor(command) for command in CATALOG]
-    return data, EXIT_OK
-
-
-def handle_completion(invocation: Invocation) -> tuple[dict, int]:
-    shell = invocation.operands[0]
-    function = f"_{PROGRAM.replace('-', '_')}_complete"
-    if shell == "bash":
-        script = "\n".join([
-            f"# bash completion for {PROGRAM}, generated from its catalog",
-            f"{function}() {{",
-            "    local IFS=$'\\n'",
-            '    local words=("${COMP_WORDS[@]:1:COMP_CWORD}")',
-            f'    COMPREPLY=($("{PROGRAM}" __complete -- "${{words[@]}}" 2>/dev/null))',
-            "    if [ ${#COMPREPLY[@]} -eq 0 ]; then",
-            '        COMPREPLY=($(compgen -f -- "${COMP_WORDS[COMP_CWORD]}"))',
-            "    fi",
-            "}",
-            f"complete -o filenames -F {function} {PROGRAM}",
-        ]) + "\n"
-    elif shell == "zsh":
-        script = "\n".join([
-            f"#compdef {PROGRAM}",
-            f"{function}() {{",
-            "    local -a candidates",
-            f'    candidates=("${{(@f)$("{PROGRAM}" __complete -- "${{words[@]:1}}" 2>/dev/null)}}")',
-            "    if (( ${#candidates} )); then compadd -- $candidates; else _files; fi",
-            "}",
-            f"compdef {function} {PROGRAM}",
-        ]) + "\n"
-    else:
-        script = "\n".join([
-            f"# fish completion for {PROGRAM}, generated from its catalog",
-            f"complete -c {PROGRAM} -f -a '({PROGRAM} __complete -- (commandline -opc)[2..-1] (commandline -ct))'",
-        ]) + "\n"
-    return {"shell": shell, "script": script}, EXIT_OK
-
-
-def handle_complete(invocation: Invocation) -> tuple[dict, int]:
-    words = list(invocation.operands)
-    current = words[-1] if words else ""
-    previous = words[:-1]
-    candidates: list[str] = []
-    command, consumed = resolve(previous)
-    if command is None or consumed == len(previous) and not current.startswith("-") and \
-            any(other["pattern"][:len(previous) + 1] != command["pattern"][:len(previous) + 1]
-                for other in CATALOG if other["pattern"][:len(previous)] == previous):
-        # still inside the pattern: the next words of every matching command
-        for other in CATALOG:
-            if other["hidden"] or len(other["pattern"]) <= len(previous):
-                continue
-            if other["pattern"][:len(previous)] == previous:
-                candidates.append(other["pattern"][len(previous)])
-    if command is not None:
-        given = {word.split("=", 1)[0] for word in previous[consumed:] if word.startswith("--")}
-        if current.startswith("-") or not current:
-            candidates.extend(item["long"] for item in command["options"] + GLOBAL_OPTIONS
-                              if item["long"] not in given and not item.get("hidden"))
-        if command["id"] in ("help", "describe") and consumed == len(previous):
-            candidates.extend(other["id"] for other in CATALOG if not other["hidden"])
-        if command["id"] == "rehearse" and len(previous) - consumed == 1:
-            candidates.extend(PLATFORMS)
-        if command["id"] == "completion" and consumed == len(previous):
-            candidates.extend(("bash", "zsh", "fish"))
-        if previous[consumed:] and previous[-1] == "--format":
-            candidates = ["text", "json", "jsonl"]
-    matching = sorted({word for word in candidates if word.startswith(current)})
-    return {"count": len(matching), "records": [{"word": word} for word in matching]}, EXIT_OK
+    tag, commit, previous = vendored_pin()
+    base = os.environ.get("MAELYS_GIT_BASE", "https://github.com/maelys-dev")
+    with tempfile.TemporaryDirectory(prefix="maelys-release-vendor.") as temp:
+        work = pathlib.Path(temp)
+        git("init", "-q", str(work))
+        git("fetch", "-q", "--depth", "1", f"{base}/maelys-cli.git", commit, cwd=work)
+        shown = run(["git", "show", "FETCH_HEAD:python/maelys_cli.py"], cwd=work)
+        if shown.returncode != 0:
+            raise Failure("NOT_FOUND", f"python/maelys_cli.py is not in maelys-cli at {commit[:7]}.",
+                          "Pin a maelys-cli release that ships the Python framework (0.5.12 or later).")
+        content = shown.stdout.encode("utf-8")
+    digest = hashlib.sha256(content).hexdigest()
+    target = socle_root() / "bin" / "maelys_cli.py"
+    changed = not target.is_file() or target.read_bytes() != content or previous != digest
+    target.write_bytes(content)
+    (socle_root() / "adapter" / "MAELYS_CLI_PIN").write_text(f"{tag}\n{commit}\nsha256:{digest}\n", encoding="utf-8")
+    return {"tag": tag, "commit": commit, "sha256": digest, "path": str(target), "changed": changed}, EXIT_OK
 
 
 # ---- text renderers ----------------------------------------------------------
 
-def render_checks(checks: list[dict], stream) -> None:
-    labels = {"ok": "ok", "note": "note", "warn": "WARN", "missing": "MISSING", "refused": "REFUSED", "fail": "FAIL"}
-    for check in checks:
-        print(f"{labels.get(check['status'], check['status']):<8} {check['message']}", file=stream)
+LABELS = {"ok": "ok", "note": "note", "warn": "WARN", "missing": "MISSING", "refused": "REFUSED", "fail": "FAIL"}
+
+
+def checks_text(checks: list[dict]) -> str:
+    return "".join(f"{LABELS.get(check['status'], check['status']):<8} {check['message']}\n" for check in checks)
 
 
 def text_adopt(data: dict) -> str:
@@ -969,10 +853,10 @@ def text_adopt(data: dict) -> str:
         lines.append("adopt: plan only; add --apply to write")
     else:
         lines.append("adopt: nothing to do")
-    return "\n".join(lines) + "\n"
+    return checks_text(data["checks"]) + "\n".join(lines) + "\n"
 
 
-def text_check(data: dict) -> str:
+def text_check(data: dict, with_checks: bool = True) -> str:
     lines = [f"{entry['action']:<8} {entry['path']}" + (f" ({entry['reason']})" if "reason" in entry else "")
              for entry in data["files"]]
     if data["valid"]:
@@ -984,17 +868,22 @@ def text_check(data: dict) -> str:
                      for entry in data["files"])
         lines.extend(f"drift    {violation}" for violation in data["violations"] if violation not in shown)
         lines.append(f"check: {data['product']} drifts from maelys-release {data['socle']['tag']}")
-    return "\n".join(lines) + "\n"
+    return (checks_text(data["checks"]) if with_checks else "") + "\n".join(lines) + "\n"
 
 
 def text_preflight(data: dict) -> str:
     # the check part first, with its drift lines when it fails; then the tag preconditions
     lines = [text_check(data).rstrip("\n")]
-    labels = {"ok": "ok", "note": "note", "fail": "FAIL"}
-    lines.extend(f"{labels[item['status']]:<8} {item['message']}" for item in data["preflight"])
+    lines.extend(f"{LABELS[item['status']]:<8} {item['message']}" for item in data["preflight"])
     state = "ready to tag" if data["ready"] else "not ready to tag"
     lines.append(f"preflight: {data['product']} is {state}")
     return "\n".join(lines) + "\n"
+
+
+def text_declarations(data: dict) -> str:
+    return checks_text(data["checks"]) + "".join(f"{key:<13} {value}\n" for key, value in (
+        ("dependencies", " ".join(data["dependencies"])), ("linux", data["linuxPackages"]),
+        ("macos", data["macosPackages"]), ("formulas", " ".join(data["formulas"]))))
 
 
 def text_tap(data: dict) -> str:
@@ -1008,46 +897,19 @@ def text_tap(data: dict) -> str:
 TEXT = {
     "adopt": text_adopt,
     "check": text_check,
-    "declarations": lambda data: "".join(f"{key:<13} {value}\n" for key, value in (
-        ("dependencies", " ".join(data["dependencies"])), ("linux", data["linuxPackages"]),
-        ("macos", data["macosPackages"]), ("formulas", " ".join(data["formulas"])))),
+    "declarations": text_declarations,
     "preflight": text_preflight,
     "rehearse": lambda data: (f"rehearse: {data['target']} built " + ", ".join(data["artifacts"]) + "\n"
                               if data["mode"] == "package" else f"rehearse: check passed on {data['target']}\n"),
     "render": lambda data: f"rendered {data['output']}\n",
     "tap": text_tap,
     "self-test": lambda data: "self-test: ok\n",
-    "version": lambda data: f"{PROGRAM} {data['version']}\n",
-    "help": lambda data: data["text"],
-    "describe": lambda data: json.dumps(data, indent=2) + "\n",
-    "completion": lambda data: data["script"],
-    "complete.candidates": lambda data: "".join(record["word"] + "\n" for record in data["records"]),
+    "vendor": lambda data: (f"vendor: bin/maelys_cli.py is maelys-cli {data['tag']} ({data['commit'][:7]}),"
+                            f" sha256 {data['sha256'][:12]}, " + ("updated" if data["changed"] else "unchanged") + "\n"),
 }
 
 
 # ---- the catalog --------------------------------------------------------------
-
-def option(long: str, summary: str, argument: dict | None = None, default: str | None = None,
-           required: bool = False, repeatable: bool = False, hidden: bool = False) -> dict:
-    entry: dict = {"long": long, "required": required, "repeatable": repeatable, "summary": summary,
-                   "requires": [], "conflictsWith": []}
-    if argument:
-        entry["argument"] = argument
-    if default is not None:
-        entry["default"] = default
-    if hidden:
-        entry["hidden"] = True
-    return entry
-
-
-def operand(name: str, summary: str, required: bool = True, variadic: bool = False,
-            choices: list[str] | None = None) -> dict:
-    entry: dict = {"name": name, "required": required, "variadic": variadic, "summary": summary}
-    if choices:
-        entry["type"] = "choice"
-        entry["choices"] = choices
-    return entry
-
 
 CHECKS_SCHEMA = {"type": "array", "items": {"type": "object", "required": ["status", "message"],
                                            "properties": {"status": {"type": "string"}, "message": {"type": "string"}}}}
@@ -1058,450 +920,98 @@ FILES_SCHEMA = {"type": "array", "items": {"type": "object", "required": ["path"
 SOCLE_SCHEMA = {"type": "object", "required": ["version", "tag", "sha"],
                 "properties": {"version": {"type": "string"}, "tag": {"type": "string"}, "sha": {"type": "string"}}}
 STRINGS = {"type": "array", "items": {"type": "string"}}
-SOCLE_OPTIONS = [
-    option("--product", "Product name; defaults to the directory name.", {"name": "NAME", "type": "string"}),
-    option("--socle-sha", "Socle commit to pin instead of this checkout's HEAD.", {"name": "SHA", "type": "hex"}, hidden=True),
-    option("--socle-tag", "Socle tag written next to --socle-sha.", {"name": "TAG", "type": "string"}, hidden=True),
-]
-DIR_OPERAND = operand("DIR", "Product repository.")
+SOCLE_OPTIONS = (
+    cli.option("--product", "Product name; defaults to the directory name.", cli.argument("NAME")),
+    cli.option("--socle-sha", "Socle commit to pin instead of this checkout's HEAD (trials and tests).",
+               cli.argument("SHA", "string", pattern="^[0-9a-f]{40}$")),
+    cli.option("--socle-tag", "Socle tag written next to --socle-sha.", cli.argument("TAG")),
+)
+DIR_OPERAND = cli.operand("DIR", "Product repository.")
+CHECK_SCHEMA = {"type": "object", "additionalProperties": False,
+                "required": ["valid", "product", "project", "socle", "pinned", "checks", "files", "violations"],
+                "properties": {"valid": {"type": "boolean"}, "product": {"type": "string"},
+                               "project": {"type": "string"}, "socle": SOCLE_SCHEMA,
+                               "pinned": {"type": ["object", "null"]}, "checks": CHECKS_SCHEMA,
+                               "files": FILES_SCHEMA, "violations": STRINGS}}
 
-CATALOG: list[dict] = [
-    {
-        "id": "help", "pattern": ["help"], "usage": "help [COMMAND_ID] | --help",
-        "purpose": "Show the generated CLI guide or one command's help.", "effect": "read",
-        "operands": [operand("COMMAND_ID", "Stable command identifier whose help is shown.", required=False)],
-        "options": [], "hidden": False, "handler": handle_help,
-        "outputSchema": {"type": "object", "additionalProperties": False, "required": ["text", "commands"],
-                         "properties": {"text": {"type": "string"}, "commands": STRINGS}},
-    },
-    {
-        "id": "version", "pattern": ["version"], "usage": "version | --version",
-        "purpose": "Return product identity.", "effect": "read", "operands": [], "options": [],
-        "hidden": False, "handler": handle_version,
-        "outputSchema": {"type": "object", "additionalProperties": False,
-                         "required": ["product", "program", "version", "contract", "cliApi", "framework"],
-                         "properties": {"product": {"type": "string"}, "program": {"type": "string"},
-                                        "version": {"type": "string"}, "contract": {"const": CONTRACT},
-                                        "cliApi": {"type": "integer"}, "framework": {"type": "string"}}},
-    },
-    {
-        "id": "describe", "pattern": ["describe"], "usage": "describe [COMMAND_ID] [--summary] [--prefix PREFIX]",
-        "purpose": "Return the machine-readable catalog, summary, one namespace or one descriptor.", "effect": "read",
-        "operands": [operand("COMMAND_ID", "Stable command identifier returned by the catalog.", required=False)],
-        "options": [option("--summary", "Return every descriptor without schemas and exit codes."),
-                    {**option("--prefix", "Select the command namespace PREFIX: PREFIX itself and PREFIX.* (with --summary).",
-                              {"name": "PREFIX", "type": "string", "pattern": r"^[a-z](?:[a-z0-9.-]*[a-z0-9-])?$"}),
-                     "requires": ["--summary"], "conflictsWith": ["COMMAND_ID"]}],
-        "constraints": [{"kind": "requires", "options": ["--prefix", "--summary"]}],
-        "hidden": False, "handler": handle_describe,
-        "outputSchema": {"type": "object", "required": ["schemaVersion", "kind", "program", "commands"]},
-    },
-    {
-        "id": "completion", "pattern": ["completion"], "usage": "completion SHELL",
-        "purpose": "Print the shell completion script generated from the catalog.", "effect": "read",
-        "operands": [operand("SHELL", "bash, zsh or fish.", choices=["bash", "zsh", "fish"])], "options": [],
-        "hidden": False, "handler": handle_completion,
-        "outputSchema": {"type": "object", "additionalProperties": False, "required": ["shell", "script"],
-                         "properties": {"shell": {"type": "string"}, "script": {"type": "string"}}},
-    },
-    {
-        "id": "complete.candidates", "pattern": ["__complete"], "usage": "__complete -- WORDS...",
-        "purpose": "Return completion candidates for the words typed so far.", "effect": "read",
-        "operands": [operand("WORDS", "Words of the command line, the last one being completed.", required=False, variadic=True)],
-        "options": [], "hidden": True, "handler": handle_complete, "outputMode": "json-records",
-        "outputSchema": {"type": "object", "additionalProperties": False, "required": ["count", "records"],
-                         "properties": {"count": {"type": "integer"},
-                                        "records": {"type": "array", "items": {"type": "object", "required": ["word"],
-                                                                               "properties": {"word": {"type": "string"}}}}}},
-    },
-    {
-        "id": "adopt", "pattern": ["adopt"], "usage": "adopt DIR [--product NAME] [--apply] [--allow-untagged]",
-        "purpose": "Write the managed files of the socle into a product; plan without --apply.",
-        "effect": {"plan": "preview", "apply": "apply"},
-        "operands": [DIR_OPERAND],
-        "options": [*SOCLE_OPTIONS, option("--apply", "Write the files instead of planning."),
-                    option("--allow-untagged", "Accept a socle commit without a tag (a trial of a candidate).")],
-        "hidden": False, "handler": handle_adopt,
-        "outputSchema": {"type": "object", "additionalProperties": False,
-                         "required": ["mode", "product", "project", "socle", "changed", "checks", "files"],
-                         "properties": {"mode": {"enum": ["plan", "apply"]}, "product": {"type": "string"},
-                                        "project": {"type": "string"}, "socle": SOCLE_SCHEMA,
-                                        "changed": {"type": "boolean"}, "checks": CHECKS_SCHEMA, "files": FILES_SCHEMA}},
-    },
-    {
-        "id": "check", "pattern": ["check"], "usage": "check DIR [--product NAME]",
-        "purpose": "Report the product contract and the drift of the managed files; exit 2 on any violation.",
-        "effect": "read", "operands": [DIR_OPERAND], "options": SOCLE_OPTIONS, "hidden": False, "handler": handle_check,
-        "outputSchema": {"type": "object", "additionalProperties": False,
-                         "required": ["valid", "product", "project", "socle", "pinned", "checks", "files", "violations"],
-                         "properties": {"valid": {"type": "boolean"}, "product": {"type": "string"},
-                                        "project": {"type": "string"}, "socle": SOCLE_SCHEMA,
-                                        "pinned": {"type": ["object", "null"]}, "checks": CHECKS_SCHEMA,
-                                        "files": FILES_SCHEMA, "violations": STRINGS}},
-    },
-    {
-        "id": "declarations", "pattern": ["declarations"], "usage": "declarations DIR [--product NAME]",
-        "purpose": "Return the product contract as data: pinned dependencies, packages, formulas; exit 2 when invalid.",
-        "effect": "read", "operands": [DIR_OPERAND], "options": [SOCLE_OPTIONS[0]], "hidden": False,
-        "handler": handle_declarations,
-        "outputSchema": {"type": "object", "additionalProperties": False,
-                         "required": ["valid", "product", "project", "version", "dependencies", "linuxPackages",
-                                      "macosPackages", "formulas", "checks"],
-                         "properties": {"valid": {"type": "boolean"}, "product": {"type": "string"},
-                                        "project": {"type": "string"}, "version": {"type": "string"},
-                                        "dependencies": STRINGS, "linuxPackages": {"type": "string"},
-                                        "macosPackages": {"type": "string"}, "formulas": STRINGS, "checks": CHECKS_SCHEMA}},
-    },
-    {
-        "id": "preflight", "pattern": ["preflight"], "usage": "preflight DIR [--product NAME]",
-        "purpose": "Check, then report what the release workflow would refuse of the next tag; exit 2 when not ready.",
-        "effect": "read", "operands": [DIR_OPERAND], "options": SOCLE_OPTIONS, "hidden": False, "handler": handle_preflight,
-        "outputSchema": {"type": "object", "additionalProperties": False,
-                         "required": ["ready", "valid", "product", "project", "socle", "pinned", "checks", "files",
-                                      "preflight", "violations"],
-                         "properties": {"ready": {"type": "boolean"}, "valid": {"type": "boolean"},
-                                        "product": {"type": "string"}, "project": {"type": "string"},
-                                        "socle": SOCLE_SCHEMA, "pinned": {"type": ["object", "null"]},
-                                        "checks": CHECKS_SCHEMA, "files": FILES_SCHEMA,
-                                        "preflight": CHECKS_SCHEMA, "violations": STRINGS}},
-    },
-    {
-        "id": "rehearse", "pattern": ["rehearse"],
-        "usage": "rehearse DIR TARGET [--product NAME] [--image IMAGE] [--package-command COMMAND] [--check] [--check-command COMMAND] [--keep]",
-        "purpose": "Replay the Linux build job of the release, or make check with --check, in a Docker container on a copy of the working tree.",
-        "effect": "execute",
-        "operands": [DIR_OPERAND, operand("TARGET", "linux-x86_64 or linux-arm64.", choices=list(PLATFORMS))],
-        "options": [*SOCLE_OPTIONS,
-                    option("--image", "Container image.", {"name": "IMAGE", "type": "string"}, default=DEFAULT_IMAGE),
-                    option("--package-command", "Command producing dist/; TARGET is substituted.",
-                           {"name": "COMMAND", "type": "string"}, default="bash scripts/package-release.sh TARGET"),
-                    option("--check", "Run the check command instead of packaging; dist/ is left alone."),
-                    option("--check-command", "Command run with --check.", {"name": "COMMAND", "type": "string"},
-                           default="make check"),
-                    option("--keep", "Keep the container for inspection.")],
-        "hidden": False, "handler": handle_rehearse,
-        "outputSchema": {"type": "object", "additionalProperties": False,
-                         "required": ["product", "target", "platform", "image", "mode", "artifacts"],
-                         "properties": {"product": {"type": "string"}, "target": {"type": "string"},
-                                        "platform": {"type": "string"}, "image": {"type": "string"},
-                                        "mode": {"enum": ["package", "check"]}, "artifacts": STRINGS}},
-    },
-    {
-        "id": "render", "pattern": ["render"], "usage": "render TEMPLATE OUTPUT [KEY=VALUE...]",
-        "purpose": "Replace @KEY@ placeholders of a template, refusing to leave one unrendered.", "effect": "execute",
-        "operands": [operand("TEMPLATE", "Template file."), operand("OUTPUT", "File written."),
-                     operand("KEY=VALUE", "Placeholder values.", required=False, variadic=True)],
-        "options": [], "hidden": False, "handler": handle_render,
-        "outputSchema": {"type": "object", "additionalProperties": False, "required": ["template", "output", "placeholders"],
-                         "properties": {"template": {"type": "string"}, "output": {"type": "string"}, "placeholders": STRINGS}},
-    },
-    {
-        "id": "tap", "pattern": ["tap"], "usage": "tap PRODUCT TAG FORMULA [--skip-style] [--apply]",
-        "purpose": "Publish a rendered formula into the Homebrew tap with a signed commit; plan without --apply.",
-        "effect": {"plan": "preview", "apply": "commit"},
-        "operands": [operand("PRODUCT", "Formula name."), operand("TAG", "Release tag vX.Y.Z."),
-                     operand("FORMULA", "Rendered formula file.")],
-        "options": [option("--skip-style", "Do not run brew style."),
-                    option("--apply", "Commit and push instead of planning.")],
-        "hidden": False, "handler": handle_tap,
-        "outputSchema": {"type": "object", "additionalProperties": False,
-                         "required": ["mode", "product", "version", "repository", "formula", "changed"],
-                         "properties": {"mode": {"enum": ["plan", "apply"]}, "product": {"type": "string"},
-                                        "version": {"type": "string"}, "repository": {"type": "string"},
-                                        "formula": {"type": "string"}, "changed": {"type": "boolean"},
-                                        "diff": {"type": "string"}, "commit": {"type": "string"}, "install": {"type": "string"}}},
-    },
-    {
-        "id": "self-test", "pattern": ["self-test"], "usage": "self-test [--verbose]",
-        "purpose": "Run the socle's own tests.", "effect": "execute", "operands": [],
-        "options": [option("--verbose", "Report every test.")], "hidden": False, "handler": handle_self_test,
-        "outputSchema": {"type": "object", "additionalProperties": False, "required": ["tests", "passed"],
-                         "properties": {"tests": {"type": "string"}, "passed": {"type": "boolean"}}},
-    },
-]
-
-GLOBAL_OPTIONS = [
-    option("--format", "Select text for humans, json for one envelope or jsonl for records.",
-           {"name": "VALUE", "type": "choice", "choices": ["text", "json", "jsonl"]}, default="text"),
-    option("--json", "Exact alias of --format json."),
-    option("--compact", "Render JSON on a single line."),
-    option("--pretty", "--pretty=false selects compact JSON."),
-    option("--non-interactive", "Never prompt; fail instead of asking a question."),
-    option("--color", "Control ANSI colors on terminals.",
-           {"name": "VALUE", "type": "choice", "choices": ["auto", "always", "never"]}, default="auto"),
-    option("--help", "Show the help of the selected command."),
-]
-INVARIANTS = [
-    "usage and agent discovery share one catalog",
-    "transactional commands plan by default and require --apply",
-    "stdout carries success data; stderr carries failures",
-    "--json and --format json are identical",
-    "unknown or duplicated options are refused",
-]
-
-
-def descriptor(command: dict, summary: bool = False) -> dict:
-    entry = {
-        "id": command["id"], "pattern": command["pattern"], "usage": command["usage"],
-        "purpose": command["purpose"], "effect": command["effect"],
-        "outputMode": command.get("outputMode", "json-envelope"), "external": False,
-        "hidden": command["hidden"], "available": True,
-        "input": {"synopsis": command["usage"], "operands": command["operands"],
-                  "options": [{key: value for key, value in item.items() if key != "hidden"}
-                              for item in command["options"] if not item.get("hidden")],
-                  "constraints": command.get("constraints", []), "passthrough": False},
-    }
-    if not summary:
-        entry["outputSchema"] = command["outputSchema"]
-        entry["exitCodes"] = EXIT_CODES
-    return entry
-
-
-def command_by_id(identifier: str) -> dict:
-    for command in CATALOG:
-        if command["id"] == identifier:
-            return command
-    raise Failure("INVALID_COMMAND", f"Unknown command identifier '{identifier}'.",
-                  "Run describe --summary to list the command identifiers.")
-
-
-def command_help(command: dict) -> str:
-    lines = [f"{PROGRAM} {command['usage']}", "", command["purpose"], ""]
-    if command["operands"]:
-        lines.append("OPERANDS")
-        lines.extend(f"  {item['name']:<18} {item['summary']}" for item in command["operands"])
-        lines.append("")
-    visible = [item for item in command["options"] if not item.get("hidden")]
-    if visible:
-        lines.append("OPTIONS")
-        for item in visible:
-            spelled = item["long"] + (f" {item['argument']['name']}" if "argument" in item else "")
-            default = f" (default {item['default']})" if "default" in item else ""
-            lines.append(f"  {spelled:<28} {item['summary']}{default}")
-        lines.append("")
-    return "\n".join(lines).rstrip("\n") + "\n"
-
-
-def guide() -> str:
-    lines = [f"{PROGRAM} {socle_version()} - release socle of the Maelys repositories", "",
-             "USAGE", f"  {PROGRAM} COMMAND [OPERANDS] [OPTIONS]", "", "COMMANDS"]
-    width = max(len(command["usage"]) for command in CATALOG if not command["hidden"])
-    lines.extend(f"  {command['usage']:<{width}}  {command['purpose']}" for command in CATALOG if not command["hidden"])
-    lines.extend(["", "GLOBAL OPTIONS"])
-    for item in GLOBAL_OPTIONS:
-        spelled = item["long"] + (f" {'|'.join(item['argument']['choices'])}" if "argument" in item else "")
-        lines.append(f"  {spelled:<28} {item['summary']}")
-    lines.extend(["", f"Run '{PROGRAM} describe --format json' for the machine-readable catalog."])
-    return "\n".join(lines) + "\n"
-
-
-# ---- parsing --------------------------------------------------------------------
-
-def resolve(words: list[str]) -> tuple[dict | None, int]:
-    """The command whose pattern starts the words, and the words consumed."""
-    best: dict | None = None
-    for command in CATALOG:
-        pattern = command["pattern"]
-        if words[:len(pattern)] == pattern and (best is None or len(pattern) > len(best["pattern"])):
-            best = command
-    return best, len(best["pattern"]) if best else 0
-
-
-def parse(argv: list[str]) -> tuple[Invocation, dict]:
-    """Validate the command line in the contract's causal order."""
-    words: list[str] = []
-    raw_options: list[tuple[str, str | None]] = []
-    index = 0
-    passthrough: list[str] = []
-    while index < len(argv):
-        word = argv[index]
-        if word == "--":
-            passthrough = argv[index + 1:]
-            break
-        if word.startswith("--") and len(word) > 2:
-            name, separator, value = word.partition("=")
-            raw_options.append((name, value if separator else None))
-            index += 1
-            # an option that takes an argument consumes the next word
-            definition = next((item for item in GLOBAL_OPTIONS if item["long"] == name), None)
-            if definition is None:
-                command, _ = resolve(words)
-                if command is not None:
-                    definition = next((item for item in command["options"] if item["long"] == name), None)
-            if definition and "argument" in definition and not separator:
-                if index >= len(argv):
-                    raise Failure("VALIDATION_FAILED", f"Option {name} needs a value {definition['argument']['name']}.",
-                                  "Run describe for this command and pass the option's argument.")
-                raw_options[-1] = (name, argv[index])
-                index += 1
-            continue
-        if word.startswith("-") and word != "-":
-            raise Failure("VALIDATION_FAILED", f"Option {word} is not supported: options are spelled --name.",
-                          "Run describe for this command and use only its declared options.")
-        words.append(word)
-        index += 1
-    if not words and any(name in ("--help", "--version") for name, _ in raw_options):
-        words = ["help"] if any(name == "--help" for name, _ in raw_options) else ["version"]
-        raw_options = [(name, value) for name, value in raw_options if name not in ("--help", "--version")]
-    if not words:
-        raise Failure("INVALID_COMMAND", "No command given.", f"Run '{PROGRAM} help' or 'describe --summary'.")
-    command, consumed = resolve(words)
-    if command is None:
-        raise Failure("INVALID_COMMAND", f"Unknown command '{' '.join(words)}'.",
-                      "Run describe --summary and use one of the listed command identifiers.")
-    operands = words[consumed:] + passthrough
-    # rendering options
-    fmt = os.environ.get("MAELYS_CLI_FORMAT", "text")
-    compact = False
-    non_interactive = False
-    rendering = False
-    help_requested = False
-    options: dict[str, object] = {}
-    seen: set[str] = set()
-    known = {item["long"]: item for item in command["options"]}
-    for name, value in raw_options:
-        if name in seen and not (name in known and known[name]["repeatable"]):
-            raise Failure("VALIDATION_FAILED", f"Option {name} is given twice.", "Give each option once.")
-        seen.add(name)
-        if name == "--format":
-            if value not in ("text", "json", "jsonl"):
-                raise Failure("VALIDATION_FAILED", f"--format takes text, json or jsonl, not '{value}'.", "Use one of the choices.")
-            fmt, rendering = value, True
-        elif name == "--json":
-            fmt, rendering = "json", True
-        elif name == "--compact":
-            compact, rendering = value != "false", True
-        elif name == "--pretty":
-            compact, rendering = value == "false", True
-        elif name == "--non-interactive":
-            non_interactive = value != "false"
-        elif name == "--color":
-            if value not in ("auto", "always", "never"):
-                raise Failure("VALIDATION_FAILED", f"--color takes auto, always or never, not '{value}'.", "Use one of the choices.")
-        elif name == "--help":
-            help_requested = True
-        elif name in ("--dry-run", "--plan") and isinstance(command["effect"], dict):
-            raise Failure("VALIDATION_FAILED", f"Option {name} is not supported by '{command['id']}': it plans by default.",
-                          "Run without --apply to plan, then add --apply to write.")
-        elif name not in known:
-            raise Failure("VALIDATION_FAILED", f"Option {name} is not supported by '{command['id']}'. Use '{command['usage']}'.",
-                          "Run describe for this command and use only its declared options.")
-        else:
-            definition = known[name]
-            if "argument" in definition:
-                argument = definition["argument"]
-                if value is None:
-                    raise Failure("VALIDATION_FAILED", f"Option {name} needs a value {argument['name']}.",
-                                  "Pass the option's argument.")
-                if argument["type"] == "choice" and value not in argument["choices"]:
-                    raise Failure("VALIDATION_FAILED", f"Option {name} takes {', '.join(argument['choices'])}, not '{value}'.",
-                                  "Use one of the choices.")
-                if argument["type"] == "hex" and not re.fullmatch(r"[0-9a-f]+", value):
-                    raise Failure("VALIDATION_FAILED", f"Option {name} takes lowercase hexadecimal, not '{value}'.",
-                                  "Pass a commit sha.")
-                options[name] = value
-            else:
-                options[name] = value != "false"
-    for definition in command["options"]:
-        if definition["required"] and definition["long"] not in options:
-            raise Failure("VALIDATION_FAILED", f"Option {definition['long']} is required by '{command['id']}'.",
-                          f"Use '{command['usage']}'.")
-    if help_requested:
-        command, operands, options = command_by_id("help"), [command["id"]], {}
-    required = sum(1 for item in command["operands"] if item["required"])
-    variadic = any(item["variadic"] for item in command["operands"])
-    if len(operands) < required or (not variadic and len(operands) > len(command["operands"])):
-        raise Failure("VALIDATION_FAILED", f"Operands do not match '{command['id']}'. Use '{command['usage']}'.",
-                      "Use the synopsis returned by describe and retry.")
-    for item, value in zip(command["operands"], operands):
-        if item.get("choices") and value not in item["choices"]:
-            raise Failure("VALIDATION_FAILED", f"{item['name']} takes {', '.join(item['choices'])}, not '{value}'.",
-                          f"Use '{command['usage']}'.")
-    if fmt == "jsonl" and command.get("outputMode") != "json-records":
-        raise Failure("VALIDATION_FAILED", f"--format jsonl is accepted only by json-records commands, not '{command['id']}'.",
-                      "Use --format json.")
-    del rendering
-    return Invocation(command, operands, options, fmt, compact, non_interactive), command
-
-
-# ---- rendering ---------------------------------------------------------------------
-
-def envelope(command_id: str, ok: bool, exit_code: int, payload: dict, compact: bool) -> str:
-    body: dict = {"schemaVersion": SCHEMA_VERSION, "contract": CONTRACT, "command": command_id, "ok": ok,
-                  "exitCode": exit_code}
-    body["data" if ok else "error"] = payload
-    return json.dumps(body, separators=(",", ":") if compact else None, indent=None if compact else 2,
-                      ensure_ascii=False) + "\n"
-
-
-def colored(text: str, argv: list[str]) -> str:
-    wants = "always" in [value for name, value in _color_options(argv)] and True
-    never = any(value == "never" for _, value in _color_options(argv)) or os.environ.get("NO_COLOR") \
-        or os.environ.get("TERM") == "dumb"
-    if never or not (wants or sys.stderr.isatty()):
-        return text
-    return f"\033[31m{text}\033[0m"
-
-
-def _color_options(argv: list[str]) -> list[tuple[str, str]]:
-    found = []
-    for index, word in enumerate(argv):
-        if word.startswith("--color="):
-            found.append(("--color", word.split("=", 1)[1]))
-        elif word == "--color" and index + 1 < len(argv):
-            found.append(("--color", argv[index + 1]))
-    return found
-
-
-def main(argv: list[str] | None = None) -> int:
-    argv = list(sys.argv[1:] if argv is None else argv)
-    command_id = ""
-    # The rendering of a parse failure follows the rendering options as
-    # given, before the parser validates them.
-    fmt = os.environ.get("MAELYS_CLI_FORMAT", "text")
-    for index, word in enumerate(argv):
-        if word == "--json" or word == "--format=json":
-            fmt = "json"
-        elif word == "--format" and index + 1 < len(argv) and argv[index + 1] in ("json", "jsonl"):
-            fmt = "json"
-        elif word == "--format=jsonl":
-            fmt = "json"
-    compact = "--compact" in argv or "--pretty=false" in argv
-    try:
-        invocation, command = parse(argv)
-        command_id, fmt, compact = command["id"], invocation.format, invocation.compact
-        data, exit_code = command["handler"](invocation)
-        if fmt == "text":
-            if command_id in ("adopt", "check", "preflight", "declarations"):
-                render_checks(data["checks"], sys.stdout)
-            sys.stdout.write(TEXT[command_id](data))
-        elif fmt == "jsonl":
-            for record in data["records"]:
-                sys.stdout.write(json.dumps(record, separators=(",", ":")) + "\n")
-        else:
-            sys.stdout.write(envelope(command_id, True, exit_code, data, compact))
-        sys.stdout.flush()
-        return exit_code
-    except Failure as failure:
-        error = {"code": failure.code, "message": failure.message}
-        if failure.hint:
-            error["hint"] = failure.hint
-        if fmt == "text":
-            sys.stderr.write(colored(f"{PROGRAM}: [{failure.code}] {failure.message}", argv) + "\n")
-            if failure.hint:
-                sys.stderr.write(f"Hint: {failure.hint}\n")
-        else:
-            sys.stderr.write(envelope(command_id or "unknown", False, EXIT_FAILURE, error, compact))
-        return EXIT_FAILURE
-    except OSError as error:
-        message = {"code": "IO_FAILED", "message": f"{error.strerror}: {error.filename}" if error.filename else str(error),
-                   "hint": "Check the path and its permissions."}
-        if fmt == "text":
-            sys.stderr.write(f"{PROGRAM}: [IO_FAILED] {message['message']}\nHint: {message['hint']}\n")
-        else:
-            sys.stderr.write(envelope(command_id or "unknown", False, EXIT_FAILURE, message, compact))
-        return EXIT_FAILURE
+APP = cli.Program(PROGRAM, PRODUCT, socle_version(), [
+    cli.transaction("adopt", "adopt", "Write the managed files of the socle into a product; plan without --apply.",
+                    handle_adopt, operands=[DIR_OPERAND],
+                    options=[*SOCLE_OPTIONS,
+                             cli.flag("--allow-untagged", "Accept a socle commit without a tag (a trial of a candidate).")],
+                    schema={"type": "object", "additionalProperties": False,
+                            "required": ["mode", "product", "project", "socle", "changed", "checks", "files"],
+                            "properties": {"mode": {"enum": ["plan", "apply"]}, "product": {"type": "string"},
+                                           "project": {"type": "string"}, "socle": SOCLE_SCHEMA,
+                                           "changed": {"type": "boolean"}, "checks": CHECKS_SCHEMA, "files": FILES_SCHEMA}}),
+    cli.read("check", "check", "Report the product contract and the drift of the managed files; exit 2 on any violation.",
+             handle_check, operands=[DIR_OPERAND], options=list(SOCLE_OPTIONS), schema=CHECK_SCHEMA),
+    cli.read("declarations", "declarations",
+             "Return the product contract as data: pinned dependencies, packages, formulas; exit 2 when invalid.",
+             handle_declarations, operands=[DIR_OPERAND], options=[SOCLE_OPTIONS[0]],
+             schema={"type": "object", "additionalProperties": False,
+                     "required": ["valid", "product", "project", "version", "dependencies", "linuxPackages",
+                                  "macosPackages", "formulas", "checks"],
+                     "properties": {"valid": {"type": "boolean"}, "product": {"type": "string"},
+                                    "project": {"type": "string"}, "version": {"type": "string"},
+                                    "dependencies": STRINGS, "linuxPackages": {"type": "string"},
+                                    "macosPackages": {"type": "string"}, "formulas": STRINGS, "checks": CHECKS_SCHEMA}}),
+    cli.read("preflight", "preflight",
+             "Check, then report what the release workflow would refuse of the next tag; exit 2 when not ready.",
+             handle_preflight, operands=[DIR_OPERAND], options=list(SOCLE_OPTIONS),
+             schema={"type": "object", "additionalProperties": False,
+                     "required": ["ready", "valid", "product", "project", "socle", "pinned", "checks", "files",
+                                  "preflight", "violations"],
+                     "properties": {"ready": {"type": "boolean"}, "valid": {"type": "boolean"},
+                                    "product": {"type": "string"}, "project": {"type": "string"},
+                                    "socle": SOCLE_SCHEMA, "pinned": {"type": ["object", "null"]},
+                                    "checks": CHECKS_SCHEMA, "files": FILES_SCHEMA,
+                                    "preflight": CHECKS_SCHEMA, "violations": STRINGS}}),
+    cli.execute("rehearse", "rehearse",
+                "Replay the Linux build job of the release, or make check with --check, in a Docker container on a copy of the working tree.",
+                handle_rehearse,
+                operands=[DIR_OPERAND, cli.operand("TARGET", "linux-x86_64 or linux-arm64.", choices=list(PLATFORMS))],
+                options=[*SOCLE_OPTIONS,
+                         cli.option("--image", "Container image.", cli.argument("IMAGE"), default=DEFAULT_IMAGE),
+                         cli.option("--package-command", "Command producing dist/; TARGET is substituted.",
+                                    cli.argument("COMMAND"), default="bash scripts/package-release.sh TARGET"),
+                         cli.flag("--check", "Run the check command instead of packaging; dist/ is left alone."),
+                         cli.option("--check-command", "Command run with --check.", cli.argument("COMMAND"), default="make check"),
+                         cli.flag("--keep", "Keep the container for inspection.")],
+                schema={"type": "object", "additionalProperties": False,
+                        "required": ["product", "target", "platform", "image", "mode", "artifacts"],
+                        "properties": {"product": {"type": "string"}, "target": {"type": "string"},
+                                       "platform": {"type": "string"}, "image": {"type": "string"},
+                                       "mode": {"enum": ["package", "check"]}, "artifacts": STRINGS}}),
+    cli.execute("render", "render", "Replace @KEY@ placeholders of a template, refusing to leave one unrendered.",
+                handle_render,
+                operands=[cli.operand("TEMPLATE", "Template file."), cli.operand("OUTPUT", "File written."),
+                          cli.operand("KEY=VALUE", "Placeholder values.", required=False, variadic=True)],
+                schema={"type": "object", "additionalProperties": False, "required": ["template", "output", "placeholders"],
+                        "properties": {"template": {"type": "string"}, "output": {"type": "string"}, "placeholders": STRINGS}}),
+    cli.transaction("tap", "tap", "Publish a rendered formula into the Homebrew tap with a signed commit; plan without --apply.",
+                    handle_tap, commit=True,
+                    operands=[cli.operand("PRODUCT", "Formula name."), cli.operand("TAG", "Release tag vX.Y.Z."),
+                              cli.operand("FORMULA", "Rendered formula file.")],
+                    options=[cli.flag("--skip-style", "Do not run brew style.")],
+                    schema={"type": "object", "additionalProperties": False,
+                            "required": ["mode", "product", "version", "repository", "formula", "changed"],
+                            "properties": {"mode": {"enum": ["plan", "apply"]}, "product": {"type": "string"},
+                                           "version": {"type": "string"}, "repository": {"type": "string"},
+                                           "formula": {"type": "string"}, "changed": {"type": "boolean"},
+                                           "diff": {"type": "string"}, "commit": {"type": "string"}, "install": {"type": "string"}}}),
+    cli.execute("self-test", "self-test", "Run the socle's own tests.", handle_self_test,
+                options=[cli.flag("--verbose", "Report every test.")],
+                schema={"type": "object", "additionalProperties": False, "required": ["tests", "passed"],
+                        "properties": {"tests": {"type": "string"}, "passed": {"type": "boolean"}}}),
+    cli.execute("vendor", "vendor", "Refresh bin/maelys_cli.py from maelys-cli at adapter/MAELYS_CLI_PIN and record its digest.",
+                handle_vendor,
+                schema={"type": "object", "additionalProperties": False,
+                        "required": ["tag", "commit", "sha256", "path", "changed"],
+                        "properties": {"tag": {"type": "string"}, "commit": {"type": "string"}, "sha256": {"type": "string"},
+                                       "path": {"type": "string"}, "changed": {"type": "boolean"}}}),
+], guide="release socle of the Maelys repositories", text=TEXT)
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(APP.main())

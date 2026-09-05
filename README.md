@@ -21,7 +21,13 @@ product repository                      maelys-release
 ## The command
 
 `bin/maelys-release` is a command-line program of the
-[agent-cli/v2](https://github.com/maelys-dev/agent-cli-spec) contract, in Python (standard library, 3.9 or later): one
+[agent-cli/v2](https://github.com/maelys-dev/agent-cli-spec) contract,
+built on `maelys_cli`, the Python framework of maelys-cli: `bin/maelys_cli.py`
+is that framework's `python/maelys_cli.py` at the commit
+`adapter/MAELYS_CLI_PIN` names, byte for byte, with its digest on the pin's
+third line; `self-test` verifies both, and `maelys-release vendor` refreshes
+the copy after a pin bump. The socle stays one fetch of one commit: the
+framework travels inside it. The program is Python (standard library, 3.9 or later): one
 catalog drives the parser, `help`, `describe` and the shell completion;
 success is a JSON envelope on stdout with `--format json`, failure an
 envelope on stderr; exit 0 completed, 1 failed, 2 a validation that found
@@ -249,6 +255,9 @@ runners and secrets are normative in [docs/conventions.md](docs/conventions.md).
   nothing but the caller's repository.
 - `declarations DIR` returns the product contract as data; the CI job of
   `check-product.yml` reads it instead of repeating it.
+- `vendor` refreshes `bin/maelys_cli.py` from maelys-cli at
+  `adapter/MAELYS_CLI_PIN` and records its digest; bump the pin's first two
+  lines, run it, run `self-test`.
 - `self-test` runs `tests/` on a fixture product, including the conformance
   kit of [agent-cli-spec](https://github.com/maelys-dev/agent-cli-spec) at
   `adapter/AGENT_CLI_SPEC_PIN`, which drives this program from the outside
