@@ -13,17 +13,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [ubuntu-24.04, macos-15]
+        runner: [ubuntu-26.04, macos-15]
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - name: Install shellcheck and actionlint
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update && sudo apt-get install -y shellcheck
-          bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.7/scripts/download-actionlint.bash) 1.7.7 /usr/local/bin >/dev/null
+          bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.12 /usr/local/bin >/dev/null
       - if: runner.os == 'Linux'
         run: actionlint .github/workflows/*.yml
       - if: runner.os == 'Linux'

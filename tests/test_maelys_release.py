@@ -292,7 +292,7 @@ class AdoptTest(unittest.TestCase):
         self.assertTrue(product.json("check", self.dir)["data"]["valid"])
         self.assertFalse(product.json("adopt", self.dir)["data"]["changed"])
         with (product.dir / ".github" / "workflows" / "ci.yml").open("a") as ci_file:
-            ci_file.write("  mine:\n    runs-on: ubuntu-24.04\n")
+            ci_file.write("  mine:\n    runs-on: ubuntu-26.04\n")
         product.run("adopt", self.dir, "--apply")
         self.assertIn("  mine:", product.read(".github/workflows/ci.yml"))
         self.assertEqual(product.read("AGENTS.md").count("maelys-release:begin"), 1)
@@ -305,7 +305,7 @@ class AdoptTest(unittest.TestCase):
         product.run("adopt", self.dir, "--apply")
         self.assertNotIn("0" * 40, ci_path.read_text())
         self.assertIn("  mine:", ci_path.read_text())
-        ci_path.write_text("name: ci\non: [push]\njobs:\n  mine:\n    runs-on: ubuntu-24.04\n")
+        ci_path.write_text("name: ci\non: [push]\njobs:\n  mine:\n    runs-on: ubuntu-26.04\n")
         data = product.json("check", self.dir, expect=2)["data"]
         self.assertTrue(any("does not call the socle's check-product.yml" in violation for violation in data["violations"]))
         self.assertEqual(product.json("adopt", self.dir)["data"]["mode"], "plan")   # a warning does not block adopt
@@ -430,7 +430,7 @@ class AdoptTest(unittest.TestCase):
         product.git(copy, "rm", "-q", "bin/maelys-release")
         product.git(copy, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "before the command")
         old = product.git(copy, "rev-parse", "HEAD")
-        product.git(copy, "push", "-q", str(bare), "HEAD:main")
+        product.git(copy, "push", "-q", str(bare), "HEAD:refs/heads/main")
         workflow = product.dir / ".github" / "workflows" / "release.yml"
         workflow.write_text(re.sub(r"release\.yml@[0-9a-f]{40} # \S+", f"release.yml@{old} # v0.2.8", workflow.read_text()))
         ancient = subprocess.run([str(CLI), "check", self.dir, "--format", "json"], env=env, check=False, text=True,
@@ -690,6 +690,16 @@ class UnitTest(unittest.TestCase):
         entries = re.findall(r"^## ([0-9]+\.[0-9]+\.[0-9]+) ", changelog, re.MULTILINE)
         self.assertEqual(entries[0], version)
         self.assertEqual(len(entries), len(set(entries)), "duplicate entries")
+
+    def test_linux_baseline_is_ubuntu_26(self) -> None:
+        self.assertEqual(MODULE.DEFAULT_IMAGE, "ubuntu:26.04")
+        for relative in (".github/workflows/check.yml", ".github/workflows/check-product.yml",
+                         ".github/workflows/release.yml"):
+            workflow = (ROOT / relative).read_text()
+            self.assertIn("ubuntu-26.04", workflow)
+            self.assertNotIn("ubuntu-24.04", workflow)
+        actionlint = (ROOT / ".github" / "actionlint.yaml").read_text()
+        self.assertIn("ubuntu-26.04-arm", actionlint)
 
     def test_release_workflow_text(self) -> None:
         decl = MODULE.Declarations(pathlib.Path("/p"), "maelys-x")

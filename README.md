@@ -121,7 +121,7 @@ run of a product.
 ### Rehearsing the Linux build
 
 `rehearse DIR linux-arm64` (native on Apple Silicon) or `linux-x86_64`
-(emulated, slow) replays the build job of the release in an `ubuntu:24.04`
+(emulated, slow) replays the build job of the release in an `ubuntu:26.04`
 container: the socle's and the declared packages, the pinned checkouts
 through `scripts/checkout-dependency.sh`, then `scripts/package-release.sh
 TARGET`, on a copy of the working tree. Only `dist/` receives the
