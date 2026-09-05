@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.10.0 — 2026-09-05
+
+Feedback from maelys-cli after four socle versions in three days: the
+socle's speed had become the maintenance of every product.
+
+- The managed texts carry no socle version any more: `AGENTS.md` and
+  `CLAUDE.md` blocks, the skill and `scripts/checkout-dependency.sh` were
+  stamped with the tag, so every socle tag changed them in every product
+  and `check` called it a drift. The version now lives in the `uses:`
+  lines of `release.yml` and `ci.yml` alone; a socle tag that changes no
+  text changes nothing in a product. One last re-adoption removes the
+  stamps; after it, patch versions of the socle never touch a managed
+  text (conventions: "Compatibility of the managed files").
+- `rehearse DIR TARGET --check` replays `make check` (`--check-command`
+  overrides) on the Linux target in the container instead of packaging,
+  so a Linux-only failure (`EFTYPE` on maelys-cli) is found before the
+  push, not by CI.
+- Golden tests of the text rendering of `check` and `preflight` in their
+  three states (conformant, drifting, not ready): the defects found since
+  0.5.0 were all in the text rendering, which the self-test only sampled.
+
 ## 0.9.0 — 2026-09-05
 
 - The provenance attestation follows the repository's visibility:

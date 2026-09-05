@@ -677,6 +677,11 @@ tar -C /src --exclude=./dist -cf - . | tar -xf -
 git config --global --add safe.directory "*"
 echo "== Pinned dependency checkouts"
 for name in $DEPENDENCIES; do sh scripts/checkout-dependency.sh "$name"; done
+if [ "$REHEARSE_MODE" = check ]; then
+    echo "== Check: $CHECK_COMMAND"
+    eval "$CHECK_COMMAND"
+    exit 0
+fi
 echo "== Package: ${PACKAGE_COMMAND//TARGET/$TARGET}"
 eval "${PACKAGE_COMMAND//TARGET/$TARGET}"
 test -n "$(ls dist 2>/dev/null)" || { echo "rehearse: dist/ is empty" >&2; exit 1; }
@@ -701,6 +706,8 @@ def handle_rehearse(invocation: Invocation) -> tuple[dict, int]:
     (project / "dist").mkdir(exist_ok=True)
     image = str(invocation.option("--image", os.environ.get("REHEARSE_IMAGE", DEFAULT_IMAGE)))
     package_command = str(invocation.option("--package-command", "bash scripts/package-release.sh TARGET"))
+    mode = "check" if invocation.flag("--check") else "package"
+    check_command = str(invocation.option("--check-command", "make check"))
     command = ["docker", "run", f"--name=rehearse-{target}" if invocation.flag("--keep") else "--rm",
                "--platform", PLATFORMS[target],
                "-v", f"{project}:/src:ro", "-v", f"{project / 'dist'}:/dist",
@@ -708,18 +715,19 @@ def handle_rehearse(invocation: Invocation) -> tuple[dict, int]:
                "-e", f"LINUX_PACKAGES={SOCLE_LINUX_PACKAGES} {decl.linux_packages}".rstrip(),
                "-e", f"DEPENDENCIES={' '.join(decl.dependencies)}",
                "-e", f"PACKAGE_COMMAND={package_command}",
+               "-e", f"REHEARSE_MODE={mode}", "-e", f"CHECK_COMMAND={check_command}",
                image, "bash", "-c", REHEARSAL]
     # The container's output is a log: it stays on stdout for a human and
     # moves to stderr when the envelope owns stdout.
     log = sys.stderr if invocation.format != "text" else sys.stdout
-    print(f"rehearse: {target} on {image} ({PLATFORMS[target]})", file=log)
+    print(f"rehearse: {mode} {target} on {image} ({PLATFORMS[target]})", file=log)
     log.flush()
     completed = subprocess.run(command, check=False, stdout=log, stderr=subprocess.STDOUT)
     if completed.returncode != 0:
         raise Failure("PROCESS_FAILED", f"The rehearsal of {target} failed with exit {completed.returncode}.",
                       "Read the container log above; fix the product and retry.")
-    artifacts = sorted(path.name for path in (project / "dist").iterdir() if target in path.name)
-    return {"product": product, "target": target, "platform": PLATFORMS[target], "image": image,
+    artifacts = [] if mode == "check" else sorted(path.name for path in (project / "dist").iterdir() if target in path.name)
+    return {"product": product, "target": target, "platform": PLATFORMS[target], "image": image, "mode": mode,
             "artifacts": artifacts}, EXIT_OK
 
 
@@ -997,7 +1005,8 @@ TEXT = {
         ("dependencies", " ".join(data["dependencies"])), ("linux", data["linuxPackages"]),
         ("macos", data["macosPackages"]), ("formulas", " ".join(data["formulas"])))),
     "preflight": text_preflight,
-    "rehearse": lambda data: f"rehearse: {data['target']} built " + ", ".join(data["artifacts"]) + "\n",
+    "rehearse": lambda data: (f"rehearse: {data['target']} built " + ", ".join(data["artifacts"]) + "\n"
+                              if data["mode"] == "package" else f"rehearse: check passed on {data['target']}\n"),
     "render": lambda data: f"rendered {data['output']}\n",
     "tap": text_tap,
     "self-test": lambda data: "self-test: ok\n",
@@ -1150,20 +1159,24 @@ CATALOG: list[dict] = [
     },
     {
         "id": "rehearse", "pattern": ["rehearse"],
-        "usage": "rehearse DIR TARGET [--product NAME] [--image IMAGE] [--package-command COMMAND] [--keep]",
-        "purpose": "Replay the Linux build job of the release in a Docker container on a copy of the working tree.",
+        "usage": "rehearse DIR TARGET [--product NAME] [--image IMAGE] [--package-command COMMAND] [--check] [--check-command COMMAND] [--keep]",
+        "purpose": "Replay the Linux build job of the release, or make check with --check, in a Docker container on a copy of the working tree.",
         "effect": "execute",
         "operands": [DIR_OPERAND, operand("TARGET", "linux-x86_64 or linux-arm64.", choices=list(PLATFORMS))],
         "options": [*SOCLE_OPTIONS,
                     option("--image", "Container image.", {"name": "IMAGE", "type": "string"}, default=DEFAULT_IMAGE),
                     option("--package-command", "Command producing dist/; TARGET is substituted.",
                            {"name": "COMMAND", "type": "string"}, default="bash scripts/package-release.sh TARGET"),
+                    option("--check", "Run the check command instead of packaging; dist/ is left alone."),
+                    option("--check-command", "Command run with --check.", {"name": "COMMAND", "type": "string"},
+                           default="make check"),
                     option("--keep", "Keep the container for inspection.")],
         "hidden": False, "handler": handle_rehearse,
         "outputSchema": {"type": "object", "additionalProperties": False,
-                         "required": ["product", "target", "platform", "image", "artifacts"],
+                         "required": ["product", "target", "platform", "image", "mode", "artifacts"],
                          "properties": {"product": {"type": "string"}, "target": {"type": "string"},
-                                        "platform": {"type": "string"}, "image": {"type": "string"}, "artifacts": STRINGS}},
+                                        "platform": {"type": "string"}, "image": {"type": "string"},
+                                        "mode": {"enum": ["package", "check"]}, "artifacts": STRINGS}},
     },
     {
         "id": "render", "pattern": ["render"], "usage": "render TEMPLATE OUTPUT [KEY=VALUE...]",

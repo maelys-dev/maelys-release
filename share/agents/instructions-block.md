@@ -1,4 +1,4 @@
-# Maelys release socle (maelys-release @SOCLE_TAG@)
+# Maelys release socle (maelys-release)
 
 This repository publishes through the shared maelys-release workflows. The
 rules below hold for every release-related change; the complete conventions

@@ -52,7 +52,10 @@ The managed files are `.github/workflows/release.yml`,
 `scripts/checkout-dependency.sh`, the maelys-release block of `AGENTS.md`
 and `CLAUDE.md` and the Claude skill. None of them is edited by hand;
 `check` reports any drift, and a product whose declarations no longer
-match the generated workflow. `check`, `preflight` and `rehearse` always
+match the generated workflow. The managed texts carry no socle version;
+it lives in the `uses:` lines of `release.yml` and `ci.yml` alone, so a
+socle tag that changes no text changes nothing in a product (conventions:
+"Compatibility of the managed files"). `check`, `preflight` and `rehearse` always
 answer as the socle `release.yml` pins: run from another checkout, they
 fetch the pinned commit once into `~/.cache/maelys-release/<sha>` and
 re-execute themselves from it, so a sibling checkout that moved on does
@@ -109,8 +112,9 @@ run of a product.
 container: the socle's and the declared packages, the pinned checkouts
 through `scripts/checkout-dependency.sh`, then `scripts/package-release.sh
 TARGET`, on a copy of the working tree. Only `dist/` receives the
-artifacts. It runs before a tag what the workflow would otherwise discover
-on the first one; the defects maelys-oci found this way (a library without
+artifacts. `--check` replays `make check` (`--check-command` overrides)
+instead of packaging, for a Linux-only failure before the push. It runs
+before a tag what the workflow would otherwise discover on the first one; the defects maelys-oci found this way (a library without
 pkg-config files on Debian, a host-dependent contract, objects that did not
 depend on `VERSION`) would all have failed the first release.
 

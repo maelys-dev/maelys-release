@@ -425,6 +425,84 @@ class AdoptTest(unittest.TestCase):
                                         stderr=subprocess.PIPE).returncode, 64)
 
 
+class GoldenTest(unittest.TestCase):
+    """The text a human reads, in full: check conformant, check drifting, preflight not ready."""
+
+    CONTRACT = textwrap.dedent("""\
+        ok       VERSION file
+        ok       scripts/package-release.sh TARGET writing dist/
+        ok       CHANGELOG.md
+        ok       CHANGELOG.md has a dated ## 1.2.3 entry
+        ok       Homebrew formula templates: libmaelys-fixture maelys-fixture
+        ok       pinned dependencies: maelys-system
+        ok       .github/workflows/ci.yml calls check-product.yml of the socle
+        ok       adapter/PACKAGES: linux [pkg-config libjansson-dev] macos [jansson]
+        """)
+    FILES = textwrap.dedent("""\
+        same     .github/workflows/release.yml
+        same     scripts/checkout-dependency.sh
+        same     AGENTS.md
+        same     CLAUDE.md
+        same     .claude/skills/maelys-release/SKILL.md
+        same     .github/workflows/ci.yml
+        """)
+
+    def setUp(self) -> None:
+        self.product = Product()
+        self.dir = str(self.product.dir)
+        self.product.run("adopt", self.dir, "--apply")
+
+    def tearDown(self) -> None:
+        self.product.close()
+
+    def test_check_conformant(self) -> None:
+        completed = self.product.run("check", self.dir)
+        self.assertEqual(completed.stderr, "")
+        self.assertEqual(completed.stdout, self.CONTRACT + self.FILES + "check: maelys-fixture is on maelys-release v9.9.9\n")
+
+    def test_check_drifting(self) -> None:
+        with (self.product.dir / ".github" / "workflows" / "release.yml").open("a") as workflow:
+            workflow.write("\n# edited\n")
+        completed = self.product.run("check", self.dir, expect=2)
+        self.assertEqual(completed.stderr, "")
+        self.assertEqual(completed.stdout, self.CONTRACT
+                         + self.FILES.replace("same     .github/workflows/release.yml", "update   .github/workflows/release.yml")
+                         + "check: maelys-fixture drifts from maelys-release v9.9.9\n")
+
+    def test_check_pinned_elsewhere(self) -> None:
+        workflow = self.product.dir / ".github" / "workflows" / "release.yml"
+        workflow.write_text(workflow.read_text().replace("release.yml@" + "f" * 40 + " # v9.9.9",
+                                                         "release.yml@" + "0" * 40 + " # v0.0.0"))
+        completed = self.product.run("check", self.dir, expect=2)
+        self.assertEqual(completed.stdout, self.CONTRACT
+                         + "drift    maelys-fixture pins maelys-release v0.0.0 (0000000) but this is v9.9.9 (fffffff):"
+                           " run the pinned socle, or adopt --apply to upgrade\n"
+                         + "check: maelys-fixture drifts from maelys-release v9.9.9\n")
+
+    def test_preflight_not_ready(self) -> None:
+        product = self.product
+        product.git(product.dir, "init", "-q")
+        product.git(product.dir, "add", "-A")
+        product.git(product.dir, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "fixture")
+        completed = product.run("preflight", self.dir, expect=2)
+        self.assertEqual(completed.stderr, "")
+        self.assertEqual(completed.stdout, self.CONTRACT + self.FILES + textwrap.dedent("""\
+            check: maelys-fixture is on maelys-release v9.9.9
+            FAIL     tag.gpgsign is not true: git config tag.gpgsign true
+            FAIL     user.signingkey is not set (gpg.format = openpgp); the key must be registered on GitHub
+            note     no v* tag yet
+            ok       tag v1.2.3 is free
+            note     origin is not on GitHub: release environment not checked
+            preflight: maelys-fixture is not ready to tag
+            """))
+
+    def test_texts_carry_no_socle_version(self) -> None:
+        for name in ("AGENTS.md", "CLAUDE.md", ".claude/skills/maelys-release/SKILL.md", "scripts/checkout-dependency.sh"):
+            text = self.product.read(name)
+            self.assertNotIn("v9.9.9", text, name)
+            self.assertNotIn((ROOT / "VERSION").read_text().strip(), text, name)
+
+
 class PreflightTest(unittest.TestCase):
     def setUp(self) -> None:
         self.product = Product()

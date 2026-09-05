@@ -1,5 +1,5 @@
 #!/bin/sh
-# Managed by maelys-release @SOCLE_TAG@ (@SOCLE_VERSION@). Regenerate with
+# Managed by maelys-release. Regenerate with
 # 'maelys-release adopt' of maelys-release; do not edit by hand.
 #
 # usage: scripts/checkout-dependency.sh NAME [DESTINATION]

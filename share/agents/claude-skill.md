@@ -6,7 +6,8 @@ description: Release a Maelys product through the shared maelys-release socle, o
 # Releasing a Maelys product
 
 The product is `@PRODUCT@`; its release mechanics come from maelys-release
-@SOCLE_TAG@ (`docs/conventions.md` there is normative).
+at the version `.github/workflows/release.yml` pins (`docs/conventions.md`
+there is normative).
 
 ## Cut a release
 
@@ -16,7 +17,8 @@ The product is `@PRODUCT@`; its release mechanics come from maelys-release
    that will be tagged.
 2. Merge through a pull request with green CI.
 3. Run `bin/maelys-release preflight .` from a maelys-release checkout at
-   @SOCLE_TAG@; it exits 2 on anything the workflow would refuse (signing
+   (any version: it runs as the pinned one); it exits 2 on anything the
+   workflow would refuse (signing
    configuration, previous tag, existing `vX.Y.Z`, `release` environment
    not limited to tags `v*`).
 4. Tag the merge commit: `git tag -s vX.Y.Z -m "@PRODUCT@ X.Y.Z"`, then

@@ -136,6 +136,24 @@ Claude skill under `.claude/skills/maelys-release/`; they carry the rules
 above in the form an agent needs. Products may add their own rules outside
 the managed block.
 
+## Compatibility of the managed files
+
+A product adopts the socle once and follows it only when it has something
+to say. The managed texts (`AGENTS.md` block, `CLAUDE.md` block, the skill,
+`scripts/checkout-dependency.sh`) carry no socle version; the version
+lives in the `uses:` lines of `release.yml` and `ci.yml` alone. Hence:
+
+- a patch version of the socle (`0.x.Y`, later `X.Y.Z` with Z) changes the
+  workflows only; no managed text moves, and a product that stays on its
+  pin stays conformant to `check`;
+- a minor version may change a managed text; its changelog entry names what
+  the product must change by hand, if anything, and the product re-adopts
+  at its next release;
+- a major version may break the product contract (the files `adopt` reads);
+  the changelog says how to migrate.
+
+The 1.0 tag will make this rule a promise; until then it is the practice.
+
 ## Adopting and upgrading
 
 ```sh
