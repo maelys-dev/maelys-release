@@ -253,8 +253,10 @@ runners and secrets are normative in [docs/conventions.md](docs/conventions.md).
   for a developer machine: clones the tap, copies the rendered formula,
   runs `brew style`, and shows the diff; with `--apply` it commits with the
   configured signing key (`TAP_SIGNING_KEY`, `TAP_TOKEN`, `TAP_REPOSITORY`)
-  and pushes. The workflows inline these steps so a release depends on
-  nothing but the caller's repository.
+  and pushes, rebasing onto the tap and pushing again when another
+  publication landed first (three attempts, reported as `pushAttempts`).
+  The workflows inline these steps so a release depends on nothing but the
+  caller's repository.
 - `declarations DIR` returns the product contract as data; the CI job of
   `check-product.yml` reads it instead of repeating it.
 - `vendor` refreshes `bin/maelys_cli.py` from maelys-cli at
@@ -288,7 +290,9 @@ The generated caller workflow also accepts `workflow_dispatch` with a `tag`
 input. It rebuilds the existing signed tag through the current socle, uploads
 the packages to a protected draft release, verifies them, publishes the
 release, then runs the tap jobs. Use it after adopting a corrected socle when
-a release or its formula failed; never re-tag for that.
+a release or its formula failed; never re-tag for that. A tap push rejected
+because another product published first is retried by the job itself; the
+replay is for a job that failed or was cancelled.
 
 ```bash
 gh workflow run release.yml --repo maelys-dev/PRODUCT -f tag=vX.Y.Z

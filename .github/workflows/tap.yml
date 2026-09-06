@@ -6,6 +6,11 @@ name: homebrew tap (reusable)
 # shared Homebrew tap. Without tap credentials the publish step renders,
 # lints, prints the diff and succeeds, so a release never fails on a missing
 # secret. The formula keeps its source URL: bottles are an addition.
+#
+# Every product pushes to the same tap. The publish job runs one at a time
+# per tap within the calling repository (concurrency group), and its push
+# fetches, rebases and retries when another product's formula landed first,
+# since GitHub scopes a concurrency group to one repository.
 on:
   workflow_call:
     inputs:
@@ -161,6 +166,15 @@ jobs:
     needs: [render, bottle]
     if: always() && needs.render.result == 'success' && (needs.bottle.result == 'success' || needs.bottle.result == 'skipped')
     runs-on: macos-15
+    # One publication at a time per tap in this repository: the formula jobs
+    # of one release, or a replay during a release, wait for each other
+    # instead of racing on the push. GitHub scopes the group to the
+    # repository and keeps one pending job per group, so another product's
+    # publication still runs concurrently; the push step rebases and retries
+    # for that case.
+    concurrency:
+      group: tap-${{ inputs.tap_repository }}
+      cancel-in-progress: false
     env:
       HOMEBREW_NO_AUTO_UPDATE: "1"
       HAS_TAP_TOKEN: ${{ secrets.tap_token != '' }}
@@ -206,6 +220,33 @@ jobs:
           ACTOR: ${{ github.actor }}
         run: |
           set -euo pipefail
+          # Push HEAD of the clone DIR to BRANCH of the tap. A rejected push
+          # means another publication landed first: fetch, rebase the commit
+          # onto the branch and push again, at most ATTEMPTS times. Each
+          # product owns its own Formula/NAME.rb, so the rebase conflicts only
+          # when the same formula is published twice at once, which the
+          # signed-tag model excludes; then the rebase is aborted and the
+          # publication fails instead of guessing.
+          push_rebased() {
+            local dir="$1" branch="$2" attempts="$3" attempt
+            for ((attempt = 1; attempt <= attempts; attempt++)); do
+              if git -C "$dir" push -q origin "HEAD:$branch"; then
+                echo "pushed to $branch on attempt $attempt of $attempts"
+                return 0
+              fi
+              echo "push to $branch rejected on attempt $attempt of $attempts"
+              if [ "$attempt" -lt "$attempts" ]; then
+                git -C "$dir" fetch -q origin "$branch"
+                if ! git -C "$dir" rebase -q "origin/$branch"; then
+                  git -C "$dir" rebase --abort
+                  echo "rebase onto origin/$branch conflicts: the tap received another change of the same formula" >&2
+                  return 1
+                fi
+              fi
+            done
+            echo "push to $branch rejected $attempts times" >&2
+            return 1
+          }
           tag="${INPUT_TAG:-${GITHUB_REF_NAME}}"
           tmp="$(mktemp -d)"
           if [ "$HAS_TAP_TOKEN" = "true" ]; then
@@ -225,16 +266,19 @@ jobs:
             git -C "$tmp/tap" diff --cached --stat
             exit 0
           fi
-          sign=()
+          # Identity and signing live in the clone's configuration, so the
+          # commit and any rebase of it are signed alike.
+          git -C "$tmp/tap" config user.name "${ACTOR}"
+          git -C "$tmp/tap" config user.email "${ACTOR}@users.noreply.github.com"
           if [ -n "$TAP_SIGNING_KEY" ]; then
             printf '%s\n' "$TAP_SIGNING_KEY" >"$tmp/signing-key"
             chmod 0600 "$tmp/signing-key"
-            sign=(-c gpg.format=ssh -c "user.signingkey=$tmp/signing-key" -c commit.gpgsign=true)
+            git -C "$tmp/tap" config gpg.format ssh
+            git -C "$tmp/tap" config user.signingkey "$tmp/signing-key"
+            git -C "$tmp/tap" config commit.gpgsign true
           fi
-          git -C "$tmp/tap" "${sign[@]}" \
-            -c "user.name=${ACTOR}" -c "user.email=${ACTOR}@users.noreply.github.com" \
-            commit -q -m "Update ${PRODUCT} to ${tag#v}"
-          git -C "$tmp/tap" push -q origin HEAD:main
+          git -C "$tmp/tap" commit -q -m "Update ${PRODUCT} to ${tag#v}"
+          push_rebased "$tmp/tap" main 3
           echo "brew install ${TAP_REPOSITORY%/homebrew-*}/${TAP_REPOSITORY#*/homebrew-}/${PRODUCT}"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
