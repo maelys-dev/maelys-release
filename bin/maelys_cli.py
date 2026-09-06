@@ -36,7 +36,9 @@ import fcntl
 import json
 import os
 import re
+import shlex
 import stat
+import subprocess
 import sys
 import tempfile
 from typing import Any, Callable, Optional
@@ -55,11 +57,12 @@ EXIT_CODES = {"0": "command completed", "1": "execution failed", "2": "valid rep
 STABLE_CODES = ("INVALID_COMMAND", "VALIDATION_FAILED", "PRECONDITION_FAILED", "POLICY_FAILED", "ACCESS_DENIED",
                 "NOT_FOUND", "IO_FAILED", "PROCESS_FAILED", "PROTOCOL_FAILED", "UNSUPPORTED", "UNEXPECTED")
 IDENTIFIER = re.compile(r"^[a-z][a-z0-9.-]*$")
-PREFIX_GRAMMAR = re.compile(r"^[a-z](?:[a-z0-9.-]*[a-z0-9-])?$")
+PREFIX_GRAMMAR = re.compile(r"^[a-z]([a-z0-9.-]*[a-z0-9-])?$")
 FORMATS = ("text", "json", "jsonl")
 COLORS = ("auto", "always", "never")
 SHELLS = ("bash", "zsh", "fish")
-RENDERING = ("--format", "--json", "--compact", "--pretty", "--color")
+RENDERING = ("--format", "--json", "--compact", "--pretty", "--color", "--pager")
+TRISTATE = ("auto", "always", "never")
 SIZE_UNITS = {"": 1, "K": 1024, "M": 1024 ** 2, "G": 1024 ** 3, "T": 1024 ** 4}
 DURATION_UNITS = {"ms": 1, "s": 1000, "m": 60_000, "h": 3_600_000, "d": 86_400_000}
 
@@ -70,6 +73,26 @@ def environment_format() -> str:
     """MAELYS_CLI_FORMAT selects json or text; any other value is ignored, as in C."""
     value = os.environ.get("MAELYS_CLI_FORMAT", "")
     return value if value in ("json", "text") else "text"
+
+
+def _terminal_safe(text: str) -> str:
+    """Render control characters visibly in human diagnostics."""
+    escaped = []
+    for character in text:
+        code = ord(character)
+        if character == "\n":
+            escaped.append("\\n")
+        elif character == "\r":
+            escaped.append("\\r")
+        elif character == "\t":
+            escaped.append("\\t")
+        elif code < 0x20 or 0x7f <= code <= 0x9f:
+            escaped.append(f"\\x{code:02x}")
+        elif code in (0x061c, 0x200e, 0x200f, 0x2028, 0x2029) or 0x202a <= code <= 0x202e or 0x2066 <= code <= 0x2069:
+            escaped.append(f"\\u{code:04x}")
+        else:
+            escaped.append(character)
+    return "".join(escaped)
 
 
 class Failure(Exception):
@@ -221,6 +244,11 @@ GLOBAL_OPTIONS = [
     flag("--pretty", "--pretty=false selects compact JSON."),
     flag("--non-interactive", "Never prompt; fail instead of asking a question."),
     option("--color", "Control ANSI colors on terminals.", argument("VALUE", "choice", COLORS), default="auto"),
+    option("--progress", "Show the progress of a long run on stderr in text mode: auto only when stderr is a terminal.",
+           argument("VALUE", "choice", TRISTATE), default="auto"),
+    flag("--verbose", "Add the details of the run on stderr in text mode; silent in JSON."),
+    option("--pager", "Page the text rendering when stdout is a terminal; never in a pipe, in JSON or under --non-interactive.",
+           argument("VALUE", "choice", TRISTATE), default="auto"),
     flag("--help", "Show the help of the selected command."),
 ]
 INVARIANTS = [
@@ -243,8 +271,10 @@ def parse_value(kind: str, text: str, spec: dict, where: str, usage: str) -> Any
             raise refuse("true or false")
         return text == "true"
     if kind == "string":
-        # `pattern` documents the value in describe; the parser does not
-        # enforce it, as libmaelys_cli does not.
+        # The value MUST match the declared pattern (spec 2.3), written in the
+        # common subset of ECMA-262 and POSIX ERE; search semantics, as ERE.
+        if "pattern" in spec and not re.search(spec["pattern"], text):
+            raise refuse(f"a value matching {spec['pattern']}")
         return text
     if kind in ("integer", "unsigned"):
         if not re.fullmatch(r"-?\d+" if kind == "integer" else r"\d+", text):
@@ -263,6 +293,8 @@ def parse_value(kind: str, text: str, spec: dict, where: str, usage: str) -> Any
     elif kind == "path":
         if not text:
             raise refuse("a non-empty path")
+        if "pattern" in spec and not re.search(spec["pattern"], text):
+            raise refuse(f"a value matching {spec['pattern']}")
         return text
     elif kind == "absolute-path":
         if not text.startswith("/"):
@@ -292,6 +324,19 @@ def parse_value(kind: str, text: str, spec: dict, where: str, usage: str) -> Any
         bounds = f"between {spec.get('minimum', '-inf')} and {spec.get('maximum', '+inf')}"
         raise Failure("VALIDATION_FAILED", f"{where} must be {bounds}, not {text}.", f"Use '{usage}'.")
     return value
+
+
+def _parse_flag(value: Optional[str], name: str, usage: str) -> bool:
+    """Parse the explicit spellings accepted by the C flag parser."""
+    if value is None:
+        return True
+    if value in ("true", "yes", "on", "1"):
+        return True
+    if value in ("false", "no", "off", "0"):
+        return False
+    raise Failure("VALIDATION_FAILED",
+                  f"Option {name} takes true, false, yes, no, on, off, 1 or 0, not '{value}'.",
+                  f"Use '{usage}'.")
 
 
 # ---- files -----------------------------------------------------------------------
@@ -512,11 +557,67 @@ def write_file_atomic(path: str, data: bytes, mode: int, policy: str) -> None:
 
 # ---- the program ------------------------------------------------------------------
 
+def record_text(records: list) -> str:
+    """The text form of records (spec 2.3, section 7): one tab-separated row per
+    record, the columns being the union of the member names sorted by code
+    point, a missing member an empty field, strings unquoted and escaped,
+    every other value compact JSON. The same rows on a terminal and in a pipe."""
+    columns = sorted({key for record in records if isinstance(record, dict) for key in record})
+
+    def cell(value: Any) -> str:
+        if isinstance(value, str):
+            escapes = {"\\": "\\\\", "\t": "\\t", "\r": "\\r", "\n": "\\n"}
+            return "".join(escapes.get(char, f"\\u{ord(char):04x}") if ord(char) < 32 or char == "\\"
+                           or ord(char) == 127 else char for char in value)
+        return json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+
+    return "".join("\t".join(cell(record[key]) if key in record else "" for key in columns) + "\n"
+                   for record in records if isinstance(record, dict))
+
+
+def pager_command() -> Optional[list]:
+    """The pager PAGER names, split with POSIX quoting and no expansion; ["less"]
+    when unset; None when disabled (empty or blank) or unparseable."""
+    setting = os.environ.get("PAGER")
+    if setting is None:
+        return ["less"]
+    try:
+        words = shlex.split(setting)
+    except ValueError:
+        return None
+    return words or None
+
+
+def page_text(text: str, invocation: "Invocation") -> bool:
+    """Sends the text rendering through the pager when spec 2.3 section 5 allows
+    it: text mode, stdout a terminal, --pager not never, no --non-interactive.
+    Returns True when the pager consumed the text; the caller writes it to
+    stdout otherwise. The pager is the one program resolved through PATH: the
+    user's own choice, started only on that user's terminal."""
+    if invocation.format != "text" or invocation.pager == "never" or invocation.non_interactive:
+        return False
+    if invocation.command["outputMode"] == "protocol-stream" or not sys.stdout.isatty():
+        return False
+    words = pager_command()
+    if not words:
+        return False
+    env = dict(os.environ)
+    if "PAGER" not in env:
+        env.setdefault("LESS", "FRX")
+    sys.stdout.flush()
+    try:
+        subprocess.run(words, input=text, text=True, check=False, env=env)
+    except (OSError, ValueError):
+        return False
+    return True
+
+
 class Invocation:
     """What a handler receives: the resolved command and its validated input."""
 
     def __init__(self, program: "Program", command: dict, operands: list, options: dict,
-                 fmt: str, compact: bool, non_interactive: bool, raw_operands: list) -> None:
+                 fmt: str, compact: bool, non_interactive: bool, raw_operands: list,
+                 verbose: bool = False, progress: str = "auto", pager: str = "auto") -> None:
         self.program = program
         self.command = command
         self.operands = operands
@@ -525,6 +626,44 @@ class Invocation:
         self.format = fmt
         self.compact = compact
         self.non_interactive = non_interactive
+        self.verbose = verbose and fmt == "text"
+        self.progress = progress
+        self.pager = pager
+        self._progress_shown = False
+
+    @property
+    def progress_wanted(self) -> bool:
+        """Text mode and --progress always, or auto with stderr a terminal."""
+        if self.format != "text" or self.progress == "never":
+            return False
+        return self.progress == "always" or sys.stderr.isatty()
+
+    def detail(self, message: str) -> None:
+        """One detail line `PROGRAM: message` on stderr when --verbose is active in
+        text mode (maelys_cli_detail); nothing in JSON; never a failure rendering."""
+        if not self.verbose:
+            return
+        self.progress_done()
+        sys.stderr.write(f"{self.program.program}: {_terminal_safe(message)}\n")
+        sys.stderr.flush()
+
+    def show_progress(self, message: str) -> None:
+        """Transient progress (maelys_cli_progress): rewritten in place on a terminal
+        and erased by progress_done(); one line per call on another stderr."""
+        if not self.progress_wanted:
+            return
+        if sys.stderr.isatty():
+            sys.stderr.write(f"\r{_terminal_safe(message)}\033[K")
+            self._progress_shown = True
+        else:
+            sys.stderr.write(f"{_terminal_safe(message)}\n")
+        sys.stderr.flush()
+
+    def progress_done(self) -> None:
+        if self._progress_shown:
+            sys.stderr.write("\r\033[K")
+            sys.stderr.flush()
+            self._progress_shown = False
 
     def option(self, name: str, default: Any = None) -> Any:
         """The typed value of an option, its declared default, or `default`."""
@@ -579,6 +718,13 @@ class Program:
         for command in commands:
             if command["id"] in seen or any(command["id"] == built["id"] for built in self.catalog):
                 raise ValueError(f"duplicate command identifier {command['id']!r}")
+            for item in command["options"]:
+                pattern = item.get("argument", {}).get("pattern")
+                if pattern is not None:
+                    try:
+                        re.compile(pattern)
+                    except re.error as error:
+                        raise ValueError(f"{command['id']}: {item['long']} pattern is invalid: {error}") from None
             seen.add(command["id"])
             self._check_references(command)
             self.catalog.append(command)
@@ -664,7 +810,7 @@ class Program:
 
     def warn(self, message: str) -> None:
         """A diagnostic on stderr, `program: warning: message`, as maelys_cli_warn(); never stdout."""
-        sys.stderr.write(f"{self.program}: warning: {message}\n")
+        sys.stderr.write(f"{self.program}: warning: {_terminal_safe(message)}\n")
         sys.stderr.flush()
 
     def guide(self) -> str:
@@ -775,6 +921,8 @@ class Program:
                 candidates = list(FORMATS)
             elif previous[consumed:] and previous[-1] == "--color":
                 candidates = list(COLORS)
+            elif previous[consumed:] and previous[-1] in ("--progress", "--pager"):
+                candidates = list(TRISTATE)
             else:
                 if current.startswith("-") or not current:
                     candidates.extend(item["long"] for item in command["options"] + GLOBAL_OPTIONS
@@ -835,6 +983,8 @@ class Program:
         if command is None:
             raise Failure("INVALID_COMMAND", f"Unknown command '{' '.join(words)}'.",
                           "Run describe --summary and use one of the listed command identifiers.")
+        # A failure envelope names the resolved command from here on (section 7).
+        self.resolved_command_id = command["id"]
         if command["unavailable"] is not None:
             raise Failure("UNSUPPORTED", f"Command '{command['id']}' is not available in this build: {command['unavailable']}",
                           "Use another build of the product, or another command.")
@@ -843,6 +993,9 @@ class Program:
         fmt = environment_format()
         compact = False
         non_interactive = False
+        verbose = False
+        progress = "auto"
+        pager = "auto"
         rendering: list = []
         help_requested = False
         options: dict = {}
@@ -857,17 +1010,23 @@ class Program:
             if name == "--format":
                 fmt = parse_value("choice", value or "", {"choices": list(FORMATS)}, "Option --format", usage)
             elif name == "--json":
-                fmt = "json"
+                fmt = "json" if _parse_flag(value, name, usage) else "text"
             elif name == "--compact":
-                compact = value != "false"
+                compact = _parse_flag(value, name, usage)
             elif name == "--pretty":
-                compact = value == "false"
+                compact = not _parse_flag(value, name, usage)
             elif name == "--non-interactive":
-                non_interactive = value != "false"
+                non_interactive = _parse_flag(value, name, usage)
             elif name == "--color":
                 parse_value("choice", value or "", {"choices": list(COLORS)}, "Option --color", usage)
+            elif name == "--progress":
+                progress = parse_value("choice", value or "", {"choices": list(TRISTATE)}, "Option --progress", usage)
+            elif name == "--verbose":
+                verbose = _parse_flag(value, name, usage)
+            elif name == "--pager":
+                pager = parse_value("choice", value or "", {"choices": list(TRISTATE)}, "Option --pager", usage)
             elif name == "--help":
-                help_requested = True
+                help_requested = _parse_flag(value, name, usage)
             elif name in ("--dry-run", "--plan") and isinstance(command["effect"], dict):
                 raise Failure("VALIDATION_FAILED", f"Option {name} is not supported by '{command['id']}': it plans by default.",
                               "Run without --apply to plan, then add --apply to write.")
@@ -887,18 +1046,21 @@ class Program:
                     else:
                         options[name] = typed
                 else:
-                    options[name] = value != "false"
+                    options[name] = _parse_flag(value, name, usage)
         # dependencies, conflicts, groups; then required; then operands
+        def enabled(option_name: str) -> bool:
+            return option_name in options and options[option_name] is not False
+
         for definition in command["options"]:
             name = definition["long"]
-            if name not in options:
+            if not enabled(name):
                 continue
             for other in definition["requires"]:
-                if other not in options and other not in seen:
+                if not enabled(other):
                     raise Failure("VALIDATION_FAILED", f"Option {name} requires {other}.", f"Use '{usage}'.")
             for other in definition["conflictsWith"]:
                 if other.startswith("--"):
-                    if other in options or other in seen:
+                    if enabled(other):
                         raise Failure("VALIDATION_FAILED", f"Option {name} conflicts with {other}.", f"Use '{usage}'.")
                 else:
                     position = next((i for i, item in enumerate(command["operands"]) if item["name"] == other), None)
@@ -910,7 +1072,7 @@ class Program:
             if "group" in definition:
                 groups.setdefault(definition["group"], []).append(definition["long"])
         for members in groups.values():
-            present = [name for name in members if name in options]
+            present = [name for name in members if enabled(name)]
             if present and len(present) != len(members):
                 raise Failure("VALIDATION_FAILED", f"Options {', '.join(members)} are given together or not at all.",
                               f"Use '{usage}'.")
@@ -921,7 +1083,7 @@ class Program:
         if help_requested:
             help_command = self.command_by_id("help")
             return Invocation(self, help_command, [command["id"]], {}, fmt, compact, non_interactive,
-                              [command["id"]]), help_command
+                              [command["id"]], verbose, progress, pager), help_command
         operands: list = []
         if not command["passthrough"]:
             required = sum(1 for item in command["operands"] if item["required"])
@@ -941,7 +1103,8 @@ class Program:
         if fmt == "jsonl" and command["outputMode"] != "json-records":
             raise Failure("VALIDATION_FAILED", f"--format jsonl is accepted only by json-records commands, not '{command['id']}'.",
                           "Use --format json.")
-        return Invocation(self, command, operands, options, fmt, compact, non_interactive, raw_operands), command
+        return Invocation(self, command, operands, options, fmt, compact, non_interactive, raw_operands,
+                          verbose, progress, pager), command
 
     # ---- rendering ----
 
@@ -964,14 +1127,8 @@ class Program:
         if command["id"] == "version":
             return f"{self.program} {self.version}\n"
         if command["outputMode"] == "json-records":
-            return "".join(self._record_line(record) for record in data.get("records", []))
+            return record_text(data.get("records", []))
         return json.dumps(data, indent=2, ensure_ascii=False) + "\n"
-
-    @staticmethod
-    def _record_line(record: Any) -> str:
-        if isinstance(record, dict) and len(record) == 1:
-            return f"{next(iter(record.values()))}\n"
-        return json.dumps(record, separators=(",", ":"), ensure_ascii=False) + "\n"
 
     @staticmethod
     def _colored(text: str, argv: list) -> str:
@@ -985,6 +1142,7 @@ class Program:
     def main(self, argv: Optional[list] = None) -> int:
         argv = list(sys.argv[1:] if argv is None else argv)
         command_id = ""
+        self.resolved_command_id = ""
         fmt = environment_format()
         for index, word in enumerate(argv):
             if word in ("--json", "--format=json", "--format=jsonl"):
@@ -999,8 +1157,11 @@ class Program:
                 result = command["handler"](invocation)
                 return int(result[1] if isinstance(result, tuple) else result)
             data, exit_code = command["handler"](invocation)
+            invocation.progress_done()
             if fmt == "text":
-                sys.stdout.write(self.render_text(command, data))
+                text = self.render_text(command, data)
+                if not page_text(text, invocation):
+                    sys.stdout.write(text)
             elif fmt == "jsonl":
                 for record in data.get("records", []):
                     sys.stdout.write(json.dumps(record, separators=(",", ":"), ensure_ascii=False) + "\n")
@@ -1015,19 +1176,23 @@ class Program:
             if failure.issues:
                 error["issues"] = failure.issues
             if fmt == "text":
-                sys.stderr.write(self._colored(f"{self.program}: [{failure.code}] {failure.message}", argv) + "\n")
+                sys.stderr.write(self._colored(
+                    f"{self.program}: [{failure.code}] {_terminal_safe(failure.message)}", argv) + "\n")
                 if failure.hint:
-                    sys.stderr.write(f"Hint: {failure.hint}\n")
+                    sys.stderr.write(f"Hint: {_terminal_safe(failure.hint)}\n")
             else:
-                sys.stderr.write(self.envelope(command_id or "unknown", False, EXIT_FAILURE, error, compact))
+                sys.stderr.write(self.envelope(command_id or self.resolved_command_id or "unknown", False,
+                                               EXIT_FAILURE, error, compact))
             return EXIT_FAILURE
         except OSError as error:
             # An OSError a handler did not convert: same table as maelys_cli_fail_file().
             failure = file_failure(error)
             payload = {"code": failure.code, "message": failure.message, "hint": failure.hint}
             if fmt == "text":
-                sys.stderr.write(self._colored(f"{self.program}: [{failure.code}] {failure.message}", argv) + "\n")
-                sys.stderr.write(f"Hint: {failure.hint}\n")
+                sys.stderr.write(self._colored(
+                    f"{self.program}: [{failure.code}] {_terminal_safe(failure.message)}", argv) + "\n")
+                sys.stderr.write(f"Hint: {_terminal_safe(failure.hint)}\n")
             else:
-                sys.stderr.write(self.envelope(command_id or "unknown", False, EXIT_FAILURE, payload, compact))
+                sys.stderr.write(self.envelope(command_id or self.resolved_command_id or "unknown", False,
+                                               EXIT_FAILURE, payload, compact))
             return EXIT_FAILURE

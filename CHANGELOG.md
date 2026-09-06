@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.15.3 — 2026-09-06
+
+- `maelys-cli` is pinned at v0.5.19 and the vendored Python framework is
+  refreshed from that commit: the trunk options `--progress`, `--verbose` and
+  `--pager` exist on every command and in `globalOptions`, `pattern` is
+  enforced by the parser as POSIX ERE, and `describe --summary` no longer
+  carries `globalOptions`, `invariants` and `output`.
+- `agent-cli-spec` is pinned at v2.3.1, the contract the framework is held
+  to; the conformance test runs that kit.
+
 ## 0.15.2 — 2026-09-06
 
 - Two products releasing at the same time raced on `maelys-dev/homebrew-tap`:
