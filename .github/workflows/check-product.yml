@@ -38,16 +38,6 @@ on:
         required: false
         type: string
         default: ""
-      macos_runner:
-        description: >-
-          JSON runner for the macOS leg: a label string such as "macos-15"
-          or a label array such as ["self-hosted","macOS","ARM64"]. Used
-          only on a private repository; a public one always runs macos-15,
-          since this job is reachable from a pull request and a self-hosted
-          runner must never execute an outside contributor's code.
-        required: false
-        type: string
-        default: '["self-hosted","macOS","maelys"]'
 
 permissions:
   contents: read
@@ -57,14 +47,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - id: ubuntu-26.04
-            runner: '"ubuntu-26.04"'
-          - id: ubuntu-26.04-arm
-            runner: '"ubuntu-26.04-arm"'
-          - id: macos
-            runner: ${{ github.event.repository.private && inputs.macos_runner || '"macos-15"' }}
-    runs-on: ${{ fromJSON(matrix.runner) }}
+        runner: [ubuntu-26.04, ubuntu-26.04-arm, macos-15]
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -108,7 +92,7 @@ jobs:
         shell: bash
         run: ${{ inputs.check_command }}
       - name: Release socle drift
-        if: matrix.id == 'ubuntu-26.04'
+        if: matrix.runner == 'ubuntu-26.04'
         shell: bash
         # The socle pinned by release.yml is the pin of record: check from
         # that checkout regenerates the managed files and fails on any drift,

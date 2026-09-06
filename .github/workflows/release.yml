@@ -49,13 +49,16 @@ on:
         default: '"ubuntu-26.04-arm"'
       macos_runner:
         description: >-
-          This job builds only after `verify` accepts a GitHub-verified
-          signed tag, so a self-hosted runner is safe here on a public
-          repository too: the trust boundary is the signature, not who can
-          open a pull request.
+          JSON runner for the macOS build: a label string such as
+          "macos-15", or a label array for a self-hosted runner. The
+          self-hosted default applies only on a private repository (one
+          runner per repository, registered at the repository and never
+          the organization); a public repository always runs macos-15,
+          keeping a self-hosted machine off the org's public automation
+          surface regardless of this job's own tag-signature gate.
         required: false
         type: string
-        default: '["self-hosted","macOS","maelys"]'
+        default: '["self-hosted","macOS","ARM64"]'
       release_environment:
         required: false
         type: string
@@ -130,6 +133,7 @@ jobs:
 
   build:
     needs: [verify, prepare]
+    environment: ${{ inputs.release_environment }}
     strategy:
       fail-fast: false
       matrix:
@@ -138,7 +142,7 @@ jobs:
             target: linux-x86_64
           - runner: ${{ inputs.linux_arm64_runner }}
             target: linux-arm64
-          - runner: ${{ inputs.macos_runner }}
+          - runner: ${{ github.event.repository.private && inputs.macos_runner || '"macos-15"' }}
             target: macos-arm64
     runs-on: ${{ fromJSON(matrix.runner) }}
     permissions:

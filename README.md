@@ -217,30 +217,32 @@ replaces the other.
 ## Runners
 
 `macos_runner`, `linux_x86_64_runner` and `linux_arm64_runner` are JSON
-inputs: a label string, or a label array for a self-hosted runner. GitHub
-bills a macOS runner at several times a Linux minute, so `release.yml`'s
-`build` job and `tap.yml`'s `render` and `publish` jobs default
-`macos_runner` to a self-hosted label array (`self-hosted,macOS,maelys` by
-convention): all three run only after `verify` accepts a GitHub-verified
-signed tag (or a `workflow_dispatch` replay of one), so the trust boundary
-is the signature, not who can open a pull request, and this holds on a
-public repository too.
+inputs: a label string such as `"macos-15"`, or a label array such as
+`["self-hosted","macOS","ARM64"]` for a self-hosted runner. A self-hosted
+runner serves exactly one private repository, registered at the repository
+and never the organization; its labels describe a hardware capability, not
+a product. A public repository never uses one: GitHub bills a macOS minute
+at several times a Linux one, but that cost is the price of keeping a
+self-hosted machine off the org's public automation surface, so the
+recommendation holds regardless of a job's own trigger. See the runner
+policy and inventory in maelys-platform.
 
-`check-product.yml`'s `check` job is reachable from a bare `pull_request`,
-so its `macos_runner` input keeps that self-hosted default only on a
-private repository (`github.event.repository.private`); on a public one
-the macOS leg always runs `macos-15`, since a self-hosted runner must never
-execute an outside contributor's code. `tap.yml`'s `bottle` job (the
-`bottles` input) is unaffected: it stays on GitHub-hosted runners named for
-the macOS releases the bottle targets (`macos-15`, `macos-26`), because a
-Homebrew bottle is tied to the OS version it was built on, not to a
-generic self-hosted machine's version.
+`release.yml`'s `build` job and `tap.yml`'s `render` and `publish` jobs
+default `macos_runner` to a self-hosted label array, gated on a private
+repository (`github.event.repository.private`) and on the
+`release_environment` input (`release` by default); a public repository
+always runs `macos-15` there too. All three jobs are reachable only from a
+GitHub-verified signed tag (or a `workflow_dispatch` replay of one), never
+from a `pull_request`, matching the policy's rule for what a self-hosted
+runner may run.
 
-A self-hosted runner is registered once per label set, typically at the
-`maelys-dev` organization level so every repository can see it, as an
-ephemeral runner (`--ephemeral` or a hosted-runner controller) so one job's
-state cannot leak into the next; see the runner inventory in
-maelys-platform.
+`check-product.yml`'s `check` job keeps `macos-15` unconditionally: it is
+reachable from a bare `pull_request`, which a self-hosted runner must never
+execute regardless of repository visibility. `tap.yml`'s `bottle` job (the
+`bottles` input) is also unaffected: it stays on GitHub-hosted runners
+named for the macOS releases the bottle targets (`macos-15`, `macos-26`),
+because a Homebrew bottle is tied to the OS version it was built on, not to
+a self-hosted machine's version.
 
 ## Homebrew tap
 
