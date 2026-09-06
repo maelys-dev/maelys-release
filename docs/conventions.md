@@ -78,6 +78,21 @@ rest.
   bottles only, from a private repository, and say so in their formula.
 - The tap is `maelys-dev/homebrew-tap`; it is updated only by the release
   workflows or by `maelys-release tap --apply`, with signed commits.
+- Every product publishes into that one tap, so publications overlap. The
+  publish job of `tap.yml` runs one at a time per tap within a repository
+  (concurrency group `tap-<tap repository>`, never cancelling a running
+  job): the formula jobs of one release, or a replay during a release, wait
+  for each other. GitHub scopes a concurrency group to one repository and
+  keeps one pending job per group, so two products still publish at the
+  same time, and a third publication of one repository queued at once
+  cancels the pending one. The push therefore fetches, rebases the formula
+  commit onto the tap's `main` and pushes again, three attempts at most,
+  each logged; identity and signing live in the clone's configuration, so
+  the rebased commit is signed like the original. Each product owns its
+  `Formula/<name>.rb`, so the rebase conflicts only when the same formula is
+  published twice at once, which the signed-tag model excludes; the rebase
+  is then aborted and the job fails. `maelys-release tap --apply` retries
+  the same way.
 - A formula that depends on another Maelys formula (`depends_on
   "libmaelys-sys"`) is published after it: the bottle job resolves
   `depends_on` from the shared tap, so the dependency's formula must be in
@@ -180,7 +195,9 @@ The generated caller workflow also accepts `workflow_dispatch` with a `tag`
 input. It rebuilds the existing signed tag through the current socle, uploads
 the packages to a protected draft release, verifies them, publishes the
 release, then runs the tap jobs. Use it after adopting a corrected socle when
-a release or its formula failed; never re-tag for that.
+a release or its formula failed; never re-tag for that. A tap push rejected
+because another product published first is retried by the job itself; the
+replay is for a job that failed or was cancelled.
 
 ```bash
 gh workflow run release.yml --repo maelys-dev/PRODUCT -f tag=vX.Y.Z

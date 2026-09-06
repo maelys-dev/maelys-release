@@ -765,6 +765,32 @@ def handle_render(invocation: Invocation) -> tuple[dict, int]:
     return {"template": str(template), "output": str(output), "placeholders": sorted(mapping)}, EXIT_OK
 
 
+def push_rebased(tap: pathlib.Path, branch: str, attempts: int = 3) -> int:
+    """Push HEAD of the tap clone to BRANCH; after a rejected push, fetch,
+    rebase onto the branch and push again, ATTEMPTS times at most.
+
+    Returns the number of attempts the push took. Every product owns its own
+    Formula/NAME.rb, so the rebase conflicts only when the same formula is
+    published twice at once, which the signed-tag model excludes: the rebase
+    is then aborted and the publication fails instead of guessing. The
+    publish step of tap.yml does the same in shell.
+    """
+    pushed = None
+    for attempt in range(1, attempts + 1):
+        pushed = run(["git", "push", "-q", "origin", f"HEAD:{branch}"], cwd=tap)
+        if pushed.returncode == 0:
+            return attempt
+        if attempt == attempts:
+            break
+        git("fetch", "-q", "origin", branch, cwd=tap)
+        if run(["git", "rebase", "-q", f"origin/{branch}"], cwd=tap).returncode != 0:
+            run(["git", "rebase", "--abort"], cwd=tap)
+            raise Failure("PROCESS_FAILED", f"Rebasing onto origin/{branch} conflicts: the tap received another"
+                          " change of the same formula.", "Read the tap's history of the formula, then publish again.")
+    raise Failure("PROCESS_FAILED", f"git push to {branch} of the tap was rejected {attempts} times:"
+                  f" {pushed.stderr.strip()}", "Check the tap's branch rules and the credentials, then publish again.")
+
+
 def handle_tap(invocation: Invocation) -> tuple[dict, int]:
     """Plan or publish one rendered formula into the tap with a signed commit."""
     product, tag, formula = invocation.operands[0], invocation.operands[1], pathlib.Path(invocation.operands[2])
@@ -799,19 +825,22 @@ def handle_tap(invocation: Invocation) -> tuple[dict, int]:
         data["diff"] = git("diff", "--cached", cwd=tap)
         if not apply:
             return data, EXIT_OK
-        sign: list[str] = []
+        # Identity and signing live in the clone's configuration, so the
+        # commit and any rebase of it are signed alike.
+        git("config", "user.name", os.environ.get("GIT_AUTHOR_NAME", PROGRAM), cwd=tap)
+        git("config", "user.email", os.environ.get("GIT_AUTHOR_EMAIL", f"{PROGRAM}@users.noreply.github.com"), cwd=tap)
         key = os.environ.get("TAP_SIGNING_KEY", "")
         if key:
             key_file = pathlib.Path(temp) / "signing-key"
             key_file.write_text(key + "\n", encoding="utf-8")
             key_file.chmod(0o600)
-            sign = ["-c", "gpg.format=ssh", "-c", f"user.signingkey={key_file}", "-c", "commit.gpgsign=true"]
-        author = os.environ.get("GIT_AUTHOR_NAME", PROGRAM)
-        email = os.environ.get("GIT_AUTHOR_EMAIL", f"{PROGRAM}@users.noreply.github.com")
-        git(*sign, "-c", f"user.name={author}", "-c", f"user.email={email}",
-            "commit", "-q", "-m", f"Update {product} to {version}", cwd=tap)
+            git("config", "gpg.format", "ssh", cwd=tap)
+            git("config", "user.signingkey", str(key_file), cwd=tap)
+            git("config", "commit.gpgsign", "true", cwd=tap)
+        git("commit", "-q", "-m", f"Update {product} to {version}", cwd=tap)
+        data["pushAttempts"] = push_rebased(tap, "main")
+        # The rebase of a retried push rewrites the commit: report what the tap holds.
         data["commit"] = git("rev-parse", "HEAD", cwd=tap)
-        git("push", "-q", "origin", "HEAD:main", cwd=tap)
     data["install"] = f"brew install {owner}/{name.replace('homebrew-', '', 1)}/{product}"
     return data, EXIT_OK
 

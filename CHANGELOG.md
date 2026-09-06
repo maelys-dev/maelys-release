@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.15.2 — 2026-09-06
+
+- Two products releasing at the same time raced on `maelys-dev/homebrew-tap`:
+  the publish job of `tap.yml` cloned, committed and pushed once, so the
+  second push was rejected and two releases out of three needed a replay
+  with `gh workflow run release.yml -f tag=vX.Y.Z`. The push now fetches,
+  rebases the formula commit onto the tap's `main` and pushes again, three
+  attempts at most, each logged. A rebase that conflicts (the same formula
+  published twice at once, which the signed-tag model excludes) is aborted
+  and the job fails. Identity and signing are set in the clone's
+  configuration instead of on the commit command, so a rebased commit is
+  signed like the original. `maelys-release tap --apply` retries the same
+  way and reports `pushAttempts`; the self-test runs the step's shell
+  function and the whole step against a fake tap that another publication
+  moves first.
+- The publish job of `tap.yml` runs in the concurrency group
+  `tap-<tap repository>` with `cancel-in-progress: false`: the formula jobs
+  of one release, or a replay during a release, wait for each other. The
+  block sits on the job of the reusable workflow, where it covers every
+  caller of a pin without touching the generated `release.yml`, and leaves
+  the render and bottle jobs parallel. GitHub scopes a concurrency group to
+  one repository and keeps one pending job per group, so across products
+  the rebased push is the guarantee, and a third publication of one
+  repository queued at once cancels the pending one, to be replayed.
+- Only the workflows change: the `release.yml` that `adopt` generates and
+  the managed texts are the same, so a product picks this up by moving its
+  pin at its next re-adoption, as a patch.
+
 ## 0.15.1 — 2026-09-05
 
 - Release packages are uploaded directly to a protected draft GitHub release,
