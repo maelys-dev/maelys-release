@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.15.4 — 2026-09-06
+
+- `release.yml`'s `build` job and `tap.yml`'s `render` and `publish` jobs
+  default `macos_runner` to a self-hosted label array
+  (`self-hosted,macOS,maelys`): all three run only after a GitHub-verified
+  signed tag, so the trust boundary is the signature, not who can open a
+  pull request, and this holds on a public repository too.
+- `check-product.yml` gains the same `macos_runner` input, but keeps the
+  self-hosted default only on a private repository
+  (`github.event.repository.private`); on a public one its `check` job,
+  reachable from a bare pull request, always runs `macos-15`. `tap.yml`'s
+  `bottle` job (`bottles`) is unchanged: a Homebrew bottle is tied to the
+  OS version it was built on, so it keeps GitHub-hosted runners named for
+  the macOS releases it targets.
+- No managed file changes: neither input was ever emitted into a product's
+  `release.yml` or `ci.yml`, so re-adopting is enough to pick this up.
+
 ## 0.15.3 — 2026-09-06
 
 - `maelys-cli` is pinned at v0.5.19 and the vendored Python framework is

@@ -46,6 +46,16 @@ on:
         required: false
         type: string
         default: auto
+      macos_runner:
+        description: >-
+          JSON runner for render and publish (both need brew, not a
+          bottle build): a label string or a label array. Both jobs are
+          reachable only from `release`'s build, itself gated on a
+          GitHub-verified signed tag, so a self-hosted runner is safe here
+          on a public repository too.
+        required: false
+        type: string
+        default: '["self-hosted","macOS","maelys"]'
     secrets:
       tap_token:
         required: false
@@ -57,7 +67,7 @@ permissions:
 
 jobs:
   render:
-    runs-on: macos-15
+    runs-on: ${{ fromJSON(inputs.macos_runner) }}
     env:
       HOMEBREW_NO_AUTO_UPDATE: "1"
     steps:

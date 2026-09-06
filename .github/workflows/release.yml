@@ -48,9 +48,14 @@ on:
         type: string
         default: '"ubuntu-26.04-arm"'
       macos_runner:
+        description: >-
+          This job builds only after `verify` accepts a GitHub-verified
+          signed tag, so a self-hosted runner is safe here on a public
+          repository too: the trust boundary is the signature, not who can
+          open a pull request.
         required: false
         type: string
-        default: '"macos-15"'
+        default: '["self-hosted","macOS","maelys"]'
       release_environment:
         required: false
         type: string
