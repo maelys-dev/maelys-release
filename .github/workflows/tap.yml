@@ -46,6 +46,21 @@ on:
         required: false
         type: string
         default: auto
+      macos_runner:
+        description: >-
+          JSON runner for render and publish (both need brew, not a
+          bottle build): a label string such as "macos-15", or a label
+          array for a self-hosted runner. The self-hosted default applies
+          only on a private repository (one runner per repository,
+          registered at the repository and never the organization); a
+          public repository always runs macos-15.
+        required: false
+        type: string
+        default: '["self-hosted","macOS","ARM64"]'
+      release_environment:
+        required: false
+        type: string
+        default: release
     secrets:
       tap_token:
         required: false
@@ -57,7 +72,8 @@ permissions:
 
 jobs:
   render:
-    runs-on: macos-15
+    environment: ${{ inputs.release_environment }}
+    runs-on: ${{ github.event.repository.private && fromJSON(inputs.macos_runner) || 'macos-15' }}
     env:
       HOMEBREW_NO_AUTO_UPDATE: "1"
     steps:
@@ -165,7 +181,8 @@ jobs:
   publish:
     needs: [render, bottle]
     if: always() && needs.render.result == 'success' && (needs.bottle.result == 'success' || needs.bottle.result == 'skipped')
-    runs-on: macos-15
+    environment: ${{ inputs.release_environment }}
+    runs-on: ${{ github.event.repository.private && fromJSON(inputs.macos_runner) || 'macos-15' }}
     # One publication at a time per tap in this repository: the formula jobs
     # of one release, or a replay during a release, wait for each other
     # instead of racing on the push. GitHub scopes the group to the

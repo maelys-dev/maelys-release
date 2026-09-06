@@ -217,12 +217,32 @@ replaces the other.
 ## Runners
 
 `macos_runner`, `linux_x86_64_runner` and `linux_arm64_runner` are JSON
-inputs: a label string, or a label array for a self-hosted runner.
-GitHub-hosted runners are the default and the recommendation for public
-repositories, where a self-hosted runner would execute code from any pull
-request. A self-hosted Mac Studio (labels `self-hosted,macOS,ARM64,...`) is
-appropriate only for jobs triggered by a signed tag or `workflow_dispatch`,
-behind the `release` environment, on an ephemeral runner.
+inputs: a label string such as `"macos-15"`, or a label array such as
+`["self-hosted","macOS","ARM64"]` for a self-hosted runner. A self-hosted
+runner serves exactly one private repository, registered at the repository
+and never the organization; its labels describe a hardware capability, not
+a product. A public repository never uses one: GitHub bills a macOS minute
+at several times a Linux one, but that cost is the price of keeping a
+self-hosted machine off the org's public automation surface, so the
+recommendation holds regardless of a job's own trigger. See the runner
+policy and inventory in maelys-platform.
+
+`release.yml`'s `build` job and `tap.yml`'s `render` and `publish` jobs
+default `macos_runner` to a self-hosted label array, gated on a private
+repository (`github.event.repository.private`) and on the
+`release_environment` input (`release` by default); a public repository
+always runs `macos-15` there too. All three jobs are reachable only from a
+GitHub-verified signed tag (or a `workflow_dispatch` replay of one), never
+from a `pull_request`, matching the policy's rule for what a self-hosted
+runner may run.
+
+`check-product.yml`'s `check` job keeps `macos-15` unconditionally: it is
+reachable from a bare `pull_request`, which a self-hosted runner must never
+execute regardless of repository visibility. `tap.yml`'s `bottle` job (the
+`bottles` input) is also unaffected: it stays on GitHub-hosted runners
+named for the macOS releases the bottle targets (`macos-15`, `macos-26`),
+because a Homebrew bottle is tied to the OS version it was built on, not to
+a self-hosted machine's version.
 
 ## Homebrew tap
 
