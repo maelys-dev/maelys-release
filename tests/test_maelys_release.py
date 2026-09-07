@@ -615,24 +615,64 @@ class DocsContractTest(unittest.TestCase):
         strict = self.product.json("check", self.dir, "--docs-contract", expect=2)["data"]
         self.assertTrue(any("docs/cli-reference.md" in violation for violation in strict["conventions"]["violations"]))
 
-    def test_a_declared_renderer_makes_the_reference_managed(self) -> None:
-        self.product.write("scripts/render-cli-reference.sh",
-                           '#!/bin/sh\nprintf "<!-- generated -->\\n\\n# CLI %s\\n" "$(cat VERSION)" >"$1"\n',
-                           executable=True)
-        self.product.run("adopt", self.dir, "--apply")
-        self.assertEqual(self.product.read("docs/cli.md"), "<!-- generated -->\n\n# CLI 1.2.3\n")
+    def with_a_command_line(self, generator: str | None = None) -> None:
+        """A product whose command line is built on the framework pins maelys-cli."""
+        self.product.write("dependencies/maelys-cli.pin", "v0.5.19\n" + "c" * 40 + "\n")
+        self.product.write("docs/cli.md", "<!-- generated -->\n\n# CLI\n")
+        if generator is not None:
+            tools = self.product.work / "maelys-cli" / "tools"
+            tools.mkdir(parents=True, exist_ok=True)
+            (tools / "generate_cli_reference.py").write_text(generator, encoding="utf-8")
+
+    RECORDING_GENERATOR = (
+        "import pathlib, sys\n"
+        "arguments = sys.argv[1:]\n"
+        "markdown = pathlib.Path(arguments[arguments.index('--markdown') + 1])\n"
+        "contract = pathlib.Path(arguments[arguments.index('--json') + 1])\n"
+        "build = arguments[arguments.index('--build') + 1]\n"
+        "markdown.write_text('<!-- generated -->\\n\\n# CLI\\n\\nbuild=%s programs=%s\\n'\n"
+        "                    % (build, arguments[-1]))\n"
+        "contract.write_text('{}\\n')\n")
+
+    def test_the_renderer_is_managed_by_the_socle_not_written_by_the_product(self) -> None:
+        self.with_a_command_line(self.RECORDING_GENERATOR)
+        data = self.product.json("adopt", self.dir, "--apply")["data"]
+        written = {entry["path"] for entry in data["files"]}
+        self.assertIn("scripts/render-cli-reference.sh", written)
+        self.assertIn("docs/cli.md", written)
+        self.assertIn("Managed by maelys-release", self.product.read("scripts/render-cli-reference.sh"))
+        self.assertTrue(os.access(self.product.dir / "scripts" / "render-cli-reference.sh", os.X_OK))
+        # The programs default to the product's commands, its libraries aside.
+        self.assertIn("build=build/bin programs=maelys-fixture", self.product.read("docs/cli.md"))
         self.assertTrue(self.product.json("check", self.dir)["data"]["valid"])
+
+    def test_a_stale_reference_is_a_drift(self) -> None:
+        self.with_a_command_line(self.RECORDING_GENERATOR)
+        self.product.run("adopt", self.dir, "--apply")
         self.product.write("docs/cli.md", "<!-- generated -->\n\n# CLI stale\n")
         data = self.product.json("check", self.dir, expect=2)["data"]
         self.assertIn("docs/cli.md: update", data["conventions"]["violations"])
 
-    def test_a_renderer_that_cannot_run_leaves_the_file_alone(self) -> None:
-        self.product.write("docs/cli.md", "<!-- generated -->\n\n# CLI\n")
+    def test_the_managed_script_is_edited_nowhere_but_here(self) -> None:
+        self.with_a_command_line(self.RECORDING_GENERATOR)
         self.product.run("adopt", self.dir, "--apply")
-        self.product.write("scripts/render-cli-reference.sh", "#!/bin/sh\nexit 3\n", executable=True)
+        script = self.product.dir / "scripts" / "render-cli-reference.sh"
+        script.write_text(script.read_text() + "\n# edited\n")
+        data = self.product.json("check", self.dir, expect=2)["data"]
+        self.assertIn("scripts/render-cli-reference.sh: update", data["conventions"]["violations"])
+
+    def test_a_renderer_that_cannot_run_leaves_the_reference_alone(self) -> None:
+        self.with_a_command_line()      # no maelys-cli checkout beside the product
+        self.product.run("adopt", self.dir, "--apply")
         data = self.product.json("check", self.dir)["data"]
         self.assertTrue(data["valid"], data["violations"])
         self.assertTrue(any("did not run here" in check["message"] for check in data["checks"]))
+        self.assertEqual(self.product.read("docs/cli.md"), "<!-- generated -->\n\n# CLI\n")
+
+    def test_a_product_without_a_framework_command_line_gets_no_renderer(self) -> None:
+        self.product.write("docs/cli.md", "<!-- generated -->\n\n# CLI\n")
+        data = self.product.json("adopt", self.dir)["data"]
+        self.assertNotIn("scripts/render-cli-reference.sh", {entry["path"] for entry in data["files"]})
 
 
 class GoldenTest(unittest.TestCase):

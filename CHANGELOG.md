@@ -10,13 +10,18 @@
   place for every product. `docs/cli-reference.md` and
   `docs/generated/cli-reference.md`, the three spellings in use today, are
   named with the `git mv` that fixes them.
-- A product that installs an executable `scripts/render-cli-reference.sh
-  OUTPUT` lets `adopt` write and regenerate `docs/cli.md` and `check`
-  compare it, as `scripts/render-homebrew-formula.sh` already does for a
-  formula. The Markdown itself still comes from maelys-cli's generator; the
-  socle fixes where it lands. A renderer that cannot run in a fresh checkout
-  leaves the file as it stands and says so, rather than reporting a false
-  drift.
+- `scripts/render-cli-reference.sh` is a managed file, written for a product
+  that pins `maelys-cli` and carries `docs/cli.md`; editing it is a drift, as
+  for `scripts/checkout-dependency.sh`. The Markdown still comes from
+  maelys-cli's generator, which the socle does not reimplement: the wrapper
+  passes the built binaries (`build/bin`), the pinned checkout
+  (`../maelys-cli`) and the product's commands, each overridable by
+  environment (`BIN`/`BUILD`, `MAELYS_CLI_DIR`, `CLI_REFERENCE_PROGRAMS`,
+  `CLI_REFERENCE_FLAGS`, `PYTHON`). Checked against maelys-oci: the wrapper
+  reproduces its Makefile's output, Markdown and JSON contract, byte for
+  byte. `adopt` writes it and regenerates the reference; `check` runs the
+  wrapper as the socle would write it, so a stale copy cannot hide a drift,
+  and a wrapper that cannot run here leaves the reference as it stands.
 - The refusal is opt-in: `check --docs-contract`, and the `docs_contract`
   input of `check-product.yml`, turn those notes into violations. It stays
   opt-in for as long as `maelys-docs` does not exist, because a product
