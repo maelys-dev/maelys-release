@@ -299,12 +299,16 @@ def declared_mechanism(project: pathlib.Path, requested: str = "") -> str:
     if not workflow.is_file():
         return requested or SOCLE_MECHANISM
     carried = SOCLE_MECHANISM if RELEASE_USES.search(workflow.read_text(encoding="utf-8")) else "custom"
-    if requested and requested != carried:
+    # custom and none both say "the socle does not release this"; which of the
+    # two is a refinement the repository may state. Only crossing that line is
+    # a contradiction: it would either abandon a generated workflow or
+    # overwrite one the socle never wrote.
+    if requested and requested != carried and SOCLE_MECHANISM in (requested, carried):
         raise Failure("PRECONDITION_FAILED",
                       f"{project} carries a {carried} release.yml, so --mechanism {requested} contradicts it.",
                       "Delete or move .github/workflows/release.yml to change the mechanism of a repository;"
                       " the socle never overwrites a workflow it did not generate.")
-    return carried
+    return requested or carried
 
 
 def pinned_product(project: pathlib.Path) -> str:
