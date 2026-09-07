@@ -50,6 +50,7 @@ PLATFORMS = {"linux-x86_64": "linux/amd64", "linux-arm64": "linux/arm64"}
 # (docs/policies/documentation.md of maelys-platform). Everything else in
 # docs/ is prose, and prose lives in maelys-docs.
 CLI_REFERENCE = "docs/cli.md"
+CLI_REFERENCE_SCRIPT = "scripts/render-cli-reference.sh"
 LEGACY_CLI_REFERENCES = ("docs/cli-reference.md", "docs/generated/cli-reference.md")
 # A generated file says so on its first line, whatever wrote it.
 GENERATED_FIRST_LINE = re.compile(r"generated|do not edit|ne pas .diter", re.IGNORECASE)
@@ -71,6 +72,7 @@ MANAGED = (
     ".github/workflows/release.yml",
     "scripts/checkout-dependency.sh",
     CLI_REFERENCE,
+    CLI_REFERENCE_SCRIPT,
     "AGENTS.md",
     "CLAUDE.md",
     ".claude/skills/maelys-release/SKILL.md",
@@ -346,10 +348,13 @@ def read_docs(decl: Declarations) -> None:
     """
     docs = decl.project / "docs"
     reference = decl.project / CLI_REFERENCE
-    renderer = decl.project / "scripts" / "render-cli-reference.sh"
-    if renderer.is_file() and os.access(renderer, os.X_OK):
-        decl.cli_reference_command = "sh scripts/render-cli-reference.sh OUTPUT"
-        decl.add("ok", f"scripts/render-cli-reference.sh writes {CLI_REFERENCE}", "conventions")
+    # A product whose command line is built on the framework pins maelys-cli,
+    # whose generator writes the reference. The socle owns the wrapper, so the
+    # reference is produced the same way everywhere; the product's Makefile
+    # calls it and overrides by environment what its layout requires.
+    if "maelys-cli" in decl.dependencies and reference.is_file():
+        decl.cli_reference_command = f"sh {CLI_REFERENCE_SCRIPT} OUTPUT"
+        decl.add("ok", f"{CLI_REFERENCE_SCRIPT} writes {CLI_REFERENCE} from maelys-cli's generator", "conventions")
     legacy = [name for name in LEGACY_CLI_REFERENCES if (decl.project / name).is_file()]
     for name in legacy:
         decl.add("note", f"{name}: the generated CLI reference is {CLI_REFERENCE} for every product;"
@@ -569,7 +574,10 @@ def stage(decl: Declarations, sha: str, tag: str) -> dict[str, tuple[str, bool]]
         existing = path.read_text(encoding="utf-8") if path.is_file() else None
         staged[name] = (managed_block(existing, block), False)
     if decl.cli_reference_command:
-        staged[CLI_REFERENCE] = (render_cli_reference(decl), False)
+        programs = " ".join(name for name in decl.formulas if not name.startswith("lib")) or decl.product
+        script = render_text(share / "templates" / "render-cli-reference.sh", {**mapping, "PROGRAMS": programs})
+        staged[CLI_REFERENCE_SCRIPT] = (script, True)
+        staged[CLI_REFERENCE] = (render_cli_reference(decl, script), False)
     releasing = "RELEASING.md" if decl.releases_here else "RELEASING-conventions.md"
     for name, template in (("RELEASING.md", releasing), ("LICENSING.md", "LICENSING.md"),
                            ("SECURITY.md", "SECURITY.md")):
@@ -588,23 +596,26 @@ def stage(decl: Declarations, sha: str, tag: str) -> dict[str, tuple[str, bool]]
     return staged
 
 
-def render_cli_reference(decl: Declarations) -> str:
-    """Run the product's renderer into a temporary file and return what it wrote.
+def render_cli_reference(decl: Declarations, script: str) -> str:
+    """Run the managed renderer into a temporary file and return what it wrote.
 
-    The Markdown itself comes from maelys-cli's generator, which the product
-    already calls; the socle fixes the name and the place, and regenerates to
-    compare. A renderer that cannot run (an unbuilt binary in a fresh
-    checkout) leaves the file as it stands rather than reporting a false drift.
+    The script is run as the socle would write it, not as the product carries
+    it, so a stale copy on disk cannot hide a drift. The Markdown itself comes
+    from maelys-cli's generator, which asks each program for its catalogue; the
+    socle owns the wrapper and the place. A renderer that cannot run here (an
+    unbuilt product, a missing maelys-cli checkout) leaves the reference as it
+    stands rather than reporting a drift it cannot substantiate.
     """
-    current = (decl.project / CLI_REFERENCE)
+    current = decl.project / CLI_REFERENCE
     existing = current.read_text(encoding="utf-8") if current.is_file() else ""
     with tempfile.TemporaryDirectory(prefix="maelys-release-cli-reference.") as temp:
+        runner = pathlib.Path(temp) / "render-cli-reference.sh"
+        runner.write_text(script, encoding="utf-8")
         output = pathlib.Path(temp) / "cli.md"
-        command = decl.cli_reference_command.replace("OUTPUT", str(output))
-        completed = run(["sh", "-c", command], cwd=decl.project)
+        completed = run(["sh", str(runner), str(output)], cwd=decl.project)
         if completed.returncode != 0 or not output.is_file():
-            decl.add("note", f"{CLI_REFERENCE}: scripts/render-cli-reference.sh did not run here"
-                     " (an unbuilt product, usually); the file is left as it stands", "conventions")
+            decl.add("note", f"{CLI_REFERENCE}: {CLI_REFERENCE_SCRIPT} did not run here"
+                     " (an unbuilt product, usually); the reference is left as it stands", "conventions")
             return existing
         return output.read_text(encoding="utf-8")
 
@@ -618,7 +629,8 @@ def plan(decl: Declarations, staged: dict[str, tuple[str, bool]], apply: bool) -
         content, executable = staged[relative]
         path = decl.project / relative
         entry: dict = {"path": relative,
-                       "scope": "conventions" if relative in CONVENTION_MANAGED + CONVENTION_SEEDED + (CLI_REFERENCE,)
+                       "scope": "conventions" if relative in CONVENTION_MANAGED + CONVENTION_SEEDED
+                       + (CLI_REFERENCE, CLI_REFERENCE_SCRIPT)
                        else "release"}
         if relative in CONVENTION_SEEDED:
             entry["seeded"] = True
