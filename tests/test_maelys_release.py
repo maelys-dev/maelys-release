@@ -155,7 +155,7 @@ class ContractTest(unittest.TestCase):
 
     def test_help(self) -> None:
         text = self.product.run("help").stdout
-        self.assertIn("adopt DIR [--product NAME] [--allow-untagged] [--apply]", text)
+        self.assertIn("adopt DIR [--product NAME] [--mechanism MECHANISM] [--allow-untagged] [--apply]", text)
         self.assertNotIn("--socle-sha", text)                       # hidden: parsed, described, never shown
         self.assertEqual(self.product.run("--help").stdout, text)
         self.assertIn("OPTIONS", self.product.run("help", "adopt").stdout)
@@ -465,6 +465,80 @@ class AdoptTest(unittest.TestCase):
                                         stderr=subprocess.PIPE).returncode, 64)
 
 
+class MechanismTest(unittest.TestCase):
+    """A product the socle does not release: conventions installed, workflows untouched."""
+
+    OWN_WORKFLOW = "name: release\n\non:\n  push:\n    tags: [\"v*\"]\n\njobs:\n  release:\n    runs-on: ubuntu-26.04\n    steps:\n      - run: echo mine\n"
+
+    def setUp(self) -> None:
+        self.product = Product()
+        self.dir = str(self.product.dir)
+        self.product.write(".github/workflows/release.yml", self.OWN_WORKFLOW)
+
+    def tearDown(self) -> None:
+        self.product.close()
+
+    def test_a_release_workflow_of_its_own_declares_a_custom_mechanism(self) -> None:
+        data = self.product.json("adopt", self.dir)["data"]
+        self.assertEqual(data["mechanism"], "custom")
+        written = {entry["path"] for entry in data["files"]}
+        self.assertEqual(written, {"AGENTS.md", "CLAUDE.md", "RELEASING.md", "LICENSING.md", "SECURITY.md"})
+        self.assertNotIn(".github/workflows/release.yml", written)
+        self.assertNotIn(".github/workflows/ci.yml", written)
+
+    def test_adopt_leaves_the_products_own_workflow_alone(self) -> None:
+        self.product.run("adopt", self.dir, "--apply")
+        self.assertEqual(self.product.read(".github/workflows/release.yml"), self.OWN_WORKFLOW)
+        self.assertFalse((self.product.dir / "scripts" / "checkout-dependency.sh").exists())
+        self.assertFalse((self.product.dir / ".claude").exists())
+
+    def test_check_passes_without_a_word_about_the_workflows(self) -> None:
+        self.product.run("adopt", self.dir, "--apply")
+        completed = self.product.run("check", self.dir)
+        data = self.product.json("check", self.dir)["data"]
+        self.assertTrue(data["valid"])
+        self.assertTrue(data["conventions"]["valid"])
+        self.assertFalse(data["release"]["applicable"])
+        self.assertEqual(data["release"]["violations"], [])
+        self.assertIn("release mechanism: not applicable (custom mechanism)", completed.stdout)
+        self.assertNotIn("check-product.yml", completed.stdout)
+        self.assertNotIn("package-release.sh", completed.stdout)
+
+    def test_the_block_states_the_conventions_not_the_socle_release(self) -> None:
+        self.product.run("adopt", self.dir, "--apply")
+        agents = self.product.read("AGENTS.md")
+        self.assertIn("Maelys repository conventions", agents)
+        self.assertIn("its release mechanism is its own", agents)
+        self.assertNotIn("publishes through the shared maelys-release workflows", agents)
+
+    def test_a_mechanism_contradicting_the_carried_workflow_is_refused(self) -> None:
+        error = self.product.json("adopt", self.dir, "--mechanism", "maelys-release", expect=1)["error"]
+        self.assertEqual(error["code"], "PRECONDITION_FAILED")
+        self.assertIn("carries a custom release.yml", error["message"])
+
+    def test_preflight_and_rehearse_refuse_a_product_they_do_not_release(self) -> None:
+        for command in ("preflight", "rehearse"):
+            arguments = (command, self.dir) + (("linux-x86_64",) if command == "rehearse" else ())
+            error = self.product.json(*arguments, expect=1)["error"]
+            self.assertEqual(error["code"], "PRECONDITION_FAILED")
+            self.assertIn("custom mechanism", error["message"])
+
+    def test_an_empty_mechanism_choice_keeps_the_socle_as_before(self) -> None:
+        (self.product.dir / ".github" / "workflows" / "release.yml").unlink()
+        self.assertEqual(self.product.json("adopt", self.dir)["data"]["mechanism"], "maelys-release")
+        self.assertEqual(self.product.json("adopt", self.dir, "--mechanism", "none")["data"]["mechanism"], "none")
+
+    def test_a_seeded_file_is_a_note_never_a_violation(self) -> None:
+        self.product.run("adopt", self.dir, "--apply")
+        for name in ("RELEASING.md", "LICENSING.md", "SECURITY.md"):
+            (self.product.dir / name).unlink()
+        data = self.product.json("check", self.dir)["data"]
+        self.assertTrue(data["valid"], data["violations"])
+        notes = [check["message"] for check in data["checks"] if check["status"] == "note"]
+        self.assertEqual(len(notes), 3, notes)
+        self.assertTrue(all("adopt --apply' writes it once" in note for note in notes), notes)
+
+
 class GoldenTest(unittest.TestCase):
     """The text a human reads, in full: check conformant, check drifting, preflight not ready."""
 
@@ -486,6 +560,7 @@ class GoldenTest(unittest.TestCase):
         same     .claude/skills/maelys-release/SKILL.md
         same     .github/workflows/ci.yml
         """)
+    VERDICTS = "verdict  conventions: ok\nverdict  release mechanism: ok\n"
 
     def setUp(self) -> None:
         self.product = Product()
@@ -498,7 +573,8 @@ class GoldenTest(unittest.TestCase):
     def test_check_conformant(self) -> None:
         completed = self.product.run("check", self.dir)
         self.assertEqual(completed.stderr, "")
-        self.assertEqual(completed.stdout, self.CONTRACT + self.FILES + "check: maelys-fixture is on maelys-release v9.9.9\n")
+        self.assertEqual(completed.stdout, self.CONTRACT + self.FILES + self.VERDICTS
+                         + "check: maelys-fixture is on maelys-release v9.9.9\n")
 
     def test_check_drifting(self) -> None:
         with (self.product.dir / ".github" / "workflows" / "release.yml").open("a") as workflow:
@@ -507,6 +583,7 @@ class GoldenTest(unittest.TestCase):
         self.assertEqual(completed.stderr, "")
         self.assertEqual(completed.stdout, self.CONTRACT
                          + self.FILES.replace("same     .github/workflows/release.yml", "update   .github/workflows/release.yml")
+                         + self.VERDICTS.replace("release mechanism: ok", "release mechanism: FAIL")
                          + "check: maelys-fixture drifts from maelys-release v9.9.9\n")
 
     def test_check_pinned_elsewhere(self) -> None:
@@ -515,6 +592,7 @@ class GoldenTest(unittest.TestCase):
                                                          "release.yml@" + "0" * 40 + " # v0.0.0"))
         completed = self.product.run("check", self.dir, expect=2)
         self.assertEqual(completed.stdout, self.CONTRACT
+                         + self.VERDICTS.replace("release mechanism: ok", "release mechanism: FAIL")
                          + "drift    maelys-fixture pins maelys-release v0.0.0 (0000000) but this is v9.9.9 (fffffff):"
                            f" run the pinned socle, or 'adopt {self.product.dir.resolve()} --apply' from this one to upgrade\n"
                          + "check: maelys-fixture drifts from maelys-release v9.9.9\n")
@@ -526,7 +604,7 @@ class GoldenTest(unittest.TestCase):
         product.git(product.dir, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "fixture")
         completed = product.run("preflight", self.dir, expect=2)
         self.assertEqual(completed.stderr, "")
-        self.assertEqual(completed.stdout, self.CONTRACT + self.FILES + textwrap.dedent("""\
+        self.assertEqual(completed.stdout, self.CONTRACT + self.FILES + self.VERDICTS + textwrap.dedent("""\
             check: maelys-fixture is on maelys-release v9.9.9
             FAIL     tag.gpgsign is not true: git config tag.gpgsign true
             FAIL     user.signingkey is not set (gpg.format = openpgp); the key must be registered on GitHub

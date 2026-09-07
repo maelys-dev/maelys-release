@@ -672,6 +672,8 @@ def check_data(invocation: Invocation) -> tuple[Declarations, dict]:
                     continue
                 message = f"{entry['path']}: {entry['action']}" + (f" ({entry['reason']})" if "reason" in entry else "")
                 (conventions if entry["scope"] == "conventions" else release).append(message)
+    # The seeded notes are added while planning, so the checks are taken last.
+    data["checks"] = decl.applicable()
     data["conventions"] = {"valid": not conventions, "violations": conventions}
     data["release"] = {"applicable": decl.releases_here, "valid": not release, "violations": release}
     data["violations"] = conventions + release
