@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.16.0 — 2026-09-07
+
+- The conventions of a Maelys repository are separable from the mechanism
+  that publishes it. `adopt` installs the conventions of any product and the
+  release files only of a product the socle releases; `check` returns two
+  verdicts, and a product with a mechanism of its own passes without a word
+  about workflows it owns. A repository declares its mechanism by the
+  release.yml it carries: the socle's generated one, its own (`custom`), or
+  none at all; `--mechanism` answers only for a repository that carries no
+  release.yml yet, and the socle never overwrites a workflow it did not
+  generate.
+- The conventions are `VERSION`, `CHANGELOG.md` with its dated entry, the
+  managed `AGENTS.md` and `CLAUDE.md` blocks, and the seeded `RELEASING.md`,
+  `LICENSING.md` and `SECURITY.md`. A seeded file is written once when
+  missing and owned by the product afterwards: `check` reports a missing one
+  as a note, never as a violation. `CONTRIBUTING.md` is deliberately not a
+  convention (docs/conventions.md, "Conventions and mechanism").
+- The `AGENTS.md` and `CLAUDE.md` block of a product the socle does not
+  release states the conventions instead of the socle's release rules.
+- `preflight` and `rehearse` refuse a product whose mechanism is not the
+  socle's: they replay a release this socle does not run.
+- `check`, `adopt` and `declarations` carry `mechanism`, every check and
+  planned file carries its `scope`, and `check` carries the `conventions`
+  and `release` verdicts. A command reports only the checks that apply to
+  the product it was given.
+- This repository now carries the conventions it installs: `AGENTS.md`,
+  `CLAUDE.md`, `RELEASING.md`, `LICENSING.md` and `SECURITY.md`, written for
+  a socle that publishes a signed tag and no artifact.
+- For a product the socle releases nothing changes: the generated files are
+  byte for byte what 0.15.3 wrote, and its `check` verdict is unchanged. At
+  its next adoption, a product missing a seeded file receives that skeleton.
+
 ## 0.15.3 — 2026-09-06
 
 - `maelys-cli` is pinned at v0.5.19 and the vendored Python framework is
