@@ -631,7 +631,7 @@ def handle_adopt(invocation: Invocation) -> tuple[dict, int]:
     changed = any(entry["action"] != "same" for entry in files)
     return {"mode": "apply" if apply else "plan", "product": product, "project": str(project),
             "mechanism": mechanism, "socle": socle_data(sha, tag), "changed": changed,
-            "checks": decl.checks, "files": files}, EXIT_OK
+            "checks": decl.applicable(), "files": files}, EXIT_OK
 
 
 def check_data(invocation: Invocation) -> tuple[Declarations, dict]:
@@ -650,7 +650,7 @@ def check_data(invocation: Invocation) -> tuple[Declarations, dict]:
     conventions: list[str] = []
     release: list[str] = []
     data: dict = {"product": product, "project": str(project), "mechanism": decl.mechanism,
-                  "socle": socle_data(sha, tag), "pinned": pinned, "checks": decl.checks,
+                  "socle": socle_data(sha, tag), "pinned": pinned, "checks": decl.applicable(),
                   "files": [], "violations": []}
     for check in decl.applicable():
         if check["status"] not in ("ok", "note"):
@@ -686,7 +686,7 @@ def handle_declarations(invocation: Invocation) -> tuple[dict, int]:
     return {"valid": decl.valid, "product": product, "project": str(project), "version": decl.version,
             "mechanism": mechanism,
             "dependencies": decl.dependencies, "linuxPackages": decl.linux_packages,
-            "macosPackages": decl.macos_packages, "formulas": decl.formulas, "checks": decl.checks}, \
+            "macosPackages": decl.macos_packages, "formulas": decl.formulas, "checks": decl.applicable()}, \
         EXIT_OK if decl.valid else EXIT_VIOLATIONS
 
 
