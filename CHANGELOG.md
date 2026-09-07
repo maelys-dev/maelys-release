@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.17.0 — 2026-09-07
+
+- `docs/` of a product holds what a machine writes and what `LICENSING.md`
+  engages; its prose belongs in `maelys-docs/<product>/`. `check` sorts every
+  file of `docs/` into generated, engaged, data and prose, and names each
+  prose file with its destination.
+- The generated command-line reference is `docs/cli.md`, one name and one
+  place for every product. `docs/cli-reference.md` and
+  `docs/generated/cli-reference.md`, the three spellings in use today, are
+  named with the `git mv` that fixes them.
+- A product that installs an executable `scripts/render-cli-reference.sh
+  OUTPUT` lets `adopt` write and regenerate `docs/cli.md` and `check`
+  compare it, as `scripts/render-homebrew-formula.sh` already does for a
+  formula. The Markdown itself still comes from maelys-cli's generator; the
+  socle fixes where it lands. A renderer that cannot run in a fresh checkout
+  leaves the file as it stands and says so, rather than reporting a false
+  drift.
+- The refusal is opt-in: `check --docs-contract`, and the `docs_contract`
+  input of `check-product.yml`, turn those notes into violations. It stays
+  opt-in for as long as `maelys-docs` does not exist, because a product
+  cannot move prose to a repository nobody has created yet. Without it,
+  every product keeps the verdict it has today.
+
 ## 0.16.0 — 2026-09-07
 
 - The conventions of a Maelys repository are separable from the mechanism

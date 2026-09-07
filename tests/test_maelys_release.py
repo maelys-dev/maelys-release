@@ -628,6 +628,7 @@ class DocsContractTest(unittest.TestCase):
 
     def test_a_renderer_that_cannot_run_leaves_the_file_alone(self) -> None:
         self.product.write("docs/cli.md", "<!-- generated -->\n\n# CLI\n")
+        self.product.run("adopt", self.dir, "--apply")
         self.product.write("scripts/render-cli-reference.sh", "#!/bin/sh\nexit 3\n", executable=True)
         data = self.product.json("check", self.dir)["data"]
         self.assertTrue(data["valid"], data["violations"])

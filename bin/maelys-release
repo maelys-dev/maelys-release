@@ -363,7 +363,7 @@ def read_docs(decl: Declarations) -> None:
         else:
             decl.add("warn", f"{CLI_REFERENCE} does not say on its first line that it is generated;"
                      " the reference is written from describe, never by hand", "conventions")
-    elif not legacy:
+    elif not legacy and not decl.cli_reference_command:
         decl.add("note", f"no {CLI_REFERENCE}: a product with a command line carries its generated reference there",
                  "conventions")
     engaged = engaged_documents(decl.project)
