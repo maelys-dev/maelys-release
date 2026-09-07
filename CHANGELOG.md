@@ -10,18 +10,22 @@
   place for every product. `docs/cli-reference.md` and
   `docs/generated/cli-reference.md`, the three spellings in use today, are
   named with the `git mv` that fixes them.
-- `scripts/render-cli-reference.sh` is a managed file, written for a product
-  that pins `maelys-cli` and carries `docs/cli.md`; editing it is a drift, as
-  for `scripts/checkout-dependency.sh`. The Markdown still comes from
-  maelys-cli's generator, which the socle does not reimplement: the wrapper
-  passes the built binaries (`build/bin`), the pinned checkout
-  (`../maelys-cli`) and the product's commands, each overridable by
-  environment (`BIN`/`BUILD`, `MAELYS_CLI_DIR`, `CLI_REFERENCE_PROGRAMS`,
-  `CLI_REFERENCE_FLAGS`, `PYTHON`). Checked against maelys-oci: the wrapper
-  reproduces its Makefile's output, Markdown and JSON contract, byte for
-  byte. `adopt` writes it and regenerates the reference; `check` runs the
-  wrapper as the socle would write it, so a stale copy cannot hide a drift,
-  and a wrapper that cannot run here leaves the reference as it stands.
+- **The socle generates the reference itself.** `adopt` writes
+  `docs/cli.md` and `docs/cli-contract.json`, `check` compares them, and
+  `check-product.yml` does that in every product's CI. The Markdown still
+  comes from maelys-cli's generator, which the socle does not reimplement:
+  it finds it at the commit `dependencies/maelys-cli.pin` names, using a
+  checkout beside the product when there is one and its own cache otherwise.
+  A product therefore carries no rule, no path, no variable and no freshness
+  check of its own: the `cli-reference` and `contract-check` targets of
+  maelys-cli, maelys-egress and maelys-oci, three spellings of one rule, are
+  deleted at their next adoption.
+- What cannot be guessed is declared in `docs/cli.reference`, with a
+  `[programs]` section defaulting to the product's commands (its `lib*`
+  formulas aside) and a `[flags]` section for the generator; maelys-oci's
+  `--neutral-availability unpack-rootfs` moves there from its Makefile.
+  Checked against maelys-oci: the socle alone reproduces what its Makefile
+  produced, Markdown and JSON contract, byte for byte.
 - The refusal is opt-in: `check --docs-contract`, and the `docs_contract`
   input of `check-product.yml`, turn those notes into violations. It stays
   opt-in for as long as `maelys-docs` does not exist, because a product

@@ -409,7 +409,7 @@ def read_docs(decl: Declarations) -> None:
         else:
             decl.add("warn", f"{CLI_REFERENCE} does not say on its first line that it is generated;"
                      " the reference is written from describe, never by hand", "conventions")
-    elif not legacy and not decl.cli_reference_command:
+    elif not legacy and "maelys-cli" not in decl.dependencies:
         decl.add("note", f"no {CLI_REFERENCE}: a product with a command line carries its generated reference there",
                  "conventions")
     engaged = engaged_documents(decl.project)
@@ -653,7 +653,7 @@ def cli_generator(decl: Declarations) -> pathlib.Path | None:
         if head == sha:
             return sibling / relative
     checkout = pinned_checkout("maelys-cli", sha, str(relative))
-    return checkout / relative if checkout else None
+    return checkout / relative if checkout and (checkout / relative).is_file() else None
 
 
 def render_cli_reference(decl: Declarations) -> tuple[str, str]:
@@ -741,9 +741,10 @@ def socle_data(sha: str, tag: str) -> dict:
 def pinned_checkout(name: str, sha: str, witness: str) -> pathlib.Path | None:
     """A checkout of `name` at `sha`, fetched once into the user's cache.
 
-    `witness` is a file that must exist for the checkout to count as complete.
-    None when the repository cannot be fetched, so a caller can degrade
-    instead of failing: a checkout is a convenience, never the contract.
+    `witness` is the file whose presence means the cache already holds this
+    commit. None when the fetch fails, so a caller can degrade instead of
+    failing; a checkout that lacks the witness is still returned, because
+    "fetched but old" and "not fetched" are different answers.
     """
     root = pathlib.Path(os.environ.get("XDG_CACHE_HOME") or pathlib.Path.home() / ".cache") / "maelys-release"
     cache = root / sha if name == "maelys-release" else root / f"{name}-{sha}"
@@ -756,7 +757,7 @@ def pinned_checkout(name: str, sha: str, witness: str) -> pathlib.Path | None:
     if fetched.returncode != 0:
         return None
     git("checkout", "-q", "FETCH_HEAD", cwd=cache)
-    return cache if (cache / witness).is_file() else None
+    return cache
 
 
 def pinned_socle_checkout(sha: str) -> pathlib.Path:
@@ -765,7 +766,8 @@ def pinned_socle_checkout(sha: str) -> pathlib.Path:
     if cache is None:
         raise Failure("NOT_FOUND", f"maelys-release {sha[:7]} could not be fetched.",
                       "Check the network, or run with MAELYS_RELEASE_NO_RELOCATE=1.")
-    (cache / "bin" / "maelys-release").chmod(0o755)
+    if (cache / "bin" / "maelys-release").is_file():
+        (cache / "bin" / "maelys-release").chmod(0o755)
     return cache
 
 

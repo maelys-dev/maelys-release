@@ -75,30 +75,40 @@ them with the `git mv` that fixes them.
 The Markdown comes from maelys-cli's generator, installed as
 `maelys-cli-reference` and present in any pinned checkout at
 `tools/generate_cli_reference.py`; it asks each program for its own
-catalogue through `describe`. The socle does not reimplement it. It owns the
-wrapper instead: `scripts/render-cli-reference.sh` is a **managed** file, as
-`scripts/checkout-dependency.sh` is, written for a product that pins
-`maelys-cli` and already carries `docs/cli.md`. Editing it is a drift.
+catalogue through `describe`. **The socle runs it.** A product carries no
+rule, no path, no variable and no freshness check of its own for the
+reference: `adopt` regenerates `docs/cli.md` and `docs/cli-contract.json`,
+`check` compares them, and `check-product.yml` does that in every CI. A
+product that already has a `cli-reference` target in its Makefile deletes
+it, along with the `contract-check` that compared the file with a
+regeneration; three products carry three spellings of that same rule today.
 
-Everything the wrapper needs is a fleet convention with an environment
-override, so one generated text fits every product:
+The socle finds the generator by itself, at the commit
+`dependencies/maelys-cli.pin` names: a checkout beside the product at that
+commit is used as it stands, otherwise the socle fetches it into its cache.
+Nothing to install, nothing to pass.
 
-| Value | Default | Override |
-| --- | --- | --- |
-| built binaries | `build/bin` | `BIN`, or `BUILD` |
-| the generator | `../maelys-cli`, where `checkout-dependency.sh` puts it | `MAELYS_CLI_DIR` |
-| programs to describe | the product's commands, its `lib*` formulas aside | `CLI_REFERENCE_PROGRAMS` |
-| extra generator flags | none | `CLI_REFERENCE_FLAGS` |
-| interpreter | `python3` | `PYTHON` |
+What a product cannot be guessed on is declared in `docs/cli.reference`,
+read by the socle:
 
-A product's Makefile calls the wrapper and sets what its layout requires;
-maelys-oci passes `CLI_REFERENCE_FLAGS=--neutral-availability unpack-rootfs`,
-which reproduces its current output byte for byte. `adopt` writes the
-wrapper and regenerates the reference, and `check` compares it by running
-the wrapper as the socle would write it, so a stale copy on disk cannot hide
-a drift. A wrapper that cannot run here (an unbuilt product, no maelys-cli
-checkout) leaves the reference as it stands and says so, rather than
-reporting a drift it cannot substantiate.
+```
+[programs]
+maelys
+maelys-hello
+
+[flags]
+--neutral-availability unpack-rootfs
+```
+
+`[programs]` defaults to the product's commands, its `lib*` formulas aside,
+so most products carry no such file: maelys-oci needs only the `[flags]`
+section that its Makefile held as `REFERENCE_FLAGS`. The binaries are read
+from `build/bin`, the fleet's layout, which `BUILD` overrides.
+
+A reference that cannot be produced here (an unbuilt product, an
+unreachable maelys-cli) is left as it stands, with a note saying so, rather
+than reporting a drift the socle cannot substantiate. In CI the product is
+built before `check` runs, so the comparison is real there.
 
 `check` reports prose as a note naming its destination, and refuses it only
 under `--docs-contract` (the `docs_contract` input of `check-product.yml`).
