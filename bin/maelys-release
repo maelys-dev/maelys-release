@@ -18,6 +18,7 @@ into products, VERSION its version.
 """
 from __future__ import annotations
 
+import datetime
 import difflib
 import hashlib
 import json
@@ -847,6 +848,100 @@ def run_pinned_socle(invocation: Invocation, project: pathlib.Path) -> None:
 
 # ---- handlers: each returns (data, exit code) ---------------------------------
 
+def resolve_dependency(spec: str) -> tuple[str, str, str]:
+    """`name@vX.Y.Z` to (name, tag, commit), the tag resolved on the remote."""
+    name, separator, tag = spec.partition("@")
+    if not separator or not re.fullmatch(r"[a-z0-9][a-z0-9-]*", name) or not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", tag):
+        raise Failure("VALIDATION_FAILED", f"A dependency is NAME@vX.Y.Z, not {spec!r}.",
+                      "Pass --depends maelys-system@v0.9.1, once per dependency.")
+    base = os.environ.get("MAELYS_GIT_BASE", "https://github.com/maelys-dev")
+    # The dereferenced tag (^{}) is the commit an annotated tag names, which
+    # is what a pin holds; a lightweight tag answers on the first line.
+    listed = run(["git", "ls-remote", "--tags", f"{base}/{name}.git", tag, f"{tag}^{{}}"])
+    if listed.returncode != 0:
+        raise Failure("NOT_FOUND", f"{base}/{name}.git could not be read for {tag}.",
+                      "Check the dependency name and that the remote is reachable.")
+    commits = {line.split("\t")[1]: line.split("\t")[0] for line in listed.stdout.splitlines() if "\t" in line}
+    commit = commits.get(f"refs/tags/{tag}^{{}}") or commits.get(f"refs/tags/{tag}")
+    if not commit:
+        raise Failure("NOT_FOUND", f"{name} has no tag {tag}.", f"Pick a tag that {base}/{name} publishes.")
+    return name, tag, commit
+
+
+def scaffold(project: pathlib.Path, product: str, dependencies: list[tuple[str, str, str]]) -> dict[str, str]:
+    """The files a repository carries before the socle writes anything into it."""
+    today = datetime.date.today().isoformat()
+    license_text = (socle_root() / "LICENSE").read_text(encoding="utf-8")
+    if "Mozilla Public License" not in license_text.split("\n", 1)[0]:
+        raise Failure("PRECONDITION_FAILED", "The socle's LICENSE is not the MPL-2.0 text it copies.",
+                      "Run this from a maelys-release checkout.")
+    files = {
+        "LICENSE": license_text,
+        "VERSION": "0.1.0\n",
+        "CHANGELOG.md": f"# Changelog\n\n## 0.1.0 — {today}\n\n- First release of {product}.\n",
+        "README.md": f"# {product}\n\n*One paragraph: what this repository is, and what it is not.*\n\n"
+                     f"## Install\n\n*How a user gets it.*\n\n## Build\n\n```sh\nmake check\n```\n",
+        # A release must not silently publish nothing: the stub fails until
+        # the product says how it packages.
+        "scripts/package-release.sh":
+            "#!/bin/sh\n# Package $1 (linux-x86_64, linux-arm64, macos-arm64) into dist/,\n"
+            "# with one .sha256 next to each artifact. Written by maelys-release new.\n"
+            "set -eu\n"
+            'echo "scripts/package-release.sh: $1 is not implemented yet" >&2\n'
+            "exit 1\n",
+    }
+    for name, tag, commit in dependencies:
+        files[f"dependencies/{name}.pin"] = f"{tag}\n{commit}\n"
+    del project
+    return files
+
+
+def handle_new(invocation: Invocation) -> tuple[dict, int]:
+    """Create a Maelys repository: the base files, then the socle's own."""
+    directory = pathlib.Path(invocation.operands[0])
+    product = str(invocation.option("--product", "")) or directory.name
+    if not re.fullmatch(r"[a-z0-9-]+", product):
+        raise Failure("VALIDATION_FAILED", f"Product name must be [a-z0-9-]: {product}.",
+                      "Pass --product NAME with a valid name.")
+    apply = invocation.flag("--apply")
+    mechanism = str(invocation.option("--mechanism", "")) or SOCLE_MECHANISM
+    if mechanism not in MECHANISMS:
+        raise Failure("VALIDATION_FAILED", f"Unknown mechanism: {mechanism}.",
+                      "Pass --mechanism maelys-release, custom or none.")
+    if directory.exists():
+        remaining = [path.name for path in directory.iterdir() if path.name != ".git"]
+        if remaining:
+            raise Failure("PRECONDITION_FAILED", f"{directory} is not empty: {', '.join(sorted(remaining)[:5])}.",
+                          f"'{PROGRAM} new' creates a repository; run 'adopt' on one that exists.")
+    dependencies = [resolve_dependency(str(spec)) for spec in invocation.option("--depends", [])]
+    files = scaffold(directory, product, dependencies)
+    written: list[dict] = []
+    for relative, content in files.items():
+        entry = {"path": relative, "action": "create", "scope": "conventions"}
+        if apply:
+            path = directory / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+            if relative.startswith("scripts/"):
+                path.chmod(path.stat().st_mode | 0o111)
+        written.append(entry)
+    data: dict = {"mode": "apply" if apply else "plan", "product": product, "project": str(directory),
+                  "mechanism": mechanism, "version": "0.1.0",
+                  "dependencies": [{"name": name, "tag": tag, "commit": commit}
+                                   for name, tag, commit in dependencies],
+                  "files": written, "adopted": []}
+    if not apply:
+        return data, EXIT_OK
+    # The socle's own files come from adopt, so new and adopt can never
+    # disagree on what a repository carries.
+    sha, tag = socle_identity(str(invocation.option("--socle-sha", "")), str(invocation.option("--socle-tag", "")))
+    decl = read_declarations(directory.resolve(), product, mechanism)
+    require_valid(decl, "new")
+    data["adopted"] = plan(decl, stage(decl, sha, tag), apply=True)
+    data["socle"] = socle_data(sha, tag)
+    return data, EXIT_OK
+
+
 def handle_adopt(invocation: Invocation) -> tuple[dict, int]:
     project, product, mechanism = project_of(invocation)
     apply = invocation.flag("--apply")
@@ -1309,7 +1404,24 @@ def text_tap(data: dict) -> str:
     return f"{data['install']}\n"
 
 
+def text_new(data: dict) -> str:
+    lines = [f"create   {entry['path']}" for entry in data["files"]]
+    lines.extend(f"{entry['action']:<8} {entry['path']}" for entry in data["adopted"])
+    for dependency in data["dependencies"]:
+        lines.append(f"pin      dependencies/{dependency['name']}.pin"
+                     f" {dependency['tag']} ({dependency['commit'][:7]})")
+    if data["mode"] == "plan":
+        lines.append(f"new: plan only; add --apply to create {data['product']} in {data['project']}")
+    else:
+        lines.append(f"new: {data['product']} {data['version']} created in {data['project']}"
+                     f" ({data['mechanism']} mechanism)")
+        lines.append("next: write scripts/package-release.sh and a Makefile whose 'check' passes,"
+                     " then commit and open the repository")
+    return "\n".join(lines) + "\n"
+
+
 TEXT = {
+    "new": text_new,
     "adopt": text_adopt,
     "check": text_check,
     "declarations": text_declarations,
@@ -1366,6 +1478,25 @@ MECHANISM_OPTION = cli.option(
     cli.argument("MECHANISM", choices=list(MECHANISMS)))
 
 APP = cli.Program(PROGRAM, PRODUCT, socle_version(), [
+    cli.transaction("new", "new",
+                    "Create a Maelys repository in an empty directory: licence, version, changelog, pins,"
+                    " and the files of the socle; plan without --apply.",
+                    handle_new,
+                    operands=[cli.operand("DIR", "Directory to create the repository in; empty, or absent.")],
+                    options=[*SOCLE_OPTIONS, MECHANISM_OPTION,
+                             cli.option("--depends", "A pinned Maelys dependency, NAME@vX.Y.Z; repeatable.",
+                                        cli.argument("DEPENDENCY"), repeatable=True)],
+                    schema={"type": "object", "additionalProperties": False,
+                            "required": ["mode", "product", "project", "mechanism", "version", "dependencies",
+                                         "files", "adopted"],
+                            "properties": {"mode": {"enum": ["plan", "apply"]}, "product": {"type": "string"},
+                                           "project": {"type": "string"}, "mechanism": MECHANISM_SCHEMA,
+                                           "version": {"type": "string"}, "socle": SOCLE_SCHEMA,
+                                           "dependencies": {"type": "array", "items": {
+                                               "type": "object", "required": ["name", "tag", "commit"],
+                                               "properties": {"name": {"type": "string"}, "tag": {"type": "string"},
+                                                              "commit": {"type": "string"}}}},
+                                           "files": FILES_SCHEMA, "adopted": FILES_SCHEMA}}),
     cli.transaction("adopt", "adopt",
                     "Write the conventions of the socle into a product, and its release files when it publishes"
                     " through the socle; plan without --apply.",
