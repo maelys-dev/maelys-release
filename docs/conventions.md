@@ -51,6 +51,38 @@ of thirteen carry one, contribution rules follow how open a repository is,
 and installing a skeleton in the other ten would state a policy nobody
 decided. A repository that wants one writes its own.
 
+## What `docs/` holds
+
+A product repository keeps what a machine writes and what it engages
+publicly; its prose lives in `maelys-dev/maelys-docs`, directory
+`<product>/` (the documentation policy of maelys-platform). `check` reads
+`docs/` and sorts every file into four kinds:
+
+| Kind | Recognised by | Stays |
+| --- | --- | --- |
+| generated reference | the path `docs/cli.md` | yes |
+| other generated file | its first line says so | yes |
+| public engagement | a link from `LICENSING.md` | yes |
+| data | not Markdown | yes |
+| prose | everything else | no, it moves to `maelys-docs/<product>/` |
+
+The generated command-line reference is **`docs/cli.md`**, one name and one
+place for every product. The Markdown itself comes from maelys-cli's
+generator, which products already call; the socle fixes where it lands.
+`docs/cli-reference.md` and `docs/generated/cli-reference.md` are the earlier
+spellings: `check` names them with the `git mv` that fixes them. A product
+that installs an executable `scripts/render-cli-reference.sh OUTPUT` lets
+`adopt` write and regenerate the file, and `check` compare it; a renderer
+that cannot run in a fresh checkout leaves the file as it stands rather than
+reporting a false drift.
+
+`check` reports prose as a note naming its destination, and refuses it only
+under `--docs-contract` (the `docs_contract` input of `check-product.yml`).
+The refusal is opt-in for as long as `maelys-docs` does not exist: a product
+cannot move its prose to a repository nobody has created yet, and a rule
+that no product can satisfy is a rule that gets disabled. A product opts in
+once its prose has moved.
+
 ## Versions, tags, changelog
 
 - `VERSION` holds `X.Y.Z` and nothing else. A release is the tag `vX.Y.Z`

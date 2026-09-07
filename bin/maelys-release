@@ -46,6 +46,13 @@ DEFAULT_IMAGE = "ubuntu:26.04"
 SOCLE_LINUX_PACKAGES = "build-essential dpkg-dev file rpm"  # the release.yml default
 BOTTLES = '\'["macos-15","macos-26"]\''
 PLATFORMS = {"linux-x86_64": "linux/amd64", "linux-arm64": "linux/arm64"}
+# One name and one place for the reference a machine writes from describe
+# (docs/policies/documentation.md of maelys-platform). Everything else in
+# docs/ is prose, and prose lives in maelys-docs.
+CLI_REFERENCE = "docs/cli.md"
+LEGACY_CLI_REFERENCES = ("docs/cli-reference.md", "docs/generated/cli-reference.md")
+# A generated file says so on its first line, whatever wrote it.
+GENERATED_FIRST_LINE = re.compile(r"generated|do not edit|ne pas .diter", re.IGNORECASE)
 # What a product carries whatever publishes it, and what belongs to the
 # socle's release mechanism. A product whose mechanism is custom or none
 # receives and is checked on the first set only (docs/conventions.md,
@@ -56,6 +63,7 @@ CONVENTION_MANAGED = ("AGENTS.md", "CLAUDE.md")
 CONVENTION_SEEDED = ("RELEASING.md", "LICENSING.md", "SECURITY.md")
 RELEASE_MANAGED = (
     ".github/workflows/release.yml",
+    CLI_REFERENCE,
     "scripts/checkout-dependency.sh",
     ".claude/skills/maelys-release/SKILL.md",
     ".github/workflows/ci.yml",
@@ -161,6 +169,10 @@ class Declarations:
         self.dependencies: list[str] = []
         self.linux_packages = ""
         self.macos_packages = ""
+        self.cli_reference_command = ""
+        # Files of docs/ that are neither generated, engaged by LICENSING.md
+        # nor data: they belong in maelys-docs/<product>/.
+        self.prose: list[str] = []
         self.checks: list[dict] = []
 
     @property
@@ -276,6 +288,7 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
             decl.add("warn", ".github/workflows/ci.yml does not call the socle's check-product.yml: add a job"
                      f" 'uses: {SOCLE_REPOSITORY}/.github/workflows/check-product.yml@SHA # TAG'"
                      f" with 'product: {product}', as adopt would create it")
+    read_docs(decl)
     packages = dependencies / "packages"
     if packages.is_file():
         try:
@@ -312,6 +325,62 @@ def declared_mechanism(project: pathlib.Path, requested: str = "") -> str:
                       "Delete or move .github/workflows/release.yml to change the mechanism of a repository;"
                       " the socle never overwrites a workflow it did not generate.")
     return requested or carried
+
+
+def engaged_documents(project: pathlib.Path) -> set[str]:
+    """The docs/ files LICENSING.md links: a public engagement stays here."""
+    licensing = project / "LICENSING.md"
+    if not licensing.is_file():
+        return set()
+    return {match.replace("./", "") for match in
+            re.findall(r"\(([^)\s]*docs/[^)\s#]+)\)", licensing.read_text(encoding="utf-8"))}
+
+
+def read_docs(decl: Declarations) -> None:
+    """Classify docs/: the generated reference, public engagements, data, prose.
+
+    The rule is maelys-platform's documentation policy: a product repository
+    keeps what a machine writes and what LICENSING.md engages; its prose
+    lives in maelys-docs/<product>/. The socle names what must move, and
+    moves nothing.
+    """
+    docs = decl.project / "docs"
+    reference = decl.project / CLI_REFERENCE
+    renderer = decl.project / "scripts" / "render-cli-reference.sh"
+    if renderer.is_file() and os.access(renderer, os.X_OK):
+        decl.cli_reference_command = "sh scripts/render-cli-reference.sh OUTPUT"
+        decl.add("ok", f"scripts/render-cli-reference.sh writes {CLI_REFERENCE}", "conventions")
+    legacy = [name for name in LEGACY_CLI_REFERENCES if (decl.project / name).is_file()]
+    for name in legacy:
+        decl.add("note", f"{name}: the generated CLI reference is {CLI_REFERENCE} for every product;"
+                 f" git mv {name} {CLI_REFERENCE} and point the rule that writes it there", "conventions")
+    if not docs.is_dir():
+        return
+    if reference.is_file():
+        first = reference.read_text(encoding="utf-8").split("\n", 1)[0]
+        if GENERATED_FIRST_LINE.search(first):
+            decl.add("ok", f"{CLI_REFERENCE} is generated", "conventions")
+        else:
+            decl.add("warn", f"{CLI_REFERENCE} does not say on its first line that it is generated;"
+                     " the reference is written from describe, never by hand", "conventions")
+    elif not legacy:
+        decl.add("note", f"no {CLI_REFERENCE}: a product with a command line carries its generated reference there",
+                 "conventions")
+    engaged = engaged_documents(decl.project)
+    for path in sorted(docs.rglob("*")):
+        if not path.is_file():
+            continue
+        relative = path.relative_to(decl.project).as_posix()
+        if relative == CLI_REFERENCE or relative in legacy or relative in engaged:
+            continue
+        if path.suffix.lower() != ".md":
+            continue  # data, never prose
+        if GENERATED_FIRST_LINE.search(path.read_text(encoding="utf-8").split("\n", 1)[0]):
+            continue
+        decl.prose.append(relative)
+    for relative in decl.prose:
+        decl.add("note", f"{relative}: prose belongs in maelys-docs/{decl.product}/"
+                 f"{relative[len('docs/'):]}, not in a product repository", "conventions")
 
 
 def pinned_product(project: pathlib.Path) -> str:
@@ -499,6 +568,8 @@ def stage(decl: Declarations, sha: str, tag: str) -> dict[str, tuple[str, bool]]
         path = decl.project / name
         existing = path.read_text(encoding="utf-8") if path.is_file() else None
         staged[name] = (managed_block(existing, block), False)
+    if decl.cli_reference_command:
+        staged[CLI_REFERENCE] = (render_cli_reference(decl), False)
     releasing = "RELEASING.md" if decl.releases_here else "RELEASING-conventions.md"
     for name, template in (("RELEASING.md", releasing), ("LICENSING.md", "LICENSING.md"),
                            ("SECURITY.md", "SECURITY.md")):
@@ -517,6 +588,27 @@ def stage(decl: Declarations, sha: str, tag: str) -> dict[str, tuple[str, bool]]
     return staged
 
 
+def render_cli_reference(decl: Declarations) -> str:
+    """Run the product's renderer into a temporary file and return what it wrote.
+
+    The Markdown itself comes from maelys-cli's generator, which the product
+    already calls; the socle fixes the name and the place, and regenerates to
+    compare. A renderer that cannot run (an unbuilt binary in a fresh
+    checkout) leaves the file as it stands rather than reporting a false drift.
+    """
+    current = (decl.project / CLI_REFERENCE)
+    existing = current.read_text(encoding="utf-8") if current.is_file() else ""
+    with tempfile.TemporaryDirectory(prefix="maelys-release-cli-reference.") as temp:
+        output = pathlib.Path(temp) / "cli.md"
+        command = decl.cli_reference_command.replace("OUTPUT", str(output))
+        completed = run(["sh", "-c", command], cwd=decl.project)
+        if completed.returncode != 0 or not output.is_file():
+            decl.add("note", f"{CLI_REFERENCE}: scripts/render-cli-reference.sh did not run here"
+                     " (an unbuilt product, usually); the file is left as it stands", "conventions")
+            return existing
+        return output.read_text(encoding="utf-8")
+
+
 def plan(decl: Declarations, staged: dict[str, tuple[str, bool]], apply: bool) -> list[dict]:
     """One entry per managed file: create, update or same; written when applying."""
     files: list[dict] = []
@@ -526,7 +618,8 @@ def plan(decl: Declarations, staged: dict[str, tuple[str, bool]], apply: bool) -
         content, executable = staged[relative]
         path = decl.project / relative
         entry: dict = {"path": relative,
-                       "scope": "conventions" if relative in CONVENTION_MANAGED + CONVENTION_SEEDED else "release"}
+                       "scope": "conventions" if relative in CONVENTION_MANAGED + CONVENTION_SEEDED + (CLI_REFERENCE,)
+                       else "release"}
         if relative in CONVENTION_SEEDED:
             entry["seeded"] = True
         if not path.is_file():
@@ -679,6 +772,14 @@ def check_data(invocation: Invocation) -> tuple[Declarations, dict]:
                     continue
                 message = f"{entry['path']}: {entry['action']}" + (f" ({entry['reason']})" if "reason" in entry else "")
                 (conventions if entry["scope"] == "conventions" else release).append(message)
+    # The documentation contract is opt-in while maelys-docs does not exist:
+    # a product cannot move prose to a repository nobody has created yet, so
+    # check names the destination and only refuses when asked to.
+    if invocation.flag("--docs-contract"):
+        conventions.extend(f"{relative}: prose belongs in maelys-docs/{product}/{relative[len('docs/'):]}"
+                           for relative in decl.prose)
+        conventions.extend(f"{name}: the generated CLI reference is {CLI_REFERENCE} for every product"
+                           for name in LEGACY_CLI_REFERENCES if (project / name).is_file())
     # The seeded notes are added while planning, so the checks are taken last.
     data["checks"] = decl.applicable()
     data["conventions"] = {"valid": not conventions, "violations": conventions}
@@ -1124,6 +1225,8 @@ CHECK_SCHEMA = {"type": "object", "additionalProperties": False,
                                "pinned": {"type": ["object", "null"]}, "checks": CHECKS_SCHEMA,
                                "files": FILES_SCHEMA, "violations": STRINGS,
                                "conventions": VERDICT_SCHEMA, "release": VERDICT_SCHEMA}}
+DOCS_CONTRACT_OPTION = cli.flag(
+    "--docs-contract", "Refuse prose in docs/ and a CLI reference outside docs/cli.md, instead of noting them.")
 MECHANISM_OPTION = cli.option(
     "--mechanism", "How the product publishes when it carries no release.yml yet.",
     cli.argument("MECHANISM", choices=list(MECHANISMS)))
@@ -1144,7 +1247,8 @@ APP = cli.Program(PROGRAM, PRODUCT, socle_version(), [
     cli.read("check", "check",
              "Report the conventions of a product and, when it publishes through the socle, its release mechanism;"
              " exit 2 on any violation.",
-             handle_check, operands=[DIR_OPERAND], options=[*SOCLE_OPTIONS, MECHANISM_OPTION], schema=CHECK_SCHEMA),
+             handle_check, operands=[DIR_OPERAND],
+             options=[*SOCLE_OPTIONS, MECHANISM_OPTION, DOCS_CONTRACT_OPTION], schema=CHECK_SCHEMA),
     cli.read("declarations", "declarations",
              "Return the product contract as data: pinned dependencies, packages, formulas; exit 2 when invalid.",
              handle_declarations, operands=[DIR_OPERAND], options=[SOCLE_OPTIONS[0]],
@@ -1158,7 +1262,7 @@ APP = cli.Program(PROGRAM, PRODUCT, socle_version(), [
                                     "macosPackages": {"type": "string"}, "formulas": STRINGS, "checks": CHECKS_SCHEMA}}),
     cli.read("preflight", "preflight",
              "Check, then report what the release workflow would refuse of the next tag; exit 2 when not ready.",
-             handle_preflight, operands=[DIR_OPERAND], options=list(SOCLE_OPTIONS),
+             handle_preflight, operands=[DIR_OPERAND], options=[*SOCLE_OPTIONS, DOCS_CONTRACT_OPTION],
              schema={"type": "object", "additionalProperties": False,
                      "required": ["ready", "valid", "product", "project", "socle", "pinned", "checks", "files",
                                   "preflight", "violations"],

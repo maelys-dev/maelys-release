@@ -567,6 +567,73 @@ class MechanismTest(unittest.TestCase):
         self.assertTrue(all("adopt --apply' writes it once" in note for note in notes), notes)
 
 
+class DocsContractTest(unittest.TestCase):
+    """docs/ holds what a machine writes and what LICENSING.md engages; prose moves."""
+
+    def setUp(self) -> None:
+        self.product = Product()
+        self.dir = str(self.product.dir)
+
+    def tearDown(self) -> None:
+        self.product.close()
+
+    def notes(self) -> list[str]:
+        return [check["message"] for check in self.product.json("check", self.dir)["data"]["checks"]
+                if check["status"] == "note"]
+
+    def test_prose_is_noted_with_its_destination_and_nothing_else_is(self) -> None:
+        self.product.write("docs/architecture.md", "# Architecture\n\nProse.\n")
+        self.product.write("docs/cli.md", "<!-- generated from describe; do not edit -->\n\n# CLI\n")
+        self.product.write("docs/schema.json", '{"a": 1}\n')
+        self.product.write("docs/other-generated.md", "<!-- GENERATED -->\n\n# Other\n")
+        self.product.run("adopt", self.dir, "--apply")
+        notes = [note for note in self.notes() if "maelys-docs" in note]
+        self.assertEqual(notes, ["docs/architecture.md: prose belongs in maelys-docs/maelys-fixture/architecture.md,"
+                                 " not in a product repository"])
+
+    def test_a_document_licensing_engages_stays(self) -> None:
+        self.product.write("docs/open-core.md", "# Open core\n\nProse, but engaged.\n")
+        self.product.write("LICENSING.md", "# Licensing\n\nSee [open core](docs/open-core.md).\n")
+        self.product.run("adopt", self.dir, "--apply")
+        self.assertEqual([note for note in self.notes() if "maelys-docs" in note], [])
+
+    def test_prose_is_a_note_by_default_and_a_violation_on_demand(self) -> None:
+        self.product.write("docs/architecture.md", "# Architecture\n\nProse.\n")
+        self.product.run("adopt", self.dir, "--apply")
+        self.assertTrue(self.product.json("check", self.dir)["data"]["conventions"]["valid"])
+        strict = self.product.json("check", self.dir, "--docs-contract", expect=2)["data"]
+        self.assertFalse(strict["conventions"]["valid"])
+        self.assertIn("docs/architecture.md: prose belongs in maelys-docs/maelys-fixture/architecture.md",
+                      strict["conventions"]["violations"])
+
+    def test_the_earlier_reference_paths_are_named_with_their_git_mv(self) -> None:
+        self.product.write("docs/cli-reference.md", "<!-- GENERATED -->\n\n# CLI\n")
+        self.product.run("adopt", self.dir, "--apply")
+        note = [note for note in self.notes() if "docs/cli-reference.md" in note]
+        self.assertEqual(len(note), 1, self.notes())
+        self.assertIn("git mv docs/cli-reference.md docs/cli.md", note[0])
+        strict = self.product.json("check", self.dir, "--docs-contract", expect=2)["data"]
+        self.assertTrue(any("docs/cli-reference.md" in violation for violation in strict["conventions"]["violations"]))
+
+    def test_a_declared_renderer_makes_the_reference_managed(self) -> None:
+        self.product.write("scripts/render-cli-reference.sh",
+                           '#!/bin/sh\nprintf "<!-- generated -->\\n\\n# CLI %s\\n" "$(cat VERSION)" >"$1"\n',
+                           executable=True)
+        self.product.run("adopt", self.dir, "--apply")
+        self.assertEqual(self.product.read("docs/cli.md"), "<!-- generated -->\n\n# CLI 1.2.3\n")
+        self.assertTrue(self.product.json("check", self.dir)["data"]["valid"])
+        self.product.write("docs/cli.md", "<!-- generated -->\n\n# CLI stale\n")
+        data = self.product.json("check", self.dir, expect=2)["data"]
+        self.assertIn("docs/cli.md: update", data["conventions"]["violations"])
+
+    def test_a_renderer_that_cannot_run_leaves_the_file_alone(self) -> None:
+        self.product.write("docs/cli.md", "<!-- generated -->\n\n# CLI\n")
+        self.product.write("scripts/render-cli-reference.sh", "#!/bin/sh\nexit 3\n", executable=True)
+        data = self.product.json("check", self.dir)["data"]
+        self.assertTrue(data["valid"], data["violations"])
+        self.assertTrue(any("did not run here" in check["message"] for check in data["checks"]))
+
+
 class GoldenTest(unittest.TestCase):
     """The text a human reads, in full: check conformant, check drifting, preflight not ready."""
 

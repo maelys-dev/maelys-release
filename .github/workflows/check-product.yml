@@ -38,6 +38,13 @@ on:
         required: false
         type: string
         default: ""
+      docs_contract:
+        description: >-
+          Refuse prose in docs/ and a CLI reference outside docs/cli.md.
+          A product opts in once its prose has moved to maelys-docs.
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -97,7 +104,9 @@ jobs:
         # The socle pinned by release.yml is the pin of record: check from
         # that checkout regenerates the managed files and fails on any drift,
         # including declarations changed without adopt --apply.
-        run: ${{ steps.socle.outputs.dir }}/bin/maelys-release check . --product "${{ inputs.product }}"
+        run: |
+          ${{ steps.socle.outputs.dir }}/bin/maelys-release check . --product "${{ inputs.product }}" \
+            ${{ inputs.docs_contract && '--docs-contract' || '' }}
 
   sanitizers:
     if: inputs.sanitizer_command != ''
