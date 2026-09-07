@@ -63,7 +63,6 @@ CONVENTION_MANAGED = ("AGENTS.md", "CLAUDE.md")
 CONVENTION_SEEDED = ("RELEASING.md", "LICENSING.md", "SECURITY.md")
 RELEASE_MANAGED = (
     ".github/workflows/release.yml",
-    CLI_REFERENCE,
     "scripts/checkout-dependency.sh",
     ".claude/skills/maelys-release/SKILL.md",
     ".github/workflows/ci.yml",
@@ -71,6 +70,7 @@ RELEASE_MANAGED = (
 MANAGED = (
     ".github/workflows/release.yml",
     "scripts/checkout-dependency.sh",
+    CLI_REFERENCE,
     "AGENTS.md",
     "CLAUDE.md",
     ".claude/skills/maelys-release/SKILL.md",
