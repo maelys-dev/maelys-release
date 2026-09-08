@@ -86,12 +86,17 @@ regeneration; three products carry three spellings of that same rule today.
 The socle finds the generator by itself, at the commit
 `dependencies/maelys-cli.pin` names: a checkout beside the product at that
 commit is used as it stands, otherwise the socle fetches it into its cache.
-Nothing to install, nothing to pass.
+Nothing to install, nothing to pass. maelys-cli does not pin itself, so the
+socle uses the `tools/generate_cli_reference.py` it carries: the framework
+is held to the rule it serves.
 
 What a product cannot be guessed on is declared in `docs/cli.reference`,
 read by the socle:
 
 ```
+[build]
+build/release/bin
+
 [programs]
 maelys
 maelys-hello
@@ -101,9 +106,12 @@ maelys-hello
 ```
 
 `[programs]` defaults to the product's commands, its `lib*` formulas aside,
-so most products carry no such file: maelys-oci needs only the `[flags]`
-section that its Makefile held as `REFERENCE_FLAGS`. The binaries are read
-from `build/bin`, the fleet's layout, which `BUILD` overrides.
+and `[build]` to `build/bin`, so a product declares only what it does
+differently: maelys-oci the `[flags]` its Makefile held as
+`REFERENCE_FLAGS`, maelys-cli the `[build]` (`build/release/bin`) and the
+second program it documents. There is no fleet layout to assume here: the
+three products that generate a reference build into three different trees.
+`CLI_REFERENCE_BUILD` overrides the directory for a local run.
 
 A reference that cannot be produced here (an unbuilt product, an
 unreachable maelys-cli) is left as it stands, with a note saying so, rather

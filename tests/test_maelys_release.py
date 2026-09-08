@@ -667,6 +667,28 @@ class DocsContractTest(unittest.TestCase):
         self.assertIn("rest=--neutral-availability unpack-rootfs maelys maelys-hello",
                       self.product.read("docs/cli.md"))
 
+    def test_the_framework_itself_carries_the_generator_instead_of_pinning_it(self) -> None:
+        # maelys-cli holds tools/generate_cli_reference.py; it is held to the
+        # same rule as the products it serves, with no pin to itself.
+        self.product.write("docs/cli.md", "<!-- generated -->\n\n# CLI\n")
+        self.product.write("tools/generate_cli_reference.py", self.RECORDING_GENERATOR)
+        self.product.run("adopt", self.dir, "--apply")
+        self.assertIn("build=bin rest=maelys-fixture", self.product.read("docs/cli.md"))
+        self.assertTrue(self.product.json("check", self.dir)["data"]["valid"])
+
+    def test_the_build_directory_is_declared_not_guessed(self) -> None:
+        self.with_a_command_line(self.RECORDING_GENERATOR)
+        self.product.write("docs/cli.reference", "[build]\nbuild/release/bin\n")
+        self.product.run("adopt", self.dir, "--apply")
+        self.assertIn("build=bin", self.product.read("docs/cli.md"))
+        data = self.product.json("adopt", self.dir)["data"]
+        self.assertTrue(any(entry["path"] == "docs/cli.md" for entry in data["files"]))
+        for bad in ("[build]\n/etc\n", "[build]\n../elsewhere\n", "[build]\nbuild/a\nbuild/b\n"):
+            self.product.write("docs/cli.reference", bad)
+            refused = self.product.json("check", self.dir, expect=2)["data"]
+            self.assertTrue(any("docs/cli.reference" in violation
+                                for violation in refused["conventions"]["violations"]), bad)
+
     def test_a_malformed_declaration_is_refused(self) -> None:
         self.with_a_command_line(self.RECORDING_GENERATOR)
         self.product.write("docs/cli.reference", "[targets]\nmaelys\n")

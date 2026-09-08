@@ -20,12 +20,19 @@
   check of its own: the `cli-reference` and `contract-check` targets of
   maelys-cli, maelys-egress and maelys-oci, three spellings of one rule, are
   deleted at their next adoption.
-- What cannot be guessed is declared in `docs/cli.reference`, with a
-  `[programs]` section defaulting to the product's commands (its `lib*`
-  formulas aside) and a `[flags]` section for the generator; maelys-oci's
-  `--neutral-availability unpack-rootfs` moves there from its Makefile.
-  Checked against maelys-oci: the socle alone reproduces what its Makefile
-  produced, Markdown and JSON contract, byte for byte.
+- What cannot be guessed is declared in `docs/cli.reference`: `[build]`, the
+  directory holding the programs (default `build/bin`); `[programs]`,
+  defaulting to the product's commands with its `lib*` formulas aside; and
+  `[flags]` for the generator. maelys-oci's `--neutral-availability
+  unpack-rootfs` moves there from its Makefile, maelys-cli its
+  `build/release/bin` and the second program it documents; the three
+  products that generate a reference build into three different trees, so
+  the directory is declared rather than assumed.
+- maelys-cli does not pin itself, so the socle uses the
+  `tools/generate_cli_reference.py` it carries: the framework is held to the
+  rule it serves, and loses its own target like the others. Checked against
+  both maelys-oci and maelys-cli: the socle alone reproduces what each
+  Makefile produced, byte for byte.
 - The refusal is opt-in: `check --docs-contract`, and the `docs_contract`
   input of `check-product.yml`, turn those notes into violations. It stays
   opt-in for as long as `maelys-docs` does not exist, because a product
