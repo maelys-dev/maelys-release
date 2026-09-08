@@ -28,6 +28,10 @@
   `build/release/bin` and the second program it documents; the three
   products that generate a reference build into three different trees, so
   the directory is declared rather than assumed.
+- A repository that publishes libraries alone is told nothing about a CLI
+  reference: maelys-system and maelys-json ship `libmaelys-sys` and
+  `libmaelys-json`, no command, so the rule does not apply to them and no
+  note asks for a file they cannot have.
 - maelys-cli does not pin itself, so the socle uses the
   `tools/generate_cli_reference.py` it carries: the framework is held to the
   rule it serves, and loses its own target like the others. Checked against

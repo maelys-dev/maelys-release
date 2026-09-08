@@ -710,6 +710,15 @@ class DocsContractTest(unittest.TestCase):
         self.assertTrue(any("maelys-cli is not available" in check["message"] for check in data["checks"]))
         self.assertEqual(self.product.read("docs/cli.md"), "<!-- generated -->\n\n# CLI\n")
 
+    def test_a_library_is_told_nothing_about_a_reference_it_cannot_have(self) -> None:
+        # Everything this fixture publishes becomes a library: no command, so
+        # no reference, and no note asking for one.
+        for name in ("maelys-fixture", "libmaelys-fixture"):
+            (self.product.dir / "packaging" / "homebrew" / f"{name}.rb.in").unlink()
+        self.product.write("packaging/homebrew/libmaelys-fixture.rb.in", "class LibmaelysFixture < Formula\nend\n")
+        self.product.run("adopt", self.dir, "--apply")
+        self.assertEqual([note for note in self.notes() if "cli.md" in note], [])
+
     def test_a_product_without_a_framework_command_line_generates_nothing(self) -> None:
         self.product.write("docs/cli.md", "<!-- generated -->\n\n# CLI\n")
         data = self.product.json("adopt", self.dir)["data"]

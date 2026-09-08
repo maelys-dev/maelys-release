@@ -105,6 +105,10 @@ maelys-hello
 --neutral-availability unpack-rootfs
 ```
 
+A repository that publishes libraries alone carries no reference and is told
+nothing about one: maelys-system and maelys-json ship `libmaelys-sys` and
+`libmaelys-json`, no command, and the rule does not apply to them.
+
 `[programs]` defaults to the product's commands, its `lib*` formulas aside,
 and `[build]` to `build/bin`, so a product declares only what it does
 differently: maelys-oci the `[flags]` its Makefile held as
