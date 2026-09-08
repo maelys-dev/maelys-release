@@ -54,6 +54,9 @@ CLI_CONTRACT = "docs/cli-contract.json"
 # What a product declares about its own reference, when the conventions do
 # not already say it: [programs] to describe, [flags] for the generator.
 CLI_DECLARATIONS = "docs/cli.reference"
+# maelys-cli carries the generator instead of pinning it: the framework is
+# held to the same rule as the products it serves.
+CLI_GENERATOR = "tools/generate_cli_reference.py"
 LEGACY_CLI_REFERENCES = ("docs/cli-reference.md", "docs/generated/cli-reference.md")
 # A generated file says so on its first line, whatever wrote it.
 GENERATED_FIRST_LINE = re.compile(r"generated|do not edit|ne pas .diter", re.IGNORECASE)
@@ -381,6 +384,7 @@ def read_docs(decl: Declarations) -> None:
     # whose generator writes the reference. The socle owns the wrapper, so the
     # reference is produced the same way everywhere; the product's Makefile
     # calls it and overrides by environment what its layout requires.
+    has_generator = "maelys-cli" in decl.dependencies or (decl.project / CLI_GENERATOR).is_file()
     declarations = decl.project / CLI_DECLARATIONS
     if declarations.is_file():
         try:
@@ -390,7 +394,7 @@ def read_docs(decl: Declarations) -> None:
     # A product whose command line is built on the framework pins maelys-cli,
     # whose generator writes the reference. The socle runs it: no product
     # carries a rule, a path or a drift check of its own for this.
-    if "maelys-cli" in decl.dependencies and reference.is_file():
+    if has_generator and reference.is_file():
         if not decl.cli_programs:
             decl.cli_programs = [name for name in decl.formulas if not name.startswith("lib")] or [decl.product]
         decl.generates_reference = True
@@ -409,7 +413,7 @@ def read_docs(decl: Declarations) -> None:
         else:
             decl.add("warn", f"{CLI_REFERENCE} does not say on its first line that it is generated;"
                      " the reference is written from describe, never by hand", "conventions")
-    elif not legacy and "maelys-cli" not in decl.dependencies:
+    elif not legacy and not has_generator:
         decl.add("note", f"no {CLI_REFERENCE}: a product with a command line carries its generated reference there",
                  "conventions")
     engaged = engaged_documents(decl.project)
@@ -644,9 +648,15 @@ def cli_generator(decl: Declarations) -> pathlib.Path | None:
     product at the same commit is used as it stands, which keeps this offline
     and matches what scripts/checkout-dependency.sh leaves there.
     """
-    pin = (decl.project / "dependencies" / "maelys-cli.pin").read_text(encoding="utf-8").splitlines()
-    sha = pin[1].strip()
-    relative = pathlib.Path("tools") / "generate_cli_reference.py"
+    # The framework holds the generator; every other product pins it.
+    own = decl.project / CLI_GENERATOR
+    if own.is_file():
+        return own
+    pin = decl.project / "dependencies" / "maelys-cli.pin"
+    if not pin.is_file():
+        return None
+    sha = pin.read_text(encoding="utf-8").splitlines()[1].strip()
+    relative = pathlib.Path(CLI_GENERATOR)
     sibling = decl.project.parent / "maelys-cli"
     if (sibling / relative).is_file():
         head = run(["git", "-C", str(sibling), "rev-parse", "HEAD"]).stdout.strip()
