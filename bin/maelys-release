@@ -180,6 +180,7 @@ class Declarations:
         self.generates_reference = False
         self.cli_programs: list[str] = []
         self.cli_flags: list[str] = []
+        self.cli_build = ""
         # Files of docs/ that are neither generated, engaged by LICENSING.md
         # nor data: they belong in maelys-docs/<product>/.
         self.prose: list[str] = []
@@ -346,9 +347,9 @@ def engaged_documents(project: pathlib.Path) -> set[str]:
             re.findall(r"\(([^)\s]*docs/[^)\s#]+)\)", licensing.read_text(encoding="utf-8"))}
 
 
-def parse_cli_declarations(text: str) -> tuple[list[str], list[str]]:
-    """docs/cli.reference: programs under [programs], generator flags under [flags]."""
-    sections: dict[str, list[str]] = {"programs": [], "flags": []}
+def parse_cli_declarations(text: str) -> tuple[list[str], list[str], str]:
+    """docs/cli.reference: [build] holding the programs, [programs], [flags]."""
+    sections: dict[str, list[str]] = {"build": [], "programs": [], "flags": []}
     section = ""
     for number, raw in enumerate(text.splitlines(), 1):
         line = raw.strip()
@@ -365,9 +366,15 @@ def parse_cli_declarations(text: str) -> tuple[list[str], list[str]]:
             if not re.fullmatch(r"[a-z0-9][a-z0-9._-]*", line):
                 raise ValueError(f"one program per line at line {number}: {raw}")
             sections["programs"].append(line)
+        elif section == "build":
+            if sections["build"]:
+                raise ValueError(f"[build] holds one directory, a second at line {number}")
+            if line.startswith("/") or ".." in pathlib.PurePosixPath(line).parts:
+                raise ValueError(f"[build] is a path inside the product at line {number}: {raw}")
+            sections["build"].append(line)
         else:
             sections["flags"].extend(line.split())
-    return sections["programs"], sections["flags"]
+    return sections["programs"], sections["flags"], (sections["build"][0] if sections["build"] else "")
 
 
 def read_docs(decl: Declarations) -> None:
@@ -388,7 +395,8 @@ def read_docs(decl: Declarations) -> None:
     declarations = decl.project / CLI_DECLARATIONS
     if declarations.is_file():
         try:
-            decl.cli_programs, decl.cli_flags = parse_cli_declarations(declarations.read_text(encoding="utf-8"))
+            decl.cli_programs, decl.cli_flags, decl.cli_build = \
+                parse_cli_declarations(declarations.read_text(encoding="utf-8"))
         except ValueError as error:
             decl.add("missing", f"{CLI_DECLARATIONS}: {error}", "conventions")
     # A product whose command line is built on the framework pins maelys-cli,
@@ -684,7 +692,10 @@ def render_cli_reference(decl: Declarations) -> tuple[str, str]:
         decl.add("note", f"{CLI_REFERENCE}: maelys-cli is not available at the pinned commit;"
                  " the reference is left as it stands", "conventions")
         return existing()
-    build = decl.project / os.environ.get("BUILD", "build") / "bin"
+    # Three products, three build layouts (build/release, build/<profile>,
+    # a platform tree): the directory holding the programs is declared, not
+    # guessed, with the commonest as the default.
+    build = decl.project / os.environ.get("CLI_REFERENCE_BUILD", decl.cli_build or "build/bin")
     with tempfile.TemporaryDirectory(prefix="maelys-release-cli-reference.") as temp:
         markdown = pathlib.Path(temp) / "cli.md"
         contract = pathlib.Path(temp) / "cli-contract.json"
