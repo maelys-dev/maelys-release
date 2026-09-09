@@ -58,8 +58,19 @@ CLI_DECLARATIONS = "docs/cli.reference"
 # held to the same rule as the products it serves.
 CLI_GENERATOR = "tools/generate_cli_reference.py"
 LEGACY_CLI_REFERENCES = ("docs/cli-reference.md", "docs/generated/cli-reference.md")
-# A generated file says so on its first line, whatever wrote it.
-GENERATED_FIRST_LINE = re.compile(r"generated|do not edit|ne pas .diter", re.IGNORECASE)
+# A generated file says so in its head, whatever wrote it: the word
+# "generated" and a refusal to be edited, within the first ten lines. The
+# generators live in maelys-cli and in the products, not here, so the socle
+# fixes the rule rather than one spelling; the three in use satisfy it, and
+# one of them sits on line 3, under the title.
+GENERATED_HEAD_LINES = 10
+GENERATED_MARK = re.compile(r"generated", re.IGNORECASE)
+GENERATED_REFUSAL = re.compile(r"do not edit|don't edit|ne pas .diter", re.IGNORECASE)
+
+
+def is_generated(text: str) -> bool:
+    head = "\n".join(text.split("\n", GENERATED_HEAD_LINES)[:GENERATED_HEAD_LINES])
+    return bool(GENERATED_MARK.search(head) and GENERATED_REFUSAL.search(head))
 # What a product carries whatever publishes it, and what belongs to the
 # socle's release mechanism. A product whose mechanism is custom or none
 # receives and is checked on the first set only (docs/conventions.md,
@@ -416,12 +427,12 @@ def read_docs(decl: Declarations) -> None:
     if not docs.is_dir():
         return
     if reference.is_file():
-        first = reference.read_text(encoding="utf-8").split("\n", 1)[0]
-        if GENERATED_FIRST_LINE.search(first):
+        if is_generated(reference.read_text(encoding="utf-8")):
             decl.add("ok", f"{CLI_REFERENCE} is generated", "conventions")
         else:
-            decl.add("warn", f"{CLI_REFERENCE} does not say on its first line that it is generated;"
-                     " the reference is written from describe, never by hand", "conventions")
+            decl.add("warn", f"{CLI_REFERENCE} does not say in its first {GENERATED_HEAD_LINES} lines that it is"
+                     " generated and must not be edited; the reference is written from describe, never by hand",
+                     "conventions")
     elif not legacy and not has_generator and commands:
         # Only a product that ships a command can carry a reference: a library
         # publishes lib* alone and is told nothing about docs/cli.md.
@@ -436,7 +447,7 @@ def read_docs(decl: Declarations) -> None:
             continue
         if path.suffix.lower() != ".md":
             continue  # data, never prose
-        if GENERATED_FIRST_LINE.search(path.read_text(encoding="utf-8").split("\n", 1)[0]):
+        if is_generated(path.read_text(encoding="utf-8")):
             continue
         decl.prose.append(relative)
     for relative in decl.prose:

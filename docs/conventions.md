@@ -61,10 +61,18 @@ publicly; its prose lives in `maelys-dev/maelys-docs`, directory
 | Kind | Recognised by | Stays |
 | --- | --- | --- |
 | generated reference | the path `docs/cli.md` | yes |
-| other generated file | its first line says so | yes |
+| other generated file | its head says so | yes |
 | public engagement | a link from `LICENSING.md` | yes |
 | data | not Markdown | yes |
 | prose | everything else | no, it moves to `maelys-docs/<product>/` |
+
+A file is generated when its first ten lines carry both the word
+`generated` and a refusal to be edited (`do not edit`, `ne pas éditer`).
+The rule is the contract, not one spelling: the generators live in
+maelys-cli and in the products, not here, and the three forms in use all
+satisfy it, one of them on the third line under a title. Prose that merely
+says "generated" in a sentence is not marked, because the refusal is
+missing.
 
 The generated command-line reference is **`docs/cli.md`**, one name and one
 place for every product, with its machine-readable contract beside it as

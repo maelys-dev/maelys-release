@@ -10,6 +10,13 @@
   place for every product. `docs/cli-reference.md` and
   `docs/generated/cli-reference.md`, the three spellings in use today, are
   named with the `git mv` that fixes them.
+- A file counts as generated when its first ten lines carry both the word
+  `generated` and a refusal to be edited. Reading only the first line missed
+  `docs/generated/config-reference.md` of maelys-egress, whose mark sits on
+  line 3 under its title, and counted it as prose; requiring the refusal
+  keeps prose that merely says "generated" in a sentence out. The rule is
+  the contract rather than one spelling, since the generators live in
+  maelys-cli and in the products.
 - **The socle generates the reference itself.** `adopt` writes
   `docs/cli.md` and `docs/cli-contract.json`, `check` compares them, and
   `check-product.yml` does that in every product's CI. The Markdown still
