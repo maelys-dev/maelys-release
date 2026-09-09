@@ -640,6 +640,106 @@ class NewTest(unittest.TestCase):
         self.assertFalse((self.target / ".github").exists())
 
 
+@unittest.skipUnless(shutil.which("git-filter-repo"), "git-filter-repo is required to rewrite history")
+class MigrateTest(unittest.TestCase):
+    """The prose leaves the product and arrives in maelys-docs, with its history."""
+
+    def setUp(self) -> None:
+        self.product = Product()
+        self.dir = str(self.product.dir)
+        self.product.write("docs/architecture.md", "# Architecture\n\nFirst.\n")
+        self.product.write("docs/guide.md", "# Guide\n\nProse.\n")
+        self.product.write("docs/schema.json", '{"a": 1}\n')
+        self.product.write("README.md", "# Fixture\n\n## Documentation\n\n"
+                                        "- [architecture](docs/architecture.md): how.\n"
+                                        "- [guide](docs/guide.md): usage.\n\n## Licence\n\nMPL-2.0.\n")
+        self.product.git(self.product.dir, "init", "-q")
+        self.product.git(self.product.dir, "add", "-A")
+        self.product.git(self.product.dir, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "fixture")
+        self.product.git(self.product.dir, "tag", "v1.2.3")     # maelys-docs pins the tag it describes
+        # maelys-docs stands in the fixture's remotes, as the socle clones it.
+        self.documents = self.product.work / "remotes" / "maelys-docs.git"
+        seed = self.product.work / "documents-seed"
+        seed.mkdir()
+        (seed / "README.md").write_text("# Maelys documentation\n", encoding="utf-8")
+        self.product.git(seed, "init", "-q")
+        self.product.git(seed, "add", "-A")
+        self.product.git(seed, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "seed")
+        self.product.git(self.product.work, "clone", "-q", "--bare", str(seed), str(self.documents))
+
+    def tearDown(self) -> None:
+        self.product.close()
+
+    def records(self, *names: str) -> str:
+        path = self.product.work / "prose.jsonl"
+        path.write_text("".join(json.dumps({"repository": "maelys-fixture", "path": f"docs/{name}",
+                                            "kind": "prose",
+                                            "destination": f"maelys-docs/maelys-fixture/{name}"}) + "\n"
+                                for name in names), encoding="utf-8")
+        return str(path)
+
+    def migrate(self, *arguments: str, names: tuple = ("architecture.md", "guide.md"), expect: int = 0) -> dict:
+        return self.product.json("migrate", self.dir, "--product", "maelys-fixture",
+                                 "--documents", self.records(*names),
+                                 "--documents-repository", "maelys-dev/maelys-docs", *arguments, expect=expect)
+
+    def test_the_plan_says_what_moves_what_stays_and_what_still_names_it(self) -> None:
+        data = self.migrate()["data"]
+        self.assertEqual(data["mode"], "plan")
+        self.assertEqual([entry["path"] for entry in data["moving"]], ["docs/architecture.md", "docs/guide.md"])
+        self.assertEqual(data["moving"][0]["referencedBy"], ["README.md"])
+        staying = {entry["path"]: entry["reason"] for entry in data["staying"]}
+        self.assertEqual(staying, {"docs/schema.json": "data, not prose"})
+        self.assertTrue((self.product.dir / "docs" / "architecture.md").is_file())   # nothing written
+
+    def test_a_list_of_another_product_or_a_wrong_destination_is_refused(self) -> None:
+        path = self.product.work / "foreign.jsonl"
+        path.write_text(json.dumps({"repository": "maelys-other", "path": "docs/a.md",
+                                    "destination": "maelys-docs/maelys-other/a.md"}) + "\n", encoding="utf-8")
+        error = self.product.json("migrate", self.dir, "--product", "maelys-fixture", "--documents", str(path),
+                                  expect=1)["error"]
+        self.assertEqual(error["code"], "VALIDATION_FAILED")
+        self.assertIn("maelys-other", error["message"])
+
+    def test_a_document_that_is_not_in_the_product_is_refused(self) -> None:
+        error = self.migrate(names=("absent.md",), expect=1)["error"]
+        self.assertEqual(error["code"], "VALIDATION_FAILED")
+        self.assertIn("is not a file", error["message"])
+
+    def test_apply_moves_the_history_and_leaves_the_product_clean(self) -> None:
+        data = self.migrate("--apply")["data"]
+        self.assertEqual(data["mode"], "apply")
+        self.assertFalse(data["pushed"])
+        kept = pathlib.Path(data["kept"])
+        documents, product = kept / "documents", kept / "product"
+        # The prose arrived on its new path, with the commit that wrote it.
+        self.assertTrue((documents / "maelys-fixture" / "architecture.md").is_file())
+        log = self.product.git(documents, "log", "--oneline", "--", "maelys-fixture/architecture.md")
+        self.assertIn("fixture", log)
+        self.assertEqual((documents / "maelys-fixture" / "VERSION").read_text(), "1.2.3\n")
+        self.assertEqual((documents / "adapter" / "MAELYS_FIXTURE_PIN").read_text().splitlines()[0], "v1.2.3")
+        # And left the product, whose README now names where it went.
+        self.assertFalse((product / "docs" / "architecture.md").exists())
+        self.assertTrue((product / "docs" / "schema.json").is_file())
+        readme = (product / "README.md").read_text()
+        self.assertNotIn("docs/architecture.md", readme)
+        self.assertIn("maelys-dev/maelys-docs", readme)
+        self.assertIn("## Licence", readme)      # the rest of the README is untouched
+        # The operator's checkout is not written to at all.
+        self.assertTrue((self.product.dir / "docs" / "architecture.md").is_file())
+
+    def test_an_untagged_product_describes_no_release(self) -> None:
+        self.product.git(self.product.dir, "tag", "-d", "v1.2.3")
+        error = self.migrate("--apply", expect=1)["error"]
+        self.assertEqual(error["code"], "PRECONDITION_FAILED")
+        self.assertIn("no tag", error["message"])
+
+    def test_nothing_leaves_the_machine_without_push(self) -> None:
+        self.migrate("--apply")
+        remote = self.product.git(self.documents, "for-each-ref", "--format=%(refname)")
+        self.assertNotIn("migrate/maelys-fixture", remote)
+
+
 class DocsContractTest(unittest.TestCase):
     """docs/ holds what a machine writes and what LICENSING.md engages; prose moves."""
 
@@ -661,8 +761,10 @@ class DocsContractTest(unittest.TestCase):
         self.product.write("docs/other-generated.md", "<!-- GENERATED; do not edit -->\n\n# Other\n")
         self.product.run("adopt", self.dir, "--apply")
         notes = [note for note in self.notes() if "maelys-docs" in note]
-        self.assertEqual(notes, ["docs/architecture.md: prose belongs in maelys-docs/maelys-fixture/architecture.md,"
-                                 " not in a product repository"])
+        self.assertEqual(len(notes), 1, notes)
+        self.assertTrue(notes[0].startswith("docs/architecture.md: prose belongs in"
+                                            " maelys-docs/maelys-fixture/architecture.md"), notes[0])
+        self.assertIn("migrate", notes[0])      # the note names the remedy
 
     def test_the_generated_mark_is_read_in_the_head_not_on_one_line(self) -> None:
         # The three spellings in the fleet, one of them under the title.
@@ -688,8 +790,10 @@ class DocsContractTest(unittest.TestCase):
         self.assertTrue(self.product.json("check", self.dir)["data"]["conventions"]["valid"])
         strict = self.product.json("check", self.dir, "--docs-contract", expect=2)["data"]
         self.assertFalse(strict["conventions"]["valid"])
-        self.assertIn("docs/architecture.md: prose belongs in maelys-docs/maelys-fixture/architecture.md",
-                      strict["conventions"]["violations"])
+        self.assertTrue(any(violation.startswith("docs/architecture.md: prose belongs in"
+                                                  " maelys-docs/maelys-fixture/architecture.md")
+                            for violation in strict["conventions"]["violations"]),
+                        strict["conventions"]["violations"])
 
     def test_the_earlier_reference_paths_are_named_with_their_git_mv(self) -> None:
         self.product.write("docs/cli-reference.md", "<!-- GENERATED; do not edit -->\n\n# CLI\n")

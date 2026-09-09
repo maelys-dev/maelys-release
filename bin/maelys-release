@@ -454,7 +454,9 @@ def read_docs(decl: Declarations) -> None:
         decl.prose.append(relative)
     for relative in decl.prose:
         decl.add("note", f"{relative}: prose belongs in maelys-docs/{decl.product}/"
-                 f"{relative[len('docs/'):]}, not in a product repository", "conventions")
+                 f"{relative[len('docs/'):]}; move it with its history:"
+                 f" 'maelys-platform docs --prose --only {decl.product} --format jsonl"
+                 f" | {PROGRAM} migrate . --product {decl.product} --documents -'", "conventions")
 
 
 def pinned_product(project: pathlib.Path) -> str:
@@ -1028,6 +1030,10 @@ def handle_migrate(invocation: Invocation) -> tuple[dict, int]:
     if not invocation.flag("--apply"):
         return data, EXIT_OK
     data["mode"] = "apply"
+    if not data["tag"]:
+        raise Failure("PRECONDITION_FAILED",
+                      f"{data['product']} has no tag, so the prose would describe no release.",
+                      "Release the product first: maelys-docs pins the tag whose prose it carries.")
     project = pathlib.Path(data["project"])
     product = data["product"]
     base = os.environ.get("MAELYS_GIT_BASE", "https://github.com/maelys-dev")
@@ -1210,7 +1216,8 @@ def check_data(invocation: Invocation) -> tuple[Declarations, dict]:
     # a product cannot move prose to a repository nobody has created yet, so
     # check names the destination and only refuses when asked to.
     if invocation.flag("--docs-contract"):
-        conventions.extend(f"{relative}: prose belongs in maelys-docs/{product}/{relative[len('docs/'):]}"
+        conventions.extend(f"{relative}: prose belongs in maelys-docs/{product}/{relative[len('docs/'):]};"
+                           f" move it with '{PROGRAM} migrate'"
                            for relative in decl.prose)
         conventions.extend(f"{name}: the generated CLI reference is {CLI_REFERENCE} for every product"
                            for name in LEGACY_CLI_REFERENCES if (project / name).is_file())
