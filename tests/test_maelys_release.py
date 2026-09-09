@@ -499,15 +499,41 @@ class MechanismTest(unittest.TestCase):
         data = self.product.json("adopt", self.dir)["data"]
         self.assertEqual(data["mechanism"], "custom")
         written = {entry["path"] for entry in data["files"]}
-        self.assertEqual(written, {"AGENTS.md", "CLAUDE.md", "RELEASING.md", "LICENSING.md", "SECURITY.md"})
+        # The conventions, and the shared CI, which is not the mechanism.
+        self.assertEqual(written, {"AGENTS.md", "CLAUDE.md", "RELEASING.md", "LICENSING.md", "SECURITY.md",
+                                   ".github/workflows/ci.yml"})
         self.assertNotIn(".github/workflows/release.yml", written)
-        self.assertNotIn(".github/workflows/ci.yml", written)
 
     def test_adopt_leaves_the_products_own_workflow_alone(self) -> None:
         self.product.run("adopt", self.dir, "--apply")
         self.assertEqual(self.product.read(".github/workflows/release.yml"), self.OWN_WORKFLOW)
         self.assertFalse((self.product.dir / "scripts" / "checkout-dependency.sh").exists())
         self.assertFalse((self.product.dir / ".claude").exists())
+
+    def test_the_shared_ci_is_installed_whatever_publishes_the_product(self) -> None:
+        # The CI is not the release mechanism: a product that publishes by
+        # itself can still run check-product.yml.
+        data = self.product.json("adopt", self.dir, "--apply")["data"]
+        written = {entry["path"] for entry in data["files"]}
+        self.assertIn(".github/workflows/ci.yml", written)
+        self.assertNotIn(".github/workflows/release.yml", written)
+        ci = self.product.read(".github/workflows/ci.yml")
+        self.assertIn("check-product.yml@" + "f" * 40, ci)
+        self.assertEqual(self.product.read(".github/workflows/release.yml"), self.OWN_WORKFLOW)
+
+    def test_the_socle_commit_is_readable_from_the_ci_that_calls_it(self) -> None:
+        # check-product.yml reads the socle commit from release.yml when the
+        # socle wrote it, and from the ci.yml line that calls it otherwise.
+        self.product.run("adopt", self.dir, "--apply")
+        workflows = self.product.dir / ".github" / "workflows"
+        script = ('sha="$(sed -n \'s|.*maelys-release/.github/workflows/release.yml@\\([0-9a-f]\\{40\\}\\).*|\\1|p\''
+                  ' .github/workflows/release.yml 2>/dev/null || true)"\n'
+                  'if [ -z "$sha" ]; then\n'
+                  '  sha="$(sed -n \'s|.*maelys-release/.github/workflows/check-product\\.yml@\\([0-9a-f]\\{40\\}\\).*|\\1|p\''
+                  ' .github/workflows/*.yml | head -n 1)"\nfi\nprintf %s "$sha"\n')
+        found = subprocess.run(["sh", "-c", script], cwd=self.product.dir, check=True, text=True,
+                               stdout=subprocess.PIPE).stdout
+        self.assertEqual(found, "f" * 40, list(workflows.iterdir()))
 
     def test_check_passes_without_a_word_about_the_workflows(self) -> None:
         self.product.run("adopt", self.dir, "--apply")
