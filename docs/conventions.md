@@ -406,10 +406,20 @@ review.
   a write into the operator's checkout. The README's links to the moved
   documents are replaced by one line naming where they went; the socle
   rewrites no other part of a README it cannot write.
-- **The plan names what still points at each document** elsewhere in the
-  product. A header, a `CONTRIBUTING.md` or a test that references a moved
-  document keeps a link that now leaves the repository, and that is the
-  operator's call, not the socle's.
+- **Every Markdown file of the product is pointed away**, not the README
+  alone. A link whose target left keeps its text and loses its link, since
+  the destination is a private repository; a path named in prose becomes the
+  path it now has. A document that is itself moving keeps its own relative
+  links, which stay valid where it lands.
+- **What the socle will not rewrite, it names with its line.** A header, a
+  Makefile or a script says what it says for reasons the socle does not
+  know, so those references are reported, in the plan and in the commit that
+  asks for the pull request, never silently left behind. Reporting a problem
+  and fixing half of it is worse than either extreme.
+- **A rule that names `docs/` as a whole is reported too**, because the
+  migration changes what it matches: maelys-egress installs `docs/*.md`, and
+  that glob is about to match one file instead of nineteen. The socle knows
+  it and says it.
 
 ## Creating a repository
 
