@@ -12,6 +12,10 @@
 - `.github/workflows/ci.yml` belongs to the conventions verdict, not to the
   release mechanism: the shared CI is offered to every mechanism, so its
   drift is reported where the product can act on it.
+- The conventions say what was practice: a first adoption is its own pull
+  request, because it changes what a repository builds, checks and
+  publishes; an upgrade is not, and rides the commit that prepares the next
+  release. maelys-http asked, adopting for the first time.
 - A verdict that does not apply can no longer carry a violation. It did, and
   the command exited 2 while printing `conventions: ok` and `release
   mechanism: not applicable`: an exit code contradicting what a human reads

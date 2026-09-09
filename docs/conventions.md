@@ -428,6 +428,17 @@ publishes with, as for `adopt`.
 
 ## Adopting and upgrading
 
+A **first adoption** is its own pull request. It changes what the repository
+builds, checks and publishes, it usually moves files, and folding that into
+the preparation of a release would hide it behind a version bump. It is
+reviewed for itself, and the release that follows is ordinary.
+
+An **upgrade** is not: a product re-adopts at its next release, in the
+commit that prepares it, never in a pull request of its own. The socle
+moves several times a week, and a dedicated pull request per product per
+version would be all the fleet ever reviewed. The changelog names what the
+product must change by hand, if anything.
+
 ```sh
 git clone https://github.com/maelys-dev/maelys-release && git -C maelys-release checkout vX.Y.Z
 maelys-release/bin/maelys-release adopt /path/to/product            # plan
