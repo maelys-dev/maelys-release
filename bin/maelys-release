@@ -46,6 +46,20 @@ DEFAULT_IMAGE = "ubuntu:26.04"
 SOCLE_LINUX_PACKAGES = "build-essential dpkg-dev file rpm"  # the release.yml default
 BOTTLES = '\'["macos-15","macos-26"]\''
 PLATFORMS = {"linux-x86_64": "linux/amd64", "linux-arm64": "linux/arm64"}
+# What a product carries whatever publishes it, and what belongs to the
+# socle's release mechanism. A product whose mechanism is custom or none
+# receives and is checked on the first set only (docs/conventions.md,
+# "Conventions and mechanism").
+CONVENTION_MANAGED = ("AGENTS.md", "CLAUDE.md")
+# Written once when missing, then owned by the product: the socle cannot
+# judge prose it does not generate, so check reports absence as a note.
+CONVENTION_SEEDED = ("RELEASING.md", "LICENSING.md", "SECURITY.md")
+RELEASE_MANAGED = (
+    ".github/workflows/release.yml",
+    "scripts/checkout-dependency.sh",
+    ".claude/skills/maelys-release/SKILL.md",
+    ".github/workflows/ci.yml",
+)
 MANAGED = (
     ".github/workflows/release.yml",
     "scripts/checkout-dependency.sh",
@@ -53,8 +67,13 @@ MANAGED = (
     "CLAUDE.md",
     ".claude/skills/maelys-release/SKILL.md",
     "RELEASING.md",
+    "LICENSING.md",
+    "SECURITY.md",
     ".github/workflows/ci.yml",
 )
+SOCLE_MECHANISM = "maelys-release"
+MECHANISMS = (SOCLE_MECHANISM, "custom", "none")
+RELEASE_USES = re.compile(rf"{re.escape(SOCLE_REPOSITORY)}/\.github/workflows/release\.yml@[0-9a-f]{{40}}")
 CI_USES = re.compile(rf"({re.escape(SOCLE_REPOSITORY)}/\.github/workflows/check-product\.yml@)[0-9a-f]{{40}} # \S+")
 BEGIN = "<!-- maelys-release:begin -->"
 END = "<!-- maelys-release:end -->"
@@ -129,9 +148,13 @@ def socle_identity(sha: str, tag: str) -> tuple[str, str]:
 class Declarations:
     """What a product declares, read once and used by every command."""
 
-    def __init__(self, project: pathlib.Path, product: str) -> None:
+    def __init__(self, project: pathlib.Path, product: str, mechanism: str = SOCLE_MECHANISM) -> None:
         self.project = project
         self.product = product
+        # How this product publishes: the socle's workflows, a mechanism of
+        # its own, or nothing. It decides which files adopt writes and which
+        # checks apply; the conventions apply to all three.
+        self.mechanism = mechanism
         self.version = ""
         self.formulas: list[str] = []
         self.render_command = ""
@@ -141,12 +164,22 @@ class Declarations:
         self.checks: list[dict] = []
 
     @property
+    def releases_here(self) -> bool:
+        """Whether the socle's release mechanism applies to this product."""
+        return self.mechanism == SOCLE_MECHANISM
+
+    def applicable(self) -> list[dict]:
+        """The checks that hold for this product: its mechanism's, and the conventions."""
+        return [check for check in self.checks
+                if check["scope"] == "conventions" or self.releases_here]
+
+    @property
     def valid(self) -> bool:
         """Whether adopt may proceed; a warning is reported by check only."""
-        return all(check["status"] in ("ok", "note", "warn") for check in self.checks)
+        return all(check["status"] in ("ok", "note", "warn") for check in self.applicable())
 
-    def add(self, status: str, message: str) -> None:
-        self.checks.append({"status": status, "message": message})
+    def add(self, status: str, message: str, scope: str = "release") -> None:
+        self.checks.append({"status": status, "message": message, "scope": scope})
 
 
 def parse_packages(text: str) -> tuple[str, str]:
@@ -170,34 +203,34 @@ def parse_packages(text: str) -> tuple[str, str]:
     return " ".join(packages["linux"]), " ".join(packages["macos"])
 
 
-def read_declarations(project: pathlib.Path, product: str) -> Declarations:
-    decl = Declarations(project, product)
+def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCLE_MECHANISM) -> Declarations:
+    decl = Declarations(project, product, mechanism)
     version_file = project / "VERSION"
     if not version_file.is_file():
-        decl.add("missing", "VERSION file")
+        decl.add("missing", "VERSION file", "conventions")
     else:
         text = version_file.read_text(encoding="utf-8").strip()
         if re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", text):
             decl.version = text
-            decl.add("ok", "VERSION file")
+            decl.add("ok", "VERSION file", "conventions")
         else:
-            decl.add("missing", "VERSION must be X.Y.Z")
+            decl.add("missing", "VERSION must be X.Y.Z", "conventions")
     packager = project / "scripts" / "package-release.sh"
     decl.add("ok" if packager.is_file() and os.access(packager, os.X_OK) else "missing",
              "scripts/package-release.sh TARGET writing dist/")
     changelog = project / "CHANGELOG.md"
     if not changelog.is_file():
-        decl.add("missing", "CHANGELOG.md")
+        decl.add("missing", "CHANGELOG.md", "conventions")
     else:
-        decl.add("ok", "CHANGELOG.md")
+        decl.add("ok", "CHANGELOG.md", "conventions")
         # The release of VERSION needs its dated entry; the workflow only
         # compares VERSION with the tag, so the entry is checked here.
         if decl.version:
             pattern = rf"^## {re.escape(decl.version)}\s.*[0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}}"
             if re.search(pattern, changelog.read_text(encoding="utf-8"), re.MULTILINE):
-                decl.add("ok", f"CHANGELOG.md has a dated ## {decl.version} entry")
+                decl.add("ok", f"CHANGELOG.md has a dated ## {decl.version} entry", "conventions")
             else:
-                decl.add("missing", f"CHANGELOG.md needs a dated entry: ## {decl.version} — YYYY-MM-DD")
+                decl.add("missing", f"CHANGELOG.md needs a dated entry: ## {decl.version} — YYYY-MM-DD", "conventions")
     # Every packaging/homebrew/NAME.rb.in becomes one tap job publishing NAME:
     # a formula is named after what it installs, not after the repository.
     homebrew = project / "packaging" / "homebrew"
@@ -253,6 +286,34 @@ def read_declarations(project: pathlib.Path, product: str) -> Declarations:
     return decl
 
 
+def declared_mechanism(project: pathlib.Path, requested: str = "") -> str:
+    """How the product publishes, read from the release.yml it carries.
+
+    A repository declares its mechanism by the workflow it holds: the socle's
+    generated release.yml names the socle, a workflow of its own does not,
+    and no release.yml at all means the socle does not release it. The last
+    case is not an invitation: maelys-warden publishes through its own
+    qualify and publish workflows and carries no release.yml, and writing one
+    into it uninvited would be the socle claiming a repository that never
+    asked. Installing the socle's mechanism is therefore explicit,
+    --mechanism maelys-release, which is what new passes.
+    """
+    workflow = project / ".github" / "workflows" / "release.yml"
+    if not workflow.is_file():
+        return requested or "custom"
+    carried = SOCLE_MECHANISM if RELEASE_USES.search(workflow.read_text(encoding="utf-8")) else "custom"
+    # custom and none both say "the socle does not release this"; which of the
+    # two is a refinement the repository may state. Only crossing that line is
+    # a contradiction: it would either abandon a generated workflow or
+    # overwrite one the socle never wrote.
+    if requested and requested != carried and SOCLE_MECHANISM in (requested, carried):
+        raise Failure("PRECONDITION_FAILED",
+                      f"{project} carries a {carried} release.yml, so --mechanism {requested} contradicts it.",
+                      "Delete or move .github/workflows/release.yml to change the mechanism of a repository;"
+                      " the socle never overwrites a workflow it did not generate.")
+    return requested or carried
+
+
 def pinned_product(project: pathlib.Path) -> str:
     """The product name the existing release.yml carries, or ''."""
     workflow = project / ".github" / "workflows" / "release.yml"
@@ -262,7 +323,7 @@ def pinned_product(project: pathlib.Path) -> str:
     return match.group(1) if match else ""
 
 
-def project_of(invocation: Invocation) -> tuple[pathlib.Path, str]:
+def project_of(invocation: Invocation) -> tuple[pathlib.Path, str, str]:
     directory = pathlib.Path(invocation.operands[0])
     if not directory.is_dir():
         raise Failure("NOT_FOUND", f"DIR is not a directory: {directory}.", "Pass the product repository.")
@@ -274,14 +335,22 @@ def project_of(invocation: Invocation) -> tuple[pathlib.Path, str]:
     if not re.fullmatch(r"[a-z0-9-]+", product):
         raise Failure("VALIDATION_FAILED", f"Product name must be [a-z0-9-]: {product}.",
                       "Pass --product NAME with a valid name.")
-    return project, product
+    return project, product, declared_mechanism(project, str(invocation.option("--mechanism", "")))
 
 
 def require_valid(decl: Declarations, action: str) -> None:
     if not decl.valid:
-        problems = [check["message"] for check in decl.checks if check["status"] not in ("ok", "note")]
+        problems = [check["message"] for check in decl.applicable() if check["status"] not in ("ok", "note")]
         raise Failure("PRECONDITION_FAILED", f"{decl.project} does not meet the product contract, so {action} is refused: "
                       + "; ".join(problems) + ".", f"Run '{PROGRAM} check {decl.project}' and fix every violation.")
+
+
+def require_socle_mechanism(project: pathlib.Path, mechanism: str, action: str) -> None:
+    """rehearse and preflight replay the socle's release; nothing else does."""
+    if mechanism != SOCLE_MECHANISM:
+        raise Failure("PRECONDITION_FAILED",
+                      f"{project} publishes through a {mechanism} mechanism, so {action} does not apply to it.",
+                      f"'{PROGRAM} check {project}' verifies the conventions of a product the socle does not release.")
 
 
 # ---- the managed files -------------------------------------------------------
@@ -404,26 +473,39 @@ def managed_block(existing: str | None, block: str) -> str:
 
 
 def stage(decl: Declarations, sha: str, tag: str) -> dict[str, tuple[str, bool]]:
-    """Every managed file as (content, executable), rendered for the product."""
+    """Every managed file as (content, executable), rendered for the product.
+
+    A product the socle does not release receives the conventions alone: its
+    workflows are its own, and nothing here touches them.
+    """
     version = socle_version()
     share = share_dir()
     formulas = ", ".join(f"packaging/homebrew/{name}.rb.in" for name in decl.formulas) \
         or "packaging/homebrew/<name>.rb.in"
     mapping = {"PRODUCT": decl.product, "FORMULAS": formulas, "SOCLE_TAG": tag, "SOCLE_VERSION": version}
-    staged: dict[str, tuple[str, bool]] = {
-        ".github/workflows/release.yml": (release_workflow(decl, sha, tag, version), False),
-        ".claude/skills/maelys-release/SKILL.md": (render_text(share / "agents" / "claude-skill.md", mapping), False),
-    }
-    if decl.dependencies:
-        staged["scripts/checkout-dependency.sh"] = (
-            render_text(share / "templates" / "checkout-dependency.sh", mapping), True)
-    block = render_text(share / "agents" / "instructions-block.md", mapping)
-    for name in ("AGENTS.md", "CLAUDE.md"):
+    staged: dict[str, tuple[str, bool]] = {}
+    if decl.releases_here:
+        staged[".github/workflows/release.yml"] = (release_workflow(decl, sha, tag, version), False)
+        staged[".claude/skills/maelys-release/SKILL.md"] = (
+            render_text(share / "agents" / "claude-skill.md", mapping), False)
+        if decl.dependencies:
+            staged["scripts/checkout-dependency.sh"] = (
+                render_text(share / "templates" / "checkout-dependency.sh", mapping), True)
+    # The managed block states the rules that hold here: the socle's release
+    # mechanism for a product it releases, the conventions alone otherwise.
+    block_source = "instructions-block.md" if decl.releases_here else "conventions-block.md"
+    block = render_text(share / "agents" / block_source, mapping)
+    for name in CONVENTION_MANAGED:
         path = decl.project / name
         existing = path.read_text(encoding="utf-8") if path.is_file() else None
         staged[name] = (managed_block(existing, block), False)
-    if not (decl.project / "RELEASING.md").is_file():
-        staged["RELEASING.md"] = (render_text(share / "templates" / "RELEASING.md", mapping), False)
+    releasing = "RELEASING.md" if decl.releases_here else "RELEASING-conventions.md"
+    for name, template in (("RELEASING.md", releasing), ("LICENSING.md", "LICENSING.md"),
+                           ("SECURITY.md", "SECURITY.md")):
+        if not (decl.project / name).is_file():
+            staged[name] = (render_text(share / "templates" / template, mapping), False)
+    if not decl.releases_here:
+        return staged
     ci = decl.project / ".github" / "workflows" / "ci.yml"
     if not ci.is_file():
         staged[".github/workflows/ci.yml"] = (ci_workflow(decl, sha, tag, version), False)
@@ -443,7 +525,10 @@ def plan(decl: Declarations, staged: dict[str, tuple[str, bool]], apply: bool) -
             continue
         content, executable = staged[relative]
         path = decl.project / relative
-        entry: dict = {"path": relative}
+        entry: dict = {"path": relative,
+                       "scope": "conventions" if relative in CONVENTION_MANAGED + CONVENTION_SEEDED else "release"}
+        if relative in CONVENTION_SEEDED:
+            entry["seeded"] = True
         if not path.is_file():
             entry["action"] = "create"
         else:
@@ -536,28 +621,30 @@ def run_pinned_socle(invocation: Invocation, project: pathlib.Path) -> None:
 # ---- handlers: each returns (data, exit code) ---------------------------------
 
 def handle_adopt(invocation: Invocation) -> tuple[dict, int]:
-    project, product = project_of(invocation)
+    project, product, mechanism = project_of(invocation)
     apply = invocation.flag("--apply")
-    decl = read_declarations(project, product)
+    decl = read_declarations(project, product, mechanism)
     require_valid(decl, "adopt")
     sha, tag = socle_identity(str(invocation.option("--socle-sha", "")), str(invocation.option("--socle-tag", "")))
     # A product pins releases of the socle: a commit without a tag has no
     # changelog entry, no trial and no compatibility promise. Trials of a
     # candidate say so explicitly.
-    if tag == "untagged" and not invocation.option("--socle-sha") and not invocation.flag("--allow-untagged"):
+    if decl.releases_here and tag == "untagged" and not invocation.option("--socle-sha") \
+            and not invocation.flag("--allow-untagged"):
         described = git("describe", "--tags", "--always", cwd=socle_root(), check=False) or sha[:7]
         raise Failure("PRECONDITION_FAILED", f"This socle is {described}, not a release: a product pins tagged versions only.",
                       "Check out a tag of maelys-release, or pass --allow-untagged for a trial of a candidate.")
     files = plan(decl, stage(decl, sha, tag), apply)
     changed = any(entry["action"] != "same" for entry in files)
     return {"mode": "apply" if apply else "plan", "product": product, "project": str(project),
-            "socle": socle_data(sha, tag), "changed": changed, "checks": decl.checks, "files": files}, EXIT_OK
+            "mechanism": mechanism, "socle": socle_data(sha, tag), "changed": changed,
+            "checks": decl.applicable(), "files": files}, EXIT_OK
 
 
 def check_data(invocation: Invocation) -> tuple[Declarations, dict]:
-    project, product = project_of(invocation)
+    project, product, mechanism = project_of(invocation)
     run_pinned_socle(invocation, project)
-    decl = read_declarations(project, product)
+    decl = read_declarations(project, product, mechanism)
     sha, tag = socle_identity(str(invocation.option("--socle-sha", "")), str(invocation.option("--socle-tag", "")))
     pinned = pinned_socle(project)
     # A socle fetched by commit alone (a depth-1 fetch in CI) knows no tag;
@@ -565,29 +652,50 @@ def check_data(invocation: Invocation) -> tuple[Declarations, dict]:
     # agree the product's label stands and regeneration compares content.
     if tag == "untagged" and pinned and pinned["sha"] == sha:
         tag = pinned["tag"]
-    data: dict = {"product": product, "project": str(project), "socle": socle_data(sha, tag),
-                  "pinned": pinned, "checks": decl.checks, "files": [], "violations": []}
-    data["violations"].extend(check["message"] for check in decl.checks if check["status"] not in ("ok", "note"))
+    # Two verdicts: the conventions, which hold for every product, and the
+    # release mechanism, which holds only for a product the socle releases.
+    conventions: list[str] = []
+    release: list[str] = []
+    data: dict = {"product": product, "project": str(project), "mechanism": decl.mechanism,
+                  "socle": socle_data(sha, tag), "pinned": pinned, "checks": decl.applicable(),
+                  "files": [], "violations": []}
+    for check in decl.applicable():
+        if check["status"] not in ("ok", "note"):
+            (conventions if check["scope"] == "conventions" else release).append(check["message"])
     if decl.valid:
-        if data["pinned"] and data["pinned"]["sha"] != sha:
-            data["violations"].append(
+        if decl.releases_here and data["pinned"] and data["pinned"]["sha"] != sha:
+            release.append(
                 f"{product} pins maelys-release {data['pinned']['tag']} ({data['pinned']['sha'][:7]}) but this is"
                 f" {tag} ({sha[:7]}): run the pinned socle, or 'adopt {project} --apply' from this one to upgrade")
         else:
             data["files"] = plan(decl, stage(decl, sha, tag), apply=False)
-            data["violations"].extend(f"{entry['path']}: {entry['action']}" + (f" ({entry['reason']})" if "reason" in entry else "")
-                                      for entry in data["files"] if entry["action"] != "same")
+            for entry in data["files"]:
+                if entry["action"] == "same":
+                    continue
+                # A seeded file is written once and owned by the product
+                # afterwards: adopt offers it, check never demands it.
+                if entry.get("seeded"):
+                    decl.add("note", f"{entry['path']}: absent; 'adopt --apply' writes it once", "conventions")
+                    continue
+                message = f"{entry['path']}: {entry['action']}" + (f" ({entry['reason']})" if "reason" in entry else "")
+                (conventions if entry["scope"] == "conventions" else release).append(message)
+    # The seeded notes are added while planning, so the checks are taken last.
+    data["checks"] = decl.applicable()
+    data["conventions"] = {"valid": not conventions, "violations": conventions}
+    data["release"] = {"applicable": decl.releases_here, "valid": not release, "violations": release}
+    data["violations"] = conventions + release
     data["valid"] = not data["violations"]
     return decl, data
 
 
 def handle_declarations(invocation: Invocation) -> tuple[dict, int]:
     """The product contract as data, for a CI job that installs what it declares."""
-    project, product = project_of(invocation)
-    decl = read_declarations(project, product)
+    project, product, mechanism = project_of(invocation)
+    decl = read_declarations(project, product, mechanism)
     return {"valid": decl.valid, "product": product, "project": str(project), "version": decl.version,
+            "mechanism": mechanism,
             "dependencies": decl.dependencies, "linuxPackages": decl.linux_packages,
-            "macosPackages": decl.macos_packages, "formulas": decl.formulas, "checks": decl.checks}, \
+            "macosPackages": decl.macos_packages, "formulas": decl.formulas, "checks": decl.applicable()}, \
         EXIT_OK if decl.valid else EXIT_VIOLATIONS
 
 
@@ -608,6 +716,7 @@ def handle_preflight(invocation: Invocation) -> tuple[dict, int]:
     """What the release workflow will demand of the tag, before it exists."""
     decl, data = check_data(invocation)
     project = decl.project
+    require_socle_mechanism(project, decl.mechanism, "preflight")
     preflight: list[dict] = []
 
     def add(status: str, message: str) -> None:
@@ -706,12 +815,13 @@ ls -l /dist
 
 def handle_rehearse(invocation: Invocation) -> tuple[dict, int]:
     """Replay the build job of release.yml for one Linux target in Docker."""
-    project, product = project_of(invocation)
+    project, product, mechanism = project_of(invocation)
     run_pinned_socle(invocation, project)
     target = invocation.operands[1]
+    require_socle_mechanism(project, mechanism, "rehearse")
     if not shutil.which("docker"):
         raise Failure("NOT_FOUND", "docker is required to rehearse a Linux build.", "Install Docker and retry.")
-    decl = read_declarations(project, product)
+    decl = read_declarations(project, product, mechanism)
     require_valid(decl, "rehearse")
     if decl.dependencies and not os.access(project / "scripts" / "checkout-dependency.sh", os.X_OK):
         raise Failure("PRECONDITION_FAILED", "scripts/checkout-dependency.sh is missing in the product.",
@@ -907,8 +1017,10 @@ def text_adopt(data: dict) -> str:
         if data["mode"] == "plan" and entry.get("diff"):
             lines.extend("         " + line for line in entry["diff"].rstrip("\n").split("\n"))
     tag = data["socle"]["tag"]
+    scope = "conventions" if data["mechanism"] != SOCLE_MECHANISM else "conventions and release files"
     if data["mode"] == "apply":
-        lines.append(f"adopt: wrote maelys-release {tag} into {data['project']}")
+        lines.append(f"adopt: wrote the {scope} of maelys-release {tag} into {data['project']}"
+                     f" ({data['mechanism']} mechanism)")
     elif data["changed"]:
         lines.append("adopt: plan only; add --apply to write")
     else:
@@ -919,8 +1031,16 @@ def text_adopt(data: dict) -> str:
 def text_check(data: dict, with_checks: bool = True) -> str:
     lines = [f"{entry['action']:<8} {entry['path']}" + (f" ({entry['reason']})" if "reason" in entry else "")
              for entry in data["files"]]
+    conventions = "ok" if data["conventions"]["valid"] else "FAIL"
+    release = ("ok" if data["release"]["valid"] else "FAIL") if data["release"]["applicable"] \
+        else f"not applicable ({data['mechanism']} mechanism)"
+    lines.append(f"verdict  conventions: {conventions}")
+    lines.append(f"verdict  release mechanism: {release}")
     if data["valid"]:
-        lines.append(f"check: {data['product']} is on maelys-release {data['socle']['tag']}")
+        if data["release"]["applicable"]:
+            lines.append(f"check: {data['product']} is on maelys-release {data['socle']['tag']}")
+        else:
+            lines.append(f"check: {data['product']} follows the conventions of maelys-release {data['socle']['tag']}")
     else:
         # the contract lines and the file lines already show their violations
         shown = {check["message"] for check in data["checks"]}
@@ -971,12 +1091,20 @@ TEXT = {
 
 # ---- the catalog --------------------------------------------------------------
 
-CHECKS_SCHEMA = {"type": "array", "items": {"type": "object", "required": ["status", "message"],
-                                           "properties": {"status": {"type": "string"}, "message": {"type": "string"}}}}
-FILES_SCHEMA = {"type": "array", "items": {"type": "object", "required": ["path", "action"],
+CHECKS_SCHEMA = {"type": "array", "items": {"type": "object", "required": ["status", "message", "scope"],
+                                           "properties": {"status": {"type": "string"}, "message": {"type": "string"},
+                                                          "scope": {"enum": ["conventions", "release"]}}}}
+FILES_SCHEMA = {"type": "array", "items": {"type": "object", "required": ["path", "action", "scope"],
                                           "properties": {"path": {"type": "string"},
                                                          "action": {"enum": ["create", "update", "same"]},
+                                                         "scope": {"enum": ["conventions", "release"]},
+                                                         "seeded": {"type": "boolean"},
                                                          "diff": {"type": "string"}, "reason": {"type": "string"}}}}
+MECHANISM_SCHEMA = {"enum": list(MECHANISMS)}
+VERDICT_SCHEMA = {"type": "object", "required": ["valid", "violations"],
+                  "properties": {"valid": {"type": "boolean"}, "violations": {"type": "array",
+                                                                             "items": {"type": "string"}},
+                                 "applicable": {"type": "boolean"}}}
 SOCLE_SCHEMA = {"type": "object", "required": ["version", "tag", "sha"],
                 "properties": {"version": {"type": "string"}, "tag": {"type": "string"}, "sha": {"type": "string"}}}
 STRINGS = {"type": "array", "items": {"type": "string"}}
@@ -988,32 +1116,44 @@ SOCLE_OPTIONS = (
 )
 DIR_OPERAND = cli.operand("DIR", "Product repository.")
 CHECK_SCHEMA = {"type": "object", "additionalProperties": False,
-                "required": ["valid", "product", "project", "socle", "pinned", "checks", "files", "violations"],
+                "required": ["valid", "product", "project", "mechanism", "socle", "pinned", "checks", "files",
+                             "violations", "conventions", "release"],
                 "properties": {"valid": {"type": "boolean"}, "product": {"type": "string"},
-                               "project": {"type": "string"}, "socle": SOCLE_SCHEMA,
+                               "project": {"type": "string"}, "mechanism": MECHANISM_SCHEMA,
+                               "socle": SOCLE_SCHEMA,
                                "pinned": {"type": ["object", "null"]}, "checks": CHECKS_SCHEMA,
-                               "files": FILES_SCHEMA, "violations": STRINGS}}
+                               "files": FILES_SCHEMA, "violations": STRINGS,
+                               "conventions": VERDICT_SCHEMA, "release": VERDICT_SCHEMA}}
+MECHANISM_OPTION = cli.option(
+    "--mechanism", "How the product publishes when it carries no release.yml yet.",
+    cli.argument("MECHANISM", choices=list(MECHANISMS)))
 
 APP = cli.Program(PROGRAM, PRODUCT, socle_version(), [
-    cli.transaction("adopt", "adopt", "Write the managed files of the socle into a product; plan without --apply.",
+    cli.transaction("adopt", "adopt",
+                    "Write the conventions of the socle into a product, and its release files when it publishes"
+                    " through the socle; plan without --apply.",
                     handle_adopt, operands=[DIR_OPERAND],
-                    options=[*SOCLE_OPTIONS,
+                    options=[*SOCLE_OPTIONS, MECHANISM_OPTION,
                              cli.flag("--allow-untagged", "Accept a socle commit without a tag (a trial of a candidate).")],
                     schema={"type": "object", "additionalProperties": False,
-                            "required": ["mode", "product", "project", "socle", "changed", "checks", "files"],
+                            "required": ["mode", "product", "project", "mechanism", "socle", "changed", "checks", "files"],
                             "properties": {"mode": {"enum": ["plan", "apply"]}, "product": {"type": "string"},
-                                           "project": {"type": "string"}, "socle": SOCLE_SCHEMA,
+                                           "project": {"type": "string"}, "mechanism": MECHANISM_SCHEMA,
+                                           "socle": SOCLE_SCHEMA,
                                            "changed": {"type": "boolean"}, "checks": CHECKS_SCHEMA, "files": FILES_SCHEMA}}),
-    cli.read("check", "check", "Report the product contract and the drift of the managed files; exit 2 on any violation.",
-             handle_check, operands=[DIR_OPERAND], options=list(SOCLE_OPTIONS), schema=CHECK_SCHEMA),
+    cli.read("check", "check",
+             "Report the conventions of a product and, when it publishes through the socle, its release mechanism;"
+             " exit 2 on any violation.",
+             handle_check, operands=[DIR_OPERAND], options=[*SOCLE_OPTIONS, MECHANISM_OPTION], schema=CHECK_SCHEMA),
     cli.read("declarations", "declarations",
              "Return the product contract as data: pinned dependencies, packages, formulas; exit 2 when invalid.",
              handle_declarations, operands=[DIR_OPERAND], options=[SOCLE_OPTIONS[0]],
              schema={"type": "object", "additionalProperties": False,
-                     "required": ["valid", "product", "project", "version", "dependencies", "linuxPackages",
-                                  "macosPackages", "formulas", "checks"],
+                     "required": ["valid", "product", "project", "version", "mechanism", "dependencies",
+                                  "linuxPackages", "macosPackages", "formulas", "checks"],
                      "properties": {"valid": {"type": "boolean"}, "product": {"type": "string"},
                                     "project": {"type": "string"}, "version": {"type": "string"},
+                                    "mechanism": MECHANISM_SCHEMA,
                                     "dependencies": STRINGS, "linuxPackages": {"type": "string"},
                                     "macosPackages": {"type": "string"}, "formulas": STRINGS, "checks": CHECKS_SCHEMA}}),
     cli.read("preflight", "preflight",
