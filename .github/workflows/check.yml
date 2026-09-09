@@ -22,7 +22,8 @@ jobs:
       - name: Install shellcheck and actionlint
         if: runner.os == 'Linux'
         run: |
-          sudo apt-get update && sudo apt-get install -y shellcheck
+          sudo apt-get update || echo "::warning::apt-get update reported errors; the install decides"
+          sudo apt-get install -y shellcheck
           bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.12 /usr/local/bin >/dev/null
       - if: runner.os == 'Linux'
         run: actionlint .github/workflows/*.yml

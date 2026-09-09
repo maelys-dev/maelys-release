@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.22.1 — 2026-09-09
+
+- A broken third-party apt source of the runner image no longer fails a
+  product's CI. `apt-get update` is best-effort and reports a warning; the
+  install that follows decides, and still fails loudly when a package is
+  missing. GitHub's Ubuntu images carry a Google Chrome source that served
+  a mismatched index today, and `update && install` turned every Linux job
+  of the fleet red for a reason no product controls, the socle's own
+  workflows included.
+
 ## 0.22.0 — 2026-09-09
 
 - A pin may carry a `submodules` line, or `submodules recursive`, and
