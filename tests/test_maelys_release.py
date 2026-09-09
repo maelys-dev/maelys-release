@@ -525,6 +525,57 @@ class ProductNeedsTest(unittest.TestCase):
         self.assertIn("/maelys-system.git", traced)
         self.assertNotIn("example.invalid", traced)
 
+    def test_a_dependency_declares_the_submodules_its_build_needs(self) -> None:
+        self.product.write("dependencies/mbedtls.pin",
+                           "v3.6.7\n" + "b" * 40 + "\nrepository https://example.invalid/mbedtls.git\nsubmodules\n")
+        data = self.product.json("declarations", self.dir)["data"]
+        self.assertTrue(data["valid"], data["checks"])
+        self.assertTrue(any("initialises its submodules, from the URLs its .gitmodules names" in check["message"]
+                            for check in data["checks"]), data["checks"])
+        self.product.write("dependencies/mbedtls.pin",
+                           "v3.6.7\n" + "b" * 40 + "\nsubmodules recursive\n")
+        self.assertTrue(any("initialises its submodules recursively" in check["message"]
+                            for check in self.product.json("declarations", self.dir)["data"]["checks"]))
+
+    def test_an_unknown_submodules_mode_is_refused(self) -> None:
+        self.product.write("dependencies/mbedtls.pin", "v3.6.7\n" + "b" * 40 + "\nsubmodules shallow\n")
+        data = self.product.json("declarations", self.dir, expect=2)["data"]
+        self.assertFalse(data["valid"])
+        self.assertTrue(any("takes nothing, or recursive" in check["message"] for check in data["checks"]))
+
+    def test_the_managed_script_initialises_only_what_is_declared(self) -> None:
+        # A superproject pins its submodule's commit, but its URL comes from
+        # the .gitmodules of a repository this pin does not name: the socle
+        # fetches it only when the product asked.
+        inner = self.product.work / "src" / "inner"
+        inner.mkdir(parents=True)
+        (inner / "file").write_text("inner\n")
+        self.product.git(inner, "init", "-q")
+        self.product.git(inner, "add", "-A")
+        self.product.git(inner, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "inner")
+        outer = self.product.work / "src" / "outer"
+        outer.mkdir(parents=True)
+        self.product.git(outer, "init", "-q")
+        self.product.git(outer, "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(inner), "framework")
+        self.product.git(outer, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "outer")
+        commit = self.product.git(outer, "rev-parse", "HEAD")
+        remotes = self.product.work / "remotes"
+        self.product.git(self.product.work, "clone", "-q", "--bare", str(outer), str(remotes / "outer.git"))
+        self.product.write("dependencies/outer.pin", f"v1.0.0\n{commit}\n")
+        self.product.run("adopt", self.dir, "--apply")
+        script = self.product.dir / "scripts" / "checkout-dependency.sh"
+        environment = {**self.product.env, "GIT_ALLOW_PROTOCOL": "file"}
+
+        def clone(destination: str) -> pathlib.Path:
+            subprocess.run(["sh", str(script), "outer", str(self.product.work / destination)],
+                           cwd=self.product.dir, env=environment, check=True, text=True, stdout=subprocess.PIPE)
+            return self.product.work / destination
+
+        # Declared nothing: the submodule stays an empty directory.
+        self.assertEqual(list((clone("without") / "framework").iterdir()), [])
+        self.product.write("dependencies/outer.pin", f"v1.0.0\n{commit}\nsubmodules\n")
+        self.assertTrue((clone("with") / "framework" / "file").is_file())
+
     def test_a_verify_script_is_run_before_packaging_at_the_tag(self) -> None:
         self.product.write("scripts/verify-release.sh", "#!/bin/sh\nexit 0\n", executable=True)
         self.product.run("adopt", self.dir, "--apply")

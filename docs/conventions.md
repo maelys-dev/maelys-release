@@ -166,6 +166,13 @@ once its prose has moved.
 
 ## Dependencies and packages
 
+- A dependency whose build needs its submodules says so, on a `submodules`
+  line of its pin, or `submodules recursive`. This is declared and never
+  automatic: a submodule's commit is pinned by its superproject, but its URL
+  comes from that repository's `.gitmodules`, which the pin does not name, so
+  initialising one fetches from a repository the product never declared. The
+  managed script tries a shallow update first and falls back when the server
+  refuses to serve a commit it does not advertise.
 - A dependency that does not live in `maelys-dev` says where it does, on a
   `repository <https URL>` line of its own pin, after the tag and the
   commit. `scripts/checkout-dependency.sh` clones that URL instead of the

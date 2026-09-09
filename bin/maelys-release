@@ -197,6 +197,8 @@ class Declarations:
         self.verify_command = ""
         # name -> repository, for a dependency that does not live in maelys-dev
         self.foreign: dict[str, str] = {}
+        # name -> "" or "recursive", for a dependency whose build needs them
+        self.submodules: dict[str, str] = {}
         # Files of docs/ that are neither generated, engaged by LICENSING.md
         # nor data: they belong in maelys-docs/<product>/.
         self.prose: list[str] = []
@@ -302,13 +304,23 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
             # its own pin: maelys-http builds Mbed TLS from a pinned commit
             # because the distribution's version is under its security floor.
             for attribute in lines[2:]:
-                if not attribute.startswith("repository "):
-                    continue
-                repository = attribute[len("repository "):].strip()
-                if not re.fullmatch(r"https://[^\s]+", repository):
-                    decl.add("missing", f"dependencies/{pin.name}: the repository line must be an https URL", "conventions")
-                else:
-                    decl.foreign[name] = repository
+                if attribute.startswith("repository "):
+                    repository = attribute[len("repository "):].strip()
+                    if not re.fullmatch(r"https://[^\s]+", repository):
+                        decl.add("missing", f"dependencies/{pin.name}: the repository line must be an https URL",
+                                 "conventions")
+                    else:
+                        decl.foreign[name] = repository
+                elif attribute.split(" ")[0] == "submodules":
+                    # A submodule's commit is pinned by its superproject, but
+                    # its URL comes from a .gitmodules this pin does not name:
+                    # fetching one is declared, never automatic.
+                    mode = attribute[len("submodules"):].strip()
+                    if mode not in ("", "recursive"):
+                        decl.add("missing", f"dependencies/{pin.name}: the submodules line takes nothing,"
+                                 " or recursive", "conventions")
+                    else:
+                        decl.submodules[name] = mode
         else:
             decl.add("missing", f"dependencies/{pin.name}: line 2 must be the pinned commit (line 1 its tag)",
                      "conventions")
@@ -319,6 +331,9 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
         decl.add("ok", "pinned dependencies: " + " ".join(decl.dependencies), "conventions")
     for name, repository in sorted(decl.foreign.items()):
         decl.add("ok", f"dependencies/{name}.pin is cloned from {repository}, not maelys-dev", "conventions")
+    for name, mode in sorted(decl.submodules.items()):
+        decl.add("ok", f"dependencies/{name}.pin initialises its submodules"
+                 + (" recursively" if mode else "") + ", from the URLs its .gitmodules names", "conventions")
     scripts = project / "scripts"
     stray = sorted(path.name for path in scripts.glob("checkout-*.sh")
                    if path.name != "checkout-dependency.sh") if scripts.is_dir() else []
