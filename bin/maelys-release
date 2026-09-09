@@ -766,7 +766,7 @@ def plan(decl: Declarations, staged: dict[str, tuple[str, bool]], apply: bool) -
         path = decl.project / relative
         entry: dict = {"path": relative,
                        "scope": "conventions" if relative in CONVENTION_MANAGED + CONVENTION_SEEDED
-                       + (CLI_REFERENCE, CLI_CONTRACT)
+                       + (CLI_REFERENCE, CLI_CONTRACT, ".github/workflows/ci.yml")
                        else "release"}
         if relative in CONVENTION_SEEDED:
             entry["seeded"] = True
@@ -793,13 +793,25 @@ def plan(decl: Declarations, staged: dict[str, tuple[str, bool]], apply: bool) -
 
 
 def pinned_socle(project: pathlib.Path) -> dict | None:
-    """The socle sha and tag the product's release.yml pins, if any."""
-    workflow = project / ".github" / "workflows" / "release.yml"
-    if not workflow.is_file():
-        return None
-    match = re.search(rf"{re.escape(SOCLE_REPOSITORY)}/\.github/workflows/release\.yml@([0-9a-f]{{40}}) # (\S+)",
-                      workflow.read_text(encoding="utf-8"))
-    return {"sha": match.group(1), "tag": match.group(2)} if match else None
+    """The socle sha and tag the product pins, from release.yml or from ci.yml.
+
+    A product the socle releases names it in release.yml. A product that
+    keeps its own release names it in the ci.yml line that calls
+    check-product.yml, and nowhere else: reading release.yml alone left that
+    product with no pin at all, so the tag of a socle fetched by commit
+    stayed "untagged" and the regenerated ci.yml drifted against its own
+    committed line.
+    """
+    workflows = project / ".github" / "workflows"
+    for name, workflow in (("release.yml", "release"), ("ci.yml", "check-product")):
+        path = workflows / name
+        if not path.is_file():
+            continue
+        match = re.search(rf"{re.escape(SOCLE_REPOSITORY)}/\.github/workflows/{workflow}\.yml@([0-9a-f]{{40}}) # (\S+)",
+                          path.read_text(encoding="utf-8"))
+        if match:
+            return {"sha": match.group(1), "tag": match.group(2)}
+    return None
 
 
 def socle_data(sha: str, tag: str) -> dict:
@@ -1271,6 +1283,10 @@ def check_data(invocation: Invocation) -> tuple[Declarations, dict]:
     # The seeded notes are added while planning, so the checks are taken last.
     data["checks"] = decl.applicable()
     data["conventions"] = {"valid": not conventions, "violations": conventions}
+    if not decl.releases_here and release:
+        raise Failure("FAILED", "A release-scope violation was reported for a product the socle does not release: "
+                      + "; ".join(release) + ".",
+                      "This is a defect of the socle: the exit code would contradict the verdict shown.")
     data["release"] = {"applicable": decl.releases_here, "valid": not release, "violations": release}
     data["violations"] = conventions + release
     data["valid"] = not data["violations"]

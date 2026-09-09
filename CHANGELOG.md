@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.21.1 — 2026-09-09
+
+- The drift job failed for every product that takes the shared CI while
+  keeping its own release, which 0.20.0 had just made possible.
+  `check-product.yml` knows how to find the socle in the `ci.yml` line that
+  calls it, but `pinned_socle()` read the pin from `release.yml` alone: such
+  a product had no pin at all, the socle fetched by commit stayed labelled
+  `untagged`, and the regenerated `ci.yml` drifted against its own committed
+  line. It now reads the `ci.yml` line too.
+- `.github/workflows/ci.yml` belongs to the conventions verdict, not to the
+  release mechanism: the shared CI is offered to every mechanism, so its
+  drift is reported where the product can act on it.
+- A verdict that does not apply can no longer carry a violation. It did, and
+  the command exited 2 while printing `conventions: ok` and `release
+  mechanism: not applicable`: an exit code contradicting what a human reads
+  is worse than either answer. The socle now refuses that state outright.
+
 ## 0.21.0 — 2026-09-09
 
 - A dependency outside `maelys-dev` declares where it lives, on a
