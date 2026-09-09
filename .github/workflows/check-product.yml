@@ -24,6 +24,16 @@ on:
         required: false
         type: string
         default: make asan-ubsan
+      fuzz_command:
+        description: >-
+          Replay the committed corpus on Linux x86_64 with clang; empty
+          disables the job. The convention is `make fuzz-smoke`, seconds
+          long, next to the `make fuzz` campaign that nothing schedules
+          here. Opt-in: the three products that fuzz today spell their
+          targets differently.
+        required: false
+        type: string
+        default: ""
       # Accepted for ci.yml files created by maelys-release 0.5.0; ignored
       # since 0.6.0, when the job started reading the product's declarations itself.
       dependency_checkout:
@@ -114,6 +124,52 @@ jobs:
         run: |
           ${{ steps.socle.outputs.dir }}/bin/maelys-release check . --product "${{ inputs.product }}" \
             ${{ inputs.docs_contract && '--docs-contract' || '' }}
+
+  fuzz:
+    if: inputs.fuzz_command != ''
+    runs-on: ubuntu-26.04
+    env:
+      CC: clang
+      CXX: clang++
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Fetch the socle this workflow comes from
+        id: socle
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha="$(sed -n 's|.*maelys-release/.github/workflows/release.yml@\([0-9a-f]\{40\}\).*|\1|p' .github/workflows/release.yml 2>/dev/null || true)"
+          if [ -z "$sha" ]; then
+            sha="$(sed -n 's|.*maelys-release/.github/workflows/check-product\.yml@\([0-9a-f]\{40\}\).*|\1|p' .github/workflows/*.yml | head -n 1)"
+          fi
+          test -n "$sha" || { echo "no workflow of this repository names a maelys-release commit" >&2; exit 1; }
+          socle="$RUNNER_TEMP/maelys-release"
+          git init -q "$socle"
+          git -C "$socle" fetch -q --depth 1 https://github.com/maelys-dev/maelys-release.git "$sha"
+          git -C "$socle" checkout -q FETCH_HEAD
+          "$socle/bin/maelys-release" declarations . --product "${{ inputs.product }}" --format json --compact >"$RUNNER_TEMP/declarations.json"
+          python3 - "$RUNNER_TEMP/declarations.json" >>"$GITHUB_OUTPUT" <<'PY'
+          import json, sys
+          data = json.load(open(sys.argv[1]))["data"]
+          print("dependencies=" + " ".join(data["dependencies"]))
+          print("linux_packages=" + data["linuxPackages"])
+          PY
+      - name: Pinned dependency checkouts
+        if: steps.socle.outputs.dependencies != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in ${{ steps.socle.outputs.dependencies }}; do sh scripts/checkout-dependency.sh "$name"; done
+      - name: Install Linux packages
+        run: sudo apt-get update && sudo apt-get install -y build-essential clang ${{ steps.socle.outputs.linux_packages }}
+      - name: Replay the committed corpus
+        shell: bash
+        # The corpus is committed and read-only here: a smoke run proves the
+        # harnesses still build and still pass what they already caught. The
+        # campaign that finds new inputs is not a CI job.
+        run: ${{ inputs.fuzz_command }} CC=clang CXX=clang++
 
   sanitizers:
     if: inputs.sanitizer_command != ''

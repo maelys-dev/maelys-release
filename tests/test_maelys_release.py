@@ -482,6 +482,71 @@ class AdoptTest(unittest.TestCase):
                                         stderr=subprocess.PIPE).returncode, 64)
 
 
+class ProductNeedsTest(unittest.TestCase):
+    """What a product asked the socle for: a third-party pin, a verification
+    at the tag, a stronger commit check, a fuzz job."""
+
+    def setUp(self) -> None:
+        self.product = Product()
+        self.dir = str(self.product.dir)
+
+    def tearDown(self) -> None:
+        self.product.close()
+
+    def test_a_dependency_outside_maelys_dev_declares_where_it_lives(self) -> None:
+        self.product.write("dependencies/mbedtls.pin",
+                           "v3.6.7\n" + "b" * 40 + "\nrepository https://github.com/Mbed-TLS/mbedtls.git\n")
+        data = self.product.json("declarations", self.dir)["data"]
+        self.assertTrue(data["valid"], data["checks"])
+        self.assertIn("mbedtls", data["dependencies"])
+        self.assertTrue(any("cloned from https://github.com/Mbed-TLS/mbedtls.git" in check["message"]
+                            for check in data["checks"]), data["checks"])
+
+    def test_a_repository_line_that_is_not_an_https_url_is_refused(self) -> None:
+        self.product.write("dependencies/mbedtls.pin",
+                           "v3.6.7\n" + "b" * 40 + "\nrepository git@github.com:Mbed-TLS/mbedtls.git\n")
+        data = self.product.json("declarations", self.dir, expect=2)["data"]
+        self.assertFalse(data["valid"])
+        self.assertTrue(any("must be an https URL" in check["message"] for check in data["checks"]))
+
+    def test_the_managed_script_clones_the_declared_repository(self) -> None:
+        self.product.write("dependencies/mbedtls.pin",
+                           "v3.6.7\n" + "b" * 40 + "\nrepository https://example.invalid/mbedtls.git\n")
+        self.product.run("adopt", self.dir, "--apply")
+        script = self.product.dir / "scripts" / "checkout-dependency.sh"
+        traced = subprocess.run(["sh", "-x", str(script), "mbedtls", str(self.product.work / "gone")],
+                                cwd=self.product.dir, env=self.product.env, check=False, text=True,
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT).stdout
+        self.assertIn("git clone --quiet --filter=blob:none --no-checkout https://example.invalid/mbedtls.git", traced)
+        # A Maelys dependency keeps the organisation's base.
+        traced = subprocess.run(["sh", "-x", str(script), "maelys-system", str(self.product.work / "gone2")],
+                                cwd=self.product.dir, env=self.product.env, check=False, text=True,
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT).stdout
+        self.assertIn("/maelys-system.git", traced)
+        self.assertNotIn("example.invalid", traced)
+
+    def test_a_verify_script_is_run_before_packaging_at_the_tag(self) -> None:
+        self.product.write("scripts/verify-release.sh", "#!/bin/sh\nexit 0\n", executable=True)
+        self.product.run("adopt", self.dir, "--apply")
+        workflow = self.product.read(".github/workflows/release.yml")
+        self.assertIn("verify_command: sh scripts/verify-release.sh TARGET", workflow)
+
+    def test_without_that_script_the_release_workflow_asks_for_no_verification(self) -> None:
+        self.product.run("adopt", self.dir, "--apply")
+        self.assertNotIn("verify_command:", self.product.read(".github/workflows/release.yml"))
+
+    def test_the_reusable_workflows_carry_the_new_inputs(self) -> None:
+        release = (ROOT / ".github" / "workflows" / "release.yml").read_text()
+        self.assertIn("verify_command:", release)
+        self.assertIn("commit_verification:", release)
+        self.assertIn("signed-on-default-branch", release)
+        # The attestation covers everything package_command leaves in dist/.
+        self.assertIn("every file\n          package_command leaves there is attested, an SBOM included", release)
+        check_product = (ROOT / ".github" / "workflows" / "check-product.yml").read_text()
+        self.assertIn("fuzz_command:", check_product)
+        self.assertIn("make fuzz-smoke", check_product)
+
+
 class MechanismTest(unittest.TestCase):
     """A product the socle does not release: conventions installed, workflows untouched."""
 

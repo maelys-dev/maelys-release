@@ -194,6 +194,9 @@ class Declarations:
         self.cli_programs: list[str] = []
         self.cli_flags: list[str] = []
         self.cli_build = ""
+        self.verify_command = ""
+        # name -> repository, for a dependency that does not live in maelys-dev
+        self.foreign: dict[str, str] = {}
         # Files of docs/ that are neither generated, engaged by LICENSING.md
         # nor data: they belong in maelys-docs/<product>/.
         self.prose: list[str] = []
@@ -275,6 +278,10 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
         decl.add("ok", "Homebrew formula templates: " + " ".join(decl.formulas))
     else:
         decl.add("note", "no packaging/homebrew/*.rb.in: no tap job")
+    verifier = project / "scripts" / "verify-release.sh"
+    if verifier.is_file() and os.access(verifier, os.X_OK):
+        decl.verify_command = "sh scripts/verify-release.sh TARGET"
+        decl.add("ok", "scripts/verify-release.sh TARGET runs before packaging at the tag")
     renderer = project / "scripts" / "render-homebrew-formula.sh"
     if renderer.is_file() and os.access(renderer, os.X_OK):
         decl.render_command = "sh scripts/render-homebrew-formula.sh TAG OUTPUT"
@@ -287,16 +294,31 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
         name = pin.name[: -len(".pin")]
         lines = pin.read_text(encoding="utf-8").splitlines()
         if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", name):
-            decl.add("missing", f"dependencies/{pin.name}: the file is named after the repository, [a-z0-9-]")
+            decl.add("missing", f"dependencies/{pin.name}: the file is named after the repository, [a-z0-9-]",
+                     "conventions")
         elif len(lines) >= 2 and re.fullmatch(r"[0-9a-f]{40}", lines[1].strip()):
             decl.dependencies.append(name)
+            # A dependency outside maelys-dev says where it lives, once, in
+            # its own pin: maelys-http builds Mbed TLS from a pinned commit
+            # because the distribution's version is under its security floor.
+            for attribute in lines[2:]:
+                if not attribute.startswith("repository "):
+                    continue
+                repository = attribute[len("repository "):].strip()
+                if not re.fullmatch(r"https://[^\s]+", repository):
+                    decl.add("missing", f"dependencies/{pin.name}: the repository line must be an https URL", "conventions")
+                else:
+                    decl.foreign[name] = repository
         else:
-            decl.add("missing", f"dependencies/{pin.name}: line 2 must be the pinned commit (line 1 its tag)")
+            decl.add("missing", f"dependencies/{pin.name}: line 2 must be the pinned commit (line 1 its tag)",
+                     "conventions")
     if (project / "adapter").is_dir():
         decl.add("refused", "adapter/ is the pre-0.14 layout: git mv adapter/<NAME>_PIN dependencies/<name>.pin"
                  " and adapter/PACKAGES dependencies/packages, then delete adapter/ and the Makefile lines that read it")
     if decl.dependencies:
-        decl.add("ok", "pinned dependencies: " + " ".join(decl.dependencies))
+        decl.add("ok", "pinned dependencies: " + " ".join(decl.dependencies), "conventions")
+    for name, repository in sorted(decl.foreign.items()):
+        decl.add("ok", f"dependencies/{name}.pin is cloned from {repository}, not maelys-dev", "conventions")
     scripts = project / "scripts"
     stray = sorted(path.name for path in scripts.glob("checkout-*.sh")
                    if path.name != "checkout-dependency.sh") if scripts.is_dir() else []
@@ -317,9 +339,10 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
     if packages.is_file():
         try:
             decl.linux_packages, decl.macos_packages = parse_packages(packages.read_text(encoding="utf-8"))
-            decl.add("ok", f"dependencies/packages: linux [{decl.linux_packages}] macos [{decl.macos_packages}]")
+            decl.add("ok", f"dependencies/packages: linux [{decl.linux_packages}] macos [{decl.macos_packages}]",
+                     "conventions")
         except ValueError as error:
-            decl.add("missing", f"dependencies/packages: {error}")
+            decl.add("missing", f"dependencies/packages: {error}", "conventions")
     return decl
 
 
@@ -545,6 +568,8 @@ def release_workflow(decl: Declarations, sha: str, tag: str, version: str) -> st
     if decl.dependencies:
         lines.append("      dependency_checkout: |")
         lines.extend(f"        sh scripts/checkout-dependency.sh {name}" for name in decl.dependencies)
+    if decl.verify_command:
+        lines.append(f"      verify_command: {decl.verify_command}")
     if decl.linux_packages:
         lines.append(f"      linux_packages: {SOCLE_LINUX_PACKAGES} {decl.linux_packages}")
     if decl.macos_packages:
