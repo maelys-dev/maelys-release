@@ -305,6 +305,44 @@ in a product's plan at its next adoption and never as drift. Hence:
 
 The 1.0 tag will make this rule a promise; until then it is the practice.
 
+## Moving a product's prose
+
+```sh
+maelys-platform docs --prose --only NAME --format jsonl \
+  | maelys-release migrate DIR --product NAME --documents - --apply --push
+```
+
+A migration has two sides, and one without the other is a defect: the prose
+duplicated, or lost. `migrate` does both, as one transaction: plan by
+default, `--apply` to write, `--push` to send. Nothing leaves the machine
+without `--push`; both clones stay under `~/.cache/maelys-release/` for
+review.
+
+- **The list comes from maelys-platform**, one JSON record per line with the
+  document's path and its destination. The socle does not recompute it: the
+  classification lives in one place, so the two cannot disagree.
+- **maelys-docs receives the history**, not a copy. A throwaway clone of the
+  product is rewritten with `git filter-repo --path <document> ...
+  --path-rename docs/:<product>/`, then merged into maelys-docs with
+  `--allow-unrelated-histories`, so `git log -- <product>/<file>.md` reads
+  there. `git subtree add` was tried and rejected: it grafts the history but
+  the old commits keep the old path, so the log on the new path is empty.
+- **maelys-docs also receives the pin**, `dependencies/<product>.pin` at the
+  product's latest tag and commit, and `<product>/VERSION`. A product with
+  no tag is refused: its prose would describe no release. The pin is the
+  fleet's one format, tag on line 1 and commit on line 2; the socle refuses
+  `adapter/<NAME>_PIN` in a product since 0.14.0, so it writes none here.
+  The documentation policy of maelys-platform still names the old layout,
+  which is a correction for that repository.
+- **The product loses the documents**, on a branch for a pull request, never
+  a write into the operator's checkout. The README's links to the moved
+  documents are replaced by one line naming where they went; the socle
+  rewrites no other part of a README it cannot write.
+- **The plan names what still points at each document** elsewhere in the
+  product. A header, a `CONTRIBUTING.md` or a test that references a moved
+  document keeps a link that now leaves the repository, and that is the
+  operator's call, not the socle's.
+
 ## Creating a repository
 
 ```sh

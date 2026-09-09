@@ -43,6 +43,7 @@ EXIT_VIOLATIONS = cli.EXIT_VIOLATIONS
 
 SOCLE_REPOSITORY = "maelys-dev/maelys-release"
 DEFAULT_TAP = "maelys-dev/homebrew-tap"
+DEFAULT_DOCUMENTS = "maelys-dev/maelys-docs"
 DEFAULT_IMAGE = "ubuntu:26.04"
 SOCLE_LINUX_PACKAGES = "build-essential dpkg-dev file rpm"  # the release.yml default
 BOTTLES = '\'["macos-15","macos-26"]\''
@@ -453,7 +454,9 @@ def read_docs(decl: Declarations) -> None:
         decl.prose.append(relative)
     for relative in decl.prose:
         decl.add("note", f"{relative}: prose belongs in maelys-docs/{decl.product}/"
-                 f"{relative[len('docs/'):]}, not in a product repository", "conventions")
+                 f"{relative[len('docs/'):]}; move it with its history:"
+                 f" 'maelys-platform docs --prose --only {decl.product} --format jsonl"
+                 f" | {PROGRAM} migrate . --product {decl.product} --documents -'", "conventions")
 
 
 def pinned_product(project: pathlib.Path) -> str:
@@ -896,6 +899,232 @@ def scaffold(project: pathlib.Path, product: str, dependencies: list[tuple[str, 
     return files
 
 
+def read_prose_records(source: str) -> list[dict]:
+    """The documents to move, as maelys-platform lists them.
+
+    One JSON record per line, `docs --prose --only PRODUCT --format jsonl`:
+    the classification lives there and is not recomputed here, so the socle
+    and the platform cannot disagree about what is prose.
+    """
+    stream = sys.stdin.read() if source == "-" else pathlib.Path(source).read_text(encoding="utf-8")
+    records = []
+    for number, line in enumerate(stream.splitlines(), 1):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError as error:
+            raise Failure("VALIDATION_FAILED", f"Line {number} of the document list is not JSON: {error}.",
+                          "Pass 'maelys-platform docs --prose --only PRODUCT --format jsonl'.") from error
+        missing = [key for key in ("repository", "path", "destination") if not isinstance(record.get(key), str)]
+        if missing:
+            raise Failure("VALIDATION_FAILED", f"Record {number} has no {', '.join(missing)}.",
+                          "Pass 'maelys-platform docs --prose --only PRODUCT --format jsonl'.")
+        records.append(record)
+    if not records:
+        raise Failure("VALIDATION_FAILED", "The document list is empty.",
+                      "Pass 'maelys-platform docs --prose --only PRODUCT --format jsonl'; nothing to move is not a migration.")
+    return records
+
+
+def referencing_files(project: pathlib.Path, relative: str) -> list[str]:
+    """Files of the product that still name this document, which the move breaks."""
+    completed = run(["git", "grep", "-l", "--fixed-strings", "--", relative], cwd=project)
+    return [line for line in completed.stdout.splitlines() if line and line != relative]
+
+
+def migration_plan(invocation: Invocation) -> dict:
+    project, product, _ = project_of(invocation)
+    records = read_prose_records(str(invocation.option("--documents", "-")))
+    foreign = sorted({record["repository"] for record in records} - {product})
+    if foreign:
+        raise Failure("VALIDATION_FAILED", f"The list carries documents of {', '.join(foreign)}, not {product}.",
+                      f"Pass 'maelys-platform docs --prose --only {product} --format jsonl'.")
+    repository = str(invocation.option("--documents-repository", DEFAULT_DOCUMENTS))
+    moving, unknown = [], []
+    for record in records:
+        relative = record["path"]
+        destination = record["destination"]
+        expected = f"{repository.split('/')[-1]}/{product}/{relative[len('docs/'):]}"
+        if not relative.startswith("docs/") or destination != expected:
+            unknown.append(f"{relative} -> {destination} (expected {expected})")
+            continue
+        if not (project / relative).is_file():
+            unknown.append(f"{relative} is not a file of {product}")
+            continue
+        moving.append({"path": relative, "destination": destination,
+                       "referencedBy": referencing_files(project, relative)})
+    if unknown:
+        raise Failure("VALIDATION_FAILED", "The list does not describe this migration: " + "; ".join(unknown) + ".",
+                      "Regenerate it with maelys-platform for this product.")
+    # What the product keeps, and on which ground: the plan says it before
+    # anything is written, so the operator judges the whole docs/ at once.
+    decl = read_declarations(project, product, declared_mechanism(project))
+    moved = {entry["path"] for entry in moving}
+    staying = []
+    docs = project / "docs"
+    for path in sorted(docs.rglob("*")) if docs.is_dir() else []:
+        relative = path.relative_to(project).as_posix()
+        if not path.is_file() or relative in moved:
+            continue
+        if relative == CLI_REFERENCE or relative == CLI_CONTRACT:
+            reason = "the generated command-line reference and its contract"
+        elif path.suffix.lower() != ".md":
+            reason = "data, not prose"
+        elif is_generated(path.read_text(encoding="utf-8")):
+            reason = "generated: its head says so"
+        elif relative in engaged_documents(project):
+            reason = "LICENSING.md engages it publicly"
+        else:
+            reason = "not in the list maelys-platform produced"
+        staying.append({"path": relative, "reason": reason})
+    version = decl.version
+    tag = git("describe", "--tags", "--abbrev=0", cwd=project, check=False) or ""
+    commit = git("rev-parse", "HEAD", cwd=project, check=False)
+    return {"mode": "plan", "product": product, "project": str(project), "repository": repository,
+            "version": version, "tag": tag, "commit": commit,
+            "moving": moving, "staying": staying, "documents": len(moving)}
+
+
+def push_branch(clone: pathlib.Path, remote: str, branch: str) -> None:
+    """Send `branch` to `remote`, replacing an earlier attempt but nothing else.
+
+    --force-with-lease needs to know what the remote holds, and a clone that
+    has never fetched the branch knows nothing: it refuses on stale info,
+    which is what a second run of a migration hits. The branch is fetched
+    first, so the lease is judged against the ref it names.
+    """
+    run(["git", "fetch", "-q", remote, f"+refs/heads/{branch}:refs/remotes/lease/{branch}"], cwd=clone)
+    known = run(["git", "rev-parse", "--verify", "-q", f"refs/remotes/lease/{branch}"], cwd=clone).stdout.strip()
+    lease = f"--force-with-lease=refs/heads/{branch}:{known}" if known else "--force-with-lease"
+    git("push", "-q", lease, remote, f"HEAD:refs/heads/{branch}", cwd=clone)
+
+
+def rewrite_readme(clone: pathlib.Path, product: str, data: dict) -> str:
+    """Point the README at the prose that left, and say nothing more.
+
+    The socle does not rewrite a product's own README: it cannot say what the
+    product is. It replaces the links to the documents that moved with one
+    line naming where they went, and leaves every other section untouched.
+    """
+    readme = clone / "README.md"
+    if not readme.is_file():
+        return "absent"
+    moved = {entry["path"] for entry in data["moving"]}
+    kept, dropped = [], 0
+    for line in readme.read_text(encoding="utf-8").split("\n"):
+        if any(path in line for path in moved):
+            dropped += 1
+            continue
+        kept.append(line)
+    if not dropped:
+        return "unchanged: it named none of them"
+    text = "\n".join(kept)
+    pointer = (f"The documentation of {product} is in `{data['repository']}`, directory `{product}/`.\n")
+    if "\n## Documentation\n" in text:
+        head, _, tail = text.partition("\n## Documentation\n")
+        rest = tail.split("\n## ", 1)
+        text = head + "\n## Documentation\n\n" + pointer + ("\n## " + rest[1] if len(rest) > 1 else "")
+    else:
+        text = text.rstrip("\n") + "\n\n## Documentation\n\n" + pointer
+    readme.write_text(re.sub(r"\n{3,}", "\n\n", text).rstrip("\n") + "\n", encoding="utf-8")
+    return f"{dropped} link lines replaced by one pointer"
+
+
+def handle_migrate(invocation: Invocation) -> tuple[dict, int]:
+    """Move a product's prose into maelys-docs, with its history, and out of the product.
+
+    Both sides of one move: without the removal the prose is duplicated, and
+    without the addition it is lost. maelys-docs receives a branch carrying
+    the rewritten history; the product receives a pull request, never a
+    direct write.
+    """
+    data = migration_plan(invocation)
+    if not invocation.flag("--apply"):
+        return data, EXIT_OK
+    data["mode"] = "apply"
+    if not data["tag"]:
+        raise Failure("PRECONDITION_FAILED",
+                      f"{data['product']} has no tag, so the prose would describe no release.",
+                      "Release the product first: maelys-docs pins the tag whose prose it carries.")
+    project = pathlib.Path(data["project"])
+    product = data["product"]
+    base = os.environ.get("MAELYS_GIT_BASE", "https://github.com/maelys-dev")
+    branch = f"migrate/{product}"
+    with tempfile.TemporaryDirectory(prefix="maelys-release-migrate.") as temp:
+        work = pathlib.Path(temp)
+        # The history is rewritten on a throwaway clone of the product, never
+        # on the product itself: filter-repo rewrites every commit it keeps.
+        source = work / "source"
+        git("clone", "-q", str(project), str(source))
+        paths = [argument for entry in data["moving"] for argument in ("--path", entry["path"])]
+        run(["git", "filter-repo", *paths, "--path-rename", f"docs/:{product}/", "--force"], cwd=source)
+        if not (source / product).is_dir():
+            raise Failure("FAILED", "git filter-repo left no history on the new path.",
+                          "Check that git-filter-repo is installed and that the documents are tracked.")
+        documents = work / "documents"
+        git("clone", "-q", f"{base}/{data['repository'].split('/')[-1]}.git", str(documents))
+        git("config", "user.name", os.environ.get("GIT_AUTHOR_NAME", PROGRAM), cwd=documents)
+        git("config", "user.email", os.environ.get("GIT_AUTHOR_EMAIL", f"{PROGRAM}@maelys.dev"), cwd=documents)
+        git("checkout", "-q", "-B", branch, cwd=documents)
+        git("remote", "add", "source", str(source), cwd=documents)
+        git("fetch", "-q", "source", cwd=documents)
+        head = git("rev-parse", "source/HEAD", cwd=documents, check=False) or git("rev-parse", "source/main", cwd=documents)
+        git("merge", "--allow-unrelated-histories", "--no-edit", "-q", head, cwd=documents)
+        # The pin says which release of the product this prose describes, in
+        # the one format the fleet uses: dependencies/<name>.pin, tag on line
+        # 1 and commit on line 2. The socle refuses adapter/<NAME>_PIN in a
+        # product since 0.14.0, so it does not write one here either.
+        (documents / "dependencies").mkdir(exist_ok=True)
+        (documents / "dependencies" / f"{product}.pin").write_text(
+            f"{data['tag']}\n{data['commit']}\n", encoding="utf-8")
+        (documents / product / "VERSION").write_text(f"{data['version']}\n", encoding="utf-8")
+        git("add", "-A", cwd=documents)
+        git("-c", "commit.gpgsign=false", "commit", "-q", "-m",
+            f"{product}: the prose of {data['tag'] or data['commit'][:7]}, with its history", cwd=documents)
+        data["documentsBranch"] = branch
+        data["documentsCommit"] = git("rev-parse", "HEAD", cwd=documents)
+
+        # The product side: the same move, seen from the repository that
+        # loses the documents. It travels as a branch for a pull request,
+        # never as a write into the operator's checkout.
+        product_clone = work / "product"
+        git("clone", "-q", str(project), str(product_clone))
+        git("config", "user.name", os.environ.get("GIT_AUTHOR_NAME", PROGRAM), cwd=product_clone)
+        git("config", "user.email", os.environ.get("GIT_AUTHOR_EMAIL", f"{PROGRAM}@maelys.dev"), cwd=product_clone)
+        git("checkout", "-q", "-B", branch, cwd=product_clone)
+        for entry in data["moving"]:
+            git("rm", "-q", "--", entry["path"], cwd=product_clone)
+        data["readme"] = rewrite_readme(product_clone, product, data)
+        git("add", "-A", cwd=product_clone)
+        git("-c", "commit.gpgsign=false", "commit", "-q", "-m",
+            f"docs: the prose moves to {data['repository']}/{product}/\n\n"
+            f"{data['documents']} documents, with their history, are now in {data['repository']}."
+            " This side removes them and points the README there.", cwd=product_clone)
+        data["productBranch"] = branch
+        data["productCommit"] = git("rev-parse", "HEAD", cwd=product_clone)
+
+        data["pushed"] = bool(invocation.flag("--push"))
+        if data["pushed"]:
+            push_branch(documents, "origin", branch)
+            # The clone was made from the operator's checkout, so its origin
+            # is a local path: the product's own remote is asked for here.
+            remote = git("remote", "get-url", "origin", cwd=project, check=False) or f"{base}/{product}.git"
+            push_branch(product_clone, remote, branch)
+        else:
+            # Without --push both sides stay reviewable on disk: a migration
+            # writes into two repositories, so it is never pushed by default.
+            kept = pathlib.Path(os.environ.get("XDG_CACHE_HOME") or pathlib.Path.home() / ".cache") \
+                / "maelys-release" / f"migrate-{product}"
+            shutil.rmtree(kept, ignore_errors=True)
+            kept.mkdir(parents=True)
+            shutil.copytree(documents, kept / "documents")
+            shutil.copytree(product_clone, kept / "product")
+            data["kept"] = str(kept)
+    return data, EXIT_OK
+
+
 def handle_new(invocation: Invocation) -> tuple[dict, int]:
     """Create a Maelys repository: the base files, then the socle's own."""
     directory = pathlib.Path(invocation.operands[0])
@@ -1005,7 +1234,8 @@ def check_data(invocation: Invocation) -> tuple[Declarations, dict]:
     # a product cannot move prose to a repository nobody has created yet, so
     # check names the destination and only refuses when asked to.
     if invocation.flag("--docs-contract"):
-        conventions.extend(f"{relative}: prose belongs in maelys-docs/{product}/{relative[len('docs/'):]}"
+        conventions.extend(f"{relative}: prose belongs in maelys-docs/{product}/{relative[len('docs/'):]};"
+                           f" move it with '{PROGRAM} migrate'"
                            for relative in decl.prose)
         conventions.extend(f"{name}: the generated CLI reference is {CLI_REFERENCE} for every product"
                            for name in LEGACY_CLI_REFERENCES if (project / name).is_file())
@@ -1420,7 +1650,27 @@ def text_new(data: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+def text_migrate(data: dict) -> str:
+    lines = [f"move     {entry['path']} -> {entry['destination']}"
+             + (f"  (still named by {', '.join(entry['referencedBy'])})" if entry["referencedBy"] else "")
+             for entry in data["moving"]]
+    lines.extend(f"stays    {entry['path']}  ({entry['reason']})" for entry in data["staying"])
+    label = data["tag"] or data["commit"][:7]
+    if data["mode"] == "plan":
+        lines.append(f"migrate: plan only; {data['documents']} documents of {data['product']} {label}"
+                     f" would move to {data['repository']}/{data['product']}/, with their history")
+        lines.append("migrate: add --apply to write both sides, --push to send the two branches")
+        return "\n".join(lines) + "\n"
+    lines.append(f"readme   {data['readme']}")
+    lines.append(f"migrate: {data['repository']} branch {data['documentsBranch']} ({data['documentsCommit'][:7]}),"
+                 f" {data['product']} branch {data['productBranch']} ({data['productCommit'][:7]})")
+    lines.append("migrate: pushed; open one pull request on each side"
+                 if data["pushed"] else f"migrate: nothing pushed; both clones are in {data['kept']}")
+    return "\n".join(lines) + "\n"
+
+
 TEXT = {
+    "migrate": text_migrate,
     "new": text_new,
     "adopt": text_adopt,
     "check": text_check,
@@ -1478,6 +1728,37 @@ MECHANISM_OPTION = cli.option(
     cli.argument("MECHANISM", choices=list(MECHANISMS)))
 
 APP = cli.Program(PROGRAM, PRODUCT, socle_version(), [
+    cli.transaction("migrate", "migrate",
+                    "Move a product's prose into maelys-docs with its history and out of the product;"
+                    " plan without --apply.",
+                    handle_migrate, operands=[DIR_OPERAND],
+                    options=[SOCLE_OPTIONS[0],
+                             cli.option("--documents", "JSONL of the documents to move, '-' for stdin"
+                                        " (maelys-platform docs --prose --only PRODUCT --format jsonl).",
+                                        cli.argument("FILE"), default="-"),
+                             cli.option("--documents-repository", "Repository the prose moves to.",
+                                        cli.argument("REPOSITORY"), default=DEFAULT_DOCUMENTS),
+                             cli.flag("--push", "Send both branches; without it nothing leaves this machine.")],
+                    schema={"type": "object", "additionalProperties": False,
+                            "required": ["mode", "product", "project", "repository", "version", "tag", "commit",
+                                         "moving", "staying", "documents"],
+                            "properties": {"mode": {"enum": ["plan", "apply"]}, "product": {"type": "string"},
+                                           "project": {"type": "string"}, "repository": {"type": "string"},
+                                           "version": {"type": "string"}, "tag": {"type": "string"},
+                                           "commit": {"type": "string"}, "documents": {"type": "integer"},
+                                           "moving": {"type": "array", "items": {
+                                               "type": "object", "required": ["path", "destination", "referencedBy"],
+                                               "properties": {"path": {"type": "string"},
+                                                              "destination": {"type": "string"},
+                                                              "referencedBy": STRINGS}}},
+                                           "staying": {"type": "array", "items": {
+                                               "type": "object", "required": ["path", "reason"],
+                                               "properties": {"path": {"type": "string"},
+                                                              "reason": {"type": "string"}}}},
+                                           "readme": {"type": "string"},
+                                           "documentsBranch": {"type": "string"}, "documentsCommit": {"type": "string"},
+                                           "productBranch": {"type": "string"}, "productCommit": {"type": "string"},
+                                           "pushed": {"type": "boolean"}, "kept": {"type": "string"}}}),
     cli.transaction("new", "new",
                     "Create a Maelys repository in an empty directory: licence, version, changelog, pins,"
                     " and the files of the socle; plan without --apply.",

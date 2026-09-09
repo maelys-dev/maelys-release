@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.19.0 — 2026-09-09
+
+- `maelys-release migrate DIR --product NAME --documents FILE [--apply]
+  [--push]` moves a product's prose into maelys-docs with its history and
+  out of the product, as one transaction: a migration has two sides, and
+  either alone is a defect. The list of documents comes from
+  `maelys-platform docs --prose --only NAME --format jsonl` and is not
+  recomputed, so the socle and the platform cannot disagree about what is
+  prose.
+- maelys-docs receives the rewritten history (`git filter-repo` then a merge
+  with `--allow-unrelated-histories`), so `git log -- <product>/<file>.md`
+  reads there, plus `dependencies/<product>.pin` and `<product>/VERSION` at
+  the product's latest tag. The pin is the fleet's one format: the socle has
+  refused `adapter/<NAME>_PIN` in a product since 0.14.0 and writes none
+  here either, though the documentation policy of maelys-platform still
+  names it. A product with no tag is refused. The product side
+  travels as a branch for a pull request, never a write into the operator's
+  checkout, and nothing leaves the machine without `--push`.
+- The plan says what moves, what stays and why, and names every file of the
+  product that still points at a moved document. On maelys-json it reported
+  that `include/maelys/json.h`, `CONTRIBUTING.md`, `README.md` and
+  `tests/vectors/README.md` name `docs/canonical-json-v1.md`.
+- `check` now names that command as the remedy for prose it finds in
+  `docs/`.
+
 ## 0.18.0 — 2026-09-07
 
 - `maelys-release new DIR --product NAME --depends NAME@vX.Y.Z ... [--apply]`
