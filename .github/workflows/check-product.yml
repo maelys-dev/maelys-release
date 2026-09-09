@@ -60,13 +60,20 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - name: Fetch the socle pinned by release.yml
+      - name: Fetch the socle this workflow comes from
         id: socle
         shell: bash
+        # The socle commit is read from the product's release.yml when the
+        # socle generated it, and otherwise from the ci.yml line that calls
+        # this very workflow: a product that keeps a release mechanism of
+        # its own still names the socle there, and can use this CI.
         run: |
           set -euo pipefail
-          sha="$(sed -n 's|.*maelys-release/.github/workflows/release.yml@\([0-9a-f]\{40\}\).*|\1|p' .github/workflows/release.yml)"
-          test -n "$sha" || { echo "release.yml does not pin maelys-release" >&2; exit 1; }
+          sha="$(sed -n 's|.*maelys-release/.github/workflows/release.yml@\([0-9a-f]\{40\}\).*|\1|p' .github/workflows/release.yml 2>/dev/null || true)"
+          if [ -z "$sha" ]; then
+            sha="$(sed -n 's|.*maelys-release/.github/workflows/check-product\.yml@\([0-9a-f]\{40\}\).*|\1|p' .github/workflows/*.yml | head -n 1)"
+          fi
+          test -n "$sha" || { echo "no workflow of this repository names a maelys-release commit" >&2; exit 1; }
           socle="$RUNNER_TEMP/maelys-release"
           git init -q "$socle"
           git -C "$socle" fetch -q --depth 1 https://github.com/maelys-dev/maelys-release.git "$sha"
@@ -118,13 +125,20 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - name: Fetch the socle pinned by release.yml
+      - name: Fetch the socle this workflow comes from
         id: socle
         shell: bash
+        # The socle commit is read from the product's release.yml when the
+        # socle generated it, and otherwise from the ci.yml line that calls
+        # this very workflow: a product that keeps a release mechanism of
+        # its own still names the socle there, and can use this CI.
         run: |
           set -euo pipefail
-          sha="$(sed -n 's|.*maelys-release/.github/workflows/release.yml@\([0-9a-f]\{40\}\).*|\1|p' .github/workflows/release.yml)"
-          test -n "$sha" || { echo "release.yml does not pin maelys-release" >&2; exit 1; }
+          sha="$(sed -n 's|.*maelys-release/.github/workflows/release.yml@\([0-9a-f]\{40\}\).*|\1|p' .github/workflows/release.yml 2>/dev/null || true)"
+          if [ -z "$sha" ]; then
+            sha="$(sed -n 's|.*maelys-release/.github/workflows/check-product\.yml@\([0-9a-f]\{40\}\).*|\1|p' .github/workflows/*.yml | head -n 1)"
+          fi
+          test -n "$sha" || { echo "no workflow of this repository names a maelys-release commit" >&2; exit 1; }
           socle="$RUNNER_TEMP/maelys-release"
           git init -q "$socle"
           git -C "$socle" fetch -q --depth 1 https://github.com/maelys-dev/maelys-release.git "$sha"

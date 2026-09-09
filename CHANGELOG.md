@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.20.0 — 2026-09-09
+
+- The shared CI is separable from the release mechanism, which 0.16.0 left
+  half done: `check` stopped reporting a foreign `release.yml` as drift, but
+  `check-product.yml` still derived the socle's commit from that file and
+  refused outright a product that did not carry the socle's one. It now
+  falls back to the `ci.yml` line that calls the workflow itself, so a
+  product publishing by its own means runs the shared CI: one job in its
+  `ci.yml` gives it the declarations, the pinned checkouts, the three
+  targets and the conventions verdict, while its release workflow is never
+  read, regenerated or reported.
+- `adopt` installs `ci.yml` for a `custom` mechanism too, created once and
+  owned by the product afterwards, with its socle line kept current. A
+  repository whose mechanism is `none` keeps its workflows to itself.
+
 ## 0.19.0 — 2026-09-09
 
 - `maelys-release migrate DIR --product NAME --documents FILE [--apply]
