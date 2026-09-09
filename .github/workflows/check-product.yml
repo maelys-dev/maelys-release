@@ -105,7 +105,12 @@ jobs:
           for name in ${{ steps.socle.outputs.dependencies }}; do sh scripts/checkout-dependency.sh "$name"; done
       - name: Install Linux packages
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y build-essential clang ${{ steps.socle.outputs.linux_packages }}
+        # The runner image carries third-party apt sources of its own; one of
+        # them breaking must not fail an install of Ubuntu archive packages.
+        # The update reports, the install decides.
+        run: |
+          sudo apt-get update || echo "::warning::apt-get update reported errors; the install decides"
+          sudo apt-get install -y build-essential clang ${{ steps.socle.outputs.linux_packages }}
       - name: Install macOS packages
         if: runner.os == 'macOS' && steps.socle.outputs.macos_packages != ''
         run: brew install ${{ steps.socle.outputs.macos_packages }}
@@ -163,7 +168,12 @@ jobs:
           set -euo pipefail
           for name in ${{ steps.socle.outputs.dependencies }}; do sh scripts/checkout-dependency.sh "$name"; done
       - name: Install Linux packages
-        run: sudo apt-get update && sudo apt-get install -y build-essential clang ${{ steps.socle.outputs.linux_packages }}
+        # The runner image carries third-party apt sources of its own; one of
+        # them breaking must not fail an install of Ubuntu archive packages.
+        # The update reports, the install decides.
+        run: |
+          sudo apt-get update || echo "::warning::apt-get update reported errors; the install decides"
+          sudo apt-get install -y build-essential clang ${{ steps.socle.outputs.linux_packages }}
       - name: Replay the committed corpus
         shell: bash
         # The corpus is committed and read-only here: a smoke run proves the
@@ -213,7 +223,12 @@ jobs:
           set -euo pipefail
           for name in ${{ steps.socle.outputs.dependencies }}; do sh scripts/checkout-dependency.sh "$name"; done
       - name: Install Linux packages
-        run: sudo apt-get update && sudo apt-get install -y build-essential clang libclang-rt-18-dev ${{ steps.socle.outputs.linux_packages }}
+        # The runner image carries third-party apt sources of its own; one of
+        # them breaking must not fail an install of Ubuntu archive packages.
+        # The update reports, the install decides.
+        run: |
+          sudo apt-get update || echo "::warning::apt-get update reported errors; the install decides"
+          sudo apt-get install -y build-essential clang libclang-rt-18-dev ${{ steps.socle.outputs.linux_packages }}
       - name: Sanitizers with clang
         shell: bash
         run: ${{ inputs.sanitizer_command }} CC=clang CXX=clang++

@@ -197,7 +197,12 @@ jobs:
           ${{ inputs.dependency_checkout }}
       - name: Install Linux packaging tools
         if: runner.os == 'Linux' && inputs.linux_packages != ''
-        run: sudo apt-get update && sudo apt-get install -y ${{ inputs.linux_packages }}
+        # The runner image carries third-party apt sources of its own; one of
+        # them breaking must not fail an install of Ubuntu archive packages.
+        # The update reports, the install decides.
+        run: |
+          sudo apt-get update || echo "::warning::apt-get update reported errors; the install decides"
+          sudo apt-get install -y ${{ inputs.linux_packages }}
       - name: Install macOS packages
         if: runner.os == 'macOS' && inputs.macos_packages != ''
         run: brew install ${{ inputs.macos_packages }}
