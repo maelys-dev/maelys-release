@@ -166,6 +166,14 @@ once its prose has moved.
 
 ## Dependencies and packages
 
+- A dependency that does not live in `maelys-dev` says where it does, on a
+  `repository <https URL>` line of its own pin, after the tag and the
+  commit. `scripts/checkout-dependency.sh` clones that URL instead of the
+  organisation's, and refuses anything but an `https://` one. A product
+  that must build a third-party library from a pinned commit, as
+  maelys-http does with Mbed TLS under its security floor, declares it once
+  in the same file as every other pin instead of carrying a checkout of its
+  own.
 - A dependency on another Maelys repository is pinned by commit in an
   `dependencies/<name>.pin` file, `name` being the repository name
   (`maelys-system.pin`): the nearest tag on line 1 for
@@ -188,6 +196,27 @@ once its prose has moved.
   are started from, fetching it into the user's cache when the checkout at
   hand is another version.
 
+## Fuzzing
+
+A product that fuzzes uses two targets and one place, so that the fleet
+reads the same way:
+
+- `make fuzz` runs a campaign, as long as the operator lets it. Nothing
+  schedules it here: a campaign that must finish in a CI job is not a
+  campaign.
+- `make fuzz-smoke` replays the committed corpus in seconds. It proves the
+  harnesses still build and still pass what they already caught, which is
+  what a pull request needs to know.
+- The harnesses, the corpus and the dictionaries live in `tests/fuzz/`, and
+  the corpus is read-only for the smoke run: a fuzzer that writes new
+  inputs into the committed seeds turns a regression test into a moving
+  target.
+
+`check-product.yml` runs the smoke target through its `fuzz_command` input,
+on Linux with clang, next to the sanitizers. It is opt-in and empty by
+default: the three products that fuzz today spell their targets
+differently, and a default would turn their next adoption red.
+
 ## Packaging
 
 - `scripts/package-release.sh TARGET` builds one target (`linux-x86_64`,
@@ -200,6 +229,27 @@ once its prose has moved.
   signed tag and `SHA256SUMS` without attestation, because GitHub reserves
   attestations there to paid plans; the workflow skips the step by
   itself (`attestation: auto`) and `preflight` says so before the tag.
+
+## What the release verifies, and what it does not
+
+The workflow verifies the tag: annotated, signed, verified by GitHub, and
+naming the commit it builds. `commit_verification` adds what the tag alone
+does not say. `signed` requires the commit's own signature to be verified
+by GitHub; `signed-on-default-branch` also requires it to be an ancestor of
+the default branch, so a tag cannot publish a commit that never landed
+there. The default is `none`, which is what every product has today.
+
+The release builds what the tag names and does not replay the product's
+tests: the CI ran on the branch, not necessarily on that commit. A product
+that wants them replayed installs an executable
+`scripts/verify-release.sh TARGET`, which the socle renders into
+`verify_command` and the workflow runs on each target runner before
+packaging.
+
+The provenance attestation's subject is `dist/*`, so every file
+`package_command` leaves there is attested with the packages: an SBOM, a
+manifest, a signature file. A product needs no separate attestation for
+them, and gets one bundle per target rather than one per file.
 
 ## Homebrew
 

@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.21.0 — 2026-09-09
+
+- A dependency outside `maelys-dev` declares where it lives, on a
+  `repository <https URL>` line of its own pin;
+  `scripts/checkout-dependency.sh` clones that URL and refuses anything but
+  an `https://` one. maelys-http pins Mbed TLS from a commit of
+  Mbed-TLS/mbedtls, its distribution's version being under the security
+  floor of its own policy header, and had no way to say so.
+- `release.yml` gains `verify_command`, run on each target runner before
+  packaging; the socle renders it from an executable
+  `scripts/verify-release.sh TARGET`. The release builds what the tag
+  names and never replayed the product's tests on that exact commit.
+- `release.yml` gains `commit_verification`: `none` as before, `signed` for
+  the commit's own GitHub-verified signature, `signed-on-default-branch`
+  to also require it to be an ancestor of the default branch, so a tag
+  cannot publish a commit that never landed.
+- `check-product.yml` gains `fuzz_command`, a Linux-and-clang job beside
+  the sanitizers, empty by default. The convention is `make fuzz` for the
+  campaign, `make fuzz-smoke` for replaying the committed corpus in
+  seconds, everything under `tests/fuzz/`, the corpus read-only for the
+  smoke run.
+- The provenance attestation's subject is `dist/*`: every file
+  `package_command` leaves there is attested, an SBOM included. Said in the
+  workflow and in the conventions, since a product asked.
+- The pinned dependencies and `dependencies/packages` are conventions, not
+  release declarations: `check-product.yml` reads them for any product that
+  takes the shared CI, so a product keeping its own release now gets them
+  verified too.
+
 ## 0.20.0 — 2026-09-09
 
 - The shared CI is separable from the release mechanism, which 0.16.0 left

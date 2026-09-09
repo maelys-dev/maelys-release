@@ -34,6 +34,15 @@ on:
         required: false
         type: string
         default: ""
+      verify_command:
+        description: >-
+          Command run on each target runner before packaging, TARGET
+          substituted; empty runs none. The release builds what the tag
+          names, so a product that wants its tests replayed on that exact
+          commit asks here.
+        required: false
+        type: string
+        default: ""
       package_command:
         description: Command producing dist/ for one target; TARGET is substituted
         required: false
@@ -55,11 +64,21 @@ on:
         required: false
         type: string
         default: release
+      commit_verification:
+        description: >-
+          What the tag's commit must satisfy, beyond the signed annotated
+          tag: none, signed (its own signature verified by GitHub), or
+          signed-on-default-branch (also an ancestor of the default branch,
+          so a tag cannot publish a commit that never landed).
+        required: false
+        type: string
+        default: none
       attestation:
         description: >-
           auto attests provenance on a public repository and skips it on a
           private one (GitHub reserves attestations there to paid plans);
-          always and never force it
+          always and never force it. Its subject is dist/*, so every file
+          package_command leaves there is attested, an SBOM included.
         required: false
         type: string
         default: auto
@@ -96,6 +115,31 @@ jobs:
           head="$(git rev-parse HEAD)"
           test "$(jq -r .object.sha <<<"$object")" = "$head" || { echo "$TAG does not name $head" >&2; exit 1; }
           echo "tag=$TAG" >>"$GITHUB_OUTPUT"
+      - name: Verify the tag's commit
+        if: inputs.commit_verification != 'none'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MODE: ${{ inputs.commit_verification }}
+        shell: bash
+        # A signed tag says who published; this says what was published: the
+        # commit carries its own verified signature, and optionally landed on
+        # the default branch through the branch's own rules.
+        run: |
+          set -euo pipefail
+          case "$MODE" in
+            signed|signed-on-default-branch) ;;
+            *) echo "commit_verification must be none, signed or signed-on-default-branch, not $MODE" >&2; exit 1 ;;
+          esac
+          head="$(git rev-parse HEAD)"
+          commit="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${head}")"
+          test "$(jq -r .commit.verification.verified <<<"$commit")" = true \
+            || { echo "the commit $head is not signed and verified by GitHub" >&2; exit 1; }
+          if [ "$MODE" = signed-on-default-branch ]; then
+            branch="$(gh api "repos/${GITHUB_REPOSITORY}" --jq .default_branch)"
+            git fetch -q origin "$branch"
+            git merge-base --is-ancestor "$head" "origin/$branch" \
+              || { echo "the commit $head is not an ancestor of $branch: it never landed there" >&2; exit 1; }
+          fi
 
   prepare:
     needs: verify
@@ -160,6 +204,15 @@ jobs:
       - name: Require Apple Silicon
         if: runner.os == 'macOS'
         run: test "$(uname -m)" = arm64
+      - name: Verify before packaging
+        if: inputs.verify_command != ''
+        shell: bash
+        env:
+          VERIFY_COMMAND: ${{ inputs.verify_command }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          eval "${VERIFY_COMMAND//TARGET/$TARGET}"
       - name: Package
         shell: bash
         env:
