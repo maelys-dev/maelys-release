@@ -653,8 +653,9 @@ def stage(decl: Declarations, sha: str, tag: str) -> dict[str, tuple[str, bool]]
                            ("SECURITY.md", "SECURITY.md")):
         if not (decl.project / name).is_file():
             staged[name] = (render_text(share / "templates" / template, mapping), False)
-    if not decl.releases_here:
-        return staged
+    # The shared CI is not the release mechanism: a product that publishes
+    # by itself can still run check-product.yml, which finds the socle from
+    # the ci.yml line that calls it.
     ci = decl.project / ".github" / "workflows" / "ci.yml"
     if not ci.is_file():
         staged[".github/workflows/ci.yml"] = (ci_workflow(decl, sha, tag, version), False)
