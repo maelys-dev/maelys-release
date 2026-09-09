@@ -11,8 +11,11 @@
   prose.
 - maelys-docs receives the rewritten history (`git filter-repo` then a merge
   with `--allow-unrelated-histories`), so `git log -- <product>/<file>.md`
-  reads there, plus `adapter/<PRODUCT>_PIN` and `<product>/VERSION` at the
-  product's latest tag. A product with no tag is refused. The product side
+  reads there, plus `dependencies/<product>.pin` and `<product>/VERSION` at
+  the product's latest tag. The pin is the fleet's one format: the socle has
+  refused `adapter/<NAME>_PIN` in a product since 0.14.0 and writes none
+  here either, though the documentation policy of maelys-platform still
+  names it. A product with no tag is refused. The product side
   travels as a branch for a pull request, never a write into the operator's
   checkout, and nothing leaves the machine without `--push`.
 - The plan says what moves, what stays and why, and names every file of the

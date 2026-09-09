@@ -717,7 +717,10 @@ class MigrateTest(unittest.TestCase):
         log = self.product.git(documents, "log", "--oneline", "--", "maelys-fixture/architecture.md")
         self.assertIn("fixture", log)
         self.assertEqual((documents / "maelys-fixture" / "VERSION").read_text(), "1.2.3\n")
-        self.assertEqual((documents / "adapter" / "MAELYS_FIXTURE_PIN").read_text().splitlines()[0], "v1.2.3")
+        # The pin the fleet uses since 0.14.0, not the adapter/ the socle refuses.
+        self.assertFalse((documents / "adapter").exists())
+        self.assertEqual((documents / "dependencies" / "maelys-fixture.pin").read_text().splitlines(),
+                         ["v1.2.3", self.product.git(self.product.dir, "rev-parse", "HEAD")])
         # And left the product, whose README now names where it went.
         self.assertFalse((product / "docs" / "architecture.md").exists())
         self.assertTrue((product / "docs" / "schema.json").is_file())

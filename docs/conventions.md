@@ -327,9 +327,13 @@ review.
   `--allow-unrelated-histories`, so `git log -- <product>/<file>.md` reads
   there. `git subtree add` was tried and rejected: it grafts the history but
   the old commits keep the old path, so the log on the new path is empty.
-- **maelys-docs also receives the pin**, `adapter/<PRODUCT>_PIN` at the
+- **maelys-docs also receives the pin**, `dependencies/<product>.pin` at the
   product's latest tag and commit, and `<product>/VERSION`. A product with
-  no tag is refused: its prose would describe no release.
+  no tag is refused: its prose would describe no release. The pin is the
+  fleet's one format, tag on line 1 and commit on line 2; the socle refuses
+  `adapter/<NAME>_PIN` in a product since 0.14.0, so it writes none here.
+  The documentation policy of maelys-platform still names the old layout,
+  which is a correction for that repository.
 - **The product loses the documents**, on a branch for a pull request, never
   a write into the operator's checkout. The README's links to the moved
   documents are replaced by one line naming where they went; the socle

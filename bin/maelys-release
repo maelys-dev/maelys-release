@@ -1058,10 +1058,12 @@ def handle_migrate(invocation: Invocation) -> tuple[dict, int]:
         git("fetch", "-q", "source", cwd=documents)
         head = git("rev-parse", "source/HEAD", cwd=documents, check=False) or git("rev-parse", "source/main", cwd=documents)
         git("merge", "--allow-unrelated-histories", "--no-edit", "-q", head, cwd=documents)
-        # The pin and the version say which release of the product this prose
-        # describes, as every pin of the fleet does.
-        (documents / "adapter").mkdir(exist_ok=True)
-        (documents / "adapter" / f"{product.upper().replace('-', '_')}_PIN").write_text(
+        # The pin says which release of the product this prose describes, in
+        # the one format the fleet uses: dependencies/<name>.pin, tag on line
+        # 1 and commit on line 2. The socle refuses adapter/<NAME>_PIN in a
+        # product since 0.14.0, so it does not write one here either.
+        (documents / "dependencies").mkdir(exist_ok=True)
+        (documents / "dependencies" / f"{product}.pin").write_text(
             f"{data['tag']}\n{data['commit']}\n", encoding="utf-8")
         (documents / product / "VERSION").write_text(f"{data['version']}\n", encoding="utf-8")
         git("add", "-A", cwd=documents)
