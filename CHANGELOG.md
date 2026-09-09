@@ -1,5 +1,55 @@
 # Changelog
 
+## 0.17.0 — 2026-09-07
+
+- `docs/` of a product holds what a machine writes and what `LICENSING.md`
+  engages; its prose belongs in `maelys-docs/<product>/`. `check` sorts every
+  file of `docs/` into generated, engaged, data and prose, and names each
+  prose file with its destination.
+- The generated command-line reference is `docs/cli.md`, one name and one
+  place for every product. `docs/cli-reference.md` and
+  `docs/generated/cli-reference.md`, the three spellings in use today, are
+  named with the `git mv` that fixes them.
+- A file counts as generated when its first ten lines carry both the word
+  `generated` and a refusal to be edited. Reading only the first line missed
+  `docs/generated/config-reference.md` of maelys-egress, whose mark sits on
+  line 3 under its title, and counted it as prose; requiring the refusal
+  keeps prose that merely says "generated" in a sentence out. The rule is
+  the contract rather than one spelling, since the generators live in
+  maelys-cli and in the products.
+- **The socle generates the reference itself.** `adopt` writes
+  `docs/cli.md` and `docs/cli-contract.json`, `check` compares them, and
+  `check-product.yml` does that in every product's CI. The Markdown still
+  comes from maelys-cli's generator, which the socle does not reimplement:
+  it finds it at the commit `dependencies/maelys-cli.pin` names, using a
+  checkout beside the product when there is one and its own cache otherwise.
+  A product therefore carries no rule, no path, no variable and no freshness
+  check of its own: the `cli-reference` and `contract-check` targets of
+  maelys-cli, maelys-egress and maelys-oci, three spellings of one rule, are
+  deleted at their next adoption.
+- What cannot be guessed is declared in `docs/cli.reference`: `[build]`, the
+  directory holding the programs (default `build/bin`); `[programs]`,
+  defaulting to the product's commands with its `lib*` formulas aside; and
+  `[flags]` for the generator. maelys-oci's `--neutral-availability
+  unpack-rootfs` moves there from its Makefile, maelys-cli its
+  `build/release/bin` and the second program it documents; the three
+  products that generate a reference build into three different trees, so
+  the directory is declared rather than assumed.
+- A repository that publishes libraries alone is told nothing about a CLI
+  reference: maelys-system and maelys-json ship `libmaelys-sys` and
+  `libmaelys-json`, no command, so the rule does not apply to them and no
+  note asks for a file they cannot have.
+- maelys-cli does not pin itself, so the socle uses the
+  `tools/generate_cli_reference.py` it carries: the framework is held to the
+  rule it serves, and loses its own target like the others. Checked against
+  both maelys-oci and maelys-cli: the socle alone reproduces what each
+  Makefile produced, byte for byte.
+- The refusal is opt-in: `check --docs-contract`, and the `docs_contract`
+  input of `check-product.yml`, turn those notes into violations. It stays
+  opt-in for as long as `maelys-docs` does not exist, because a product
+  cannot move prose to a repository nobody has created yet. Without it,
+  every product keeps the verdict it has today.
+
 ## 0.16.0 — 2026-09-07
 
 - The conventions of a Maelys repository are separable from the mechanism

@@ -51,6 +51,92 @@ of thirteen carry one, contribution rules follow how open a repository is,
 and installing a skeleton in the other ten would state a policy nobody
 decided. A repository that wants one writes its own.
 
+## What `docs/` holds
+
+A product repository keeps what a machine writes and what it engages
+publicly; its prose lives in `maelys-dev/maelys-docs`, directory
+`<product>/` (the documentation policy of maelys-platform). `check` reads
+`docs/` and sorts every file into four kinds:
+
+| Kind | Recognised by | Stays |
+| --- | --- | --- |
+| generated reference | the path `docs/cli.md` | yes |
+| other generated file | its head says so | yes |
+| public engagement | a link from `LICENSING.md` | yes |
+| data | not Markdown | yes |
+| prose | everything else | no, it moves to `maelys-docs/<product>/` |
+
+A file is generated when its first ten lines carry both the word
+`generated` and a refusal to be edited (`do not edit`, `ne pas éditer`).
+The rule is the contract, not one spelling: the generators live in
+maelys-cli and in the products, not here, and the three forms in use all
+satisfy it, one of them on the third line under a title. Prose that merely
+says "generated" in a sentence is not marked, because the refusal is
+missing.
+
+The generated command-line reference is **`docs/cli.md`**, one name and one
+place for every product, with its machine-readable contract beside it as
+`docs/cli-contract.json`. `docs/cli-reference.md` and
+`docs/generated/cli-reference.md` are the earlier spellings: `check` names
+them with the `git mv` that fixes them.
+
+The Markdown comes from maelys-cli's generator, installed as
+`maelys-cli-reference` and present in any pinned checkout at
+`tools/generate_cli_reference.py`; it asks each program for its own
+catalogue through `describe`. **The socle runs it.** A product carries no
+rule, no path, no variable and no freshness check of its own for the
+reference: `adopt` regenerates `docs/cli.md` and `docs/cli-contract.json`,
+`check` compares them, and `check-product.yml` does that in every CI. A
+product that already has a `cli-reference` target in its Makefile deletes
+it, along with the `contract-check` that compared the file with a
+regeneration; three products carry three spellings of that same rule today.
+
+The socle finds the generator by itself, at the commit
+`dependencies/maelys-cli.pin` names: a checkout beside the product at that
+commit is used as it stands, otherwise the socle fetches it into its cache.
+Nothing to install, nothing to pass. maelys-cli does not pin itself, so the
+socle uses the `tools/generate_cli_reference.py` it carries: the framework
+is held to the rule it serves.
+
+What a product cannot be guessed on is declared in `docs/cli.reference`,
+read by the socle:
+
+```
+[build]
+build/release/bin
+
+[programs]
+maelys
+maelys-hello
+
+[flags]
+--neutral-availability unpack-rootfs
+```
+
+A repository that publishes libraries alone carries no reference and is told
+nothing about one: maelys-system and maelys-json ship `libmaelys-sys` and
+`libmaelys-json`, no command, and the rule does not apply to them.
+
+`[programs]` defaults to the product's commands, its `lib*` formulas aside,
+and `[build]` to `build/bin`, so a product declares only what it does
+differently: maelys-oci the `[flags]` its Makefile held as
+`REFERENCE_FLAGS`, maelys-cli the `[build]` (`build/release/bin`) and the
+second program it documents. There is no fleet layout to assume here: the
+three products that generate a reference build into three different trees.
+`CLI_REFERENCE_BUILD` overrides the directory for a local run.
+
+A reference that cannot be produced here (an unbuilt product, an
+unreachable maelys-cli) is left as it stands, with a note saying so, rather
+than reporting a drift the socle cannot substantiate. In CI the product is
+built before `check` runs, so the comparison is real there.
+
+`check` reports prose as a note naming its destination, and refuses it only
+under `--docs-contract` (the `docs_contract` input of `check-product.yml`).
+The refusal is opt-in for as long as `maelys-docs` does not exist: a product
+cannot move its prose to a repository nobody has created yet, and a rule
+that no product can satisfy is a rule that gets disabled. A product opts in
+once its prose has moved.
+
 ## Versions, tags, changelog
 
 - `VERSION` holds `X.Y.Z` and nothing else. A release is the tag `vX.Y.Z`

@@ -46,6 +46,31 @@ DEFAULT_IMAGE = "ubuntu:26.04"
 SOCLE_LINUX_PACKAGES = "build-essential dpkg-dev file rpm"  # the release.yml default
 BOTTLES = '\'["macos-15","macos-26"]\''
 PLATFORMS = {"linux-x86_64": "linux/amd64", "linux-arm64": "linux/arm64"}
+# One name and one place for the reference a machine writes from describe
+# (docs/policies/documentation.md of maelys-platform). Everything else in
+# docs/ is prose, and prose lives in maelys-docs.
+CLI_REFERENCE = "docs/cli.md"
+CLI_CONTRACT = "docs/cli-contract.json"
+# What a product declares about its own reference, when the conventions do
+# not already say it: [programs] to describe, [flags] for the generator.
+CLI_DECLARATIONS = "docs/cli.reference"
+# maelys-cli carries the generator instead of pinning it: the framework is
+# held to the same rule as the products it serves.
+CLI_GENERATOR = "tools/generate_cli_reference.py"
+LEGACY_CLI_REFERENCES = ("docs/cli-reference.md", "docs/generated/cli-reference.md")
+# A generated file says so in its head, whatever wrote it: the word
+# "generated" and a refusal to be edited, within the first ten lines. The
+# generators live in maelys-cli and in the products, not here, so the socle
+# fixes the rule rather than one spelling; the three in use satisfy it, and
+# one of them sits on line 3, under the title.
+GENERATED_HEAD_LINES = 10
+GENERATED_MARK = re.compile(r"generated", re.IGNORECASE)
+GENERATED_REFUSAL = re.compile(r"do not edit|don't edit|ne pas .diter", re.IGNORECASE)
+
+
+def is_generated(text: str) -> bool:
+    head = "\n".join(text.split("\n", GENERATED_HEAD_LINES)[:GENERATED_HEAD_LINES])
+    return bool(GENERATED_MARK.search(head) and GENERATED_REFUSAL.search(head))
 # What a product carries whatever publishes it, and what belongs to the
 # socle's release mechanism. A product whose mechanism is custom or none
 # receives and is checked on the first set only (docs/conventions.md,
@@ -63,6 +88,8 @@ RELEASE_MANAGED = (
 MANAGED = (
     ".github/workflows/release.yml",
     "scripts/checkout-dependency.sh",
+    CLI_REFERENCE,
+    CLI_CONTRACT,
     "AGENTS.md",
     "CLAUDE.md",
     ".claude/skills/maelys-release/SKILL.md",
@@ -161,6 +188,13 @@ class Declarations:
         self.dependencies: list[str] = []
         self.linux_packages = ""
         self.macos_packages = ""
+        self.generates_reference = False
+        self.cli_programs: list[str] = []
+        self.cli_flags: list[str] = []
+        self.cli_build = ""
+        # Files of docs/ that are neither generated, engaged by LICENSING.md
+        # nor data: they belong in maelys-docs/<product>/.
+        self.prose: list[str] = []
         self.checks: list[dict] = []
 
     @property
@@ -276,6 +310,7 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
             decl.add("warn", ".github/workflows/ci.yml does not call the socle's check-product.yml: add a job"
                      f" 'uses: {SOCLE_REPOSITORY}/.github/workflows/check-product.yml@SHA # TAG'"
                      f" with 'product: {product}', as adopt would create it")
+    read_docs(decl)
     packages = dependencies / "packages"
     if packages.is_file():
         try:
@@ -312,6 +347,112 @@ def declared_mechanism(project: pathlib.Path, requested: str = "") -> str:
                       "Delete or move .github/workflows/release.yml to change the mechanism of a repository;"
                       " the socle never overwrites a workflow it did not generate.")
     return requested or carried
+
+
+def engaged_documents(project: pathlib.Path) -> set[str]:
+    """The docs/ files LICENSING.md links: a public engagement stays here."""
+    licensing = project / "LICENSING.md"
+    if not licensing.is_file():
+        return set()
+    return {match.replace("./", "") for match in
+            re.findall(r"\(([^)\s]*docs/[^)\s#]+)\)", licensing.read_text(encoding="utf-8"))}
+
+
+def parse_cli_declarations(text: str) -> tuple[list[str], list[str], str]:
+    """docs/cli.reference: [build] holding the programs, [programs], [flags]."""
+    sections: dict[str, list[str]] = {"build": [], "programs": [], "flags": []}
+    section = ""
+    for number, raw in enumerate(text.splitlines(), 1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("["):
+            if line[1:-1] not in sections or not line.endswith("]"):
+                raise ValueError(f"unknown section {line} at line {number}")
+            section = line[1:-1]
+            continue
+        if not section:
+            raise ValueError(f"line outside a [programs] or [flags] section at line {number}")
+        if section == "programs":
+            if not re.fullmatch(r"[a-z0-9][a-z0-9._-]*", line):
+                raise ValueError(f"one program per line at line {number}: {raw}")
+            sections["programs"].append(line)
+        elif section == "build":
+            if sections["build"]:
+                raise ValueError(f"[build] holds one directory, a second at line {number}")
+            if line.startswith("/") or ".." in pathlib.PurePosixPath(line).parts:
+                raise ValueError(f"[build] is a path inside the product at line {number}: {raw}")
+            sections["build"].append(line)
+        else:
+            sections["flags"].extend(line.split())
+    return sections["programs"], sections["flags"], (sections["build"][0] if sections["build"] else "")
+
+
+def read_docs(decl: Declarations) -> None:
+    """Classify docs/: the generated reference, public engagements, data, prose.
+
+    The rule is maelys-platform's documentation policy: a product repository
+    keeps what a machine writes and what LICENSING.md engages; its prose
+    lives in maelys-docs/<product>/. The socle names what must move, and
+    moves nothing.
+    """
+    docs = decl.project / "docs"
+    reference = decl.project / CLI_REFERENCE
+    # A product whose command line is built on the framework pins maelys-cli,
+    # whose generator writes the reference. The socle owns the wrapper, so the
+    # reference is produced the same way everywhere; the product's Makefile
+    # calls it and overrides by environment what its layout requires.
+    has_generator = "maelys-cli" in decl.dependencies or (decl.project / CLI_GENERATOR).is_file()
+    commands = [name for name in decl.formulas if not name.startswith("lib")]
+    declarations = decl.project / CLI_DECLARATIONS
+    if declarations.is_file():
+        try:
+            decl.cli_programs, decl.cli_flags, decl.cli_build = \
+                parse_cli_declarations(declarations.read_text(encoding="utf-8"))
+        except ValueError as error:
+            decl.add("missing", f"{CLI_DECLARATIONS}: {error}", "conventions")
+    # A product whose command line is built on the framework pins maelys-cli,
+    # whose generator writes the reference. The socle runs it: no product
+    # carries a rule, a path or a drift check of its own for this.
+    if has_generator and reference.is_file():
+        if not decl.cli_programs:
+            decl.cli_programs = commands or [decl.product]
+        decl.generates_reference = True
+        decl.add("ok", f"{CLI_REFERENCE} is generated by the socle from maelys-cli's generator:"
+                 f" {' '.join(decl.cli_programs)}", "conventions")
+    legacy = [name for name in LEGACY_CLI_REFERENCES if (decl.project / name).is_file()]
+    for name in legacy:
+        decl.add("note", f"{name}: the generated CLI reference is {CLI_REFERENCE} for every product;"
+                 f" git mv {name} {CLI_REFERENCE} and point the rule that writes it there", "conventions")
+    if not docs.is_dir():
+        return
+    if reference.is_file():
+        if is_generated(reference.read_text(encoding="utf-8")):
+            decl.add("ok", f"{CLI_REFERENCE} is generated", "conventions")
+        else:
+            decl.add("warn", f"{CLI_REFERENCE} does not say in its first {GENERATED_HEAD_LINES} lines that it is"
+                     " generated and must not be edited; the reference is written from describe, never by hand",
+                     "conventions")
+    elif not legacy and not has_generator and commands:
+        # Only a product that ships a command can carry a reference: a library
+        # publishes lib* alone and is told nothing about docs/cli.md.
+        decl.add("note", f"no {CLI_REFERENCE}: a product with a command line carries its generated reference there",
+                 "conventions")
+    engaged = engaged_documents(decl.project)
+    for path in sorted(docs.rglob("*")):
+        if not path.is_file():
+            continue
+        relative = path.relative_to(decl.project).as_posix()
+        if relative == CLI_REFERENCE or relative in legacy or relative in engaged:
+            continue
+        if path.suffix.lower() != ".md":
+            continue  # data, never prose
+        if is_generated(path.read_text(encoding="utf-8")):
+            continue
+        decl.prose.append(relative)
+    for relative in decl.prose:
+        decl.add("note", f"{relative}: prose belongs in maelys-docs/{decl.product}/"
+                 f"{relative[len('docs/'):]}, not in a product repository", "conventions")
 
 
 def pinned_product(project: pathlib.Path) -> str:
@@ -499,6 +640,10 @@ def stage(decl: Declarations, sha: str, tag: str) -> dict[str, tuple[str, bool]]
         path = decl.project / name
         existing = path.read_text(encoding="utf-8") if path.is_file() else None
         staged[name] = (managed_block(existing, block), False)
+    if decl.generates_reference:
+        reference, contract = render_cli_reference(decl)
+        staged[CLI_REFERENCE] = (reference, False)
+        staged[CLI_CONTRACT] = (contract, False)
     releasing = "RELEASING.md" if decl.releases_here else "RELEASING-conventions.md"
     for name, template in (("RELEASING.md", releasing), ("LICENSING.md", "LICENSING.md"),
                            ("SECURITY.md", "SECURITY.md")):
@@ -517,6 +662,67 @@ def stage(decl: Declarations, sha: str, tag: str) -> dict[str, tuple[str, bool]]
     return staged
 
 
+def cli_generator(decl: Declarations) -> pathlib.Path | None:
+    """maelys-cli's reference generator, at the commit the product pins.
+
+    The product declares maelys-cli once, in dependencies/maelys-cli.pin; the
+    socle fetches that commit into its own cache. A checkout beside the
+    product at the same commit is used as it stands, which keeps this offline
+    and matches what scripts/checkout-dependency.sh leaves there.
+    """
+    # The framework holds the generator; every other product pins it.
+    own = decl.project / CLI_GENERATOR
+    if own.is_file():
+        return own
+    pin = decl.project / "dependencies" / "maelys-cli.pin"
+    if not pin.is_file():
+        return None
+    sha = pin.read_text(encoding="utf-8").splitlines()[1].strip()
+    relative = pathlib.Path(CLI_GENERATOR)
+    sibling = decl.project.parent / "maelys-cli"
+    if (sibling / relative).is_file():
+        head = run(["git", "-C", str(sibling), "rev-parse", "HEAD"]).stdout.strip()
+        if head == sha:
+            return sibling / relative
+    checkout = pinned_checkout("maelys-cli", sha, str(relative))
+    return checkout / relative if checkout and (checkout / relative).is_file() else None
+
+
+def render_cli_reference(decl: Declarations) -> tuple[str, str]:
+    """The reference and its contract, generated as maelys-cli generates them.
+
+    The socle runs the generator itself, so no product carries a rule, a path
+    or a drift check of its own for this. What cannot be produced here (an
+    unbuilt product, an unreachable maelys-cli) leaves both files as they
+    stand rather than reporting a drift the socle cannot substantiate.
+    """
+    def existing() -> tuple[str, str]:
+        return tuple((decl.project / name).read_text(encoding="utf-8")
+                     if (decl.project / name).is_file() else ""
+                     for name in (CLI_REFERENCE, CLI_CONTRACT))  # type: ignore[return-value]
+
+    generator = cli_generator(decl)
+    if generator is None:
+        decl.add("note", f"{CLI_REFERENCE}: maelys-cli is not available at the pinned commit;"
+                 " the reference is left as it stands", "conventions")
+        return existing()
+    # Three products, three build layouts (build/release, build/<profile>,
+    # a platform tree): the directory holding the programs is declared, not
+    # guessed, with the commonest as the default.
+    build = decl.project / os.environ.get("CLI_REFERENCE_BUILD", decl.cli_build or "build/bin")
+    with tempfile.TemporaryDirectory(prefix="maelys-release-cli-reference.") as temp:
+        markdown = pathlib.Path(temp) / "cli.md"
+        contract = pathlib.Path(temp) / "cli-contract.json"
+        completed = run([sys.executable, str(generator), "--build", str(build),
+                         "--markdown", str(markdown), "--json", str(contract),
+                         *decl.cli_flags, *decl.cli_programs], cwd=decl.project)
+        if completed.returncode != 0 or not markdown.is_file():
+            decl.add("note", f"{CLI_REFERENCE}: the generator did not run here"
+                     " (an unbuilt product, usually); the reference is left as it stands", "conventions")
+            return existing()
+        return markdown.read_text(encoding="utf-8"), contract.read_text(encoding="utf-8")
+
+
 def plan(decl: Declarations, staged: dict[str, tuple[str, bool]], apply: bool) -> list[dict]:
     """One entry per managed file: create, update or same; written when applying."""
     files: list[dict] = []
@@ -526,7 +732,9 @@ def plan(decl: Declarations, staged: dict[str, tuple[str, bool]], apply: bool) -
         content, executable = staged[relative]
         path = decl.project / relative
         entry: dict = {"path": relative,
-                       "scope": "conventions" if relative in CONVENTION_MANAGED + CONVENTION_SEEDED else "release"}
+                       "scope": "conventions" if relative in CONVENTION_MANAGED + CONVENTION_SEEDED
+                       + (CLI_REFERENCE, CLI_CONTRACT)
+                       else "release"}
         if relative in CONVENTION_SEEDED:
             entry["seeded"] = True
         if not path.is_file():
@@ -565,17 +773,36 @@ def socle_data(sha: str, tag: str) -> dict:
     return {"version": socle_version(), "tag": tag, "sha": sha}
 
 
+def pinned_checkout(name: str, sha: str, witness: str) -> pathlib.Path | None:
+    """A checkout of `name` at `sha`, fetched once into the user's cache.
+
+    `witness` is the file whose presence means the cache already holds this
+    commit. None when the fetch fails, so a caller can degrade instead of
+    failing; a checkout that lacks the witness is still returned, because
+    "fetched but old" and "not fetched" are different answers.
+    """
+    root = pathlib.Path(os.environ.get("XDG_CACHE_HOME") or pathlib.Path.home() / ".cache") / "maelys-release"
+    cache = root / sha if name == "maelys-release" else root / f"{name}-{sha}"
+    if (cache / witness).is_file():
+        return cache
+    base = os.environ.get("MAELYS_GIT_BASE", "https://github.com/maelys-dev")
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    git("init", "-q", str(cache))
+    fetched = run(["git", "fetch", "-q", "--depth", "1", f"{base}/{name}.git", sha], cwd=cache)
+    if fetched.returncode != 0:
+        return None
+    git("checkout", "-q", "FETCH_HEAD", cwd=cache)
+    return cache
+
+
 def pinned_socle_checkout(sha: str) -> pathlib.Path:
-    """A checkout of the socle at `sha`, fetched once into the user's cache."""
-    cache = pathlib.Path(os.environ.get("XDG_CACHE_HOME") or pathlib.Path.home() / ".cache") / "maelys-release" / sha
-    if not (cache / "bin" / "maelys-release").is_file():
-        base = os.environ.get("MAELYS_GIT_BASE", "https://github.com/maelys-dev")
-        cache.parent.mkdir(parents=True, exist_ok=True)
-        git("init", "-q", str(cache))
-        git("fetch", "-q", "--depth", "1", f"{base}/maelys-release.git", sha, cwd=cache)
-        git("checkout", "-q", "FETCH_HEAD", cwd=cache)
-        if (cache / "bin" / "maelys-release").is_file():
-            (cache / "bin" / "maelys-release").chmod(0o755)
+    """A checkout of the socle at `sha`; the relocation cannot degrade."""
+    cache = pinned_checkout("maelys-release", sha, "bin/maelys-release")
+    if cache is None:
+        raise Failure("NOT_FOUND", f"maelys-release {sha[:7]} could not be fetched.",
+                      "Check the network, or run with MAELYS_RELEASE_NO_RELOCATE=1.")
+    if (cache / "bin" / "maelys-release").is_file():
+        (cache / "bin" / "maelys-release").chmod(0o755)
     return cache
 
 
@@ -679,6 +906,14 @@ def check_data(invocation: Invocation) -> tuple[Declarations, dict]:
                     continue
                 message = f"{entry['path']}: {entry['action']}" + (f" ({entry['reason']})" if "reason" in entry else "")
                 (conventions if entry["scope"] == "conventions" else release).append(message)
+    # The documentation contract is opt-in while maelys-docs does not exist:
+    # a product cannot move prose to a repository nobody has created yet, so
+    # check names the destination and only refuses when asked to.
+    if invocation.flag("--docs-contract"):
+        conventions.extend(f"{relative}: prose belongs in maelys-docs/{product}/{relative[len('docs/'):]}"
+                           for relative in decl.prose)
+        conventions.extend(f"{name}: the generated CLI reference is {CLI_REFERENCE} for every product"
+                           for name in LEGACY_CLI_REFERENCES if (project / name).is_file())
     # The seeded notes are added while planning, so the checks are taken last.
     data["checks"] = decl.applicable()
     data["conventions"] = {"valid": not conventions, "violations": conventions}
@@ -1124,6 +1359,8 @@ CHECK_SCHEMA = {"type": "object", "additionalProperties": False,
                                "pinned": {"type": ["object", "null"]}, "checks": CHECKS_SCHEMA,
                                "files": FILES_SCHEMA, "violations": STRINGS,
                                "conventions": VERDICT_SCHEMA, "release": VERDICT_SCHEMA}}
+DOCS_CONTRACT_OPTION = cli.flag(
+    "--docs-contract", "Refuse prose in docs/ and a CLI reference outside docs/cli.md, instead of noting them.")
 MECHANISM_OPTION = cli.option(
     "--mechanism", "How the product publishes when it carries no release.yml yet.",
     cli.argument("MECHANISM", choices=list(MECHANISMS)))
@@ -1144,7 +1381,8 @@ APP = cli.Program(PROGRAM, PRODUCT, socle_version(), [
     cli.read("check", "check",
              "Report the conventions of a product and, when it publishes through the socle, its release mechanism;"
              " exit 2 on any violation.",
-             handle_check, operands=[DIR_OPERAND], options=[*SOCLE_OPTIONS, MECHANISM_OPTION], schema=CHECK_SCHEMA),
+             handle_check, operands=[DIR_OPERAND],
+             options=[*SOCLE_OPTIONS, MECHANISM_OPTION, DOCS_CONTRACT_OPTION], schema=CHECK_SCHEMA),
     cli.read("declarations", "declarations",
              "Return the product contract as data: pinned dependencies, packages, formulas; exit 2 when invalid.",
              handle_declarations, operands=[DIR_OPERAND], options=[SOCLE_OPTIONS[0]],
@@ -1158,7 +1396,7 @@ APP = cli.Program(PROGRAM, PRODUCT, socle_version(), [
                                     "macosPackages": {"type": "string"}, "formulas": STRINGS, "checks": CHECKS_SCHEMA}}),
     cli.read("preflight", "preflight",
              "Check, then report what the release workflow would refuse of the next tag; exit 2 when not ready.",
-             handle_preflight, operands=[DIR_OPERAND], options=list(SOCLE_OPTIONS),
+             handle_preflight, operands=[DIR_OPERAND], options=[*SOCLE_OPTIONS, DOCS_CONTRACT_OPTION],
              schema={"type": "object", "additionalProperties": False,
                      "required": ["ready", "valid", "product", "project", "socle", "pinned", "checks", "files",
                                   "preflight", "violations"],
