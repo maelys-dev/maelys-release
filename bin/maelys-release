@@ -987,6 +987,20 @@ def migration_plan(invocation: Invocation) -> dict:
             "moving": moving, "staying": staying, "documents": len(moving)}
 
 
+def push_branch(clone: pathlib.Path, remote: str, branch: str) -> None:
+    """Send `branch` to `remote`, replacing an earlier attempt but nothing else.
+
+    --force-with-lease needs to know what the remote holds, and a clone that
+    has never fetched the branch knows nothing: it refuses on stale info,
+    which is what a second run of a migration hits. The branch is fetched
+    first, so the lease is judged against the ref it names.
+    """
+    run(["git", "fetch", "-q", remote, f"+refs/heads/{branch}:refs/remotes/lease/{branch}"], cwd=clone)
+    known = run(["git", "rev-parse", "--verify", "-q", f"refs/remotes/lease/{branch}"], cwd=clone).stdout.strip()
+    lease = f"--force-with-lease=refs/heads/{branch}:{known}" if known else "--force-with-lease"
+    git("push", "-q", lease, remote, f"HEAD:refs/heads/{branch}", cwd=clone)
+
+
 def rewrite_readme(clone: pathlib.Path, product: str, data: dict) -> str:
     """Point the README at the prose that left, and say nothing more.
 
@@ -1093,9 +1107,11 @@ def handle_migrate(invocation: Invocation) -> tuple[dict, int]:
 
         data["pushed"] = bool(invocation.flag("--push"))
         if data["pushed"]:
-            git("push", "-q", "--force-with-lease", "origin", f"HEAD:refs/heads/{branch}", cwd=documents)
-            git("push", "-q", "--force-with-lease",
-                f"{base}/{product}.git", f"HEAD:refs/heads/{branch}", cwd=product_clone)
+            push_branch(documents, "origin", branch)
+            # The clone was made from the operator's checkout, so its origin
+            # is a local path: the product's own remote is asked for here.
+            remote = git("remote", "get-url", "origin", cwd=project, check=False) or f"{base}/{product}.git"
+            push_branch(product_clone, remote, branch)
         else:
             # Without --push both sides stay reviewable on disk: a migration
             # writes into two repositories, so it is never pushed by default.
