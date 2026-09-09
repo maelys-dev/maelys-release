@@ -8,9 +8,11 @@
   verdicts, and a product with a mechanism of its own passes without a word
   about workflows it owns. A repository declares its mechanism by the
   release.yml it carries: the socle's generated one, its own (`custom`), or
-  none at all; `--mechanism` answers only for a repository that carries no
-  release.yml yet, and the socle never overwrites a workflow it did not
-  generate.
+  none at all, which also means `custom`. Installing the socle's mechanism
+  is explicit, `--mechanism maelys-release`: maelys-warden publishes through
+  its own qualify and publish workflows and carries no release.yml, and the
+  socle must not claim a repository that never asked. The socle never
+  overwrites a workflow it did not generate either.
 - The conventions are `VERSION`, `CHANGELOG.md` with its dated entry, the
   managed `AGENTS.md` and `CLAUDE.md` blocks, and the seeded `RELEASING.md`,
   `LICENSING.md` and `SECURITY.md`. A seeded file is written once when

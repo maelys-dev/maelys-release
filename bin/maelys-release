@@ -290,14 +290,17 @@ def declared_mechanism(project: pathlib.Path, requested: str = "") -> str:
     """How the product publishes, read from the release.yml it carries.
 
     A repository declares its mechanism by the workflow it holds: the socle's
-    generated release.yml names the socle, a workflow of its own does not.
-    Only a repository with no release.yml at all leaves the question open,
-    and --mechanism answers it; the default keeps the socle's, as before this
-    distinction existed.
+    generated release.yml names the socle, a workflow of its own does not,
+    and no release.yml at all means the socle does not release it. The last
+    case is not an invitation: maelys-warden publishes through its own
+    qualify and publish workflows and carries no release.yml, and writing one
+    into it uninvited would be the socle claiming a repository that never
+    asked. Installing the socle's mechanism is therefore explicit,
+    --mechanism maelys-release, which is what new passes.
     """
     workflow = project / ".github" / "workflows" / "release.yml"
     if not workflow.is_file():
-        return requested or SOCLE_MECHANISM
+        return requested or "custom"
     carried = SOCLE_MECHANISM if RELEASE_USES.search(workflow.read_text(encoding="utf-8")) else "custom"
     # custom and none both say "the socle does not release this"; which of the
     # two is a refinement the repository may state. Only crossing that line is

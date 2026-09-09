@@ -99,6 +99,12 @@ class Product:
         # refuses; the tests name the socle commit explicitly instead.
         if arguments and arguments[0] in ("adopt", "check", "preflight", "rehearse") and "--socle-sha" not in arguments:
             arguments = (*arguments, *self.SOCLE)
+        # A repository with no release.yml declares its mechanism once, as an
+        # operator does at a first adoption; afterwards the file says it.
+        if arguments and arguments[0] in ("adopt", "check") \
+                and "--mechanism" not in arguments \
+                and not (self.dir / ".github" / "workflows" / "release.yml").is_file():
+            arguments = (*arguments, "--mechanism", "maelys-release")
         return subprocess.run([str(CLI), *arguments], cwd=self.work, env=self.env, check=False, text=True,
                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
@@ -381,17 +387,27 @@ class AdoptTest(unittest.TestCase):
         self.assertEqual(error["code"], "PRECONDITION_FAILED")
         self.assertIn("uncommitted changes", error["message"])
         product.git(copy, "checkout", "-q", "--", "share")
-        # clean but without a tag: refused unless the caller says it is a trial
-        untagged = subprocess.run([str(copy / "bin" / "maelys-release"), "adopt", self.dir, "--format", "json"],
+        # clean but without a tag: refused unless the caller says it is a trial.
+        # The pin is what a tag guarantees, so the refusal is the release
+        # mechanism's; conventions alone install from any commit.
+        untagged = subprocess.run([str(copy / "bin" / "maelys-release"), "adopt", self.dir,
+                                   "--mechanism", "maelys-release", "--format", "json"],
                                   env=product.env, check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         self.assertEqual(untagged.returncode, 1)
         self.assertIn("not a release", json.loads(untagged.stderr)["error"]["message"])
-        clean = subprocess.run([str(copy / "bin" / "maelys-release"), "adopt", self.dir, "--allow-untagged", "--format", "json"],
+        conventions = subprocess.run([str(copy / "bin" / "maelys-release"), "adopt", self.dir, "--format", "json"],
+                                     env=product.env, check=False, text=True,
+                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(conventions.returncode, 0, conventions.stderr)
+        self.assertEqual(json.loads(conventions.stdout)["data"]["mechanism"], "custom")
+        clean = subprocess.run([str(copy / "bin" / "maelys-release"), "adopt", self.dir, "--mechanism", "maelys-release",
+                                "--allow-untagged", "--format", "json"],
                                env=product.env, check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         self.assertEqual(clean.returncode, 0, clean.stderr)
         self.assertEqual(json.loads(clean.stdout)["data"]["socle"]["sha"], product.git(copy, "rev-parse", "HEAD"))
         # a socle that knows no tag (a depth-1 fetch in CI) takes the label the product pins
-        subprocess.run([str(copy / "bin" / "maelys-release"), "adopt", self.dir, "--apply", "--allow-untagged"], env=product.env, check=True,
+        subprocess.run([str(copy / "bin" / "maelys-release"), "adopt", self.dir, "--apply", "--allow-untagged",
+                        "--mechanism", "maelys-release"], env=product.env, check=True,
                        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         for name in (".github/workflows/release.yml", ".github/workflows/ci.yml", "AGENTS.md", "CLAUDE.md",
                      ".claude/skills/maelys-release/SKILL.md", "scripts/checkout-dependency.sh"):
@@ -523,9 +539,21 @@ class MechanismTest(unittest.TestCase):
             self.assertEqual(error["code"], "PRECONDITION_FAILED")
             self.assertIn("custom mechanism", error["message"])
 
-    def test_an_empty_mechanism_choice_keeps_the_socle_as_before(self) -> None:
+    def test_no_release_workflow_means_the_socle_does_not_release_it(self) -> None:
+        # maelys-warden publishes through its own qualify and publish
+        # workflows and carries no release.yml: the socle must not claim it.
         (self.product.dir / ".github" / "workflows" / "release.yml").unlink()
-        self.assertEqual(self.product.json("adopt", self.dir)["data"]["mechanism"], "maelys-release")
+        # Straight to the program: the fixture would declare the mechanism.
+        completed = subprocess.run([str(CLI), "adopt", self.dir, "--product", "maelys-fixture", *Product.SOCLE,
+                                    "--format", "json", "--compact"],
+                                   cwd=self.product.work, env=self.product.env, check=True, text=True,
+                                   stdout=subprocess.PIPE)
+        data = json.loads(completed.stdout)["data"]
+        self.assertEqual(data["mechanism"], "custom")
+        self.assertNotIn(".github/workflows/release.yml", {entry["path"] for entry in data["files"]})
+        chosen = self.product.json("adopt", self.dir, "--mechanism", "maelys-release")["data"]
+        self.assertEqual(chosen["mechanism"], "maelys-release")
+        self.assertIn(".github/workflows/release.yml", {entry["path"] for entry in chosen["files"]})
         self.assertEqual(self.product.json("adopt", self.dir, "--mechanism", "none")["data"]["mechanism"], "none")
 
     def test_a_seeded_file_is_a_note_never_a_violation(self) -> None:
