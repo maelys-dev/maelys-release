@@ -600,6 +600,30 @@ class MechanismTest(unittest.TestCase):
                                stdout=subprocess.PIPE).stdout
         self.assertEqual(found, "f" * 40, list(workflows.iterdir()))
 
+    def test_the_pin_is_read_from_the_ci_when_the_release_is_the_products_own(self) -> None:
+        # maelys-http, in its CI: the socle is fetched by commit, so it knows
+        # no tag, and the label comes from the product's pin. Read from
+        # release.yml alone, that product had no pin at all and its own
+        # ci.yml line drifted against a socle labelled "untagged".
+        self.product.run("adopt", self.dir, "--apply")
+        data = self.product.json("check", self.dir, "--socle-sha", "f" * 40)["data"]
+        self.assertEqual(data["pinned"], {"sha": "f" * 40, "tag": "v9.9.9"})
+        self.assertEqual(data["socle"]["tag"], "v9.9.9")
+        self.assertTrue(data["valid"], data["violations"])
+        self.assertEqual([entry["action"] for entry in data["files"]
+                          if entry["path"] == ".github/workflows/ci.yml"], ["same"])
+
+    def test_the_exit_code_never_contradicts_the_verdict_shown(self) -> None:
+        # A verdict that does not apply cannot carry a violation: the shared
+        # CI belongs to the conventions, whatever publishes the product.
+        self.product.run("adopt", self.dir, "--apply")
+        ci = self.product.dir / ".github" / "workflows" / "ci.yml"
+        ci.write_text(ci.read_text().replace("f" * 40, "0" * 40))
+        data = self.product.json("check", self.dir, expect=2)["data"]
+        self.assertFalse(data["release"]["applicable"])
+        self.assertEqual(data["release"]["violations"], [])
+        self.assertIn(".github/workflows/ci.yml: update", data["conventions"]["violations"])
+
     def test_check_passes_without_a_word_about_the_workflows(self) -> None:
         self.product.run("adopt", self.dir, "--apply")
         completed = self.product.run("check", self.dir)
