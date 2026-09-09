@@ -836,6 +836,11 @@ class MigrateTest(unittest.TestCase):
     def tearDown(self) -> None:
         self.product.close()
 
+    def commit(self, message: str = "more") -> None:
+        """Track what the test just wrote: filter-repo only keeps history."""
+        self.product.git(self.product.dir, "add", "-A")
+        self.product.git(self.product.dir, "-c", "commit.gpgsign=false", "commit", "-q", "-m", message)
+
     def records(self, *names: str) -> str:
         path = self.product.work / "prose.jsonl"
         path.write_text("".join(json.dumps({"repository": "maelys-fixture", "path": f"docs/{name}",
@@ -902,6 +907,55 @@ class MigrateTest(unittest.TestCase):
         error = self.migrate("--apply", expect=1)["error"]
         self.assertEqual(error["code"], "PRECONDITION_FAILED")
         self.assertIn("no tag", error["message"])
+
+    def test_every_markdown_of_the_product_is_pointed_away(self) -> None:
+        # The first shape rewrote README.md alone, and a product had to
+        # repoint examples/README.md by hand: reporting a problem and fixing
+        # half of it is worse than either extreme.
+        self.product.write("examples/README.md", "See [the guide](docs/guide.md) and `docs/guide.md`.\n")
+        self.product.write("docs/other.md", "Also [guide](guide.md), which travels with it.\n")
+        self.commit()
+        data = self.migrate("--apply", names=("guide.md", "other.md"))["data"]
+        kept = pathlib.Path(data["kept"]) / "product"
+        self.assertIn("examples/README.md", data["rewritten"])
+        example = (kept / "examples" / "README.md").read_text()
+        self.assertNotIn("docs/guide.md", example)
+        self.assertIn("the guide", example)                                   # the text stays
+        self.assertIn("maelys-docs/maelys-fixture/guide.md", example)         # the path is repointed
+
+    def test_a_document_that_moves_keeps_its_own_relative_links(self) -> None:
+        self.product.write("docs/other.md", "Also [guide](guide.md), which travels with it.\n")
+        self.commit()
+        data = self.migrate("--apply", names=("guide.md", "other.md"))["data"]
+        moved = pathlib.Path(data["kept"]) / "documents" / "maelys-fixture" / "other.md"
+        self.assertIn("[guide](guide.md)", moved.read_text())
+
+    def test_what_the_socle_will_not_rewrite_is_named_with_its_line(self) -> None:
+        self.product.write("include/fixture.h", "/* See docs/guide.md for the format. */\n")
+        self.product.write("Makefile", "install:\n\tinstall -m 0644 docs/*.md $(DESTDIR)/share\n")
+        self.commit()
+        data = self.migrate("--apply", names=("guide.md",))["data"]
+        self.assertEqual([(entry["path"], entry["line"]) for entry in data["remaining"]],
+                         [("include/fixture.h", 1)])
+        self.assertEqual([(entry["path"], entry["line"]) for entry in data["globs"]], [("Makefile", 2)])
+        # And the commit that asks for the pull request carries the list.
+        message = self.product.git(pathlib.Path(data["kept"]) / "product", "log", "-1", "--format=%B")
+        self.assertIn("include/fixture.h:1 names docs/guide.md", message)
+        self.assertIn("Makefile:2", message)
+
+    def test_a_prose_already_migrated_is_refused_instead_of_failing_opaquely(self) -> None:
+        # Pushing needs both sides to have a remote, as a real product does.
+        remotes = self.product.work / "remotes"
+        self.product.git(self.product.work, "clone", "-q", "--bare", self.dir, str(remotes / "maelys-fixture.git"))
+        self.product.git(self.product.dir, "remote", "add", "origin", str(remotes / "maelys-fixture.git"))
+        self.migrate("--apply", "--push")
+        # The pull request of that push is merged: maelys-docs carries the
+        # prose on its default branch from now on.
+        self.product.git(self.documents, "update-ref", "refs/heads/main", "refs/heads/migrate/maelys-fixture")
+        # The same migration again: maelys-docs has it, so there is nothing to add.
+        error = self.migrate("--apply", expect=1)["error"]
+        self.assertEqual(error["code"], "PRECONDITION_FAILED")
+        self.assertIn("already carries this prose", error["message"])
 
     def test_nothing_leaves_the_machine_without_push(self) -> None:
         self.migrate("--apply")

@@ -1057,6 +1057,80 @@ def push_branch(clone: pathlib.Path, remote: str, branch: str) -> None:
     git("push", "-q", lease, remote, f"HEAD:refs/heads/{branch}", cwd=clone)
 
 
+BUILD_FILES = ("Makefile", "makefile", "GNUmakefile", "CMakeLists.txt", "meson.build")
+
+
+def surviving_references(clone: pathlib.Path, data: dict) -> tuple[list[dict], list[dict]]:
+    """What still names a moved document, and what names docs/ as a whole.
+
+    The socle rewrites Markdown, and nothing else: a header, a Makefile or a
+    script says what it says for reasons the socle does not know. It reports
+    them instead, with file and line, because a reported problem half fixed
+    is worse than either extreme.
+    """
+    moved = [entry["path"] for entry in data["moving"]]
+    references, globs = [], []
+    for path in sorted(clone.rglob("*")):
+        if not path.is_file() or ".git/" in path.as_posix():
+            continue
+        relative = path.relative_to(clone).as_posix()
+        if relative in moved:
+            continue
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except (UnicodeDecodeError, OSError):
+            continue
+        for number, line in enumerate(lines, 1):
+            for document in moved:
+                if document in line and path.suffix.lower() != ".md":
+                    references.append({"path": relative, "line": number, "names": document})
+            # A build or packaging rule that names docs/ as a whole installs
+            # or copies whatever it matches, and that set is about to shrink.
+            if (path.name in BUILD_FILES or relative.startswith(("scripts/", "packaging/"))) \
+                    and "docs/" in line and "*" in line:
+                globs.append({"path": relative, "line": number, "names": line.strip()[:80]})
+    return references, globs
+
+
+def rewrite_markdown(clone: pathlib.Path, product: str, data: dict) -> list[str]:
+    """Point every Markdown file of the product away from what left.
+
+    A link whose target leaves keeps its text and loses its link: the
+    destination is a private repository, so there is nothing to link to. A
+    path named in prose becomes the path it now has. Files that are
+    themselves moving keep their own relative links, which stay valid where
+    they land.
+    """
+    moved = [entry["path"] for entry in data["moving"]]
+    rewritten = []
+    for path in sorted(clone.rglob("*.md")):
+        relative = path.relative_to(clone).as_posix()
+        if relative in moved or relative == "README.md" or ".git/" in path.as_posix():
+            continue
+        text = path.read_text(encoding="utf-8")
+        original = text
+        for document in moved:
+            destination = f"{data['repository'].split('/')[-1]}/{product}/{document[len('docs/'):]}"
+            text = re.sub(rf"\[([^\]]*)\]\({re.escape(document)}\)", r"\1", text)
+            text = text.replace(document, destination)
+        if text != original:
+            path.write_text(text, encoding="utf-8")
+            rewritten.append(relative)
+    return rewritten
+
+
+def migration_notes(data: dict) -> str:
+    """What the reviewer must finish by hand, in the commit that asks for it."""
+    lines = []
+    if data.get("remaining"):
+        lines.append("\nStill naming a document that left, in files the socle does not rewrite:")
+        lines.extend(f"  {entry['path']}:{entry['line']} names {entry['names']}" for entry in data["remaining"])
+    if data.get("globs"):
+        lines.append("\nNaming docs/ as a whole, so matching fewer files from now on:")
+        lines.extend(f"  {entry['path']}:{entry['line']} {entry['names']}" for entry in data["globs"])
+    return "\n".join(lines) + ("\n" if lines else "")
+
+
 def rewrite_readme(clone: pathlib.Path, product: str, data: dict) -> str:
     """Point the README at the prose that left, and say nothing more.
 
@@ -1137,6 +1211,11 @@ def handle_migrate(invocation: Invocation) -> tuple[dict, int]:
             f"{data['tag']}\n{data['commit']}\n", encoding="utf-8")
         (documents / product / "VERSION").write_text(f"{data['version']}\n", encoding="utf-8")
         git("add", "-A", cwd=documents)
+        if not run(["git", "diff", "--cached", "--quiet"], cwd=documents).returncode:
+            raise Failure("PRECONDITION_FAILED",
+                          f"{data['repository']} already carries this prose of {product}: nothing to add.",
+                          "The documents have been migrated already; re-run maelys-platform's list to see"
+                          " what is left, or migrate another product.")
         git("-c", "commit.gpgsign=false", "commit", "-q", "-m",
             f"{product}: the prose of {data['tag'] or data['commit'][:7]}, with its history", cwd=documents)
         data["documentsBranch"] = branch
@@ -1153,11 +1232,14 @@ def handle_migrate(invocation: Invocation) -> tuple[dict, int]:
         for entry in data["moving"]:
             git("rm", "-q", "--", entry["path"], cwd=product_clone)
         data["readme"] = rewrite_readme(product_clone, product, data)
+        data["rewritten"] = rewrite_markdown(product_clone, product, data)
+        data["remaining"], data["globs"] = surviving_references(product_clone, data)
         git("add", "-A", cwd=product_clone)
         git("-c", "commit.gpgsign=false", "commit", "-q", "-m",
             f"docs: the prose moves to {data['repository']}/{product}/\n\n"
             f"{data['documents']} documents, with their history, are now in {data['repository']}."
-            " This side removes them and points the README there.", cwd=product_clone)
+            " This side removes them, points the README there and rewrites the Markdown that"
+            " named them.\n" + migration_notes(data), cwd=product_clone)
         data["productBranch"] = branch
         data["productCommit"] = git("rev-parse", "HEAD", cwd=product_clone)
 
@@ -1722,6 +1804,13 @@ def text_migrate(data: dict) -> str:
         lines.append("migrate: add --apply to write both sides, --push to send the two branches")
         return "\n".join(lines) + "\n"
     lines.append(f"readme   {data['readme']}")
+    for relative in data.get("rewritten", []):
+        lines.append(f"pointed  {relative}")
+    for entry in data.get("remaining", []):
+        lines.append(f"BY HAND  {entry['path']}:{entry['line']} still names {entry['names']}")
+    for entry in data.get("globs", []):
+        lines.append(f"BY HAND  {entry['path']}:{entry['line']} names docs/ as a whole"
+                     f" and will match fewer files: {entry['names']}")
     lines.append(f"migrate: {data['repository']} branch {data['documentsBranch']} ({data['documentsCommit'][:7]}),"
                  f" {data['product']} branch {data['productBranch']} ({data['productCommit'][:7]})")
     lines.append("migrate: pushed; open one pull request on each side"
@@ -1816,6 +1905,17 @@ APP = cli.Program(PROGRAM, PRODUCT, socle_version(), [
                                                "properties": {"path": {"type": "string"},
                                                               "reason": {"type": "string"}}}},
                                            "readme": {"type": "string"},
+                                           "rewritten": STRINGS,
+                                           "remaining": {"type": "array", "items": {
+                                               "type": "object", "required": ["path", "line", "names"],
+                                               "properties": {"path": {"type": "string"},
+                                                              "line": {"type": "integer"},
+                                                              "names": {"type": "string"}}}},
+                                           "globs": {"type": "array", "items": {
+                                               "type": "object", "required": ["path", "line", "names"],
+                                               "properties": {"path": {"type": "string"},
+                                                              "line": {"type": "integer"},
+                                                              "names": {"type": "string"}}}},
                                            "documentsBranch": {"type": "string"}, "documentsCommit": {"type": "string"},
                                            "productBranch": {"type": "string"}, "productCommit": {"type": "string"},
                                            "pushed": {"type": "boolean"}, "kept": {"type": "string"}}}),

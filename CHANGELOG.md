@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.23.0 — 2026-09-09
+
+- `migrate` finishes what it reports. It rewrites every Markdown file of the
+  product, not the README alone: a product had to repoint
+  `examples/README.md` by hand, and reporting a problem while fixing half of
+  it is worse than either extreme. A link whose target left keeps its text
+  and loses its link; a path named in prose becomes the path it now has; a
+  document that is itself moving keeps its own relative links.
+- What the socle will not rewrite, it names with its file and line, in the
+  plan and in the commit that asks for the pull request: a header, a
+  Makefile or a script says what it says for reasons the socle does not
+  know.
+- A rule naming `docs/` as a whole is reported as well, because the
+  migration changes what it matches. maelys-egress installs `docs/*.md` at
+  `Makefile:486`, and that glob was about to match one file instead of
+  nineteen without a word.
+- Migrating a prose that maelys-docs already carries is refused with its
+  reason instead of failing on an empty commit and an opaque git error.
+
 ## 0.22.1 — 2026-09-09
 
 - A broken third-party apt source of the runner image no longer fails a
