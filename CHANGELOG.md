@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.22.0 — 2026-09-09
+
+- A pin may carry a `submodules` line, or `submodules recursive`, and
+  `scripts/checkout-dependency.sh` then initialises the clone's submodules.
+  Without it nothing is fetched: a submodule's commit is pinned by its
+  superproject, but its URL comes from that repository's `.gitmodules`,
+  which the pin does not name, so initialising one reaches a repository the
+  product never declared. The update is shallow first and falls back when
+  the server refuses to serve a commit it does not advertise.
+- This is what the `repository` line of 0.21.0 was built for and did not
+  finish: Mbed TLS carries a `framework` submodule, and `cmake` refuses to
+  configure without it even with the programs and the tests off. maelys-http
+  worked around it with a line in its own CI. Reproduced on their pin, and
+  `cmake -S mbedtls -B b -DENABLE_PROGRAMS=OFF -DENABLE_TESTING=OFF` now
+  configures from what the managed script alone leaves on disk.
+
 ## 0.21.1 — 2026-09-09
 
 - The drift job failed for every product that takes the shared CI while
