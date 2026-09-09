@@ -305,6 +305,28 @@ in a product's plan at its next adoption and never as drift. Hence:
 
 The 1.0 tag will make this rule a promise; until then it is the practice.
 
+## Creating a repository
+
+```sh
+maelys-release new DIR --product NAME --depends maelys-system@v0.9.1 --apply
+```
+
+`new` writes what a Maelys repository carries before the socle touches it,
+then calls `adopt` for the rest, so the two can never disagree on what a
+repository holds:
+
+1. `LICENSE` (the MPL-2.0 text this socle carries), `VERSION` at `0.1.0`,
+   `CHANGELOG.md` with its dated `## 0.1.0` entry, a `README.md` skeleton,
+   and `scripts/package-release.sh` as a stub that **fails** until the
+   product says how it packages: a release must not publish nothing.
+2. One `dependencies/<name>.pin` per `--depends NAME@vX.Y.Z`, the tag on
+   line 1 and, on line 2, the commit `git ls-remote` says that tag names.
+3. Everything `adopt` writes for the declared mechanism.
+
+The directory must be empty or absent; a `.git` is allowed. Plan by
+default, `--apply` to write. `--mechanism` picks what the repository
+publishes with, as for `adopt`.
+
 ## Adopting and upgrading
 
 ```sh

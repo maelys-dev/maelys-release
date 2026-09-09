@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.18.0 — 2026-09-07
+
+- `maelys-release new DIR --product NAME --depends NAME@vX.Y.Z ... [--apply]`
+  creates a Maelys repository in an empty directory: the MPL-2.0 `LICENSE`,
+  `VERSION` at `0.1.0`, a dated `CHANGELOG.md` entry, a `README.md`
+  skeleton, a `scripts/package-release.sh` stub that fails until the product
+  implements it, one `dependencies/<name>.pin` per dependency with the
+  commit its tag names, and then everything `adopt` writes for the declared
+  mechanism. Plan by default.
+- The command replaces the manual procedure of maelys-platform's
+  `docs/operations/new-product.md`, which describes it as "à venir" and
+  still names the pre-0.14 `adapter/<DEP>_PIN` layout; the pins it writes
+  are `dependencies/<name>.pin`.
+
 ## 0.17.0 — 2026-09-07
 
 - `docs/` of a product holds what a machine writes and what `LICENSING.md`

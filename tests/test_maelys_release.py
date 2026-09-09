@@ -54,6 +54,7 @@ class Product:
         self.git(source, "tag", PINNED_TAG)
         (source / "file").write_text("two\n")
         self.git(source, "commit", "-q", "-am", "two")
+        self.tagged = self.git(source, "rev-list", "-n", "1", PINNED_TAG)
         self.pinned = self.git(source, "rev-parse", "HEAD")
         remotes = self.work / "remotes"
         remotes.mkdir()
@@ -565,6 +566,78 @@ class MechanismTest(unittest.TestCase):
         notes = [check["message"] for check in data["checks"] if check["status"] == "note"]
         self.assertEqual(len(notes), 3, notes)
         self.assertTrue(all("adopt --apply' writes it once" in note for note in notes), notes)
+
+
+class NewTest(unittest.TestCase):
+    """new creates a repository the socle already accepts."""
+
+    def setUp(self) -> None:
+        self.product = Product()          # for its local remote and its git configuration
+        self.target = self.product.work / "maelys-widget"
+
+    def tearDown(self) -> None:
+        self.product.close()
+
+    def run_new(self, *arguments: str, expect: int = 0) -> dict:
+        return self.product.json("new", str(self.target), "--product", "maelys-widget", *arguments,
+                                 *Product.SOCLE, expect=expect)
+
+    def test_plan_lists_the_base_files_and_writes_nothing(self) -> None:
+        data = self.run_new()["data"]
+        self.assertEqual(data["mode"], "plan")
+        self.assertEqual([entry["path"] for entry in data["files"]],
+                         ["LICENSE", "VERSION", "CHANGELOG.md", "README.md", "scripts/package-release.sh"])
+        self.assertEqual(data["adopted"], [])
+        self.assertFalse(self.target.exists())
+
+    def test_apply_creates_a_repository_check_accepts(self) -> None:
+        data = self.run_new("--apply")["data"]
+        self.assertEqual(data["version"], "0.1.0")
+        self.assertEqual(data["mechanism"], "maelys-release")
+        written = {entry["path"] for entry in data["adopted"]}
+        self.assertIn(".github/workflows/release.yml", written)
+        self.assertIn("AGENTS.md", written)
+        self.assertEqual((self.target / "VERSION").read_text(), "0.1.0\n")
+        self.assertIn("Mozilla Public License", (self.target / "LICENSE").read_text().split("\n", 1)[0])
+        self.assertRegex((self.target / "CHANGELOG.md").read_text(), r"## 0\.1\.0 — \d{4}-\d{2}-\d{2}")
+        self.assertTrue(os.access(self.target / "scripts" / "package-release.sh", os.X_OK))
+        verdicts = self.product.json("check", str(self.target), "--product", "maelys-widget")["data"]
+        self.assertTrue(verdicts["valid"], verdicts["violations"])
+
+    def test_the_packaging_stub_refuses_to_publish_nothing(self) -> None:
+        self.run_new("--apply")
+        completed = subprocess.run(["sh", "scripts/package-release.sh", "linux-x86_64"], cwd=self.target,
+                                   check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(completed.returncode, 1)
+        self.assertIn("not implemented yet", completed.stderr)
+
+    def test_a_dependency_is_pinned_at_the_commit_its_tag_names(self) -> None:
+        data = self.run_new("--depends", f"maelys-system@{PINNED_TAG}", "--apply")["data"]
+        self.assertEqual(data["dependencies"], [{"name": "maelys-system", "tag": PINNED_TAG,
+                                                 "commit": self.product.tagged}])
+        pin = (self.target / "dependencies" / "maelys-system.pin").read_text().splitlines()
+        self.assertEqual(pin, [PINNED_TAG, self.product.tagged])
+        self.assertTrue((self.target / "scripts" / "checkout-dependency.sh").is_file())
+
+    def test_a_malformed_or_absent_dependency_is_refused(self) -> None:
+        for spec, code in ((f"maelys-system{PINNED_TAG}", "VALIDATION_FAILED"),
+                           ("maelys-system@v9.9.9", "NOT_FOUND")):
+            error = self.run_new("--depends", spec, expect=1)["error"]
+            self.assertEqual(error["code"], code, spec)
+
+    def test_a_directory_that_holds_anything_is_refused(self) -> None:
+        self.target.mkdir(parents=True)
+        (self.target / "README.md").write_text("mine\n")
+        error = self.run_new(expect=1)["error"]
+        self.assertEqual(error["code"], "PRECONDITION_FAILED")
+        self.assertIn("is not empty", error["message"])
+
+    def test_a_product_without_the_socle_mechanism_gets_the_conventions_only(self) -> None:
+        data = self.run_new("--mechanism", "none", "--apply")["data"]
+        written = {entry["path"] for entry in data["adopted"]}
+        self.assertNotIn(".github/workflows/release.yml", written)
+        self.assertIn("AGENTS.md", written)
+        self.assertFalse((self.target / ".github").exists())
 
 
 class DocsContractTest(unittest.TestCase):
