@@ -1,5 +1,50 @@
 # Changelog
 
+## 0.33.0 — 2026-09-11
+
+- **`maelys-release cut DIR X.Y.Z` carries out a release in two stops.** Two
+  conventions held only as prose — a tag comes after the checks of that exact
+  commit, and a release is never published from a branch — and no command
+  applied either. The first stop refuses before it writes anything (a version
+  that does not follow the current one, a worktree carrying more than
+  `VERSION` and `CHANGELOG.md`, a missing or future-dated entry, a `HEAD`
+  that is not the default branch up to date with `origin`, and the gate
+  `preflight` holds), then writes `VERSION`, commits it signed on
+  `release/vX.Y.Z`, opens the pull request and waits.
+- **It waits for the checks to exist before it waits for them to finish.**
+  Polling `commits/SHA/check-runs` until `total_count` is non-zero and
+  nothing is pending closes the race a fleet product paid for: a checks
+  command that answers at once when no run has registered yet reports green
+  on a release nobody has built. The reading is paged: one commit of
+  maelys-egress carries forty-eight check runs and the endpoint's default
+  page holds thirty.
+- **`cut DIR X.Y.Z --tag` signs the tag on the merge commit, never on the
+  branch.** It reads the merged pull request, takes its merge commit,
+  verifies that commit is on the default branch and carries `VERSION` =
+  `X.Y.Z` with its dated entry, waits for every one of its checks, signs and
+  pushes — then reads back what GitHub says of the signature. `origin/main`
+  moves; the commit whose checks were read does not.
+- **It never merges its own pull request.** The middle stop is GitHub's,
+  under the repository's own rules. A command that merged for itself would
+  work only where the default branch is unprotected, which is today the case
+  everywhere in the fleet, and would teach twelve repositories that the
+  releaser approves themselves.
+- The gate is what the repository's CI cannot see: the operator's signing
+  configuration, the tags already published, and — for a product the socle
+  releases — the `release` environment `preflight` reads. The product
+  contract is judged by the checks `cut` then waits for, on the exact commit,
+  rather than a second time from a socle that may not be the one the product
+  pins.
+- `preflight` keeps its behaviour and its output; its body is now the two
+  readers `cut` shares, `tag_checks` and `repository_checks`.
+- This changes the managed instruction blocks and the seeded `RELEASING.md`
+  template, so a product picks the text up at its next adoption. Nothing in a
+  product's release mechanism changes, and the ceremony by hand remains what
+  it was: `cut` is not required anywhere.
+- Proposed by maelys-datalog, whose own `cut-release.sh` this deliberately
+  does not copy on two points: it tags `origin/main` rather than the merge
+  commit, and it merges its own pull request.
+
 ## 0.32.0 — 2026-09-10
 
 - A channel that published says so, in one asset of the release named

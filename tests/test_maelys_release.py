@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import importlib.machinery
 import importlib.util
+import io
 import json
 import os
 import pathlib
@@ -1580,6 +1581,143 @@ class PreflightTest(unittest.TestCase):
         self.assertEqual(data["preflight"], [])
 
 
+class CutTest(unittest.TestCase):
+    """The gate `cut` holds before it writes anything.
+
+    The command's middle is GitHub's — a pull request, its checks and its
+    merge — so what is tested here is everything that happens before the
+    first push and the reading of a changelog, which is where a release
+    goes wrong on a laptop.
+    """
+
+    ISOLATE = ("GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_CONFIG_NOSYSTEM")
+
+    class Stub:
+        """An invocation of the framework, reduced to what cut reads of it."""
+
+        def __init__(self, **options) -> None:
+            self.options = options
+            self.format = "json"
+
+        def flag(self, name: str) -> bool:
+            return bool(self.options.get(name, False))
+
+        def option(self, name: str, default=None):
+            return self.options.get(name, default)
+
+    def setUp(self) -> None:
+        self.product = Product()
+        self.dir = self.product.dir
+        self.product.run("adopt", str(self.dir), "--apply")
+        self.product.git(self.dir, "init", "-q")
+        self.product.git(self.dir, "add", "-A")
+        self.product.git(self.dir, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "fixture")
+        # These tests call the module in process: the host's git
+        # configuration must not decide whether the gate passes.
+        self.saved = {name: os.environ.get(name) for name in self.ISOLATE}
+        os.environ.update({"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null",
+                           "GIT_CONFIG_NOSYSTEM": "1"})
+
+    def tearDown(self) -> None:
+        for name, value in self.saved.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+        self.product.close()
+
+    def declarations(self, mechanism: str = "custom"):
+        return MODULE.read_declarations(self.dir, "maelys-fixture", mechanism)
+
+    def cut(self, version: str = "1.3.0", **options):
+        data = {"mode": "apply" if options.get("--apply") else "plan", "stage": "open",
+                "product": "maelys-fixture", "project": str(self.dir),
+                "repository": "maelys-dev/maelys-fixture", "version": version, "tag": f"v{version}",
+                "branch": f"release/v{version}", "base": "main", "gate": [], "checks": [], "ready": False}
+        return MODULE.cut_open(self.Stub(**options), self.declarations(), data, io.StringIO(), 1, 1)
+
+    def refusal(self, version: str = "1.3.0", **options) -> MODULE.Failure:
+        with self.assertRaises(MODULE.Failure) as raised:
+            self.cut(version, **options)
+        return raised.exception
+
+    def test_a_published_version_is_never_cut_twice(self) -> None:
+        for version in ("1.2.3", "1.2.2"):
+            failure = self.refusal(version)
+            self.assertEqual(failure.code, "VALIDATION_FAILED")
+            self.assertIn("1.2.3", failure.message)
+
+    def test_only_the_bump_may_be_uncommitted(self) -> None:
+        self.product.write("AGENTS.md", "# Agent instructions\n\nEdited.\n")
+        failure = self.refusal()
+        self.assertEqual(failure.code, "PRECONDITION_FAILED")
+        self.assertIn("AGENTS.md", failure.message)
+        # The bump itself is exactly what cut expects to find in progress.
+        self.product.git(self.dir, "checkout", "--", "AGENTS.md")
+        self.product.write("CHANGELOG.md", self.product.read("CHANGELOG.md") + "\n")
+        self.assertIn("no dated entry", self.refusal().message)
+
+    def test_the_changelog_entry_is_required_and_never_future_dated(self) -> None:
+        self.assertIn("no dated entry", self.refusal().message)
+        self.product.write("CHANGELOG.md",
+                           "# Changelog\n\n## 1.3.0 — 2999-01-01\n\n- Later.\n\n## 1.2.3 — 2026-09-03\n\n- Something.\n")
+        failure = self.refusal()
+        self.assertEqual(failure.code, "VALIDATION_FAILED")
+        self.assertIn("2999-01-01", failure.message)
+
+    def test_a_release_is_not_cut_from_a_branch(self) -> None:
+        self.product.write("CHANGELOG.md",
+                           "# Changelog\n\n## 1.3.0 — 2026-09-03\n\n- Next.\n\n## 1.2.3 — 2026-09-03\n\n- Something.\n")
+        self.product.git(self.dir, "switch", "-q", "-c", "work")
+        failure = self.refusal()
+        self.assertEqual(failure.code, "PRECONDITION_FAILED")
+        self.assertIn("HEAD is on work", failure.message)
+
+    def test_the_gate_reads_the_signing_configuration_of_this_checkout(self) -> None:
+        gate = MODULE.cut_gate(self.declarations(), "1.3.0")
+        self.assertTrue(any(status == "fail" and "tag.gpgsign" in message for status, message in gate))
+        self.product.git(self.dir, "config", "tag.gpgsign", "true")
+        self.product.git(self.dir, "config", "user.signingkey", str(self.product.work / "signing-key"))
+        gate = MODULE.cut_gate(self.declarations(), "1.3.0")
+        self.assertEqual([status for status, _ in gate if status == "fail"], [])
+        self.assertIn("tag v1.3.0 is free", [message for _, message in gate])
+        # A repository the socle does not release has no release environment
+        # to read, and the gate must not invent one for it.
+        self.assertEqual([message for _, message in gate if "environment" in message], [])
+
+    def test_the_changelog_entry_is_read_in_the_worktree_and_at_a_commit(self) -> None:
+        self.assertEqual(MODULE.changelog_entry(self.dir, "1.2.3"), ("2026-09-03", "- Something."))
+        self.assertEqual(MODULE.changelog_entry(self.dir, "9.9.9"), ("", ""))
+        self.product.write("CHANGELOG.md", "# Changelog\n\n## 1.2.3 — 2026-09-04\n\n- Rewritten.\n")
+        self.assertEqual(MODULE.changelog_entry(self.dir, "1.2.3")[0], "2026-09-04")
+        self.assertEqual(MODULE.changelog_entry(self.dir, "1.2.3", at="HEAD")[0], "2026-09-03")
+
+    def test_a_check_that_skipped_is_not_a_refusal_and_no_check_is_not_a_pass(self) -> None:
+        data = {"project": "/p", "version": "1.3.0", "branch": "release/v1.3.0", "gate": [],
+                "pullRequest": {"number": 1, "url": "https://example.invalid/1", "state": "OPEN"}}
+        green = [{"name": "check", "status": "completed", "conclusion": "success"},
+                 {"name": "package", "status": "completed", "conclusion": "skipped"},
+                 {"name": "lint", "status": "completed", "conclusion": "neutral"}]
+        self.assertEqual(MODULE.cut_report(dict(data, gate=[]), green)[1], MODULE.EXIT_OK)
+        red = green + [{"name": "fuzz", "status": "completed", "conclusion": "cancelled"}]
+        self.assertEqual(MODULE.cut_report(dict(data, gate=[]), red)[1], MODULE.EXIT_VIOLATIONS)
+        # A commit with no check at all has not passed: it has not been read.
+        empty, code = MODULE.cut_report(dict(data, gate=[]), [])
+        self.assertEqual(code, MODULE.EXIT_VIOLATIONS)
+        self.assertFalse(empty["ready"])
+        self.assertIn("no check is registered", empty["gate"][0]["message"])
+
+    def test_cut_refuses_a_repository_that_is_not_on_github(self) -> None:
+        error = self.product.json("cut", str(self.dir), "1.3.0", expect=1)["error"]
+        self.assertEqual(error["code"], "PRECONDITION_FAILED")
+        self.assertIn("not on GitHub", error["message"])
+
+    def test_the_tag_annotation_belongs_to_the_second_stop(self) -> None:
+        error = self.product.json("cut", str(self.dir), "1.3.0", "--message", "notes", expect=1)["error"]
+        self.assertEqual(error["code"], "VALIDATION_FAILED")
+        self.assertIn("--tag", error["message"])
+
+
 class RenderAndTapTest(unittest.TestCase):
     def setUp(self) -> None:
         self.product = Product()
@@ -1793,13 +1931,20 @@ class UnitTest(unittest.TestCase):
         self.assertNotIn(b"\\", raw)                                                # not a literal backslash-n
 
     def test_socle_changelog_has_the_dated_entry(self) -> None:
-        """The socle holds itself to the product rule it enforces."""
+        """The socle holds itself to the product rule it enforces.
+
+        The newest entry may be one ahead of VERSION: `cut` reads the entry
+        of the version being released before it writes VERSION, so between
+        the two the changelog leads by exactly one release. It never lags,
+        and it never repeats a version.
+        """
         version = (ROOT / "VERSION").read_text().strip()
         changelog = (ROOT / "CHANGELOG.md").read_text()
         self.assertRegex(changelog, rf"(?m)^## {re.escape(version)} — [0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}}$")
         entries = re.findall(r"^## ([0-9]+\.[0-9]+\.[0-9]+) ", changelog, re.MULTILINE)
-        self.assertEqual(entries[0], version)
+        self.assertIn(entries.index(version), (0, 1), f"{version} is not the newest entry nor the one after it")
         self.assertEqual(len(entries), len(set(entries)), "duplicate entries")
+        self.assertEqual(entries, sorted(entries, key=MODULE.version_tuple, reverse=True), "entries out of order")
 
     def test_linux_baseline_is_ubuntu_26(self) -> None:
         self.assertEqual(MODULE.DEFAULT_IMAGE, "ubuntu:26.04")

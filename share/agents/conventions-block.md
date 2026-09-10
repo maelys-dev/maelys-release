@@ -27,7 +27,11 @@ rules below hold whatever that mechanism is; the complete conventions are in
   moved, recreated or force-pushed; a failed publication is replayed on the
   existing tag.
 - Never push a tag before this repository's own checks pass on that exact
-  commit, and never publish from a branch.
+  commit, and never publish from a branch. `maelys-release cut DIR X.Y.Z
+  --apply` holds both rules: it writes `VERSION`, commits it signed on
+  `release/vX.Y.Z`, opens the pull request and waits for its checks, and
+  `cut DIR X.Y.Z --tag --apply` then signs the tag on the merge commit
+  those checks ran on. It never merges its own pull request.
 - `RELEASING.md` states how this repository publishes. The socle writes it
   once if it is missing, then it belongs to this repository: it is the place
   to describe the mechanism the socle does not provide here.
