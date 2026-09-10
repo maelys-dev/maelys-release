@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.32.0 — 2026-09-10
+
+- A channel that published says so, in one asset of the release named
+  `channel-<name>.json`. It is written by a second job of `channel.yml`
+  that runs no code of the product: no checkout, no `dist/`, only what the
+  socle composes. `needs: publish` is what makes the marker an observation
+  and never an intention — the job does not start unless the publication
+  succeeded, so the asset exists if and only if the channel published.
+- **One asset per channel, written once and never rewritten.** maelys-datalog
+  asked for a receipt reattached to the release after each channel; a
+  rewritten asset cannot be covered by `SHA256SUMS`, which is computed
+  before it, and two channels publishing in parallel would lose one
+  another's entry on the clobber. An additive asset answers both.
+- A publish script with something to record about its publication writes a
+  JSON object to `$CHANNEL_RECORD`; its fields join the marker. It is
+  optional, and the socle records the fact of publishing without it.
+- The generated caller grants `contents: write` to the channel job, which
+  only the marker job uses: the job running the product's publish script
+  keeps `contents: read`. This changes a managed file, so a product picks it
+  up at its next adoption.
+- Reported by maelys-datalog, whose own receipt had once claimed an npm
+  package whose publication had failed with a 404, and whose channel entry
+  now waits for a success before it is written.
+
 ## 0.31.0 — 2026-09-10
 
 - **The job that runs a product's own `package_command` no longer holds a

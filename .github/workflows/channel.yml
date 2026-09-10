@@ -1,6 +1,7 @@
 name: channel (reusable)
 
-# Publishes one product to one registry, after its GitHub release is public.
+# Publishes one product to one registry, after its GitHub release is public,
+# and attaches one marker asset saying that it did.
 # A channel lives here rather than in release.yml because the permissions of
 # a called workflow are static: they cannot depend on what a product
 # declares, and the scope a registry needs differs from one to the next. A
@@ -74,9 +75,61 @@ jobs:
           PRODUCT: ${{ inputs.product }}
           GH_TOKEN: ${{ github.token }}
           NODE_AUTH_TOKEN: ${{ github.token }}
+          # A script with something to record about its publication writes a
+          # JSON object here. It is optional: the socle records the fact of
+          # publishing without it.
+          CHANNEL_RECORD: ${{ runner.temp }}/channel-record.json
         shell: bash
         run: |
           set -euo pipefail
           command="${PUBLISH_COMMAND//TAG/$TAG}"
           eval "${command//CHANNEL/$CHANNEL}"
           echo "::notice::$PRODUCT $TAG published on the $CHANNEL channel"
+      - name: Keep what the script recorded
+        if: hashFiles(format('{0}/channel-record.json', runner.temp)) != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: channel-record-${{ inputs.channel }}
+          path: ${{ runner.temp }}/channel-record.json
+          retention-days: 1
+
+  # The marker of a publication that happened, written by a job that runs no
+  # code of the product. `needs` is what makes it an observation and never an
+  # intention: this job does not start unless the publication succeeded, so
+  # the asset exists if and only if the channel published. A receipt rewritten
+  # after the fact could say otherwise, and two channels publishing in
+  # parallel would lose one another's entry on the clobber.
+  record:
+    needs: publish
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: write
+    steps:
+      - name: Collect what the script recorded
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        continue-on-error: true
+        with:
+          name: channel-record-${{ inputs.channel }}
+          path: recorded
+      - name: Attach the channel marker
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          CHANNEL: ${{ inputs.channel }}
+          PRODUCT: ${{ inputs.product }}
+          RUN: ${{ github.run_id }}
+        shell: bash
+        # One asset per channel, written once and never rewritten: the
+        # manifest cannot cover a mutable asset, and SHA256SUMS does not
+        # claim anything about a registry.
+        run: |
+          set -euo pipefail
+          published="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          jq -n --arg product "$PRODUCT" --arg tag "$TAG" --arg channel "$CHANNEL" \
+                --arg published "$published" --arg run "$RUN" \
+                --slurpfile recorded <(cat recorded/channel-record.json 2>/dev/null || echo '{}') \
+            '{product: $product, tag: $tag, channel: $channel, published: $published,
+              run: "https://github.com/\(env.GITHUB_REPOSITORY)/actions/runs/\($run)"}
+             + ($recorded[0] // {})' >"channel-$CHANNEL.json"
+          gh release upload "$TAG" --repo "${GITHUB_REPOSITORY}" "channel-$CHANNEL.json"
+          echo "::notice::$PRODUCT $TAG carries channel-$CHANNEL.json"
