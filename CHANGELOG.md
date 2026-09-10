@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.26.0 — 2026-09-10
+
+- The `Fuzzing` section of `docs/conventions.md` is rewritten against a
+  survey of the fleet, because the version before it asserted a fleet that
+  did not exist. It claimed three products fuzz: nine do. It claimed nothing
+  schedules `make fuzz` here: the socle runs it for maelys-http and
+  maelys-oci, through `sanitizer_command`. It framed `make fuzz` as a
+  campaign: in this fleet it is a bounded run, `-runs=10000` in
+  maelys-egress, `-max_total_time=30` in maelys-oci. maelys-egress asked for
+  this text to be settled and was told it already was; it was not.
+- The harnesses live in `tests/fuzz/` in five repositories and `fuzz/` in
+  four. The convention names the first as the one to prefer and the socle
+  reads either, rather than a single layout the fleet does not follow.
+- `check` observes fuzzing and never refuses it. A repository carrying
+  harnesses reports whether the socle's job runs them, a job of its own
+  does, or none does; the last is a note. Nothing here rises above a note,
+  because `check` counts anything but `ok` and `note` as a violation, so no
+  conforming repository turns red.
+- `declarations` carries a `fuzz` object, `harnesses` and `runs`. It answers
+  "who fuzzes" only for whoever reads it: `maelys-platform` reads workflows
+  by pattern today and calls this command for nothing.
+- The description of `fuzz_command` in `check-product.yml` loses the same
+  three false claims.
+
 ## 0.25.1 — 2026-09-10
 
 - The fuzz job of `check-product.yml` installs `libclang-rt-18-dev`, as the
