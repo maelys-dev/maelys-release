@@ -518,6 +518,8 @@ def workflow_permissions(text: str) -> dict[str, dict[str, str]]:
         if inside and entry:
             jobs[name][entry.group(1)] = entry.group(2)
             continue
+        if inside and re.fullmatch(r"\s*#.*", line):
+            continue                              # a comment does not end the block
         inside = False
     return jobs
 
@@ -833,6 +835,25 @@ jobs:
             # the directory is the product's, not a placeholder left behind
             self.assertIn("`maelys-fixture/`", text)
             self.assertNotIn("@PRODUCT@", text)
+
+    def test_only_the_publishing_job_may_write_and_it_runs_no_product_code(self) -> None:
+        """The job that runs the product's package_command held contents:
+        write, which on GitHub is repository-wide: it could rewrite the assets
+        of releases already published, push to any branch, and create tags."""
+        release = (ROOT / ".github" / "workflows" / "release.yml").read_text()
+        jobs = workflow_permissions(release)
+        self.assertEqual(jobs["build"].get("contents"), "read")
+        self.assertEqual(jobs["publish"].get("contents"), "write")
+        writing = [name for name, scopes in jobs.items() if scopes.get("contents") == "write"]
+        self.assertEqual(writing, ["publish"], jobs)
+        # and the human gate stands in front of that one job
+        publish = release.split("\n  publish:\n", 1)[1]
+        self.assertIn("environment: ${{ inputs.release_environment }}", publish.split("\n    steps:")[0])
+        # the bytes cross the run as artifacts, not through a draft a writing
+        # job could have edited between build and publish
+        self.assertIn("actions/upload-artifact@", release)
+        self.assertIn("retention-days: 1", release)
+        self.assertNotIn("gh release upload", release.split("\n  publish:\n")[0])
 
     def test_the_reusable_workflows_carry_the_new_inputs(self) -> None:
         release = (ROOT / ".github" / "workflows" / "release.yml").read_text()
@@ -1782,17 +1803,23 @@ class UnitTest(unittest.TestCase):
         self.assertNotIn("if: github.event_name == 'push'", text)
         self.assertIn("if: needs.release.result == 'success'", text)
 
-    def test_reusable_release_avoids_actions_artifact_storage(self) -> None:
+    def test_the_bytes_cross_the_run_without_a_writing_job(self) -> None:
+        """This reverses 0.15.1, which moved the transport onto a draft
+        release to stop depending on the Actions artifact quota. That trade
+        bought storage with a token: the job running the product's own
+        package_command needed contents: write, which is repository-wide.
+        The artifacts are back, kept one day."""
         text = (ROOT / ".github" / "workflows" / "release.yml").read_text()
         self.assertIn("ref: ${{ inputs.tag || github.ref }}", text)
-        self.assertIn("Prepare draft GitHub release", text)
+        self.assertIn("actions/upload-artifact@", text)
+        self.assertIn("actions/download-artifact@", text)
+        self.assertIn("retention-days: 1", text)
+        # the draft still exists, but only inside the one job that may write
+        self.assertNotIn("Prepare draft GitHub release", text)
         self.assertIn('gh release edit "$TAG" --repo "${GITHUB_REPOSITORY}" --draft', text)
         self.assertIn("releases/assets/$asset_id", text)
-        self.assertIn('gh release upload "$TAG"', text)
-        self.assertIn('gh release download "$TAG"', text)
         self.assertIn('--draft=false', text)
-        self.assertNotIn("actions/upload-artifact", text)
-        self.assertNotIn("actions/download-artifact", text)
+        self.assertNotIn('gh release download "$TAG"', text)
 
 
 if __name__ == "__main__":
