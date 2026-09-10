@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.25.0 — 2026-09-10
+
+- A product publishes to a registry through the socle. `channel.yml` is a new
+  reusable workflow, and a `[channels]` line of `packaging/release` plus an
+  executable `scripts/publish-channel.sh TAG CHANNEL` render one job per
+  channel. This closes the last third of `maelys-dev/maelys-release#19`;
+  maelys-datalog and maelys-mcp both kept their whole mechanism local partly
+  for want of it.
+- A channel is its own reusable workflow rather than a step of `publish`,
+  because the permissions of a called workflow are static: they cannot depend
+  on what a product declares, and one caller job that under-grants fails the
+  whole run at startup, the release job included. A product that declares no
+  channel never calls the workflow and never receives its scopes.
+- The channel runs after the release is published, never before. A release
+  can be redrafted, a registry publication cannot be withdrawn, so
+  `publish-channel.sh` must exit 0 without republishing when the registry
+  already holds the version.
+- `github-packages` is the only registry served, and refusing the others is
+  measured rather than chosen: trusted publishing matches an OIDC claim
+  naming the socle rather than the product once a reusable workflow
+  publishes, and PyPI documents that a reusable workflow cannot be a trusted
+  publisher.
+- A test now asserts that the generated caller grants every scope the
+  workflows it calls declare. Four throwaway runs established that property
+  once; the test holds it at every change.
+
 ## 0.24.0 — 2026-09-10
 
 - The release mechanism stops deciding alone what a product builds. Its

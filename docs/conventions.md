@@ -274,10 +274,46 @@ change. A declaration the socle cannot honour, a target with no runner and
 no default, is a violation of the release scope: `check` exits 2 and
 `adopt` refuses, so nothing reaches a tag through a file nobody read.
 
-Neither section opens a publication channel. A product that publishes to a
-registry still does it from its own mechanism: the socle's `publish` job
-holds `contents: write` and nothing else, and a called workflow cannot
-widen the token beyond what its caller granted.
+### Publishing to a registry
+
+A product that publishes to a registry declares a channel in the same file,
+and carries an executable `scripts/publish-channel.sh TAG CHANNEL`:
+
+```
+[channels]
+npm github-packages
+```
+
+The socle renders one `channel.yml` job per line, `needs: release` and
+`if: needs.release.result == 'success'`, under the same environment as the
+release. The section says *where* to publish, the script says *how*: a
+channel without its script is a violation, a script without its section
+publishes nothing and `check` says so.
+
+**The channel runs after the GitHub release is public, never before.** A
+release can be redrafted; a registry publication cannot be withdrawn, so
+nothing the socle runs may fail after it. A replay therefore re-runs the
+channel on a version the registry already holds, and
+`scripts/publish-channel.sh` must exit 0 without republishing, the way the
+tap leaves a formula it already carries. A published release whose channel
+failed is not half a release: it is the truth, and the run says which
+channel is missing.
+
+The script runs at the tag with the release assets in `dist/`, so it
+publishes the bytes the release published rather than a rebuild. It runs
+with `packages: write`: that is the one place a product's own code executes
+in a job holding a write token to a registry, a deliberate concession rather
+than an oversight.
+
+**`github-packages` is the only registry the socle serves**, and that is
+measured rather than chosen. Trusted publishing on npmjs and PyPI matches an
+OIDC claim, `job_workflow_ref`, which names the socle's workflow rather than
+the product as soon as a reusable workflow runs the publication; PyPI
+documents that a reusable workflow cannot be a trusted publisher at all.
+Such a channel stays in the product, with its own workflow and its own
+secret. The socle carries the secrets of the fleet, like the tap's token to
+a repository shared by everyone, never the per-product credentials of a
+registry.
 
 ## What the release verifies, and what it does not
 
