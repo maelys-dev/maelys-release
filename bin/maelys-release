@@ -53,6 +53,11 @@ SOCLE_MANIFEST_PATTERNS = "*.tar.gz *.deb *.rpm"  # the release.yml default
 # product once a reusable workflow runs the publication, and PyPI
 # documents that a reusable workflow cannot be a trusted publisher.
 SOCLE_CHANNEL_KINDS = ("github-packages",)
+# Where the fleet keeps its fuzz harnesses, preferred first. Five
+# repositories use tests/fuzz, four use fuzz; the socle reads either and
+# says which it found rather than refusing the second.
+FUZZ_DIRECTORIES = ("tests/fuzz", "fuzz")
+FUZZ_TARGET = re.compile(r"make\s+[A-Za-z0-9_.-]*fuzz[A-Za-z0-9_.-]*")
 # The targets release.yml builds when a product declares none of its own.
 SOCLE_TARGETS = ("linux-x86_64", "linux-arm64", "macos-arm64")
 BOTTLES = '\'["macos-15","macos-26"]\''
@@ -212,6 +217,9 @@ class Declarations:
         self.manifest_patterns: list[str] = []
         # (channel, registry kind) of packaging/release; one channel.yml job each.
         self.channels: list[tuple[str, str]] = []
+        # Observation only: where the harnesses are, and who runs them.
+        self.fuzz_harnesses = ""
+        self.fuzz_runs = "none"
         # name -> repository, for a dependency that does not live in maelys-dev
         self.foreign: dict[str, str] = {}
         # name -> "" or "recursive", for a dependency whose build needs them
@@ -328,6 +336,37 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
     if section and not targets and not manifest and not channels:
         raise ValueError("packaging/release declares no target, archive kind or channel")
     return targets, manifest, channels
+
+
+def read_fuzz(decl: Declarations) -> None:
+    """Observe the harnesses and who runs them; never refuse either answer.
+
+    The harnesses are a fact on disk. Whether a CI job runs them is read
+    from ci.yml, which the product owns, so the socle cannot know whether a
+    silence is an oversight or a choice: it says so and stops there. Nothing
+    here rises above a note, because check counts anything but ok and note
+    as a violation.
+    """
+    for name in FUZZ_DIRECTORIES:
+        directory = decl.project / name
+        if directory.is_dir() and any(directory.iterdir()):
+            decl.fuzz_harnesses = name
+            break
+    else:
+        return
+    ci = decl.project / ".github" / "workflows" / "ci.yml"
+    text = ci.read_text(encoding="utf-8") if ci.is_file() else ""
+    if "fuzz_command:" in text:
+        decl.fuzz_runs = "socle"
+        decl.add("ok", f"{decl.fuzz_harnesses}/: the socle's fuzz job runs it", "conventions")
+    elif FUZZ_TARGET.search(text):
+        decl.fuzz_runs = "own"
+        decl.add("ok", f"{decl.fuzz_harnesses}/: a job of this repository runs it", "conventions")
+    else:
+        decl.fuzz_runs = "none"
+        decl.add("note", f"{decl.fuzz_harnesses}/: no job of .github/workflows/ci.yml runs it."
+                         " 'fuzz_command: make fuzz-smoke' on the socle's check job would,"
+                         " and the socle schedules nothing beyond a pull request", "conventions")
 
 
 def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCLE_MECHANISM) -> Declarations:
@@ -457,6 +496,7 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
                                + " " + " ".join(decl.manifest_patterns))
         except ValueError as error:
             decl.add("missing", f"packaging/release: {error}")
+    read_fuzz(decl)
     publisher = project / "scripts" / "publish-channel.sh"
     publishes = publisher.is_file() and os.access(publisher, os.X_OK)
     if decl.channels and not publishes:
@@ -1538,6 +1578,7 @@ def handle_declarations(invocation: Invocation) -> tuple[dict, int]:
             "manifestPatterns": (SOCLE_MANIFEST_PATTERNS + " "
                                  + " ".join(decl.manifest_patterns)).strip(),
             "channels": [{"name": name, "registry": kind} for name, kind in decl.channels],
+            "fuzz": {"harnesses": decl.fuzz_harnesses, "runs": decl.fuzz_runs},
             "checks": decl.applicable()}, \
         EXIT_OK if decl.valid else EXIT_VIOLATIONS
 
@@ -1908,7 +1949,9 @@ def text_declarations(data: dict) -> str:
         ("dependencies", " ".join(data["dependencies"])), ("linux", data["linuxPackages"]),
         ("macos", data["macosPackages"]), ("formulas", " ".join(data["formulas"])),
         ("targets", " ".join(data["targets"])), ("manifest", data["manifestPatterns"]),
-        ("channels", " ".join(f"{c['name']} ({c['registry']})" for c in data["channels"]))))
+        ("channels", " ".join(f"{c['name']} ({c['registry']})" for c in data["channels"])),
+        ("fuzz", f"{data['fuzz']['harnesses']}/ run by {data['fuzz']['runs']}"
+                 if data["fuzz"]["harnesses"] else "")))
 
 
 def text_tap(data: dict) -> str:
@@ -2104,7 +2147,7 @@ APP = cli.Program(PROGRAM, PRODUCT, socle_version(), [
              schema={"type": "object", "additionalProperties": False,
                      "required": ["valid", "product", "project", "version", "mechanism", "dependencies",
                                   "linuxPackages", "macosPackages", "formulas", "targets",
-                                  "manifestPatterns", "channels", "checks"],
+                                  "manifestPatterns", "channels", "fuzz", "checks"],
                      "properties": {"valid": {"type": "boolean"}, "product": {"type": "string"},
                                     "project": {"type": "string"}, "version": {"type": "string"},
                                     "mechanism": MECHANISM_SCHEMA,
@@ -2116,6 +2159,11 @@ APP = cli.Program(PROGRAM, PRODUCT, socle_version(), [
                                         "required": ["name", "registry"],
                                         "properties": {"name": {"type": "string"},
                                                        "registry": {"type": "string"}}}},
+                                    "fuzz": {"type": "object", "additionalProperties": False,
+                                             "required": ["harnesses", "runs"],
+                                             "properties": {
+                                                 "harnesses": {"type": "string"},
+                                                 "runs": {"enum": ["socle", "own", "none"]}}},
                                     "checks": CHECKS_SCHEMA}}),
     cli.read("preflight", "preflight",
              "Check, then report what the release workflow would refuse of the next tag; exit 2 when not ready.",

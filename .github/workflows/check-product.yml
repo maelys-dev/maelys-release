@@ -28,9 +28,10 @@ on:
         description: >-
           Replay the committed corpus on Linux x86_64 with clang; empty
           disables the job. The convention is `make fuzz-smoke`, seconds
-          long, next to the `make fuzz` campaign that nothing schedules
-          here. Opt-in: the three products that fuzz today spell their
-          targets differently.
+          long; a bounded `make fuzz` runs here too, and some products pass
+          one through sanitizer_command instead. The socle schedules
+          nothing. Opt-in: the nine products that fuzz spell their targets
+          differently.
         required: false
         type: string
         default: ""

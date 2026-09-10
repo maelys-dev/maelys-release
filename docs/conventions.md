@@ -205,31 +205,46 @@ once its prose has moved.
 
 ## Fuzzing
 
-A product that fuzzes uses two targets and one place, so that the fleet
-reads the same way:
+Nine repositories of the fleet fuzz, and this section says what they do
+before it says what they should. It was rewritten in 0.26.0 against a survey
+of their `ci.yml` and Makefiles, because the version before it asserted a
+fleet that did not exist.
 
-- `make fuzz` runs a campaign, as long as the operator lets it. Nothing
-  schedules it here: a campaign that must finish in a CI job is not a
-  campaign.
+Two target names are in use, and they are the convention:
+
 - `make fuzz-smoke` replays the committed corpus in seconds. It proves the
   harnesses still build and still pass what they already caught, which is
   what a pull request needs to know.
-- The harnesses, the corpus and the dictionaries live in `tests/fuzz/`, and
-  the corpus is read-only for the smoke run: a fuzzer that writes new
-  inputs into the committed seeds turns a regression test into a moving
-  target.
+- `make fuzz` runs the fuzzer itself. **In this fleet it is bounded**, not a
+  campaign: `-runs=10000` in maelys-egress, `-max_total_time=30` in
+  maelys-oci, `-runs=$(FUZZ_RUNS)` in maelys-http. A bounded run belongs in
+  CI and several products put it there.
 
-`check-product.yml` runs the smoke target through its `fuzz_command` input,
-on Linux with clang, next to the sanitizers. It is opt-in and empty by
-default: the three products that fuzz today spell their targets
-differently, and a default would turn their next adoption red.
+The harnesses, the corpus and the dictionaries live in one directory, and
+the fleet is split on which: `tests/fuzz/` in maelys-json, maelys-egress,
+maelys-oci, maelys-http and maelys-datalog, `fuzz/` in
+maelys-sandbox-policy, maelys-code-runner, maelys-mcp and maelys-warden.
+`tests/fuzz/` is the one to prefer in a new repository; the socle reads
+either and says which it found. The corpus is read-only for the smoke run: a
+fuzzer that writes new inputs into the committed seeds turns a regression
+test into a moving target.
 
-That job installs `libclang-rt`, so a smoke target may be a libFuzzer binary
-replaying its corpus as well as a standalone driver reading it; the socle
-does not decide which of the two a product writes. It installs nothing else
-beyond what the product declares in `dependencies/packages`, and it still
-does not host `make fuzz`: the campaign is refused here on its own terms,
-not for want of a library.
+`check-product.yml` runs whatever a product hands it, in either of two
+inputs. `fuzz_command` has its own job, on Linux with clang, and since
+0.25.1 that job installs `libclang-rt`, so the command may build a libFuzzer
+binary as well as a standalone driver. `sanitizer_command` runs beside it,
+and two products pass `make fuzz` there rather than in the fuzz job. Both
+inputs are opt-in and empty by default: the nine products that fuzz spell
+their targets differently, and a default would turn their next adoption red.
+
+What the socle does not do is **schedule** anything. No timer, no nightly,
+no campaign that outlives a pull request. A fuzzing run that must finish
+inside a CI job is bounded by definition, and a product that wants an
+unbounded one runs it where it can watch it.
+
+`check` observes but never refuses: a repository carrying harnesses that no
+CI job runs gets a note, never a violation. The socle does not know whether
+that is an oversight or a choice.
 
 ## Packaging
 

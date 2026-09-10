@@ -732,6 +732,41 @@ class ProductNeedsTest(unittest.TestCase):
                         PERMISSION_LEVELS[have], PERMISSION_LEVELS[level],
                         f"{job} grants {scope}: {have} but {filename}:{name} declares {level}")
 
+    def test_harnesses_the_socle_job_replays_are_reported(self) -> None:
+        self.product.write("tests/fuzz/fuzz_target.c", "int main(void) { return 0; }\n")
+        self.product.run("adopt", self.dir, "--apply")
+        ci = self.product.dir / ".github" / "workflows" / "ci.yml"
+        ci.write_text(ci.read_text() + "      fuzz_command: make fuzz-smoke\n")
+        data = self.product.json("declarations", self.dir)["data"]
+        self.assertEqual(data["fuzz"], {"harnesses": "tests/fuzz", "runs": "socle"})
+
+    def test_harnesses_a_job_of_the_product_runs_are_reported(self) -> None:
+        self.product.write("fuzz/fuzz_target.c", "int main(void) { return 0; }\n")
+        self.product.run("adopt", self.dir, "--apply")
+        ci = self.product.dir / ".github" / "workflows" / "ci.yml"
+        ci.write_text(ci.read_text() + "  mine:\n    steps:\n      - run: make fuzz-smoke\n")
+        data = self.product.json("declarations", self.dir)["data"]
+        # fuzz/ is the layout of four repositories; the socle reads it and
+        # says so rather than refusing it.
+        self.assertEqual(data["fuzz"], {"harnesses": "fuzz", "runs": "own"})
+
+    def test_harnesses_no_job_runs_are_a_note_and_never_a_violation(self) -> None:
+        self.product.write("tests/fuzz/fuzz_target.c", "int main(void) { return 0; }\n")
+        self.product.run("adopt", self.dir, "--apply")
+        data = self.product.json("declarations", self.dir)["data"]
+        self.assertEqual(data["fuzz"], {"harnesses": "tests/fuzz", "runs": "none"})
+        self.assertTrue(data["valid"], data["checks"])
+        note = [c for c in data["checks"] if "tests/fuzz/" in c["message"]]
+        self.assertEqual([c["status"] for c in note], ["note"], note)
+        # check exits 2 on anything but ok and note, so this must stay green.
+        self.assertTrue(self.product.json("check", self.dir)["data"]["valid"])
+
+    def test_a_repository_without_harnesses_is_told_nothing(self) -> None:
+        self.product.run("adopt", self.dir, "--apply")
+        data = self.product.json("declarations", self.dir)["data"]
+        self.assertEqual(data["fuzz"], {"harnesses": "", "runs": "none"})
+        self.assertEqual([c for c in data["checks"] if "fuzz" in c["message"]], [])
+
     def test_the_reusable_workflows_carry_the_new_inputs(self) -> None:
         release = (ROOT / ".github" / "workflows" / "release.yml").read_text()
         self.assertIn("verify_command:", release)
@@ -747,6 +782,10 @@ class ProductNeedsTest(unittest.TestCase):
         check_product = (ROOT / ".github" / "workflows" / "check-product.yml").read_text()
         self.assertIn("fuzz_command:", check_product)
         self.assertIn("make fuzz-smoke", check_product)
+        # The fleet was surveyed in 0.26.0: nine repositories fuzz, and the
+        # socle schedules none of them.
+        self.assertNotIn("the three products that fuzz", check_product)
+        self.assertIn("The socle schedules\n          nothing.", check_product)
 
 
 class MechanismTest(unittest.TestCase):
