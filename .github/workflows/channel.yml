@@ -1,0 +1,82 @@
+name: channel (reusable)
+
+# Publishes one product to one registry, after its GitHub release is public.
+# A channel lives here rather than in release.yml because the permissions of
+# a called workflow are static: they cannot depend on what a product
+# declares, and the scope a registry needs differs from one to the next. A
+# product without a channel never calls this workflow and never receives its
+# scopes.
+#
+# Ordering is deliberate. The release is published first because it can be
+# redrafted; a registry publication cannot be withdrawn, so nothing the socle
+# runs may fail after it. A replay therefore re-runs this workflow on a
+# version the registry already holds: publish_command must succeed without
+# republishing, the way tap.yml treats a formula it already carries.
+on:
+  workflow_call:
+    inputs:
+      product:
+        description: Package name, for example maelys-datalog
+        required: true
+        type: string
+      tag:
+        description: The published tag this channel carries
+        required: true
+        type: string
+      channel:
+        description: Name of the channel, as declared in packaging/release
+        required: true
+        type: string
+      publish_command:
+        description: >-
+          Command publishing one channel; TAG and CHANNEL are substituted. It
+          runs at the tag, with the release assets in dist/, and must exit 0
+          without republishing when the registry already holds the version.
+        required: true
+        type: string
+      release_environment:
+        description: Environment holding the human gate; the same one release.yml uses
+        required: false
+        type: string
+        default: release
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-26.04
+    environment: ${{ inputs.release_environment }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag }}
+      - name: Collect the published assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        shell: bash
+        # The channel publishes what the release published, not a rebuild:
+        # two builds of one tag are two sets of bytes.
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          gh release download "$TAG" --repo "${GITHUB_REPOSITORY}" --dir dist
+          test -n "$(ls dist)"
+      - name: Publish the channel
+        env:
+          PUBLISH_COMMAND: ${{ inputs.publish_command }}
+          TAG: ${{ inputs.tag }}
+          CHANNEL: ${{ inputs.channel }}
+          PRODUCT: ${{ inputs.product }}
+          GH_TOKEN: ${{ github.token }}
+          NODE_AUTH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          command="${PUBLISH_COMMAND//TAG/$TAG}"
+          eval "${command//CHANNEL/$CHANNEL}"
+          echo "::notice::$PRODUCT $TAG published on the $CHANNEL channel"

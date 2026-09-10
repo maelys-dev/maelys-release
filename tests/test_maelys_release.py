@@ -483,6 +483,53 @@ class AdoptTest(unittest.TestCase):
                                         stderr=subprocess.PIPE).returncode, 64)
 
 
+PERMISSION_LEVELS = {"none": 0, "read": 1, "write": 2}
+
+
+def workflow_permissions(text: str) -> dict[str, dict[str, str]]:
+    """job -> {scope: level}, the job's own block or the workflow's default."""
+    default: dict[str, str] = {}
+    head = text.split("\njobs:\n", 1)[0]
+    if "\npermissions:\n" in head:
+        for line in head.split("\npermissions:\n", 1)[1].splitlines():
+            entry = re.fullmatch(r"  ([a-z-]+): ([a-z]+)", line)
+            if not entry:
+                break
+            default[entry.group(1)] = entry.group(2)
+    jobs: dict[str, dict[str, str]] = {}
+    name, inside = "", False
+    for line in text.split("\njobs:\n", 1)[-1].splitlines():
+        job = re.fullmatch(r"  ([A-Za-z0-9_-]+):", line)
+        if job:
+            name, inside = job.group(1), False
+            jobs[name] = dict(default)
+            continue
+        if line == "    permissions:":
+            jobs[name], inside = {}, True
+            continue
+        entry = re.fullmatch(r"      ([a-z-]+): ([a-z]+)", line)
+        if inside and entry:
+            jobs[name][entry.group(1)] = entry.group(2)
+            continue
+        inside = False
+    return jobs
+
+
+def workflow_calls(text: str) -> dict[str, str]:
+    """job -> the socle workflow file it calls, for a generated caller."""
+    calls: dict[str, str] = {}
+    name = ""
+    for line in text.split("\njobs:\n", 1)[-1].splitlines():
+        job = re.fullmatch(r"  ([A-Za-z0-9_-]+):", line)
+        if job:
+            name = job.group(1)
+            continue
+        called = re.match(r"    uses: \S+/\.github/workflows/([a-z-]+\.yml)@", line)
+        if called:
+            calls[name] = called.group(1)
+    return calls
+
+
 class ProductNeedsTest(unittest.TestCase):
     """What a product asked the socle for: a third-party pin, a verification
     at the tag, a stronger commit check, a fuzz job."""
@@ -628,6 +675,62 @@ class ProductNeedsTest(unittest.TestCase):
         self.assertFalse(data["valid"])
         self.assertTrue(any("names no runner" in check["message"] for check in data["checks"]),
                         data["checks"])
+
+    def test_a_product_declares_a_publication_channel(self) -> None:
+        self.product.write("packaging/release", "[channels]\nnpm github-packages\n")
+        self.product.write("scripts/publish-channel.sh", "#!/bin/sh\nexit 0\n", executable=True)
+        self.product.run("adopt", self.dir, "--apply")
+        workflow = self.product.read(".github/workflows/release.yml")
+        self.assertIn("  channel-npm:", workflow)
+        # After the release, never before: a registry publication cannot be
+        # withdrawn, so nothing the socle runs may fail after it.
+        self.assertIn("    needs: release\n    if: needs.release.result == 'success'", workflow)
+        self.assertIn("      packages: write", workflow)
+        self.assertIn("      publish_command: sh scripts/publish-channel.sh TAG CHANNEL", workflow)
+
+    def test_a_channel_without_its_script_is_a_violation(self) -> None:
+        self.product.run("adopt", self.dir, "--apply")
+        self.product.write("packaging/release", "[channels]\nnpm github-packages\n")
+        data = self.product.json("declarations", self.dir, expect=2)["data"]
+        self.assertFalse(data["valid"])
+        self.assertTrue(any("publish-channel.sh" in check["message"] for check in data["checks"]),
+                        data["checks"])
+
+    def test_a_script_without_its_declaration_publishes_nothing(self) -> None:
+        self.product.write("scripts/publish-channel.sh", "#!/bin/sh\nexit 0\n", executable=True)
+        self.product.run("adopt", self.dir, "--apply")
+        self.assertNotIn("channel-", self.product.read(".github/workflows/release.yml"))
+        data = self.product.json("declarations", self.dir)["data"]
+        self.assertEqual(data["channels"], [])
+        self.assertTrue(any("nothing calls it" in check["message"] for check in data["checks"]),
+                        data["checks"])
+
+    def test_the_socle_serves_no_registry_it_cannot_reach(self) -> None:
+        self.product.run("adopt", self.dir, "--apply")
+        self.product.write("packaging/release", "[channels]\nsdk pypi\n")
+        data = self.product.json("declarations", self.dir, expect=2)["data"]
+        self.assertTrue(any("serves no pypi channel" in check["message"] for check in data["checks"]),
+                        data["checks"])
+
+    def test_the_generated_caller_grants_every_scope_its_workflows_declare(self) -> None:
+        """A caller that under-grants fails the whole run at startup, the
+        release job included, so this is checked here and not on a runner."""
+        self.product.write("packaging/release", "[channels]\nnpm github-packages\n")
+        self.product.write("scripts/publish-channel.sh", "#!/bin/sh\nexit 0\n", executable=True)
+        self.product.write("packaging/homebrew/maelys-fixture.rb.in", "class F < Formula\nend\n")
+        self.product.run("adopt", self.dir, "--apply")
+        caller = self.product.read(".github/workflows/release.yml")
+        granted = workflow_permissions(caller)
+        calls = workflow_calls(caller)
+        self.assertEqual(set(calls.values()), {"release.yml", "channel.yml", "tap.yml"}, calls)
+        for job, filename in calls.items():
+            called = (ROOT / ".github" / "workflows" / filename).read_text()
+            for name, wanted in workflow_permissions(called).items():
+                for scope, level in wanted.items():
+                    have = granted[job].get(scope, "none")
+                    self.assertGreaterEqual(
+                        PERMISSION_LEVELS[have], PERMISSION_LEVELS[level],
+                        f"{job} grants {scope}: {have} but {filename}:{name} declares {level}")
 
     def test_the_reusable_workflows_carry_the_new_inputs(self) -> None:
         release = (ROOT / ".github" / "workflows" / "release.yml").read_text()
@@ -1383,11 +1486,13 @@ class UnitTest(unittest.TestCase):
 
     def test_parse_release(self) -> None:
         self.assertEqual(MODULE.parse_release("[targets]\nlinux-arm64\nwasm32 ubuntu-26.04\n"),
-                         ([("linux-arm64", ""), ("wasm32", "ubuntu-26.04")], []))
+                         ([("linux-arm64", ""), ("wasm32", "ubuntu-26.04")], [], []))
         self.assertEqual(MODULE.parse_release("[targets]\nmacos-arm64 self-hosted ARM64\n"),
-                         ([("macos-arm64", ["self-hosted", "ARM64"])], []))
-        self.assertEqual(MODULE.parse_release("[manifest]\n*.wasm\n"), ([], ["*.wasm"]))
-        self.assertEqual(MODULE.parse_release("# nothing declared\n"), ([], []))
+                         ([("macos-arm64", ["self-hosted", "ARM64"])], [], []))
+        self.assertEqual(MODULE.parse_release("[manifest]\n*.wasm\n"), ([], ["*.wasm"], []))
+        self.assertEqual(MODULE.parse_release("[channels]\nnpm github-packages\n"),
+                         ([], [], [("npm", "github-packages")]))
+        self.assertEqual(MODULE.parse_release("# nothing declared\n"), ([], [], []))
         for text in ("linux-arm64\n",                      # outside a section
                      "[bsd]\nlinux-arm64\n",               # unknown section
                      "[targets]\nwasm32\n",                # no runner and no default
@@ -1395,7 +1500,11 @@ class UnitTest(unittest.TestCase):
                      "[targets]\nlinux-arm64\nlinux-arm64\n",   # twice
                      "[targets]\nwasm32 'quoted'\n",       # not a runner label
                      "[manifest]\n*.tar.gz\n",             # already covered
-                     "[manifest]\n*.a *.b\n"):             # one glob per line
+                     "[manifest]\n*.a *.b\n",              # one glob per line
+                     "[channels]\nnpm pypi\n",             # a registry the socle cannot reach
+                     "[channels]\nnpm\n",                  # names no registry
+                     "[channels]\nNPM github-packages\n",  # not a channel name
+                     "[channels]\nnpm github-packages\nnpm github-packages\n"):  # twice
             with self.assertRaises(ValueError, msg=text):
                 MODULE.parse_release(text)
 
