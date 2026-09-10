@@ -53,6 +53,9 @@ SOCLE_MANIFEST_PATTERNS = "*.tar.gz *.deb *.rpm"  # the release.yml default
 # product once a reusable workflow runs the publication, and PyPI
 # documents that a reusable workflow cannot be a trusted publisher.
 SOCLE_CHANNEL_KINDS = ("github-packages",)
+# What a product asks of its release environment. The socle verifies the
+# answer a repository gave; it does not give it in the repository's place.
+SOCLE_GATES = ("reviewer", "none")
 # Where the fleet keeps its fuzz harnesses, preferred first. Five
 # repositories use tests/fuzz, four use fuzz; the socle reads either and
 # says which it found rather than refusing the second.
@@ -217,6 +220,8 @@ class Declarations:
         self.manifest_patterns: list[str] = []
         # (channel, registry kind) of packaging/release; one channel.yml job each.
         self.channels: list[tuple[str, str]] = []
+        # "reviewer", "none", or "" when this repository has not chosen.
+        self.gate = ""
         # Observation only: where the harnesses are, and who runs them.
         self.fuzz_harnesses = ""
         self.fuzz_runs = "none"
@@ -269,7 +274,7 @@ def parse_packages(text: str) -> tuple[str, str]:
     return " ".join(packages["linux"]), " ".join(packages["macos"])
 
 
-def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[tuple[str, str]]]:
+def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[tuple[str, str]], str]:
     """packaging/release: [targets], [manifest] and [channels], one declaration per line.
 
     A target line naming no label keeps the runner release.yml holds for that
@@ -283,18 +288,26 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
     targets: list[tuple[str, object]] = []
     manifest: list[str] = []
     channels: list[tuple[str, str]] = []
+    gate = ""
     section = ""
     for number, raw in enumerate(text.splitlines(), 1):
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
         if line.startswith("["):
-            if line in ("[targets]", "[manifest]", "[channels]"):
+            if line in ("[targets]", "[manifest]", "[channels]", "[gate]"):
                 section = line[1:-1]
                 continue
             raise ValueError(f"unknown section {line} at line {number}")
         if not section:
-            raise ValueError(f"line outside a [targets], [manifest] or [channels] section at line {number}")
+            raise ValueError(f"line outside a [targets], [manifest], [channels] or [gate] section at line {number}")
+        if section == "gate":
+            if gate:
+                raise ValueError(f"[gate] holds one line, and line {number} is a second")
+            if line not in SOCLE_GATES:
+                raise ValueError(f"[gate] is {' or '.join(SOCLE_GATES)}, not {line}, at line {number}")
+            gate = line
+            continue
         if section == "channels":
             name, *rest = line.split()
             if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", name):
@@ -333,9 +346,9 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
                 raise ValueError(f"a runner label is [A-Za-z0-9._-] at line {number}: {label}")
         runner: object = "" if not labels else (labels[0] if len(labels) == 1 else labels)
         targets.append((name, runner))
-    if section and not targets and not manifest and not channels:
-        raise ValueError("packaging/release declares no target, archive kind or channel")
-    return targets, manifest, channels
+    if section and not targets and not manifest and not channels and not gate:
+        raise ValueError("packaging/release declares no target, archive kind, channel or gate")
+    return targets, manifest, channels, gate
 
 
 def read_fuzz(decl: Declarations) -> None:
@@ -486,7 +499,7 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
     release = project / "packaging" / "release"
     if release.is_file():
         try:
-            decl.targets, decl.manifest_patterns, decl.channels = \
+            decl.targets, decl.manifest_patterns, decl.channels, decl.gate = \
                 parse_release(release.read_text(encoding="utf-8"))
             if decl.targets:
                 decl.add("ok", "packaging/release targets: "
@@ -1710,6 +1723,7 @@ def handle_declarations(invocation: Invocation) -> tuple[dict, int]:
             "manifestPatterns": (SOCLE_MANIFEST_PATTERNS + " "
                                  + " ".join(decl.manifest_patterns)).strip(),
             "channels": [{"name": name, "registry": kind} for name, kind in decl.channels],
+            "gate": decl.gate,
             "fuzz": {"harnesses": decl.fuzz_harnesses, "runs": decl.fuzz_runs},
             "checks": decl.applicable()}, \
         EXIT_OK if decl.valid else EXIT_VIOLATIONS
@@ -1726,6 +1740,50 @@ def github_api(path: str) -> dict | None:
         return None
     completed = run(["gh", "api", path])
     return json.loads(completed.stdout) if completed.returncode == 0 else None
+
+
+def environment_gate(repository: str, environment: dict | None, declared: str = "") -> list[tuple[str, str]]:
+    """Whether the release environment holds the gate this repository asked for.
+
+    A deployment policy says *what* may publish and says nothing about *who*
+    approves. The conventions called this environment the human gate, and the
+    socle answered ok on an environment that required nobody: it described a
+    gate it had never seen closed.
+
+    What it does not do is choose for a repository. `[gate]` of
+    packaging/release says `reviewer` or `none`; the socle compares that
+    answer with the environment and fails only on a promise unkept. A
+    repository that has not answered gets a note, never a failure: the socle
+    reports the gap and leaves the decision where it belongs.
+    """
+    if environment is None:
+        return []
+    rules = {rule.get("type"): rule for rule in environment.get("protection_rules") or []}
+    reviewers = rules.get("required_reviewers")
+    if not reviewers:
+        if declared == "none":
+            return [("ok", f"environment release of {repository} requires no reviewer, as [gate] none declares")]
+        unattended = (f"environment release of {repository} requires no reviewer: the publication runs"
+                      " unattended. Arm it with 'gh api -X PUT repos/" + repository + "/environments/release"
+                      " -f reviewers[][type]=User -F reviewers[][id]=ID', or declare the choice"
+                      " with [gate] none in packaging/release")
+        return [("fail" if declared == "reviewer" else "note", unattended)]
+    names = " ".join((entry.get("reviewer") or {}).get("login") or "?"
+                     for entry in reviewers.get("reviewers") or [])
+    found = [("ok", f"environment release of {repository} requires a reviewer: {names}"
+                    + (", as [gate] reviewer declares" if declared == "reviewer" else ""))]
+    if declared == "none":
+        found.append(("note", f"{repository} declares [gate] none but its environment requires {names}:"
+                              " the environment is stricter than the declaration"))
+    # A gate the approver can walk around is a pause, not a control, and the
+    # socle says which of the two this is rather than implying the second.
+    if environment.get("can_admins_bypass"):
+        found.append(("note", f"an administrator of {repository} may bypass that reviewer"
+                              " (can_admins_bypass): the gate is a pause, not a control"))
+    if reviewers.get("prevent_self_review") is False:
+        found.append(("note", f"the reviewer of {repository} may approve their own deployment"
+                              " (prevent_self_review false): the gate is a pause, not a control"))
+    return found
 
 
 def handle_preflight(invocation: Invocation) -> tuple[dict, int]:
@@ -1796,6 +1854,19 @@ def handle_preflight(invocation: Invocation) -> tuple[dict, int]:
                     add("ok", f"environment release of {repository} limits deployments to tags v*")
                 else:
                     add("fail", f"environment release of {repository} has a deployment policy without the tag rule v*")
+            # A deployment policy says *what* may publish; it says nothing
+            # about *who* approves. The conventions call this environment the
+            # human gate, and the socle used to describe a gate it never saw
+            # closed: a product published unattended and preflight said ok.
+            for status, message in environment_gate(repository, environment, decl.gate):
+                add(status, message)
+            # The default branch is what a tag is expected to come from, and
+            # what commit_verification: signed-on-default-branch relies on.
+            protection = github_api(f"repos/{repository}/branches/"
+                                    + (repository_data.get("default_branch") or "main") + "/protection")
+            if protection is None:
+                add("note", f"the default branch of {repository} is not protected: anyone who can push can move it,"
+                    " and a tag proves only what the tag proves")
     data["preflight"] = preflight
     data["violations"].extend(item["message"] for item in preflight if item["status"] == "fail")
     data["ready"] = data["valid"] and not any(item["status"] == "fail" for item in preflight)
@@ -2286,7 +2357,7 @@ APP = cli.Program(PROGRAM, PRODUCT, socle_version(), [
              schema={"type": "object", "additionalProperties": False,
                      "required": ["valid", "product", "project", "version", "mechanism", "dependencies",
                                   "linuxPackages", "macosPackages", "formulas", "targets",
-                                  "manifestPatterns", "channels", "fuzz", "declared", "pinned",
+                                  "manifestPatterns", "channels", "gate", "fuzz", "declared", "pinned",
                                   "managedBy", "runners", "checks"],
                      "properties": {"valid": {"type": "boolean"}, "product": {"type": "string"},
                                     "project": {"type": "string"}, "version": {"type": "string"},
@@ -2299,6 +2370,7 @@ APP = cli.Program(PROGRAM, PRODUCT, socle_version(), [
                                         "required": ["name", "registry"],
                                         "properties": {"name": {"type": "string"},
                                                        "registry": {"type": "string"}}}},
+                                    "gate": {"enum": ["", "reviewer", "none"]},
                                     "declared": {"type": "object", "additionalProperties": False,
                                                  "required": ["targets", "manifestPatterns"],
                                                  "properties": {"targets": STRINGS,

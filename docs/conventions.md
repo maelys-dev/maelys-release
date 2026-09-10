@@ -332,6 +332,38 @@ change. A declaration the socle cannot honour, a target with no runner and
 no default, is a violation of the release scope: `check` exits 2 and
 `adopt` refuses, so nothing reaches a tag through a file nobody read.
 
+### The gate a repository asks for
+
+The `release` environment is where a human approves a publication. A
+deployment policy limits *what* may publish; it says nothing about *who*
+approves, and the socle used to answer `ok` on an environment that required
+nobody — it described a gate it had never seen closed.
+
+**The socle does not choose that gate.** A repository declares what it wants
+in `packaging/release`:
+
+```
+[gate]
+reviewer
+```
+
+`reviewer` asks that the environment require one; `none` says this
+repository publishes without approval and means it. `preflight` compares the
+answer with the environment and fails only on a promise unkept. A repository
+that has declared nothing gets a note, never a failure: the socle reports
+the gap and leaves the decision where it belongs.
+
+A gate its approver can walk around is named for what it is. When an
+administrator may bypass the reviewer, or the reviewer may approve their own
+deployment, `preflight` says the gate is a pause and not a control. In an
+organisation of one member that is the honest description, and a pause is
+still worth having: a tag has been pushed here before a trial's verdict was
+read.
+
+`preflight` also reports an unprotected default branch, as a note. The
+socle's contract is about tags, but `commit_verification:
+signed-on-default-branch` relies on that branch meaning something.
+
 ### Publishing to a registry
 
 A product that publishes to a registry declares a channel in the same file,
