@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.24.0 — 2026-09-10
+
+- The release mechanism stops deciding alone what a product builds. Its
+  three targets and the three archive kinds `SHA256SUMS` covers were
+  written into the workflow; they are now the defaults of two inputs,
+  `targets` and `manifest_patterns`, and a product declares what it needs in
+  `packaging/release`. maelys-datalog's D7 recorded a wasm target and an npm
+  channel as candidates to bring upstream, and nothing here tracked them
+  (`maelys-dev/maelys-release#19`).
+- `[targets]` replaces the matrix rather than adding to it, so a product
+  that adds one names the ones it keeps. A target line that names no runner
+  keeps the runner the workflow holds for it, so changing a default runner
+  still reaches a product that only added a target.
+- `[manifest]` adds archive kinds. It decides what the manifest vouches
+  for, not what is published: the build job already uploads all of `dist/`
+  and the attestation already covers `dist/*`, so an artifact of an unnamed
+  kind was published and attested but absent from `SHA256SUMS`.
+- A declaration the socle cannot honour is a violation of the release
+  scope, so `check` exits 2 and `adopt` refuses rather than letting a tag
+  build from a file nobody read.
+- A product that declares neither section sees no change: the resolved
+  matrix and the manifest are byte for byte what 0.23.0 produced, and
+  `adopt` writes the same files.
+- This opens no publication channel. The socle's `publish` job holds
+  `contents: write` and nothing else, and a called workflow cannot widen
+  the token beyond what its caller granted, so a registry channel remains a
+  separate decision.
+
 ## 0.23.0 — 2026-09-09
 
 - `migrate` finishes what it reports. It rewrites every Markdown file of the

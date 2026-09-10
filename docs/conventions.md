@@ -237,6 +237,48 @@ differently, and a default would turn their next adoption red.
   attestations there to paid plans; the workflow skips the step by
   itself (`attestation: auto`) and `preflight` says so before the tag.
 
+### Targets and archive kinds a product declares
+
+Those three targets and those archive kinds are the socle's defaults, not
+its limits. A product that builds something else declares it in
+`packaging/release`, and the socle renders the declaration into the
+`targets` and `manifest_patterns` inputs of `release.yml`:
+
+```
+[targets]
+linux-x86_64
+linux-arm64
+macos-arm64
+wasm32 ubuntu-26.04
+
+[manifest]
+*.wasm
+```
+
+`[targets]` **replaces** the matrix rather than adding to it, so a product
+that adds one target names the ones it keeps. A target line naming no
+runner keeps the runner `release.yml` holds for it, which exists only for
+the three above; that is how a change of default runner still reaches a
+product that only added a target. A line may name one runner label or a
+label set (`macos-arm64 self-hosted macOS ARM64`).
+
+`[manifest]` **adds** to the socle's three archive kinds. It decides what
+`SHA256SUMS` vouches for, not what is published: the build job uploads
+everything `package_command` leaves in `dist/` and the attestation covers
+`dist/*`, so an artifact of an unnamed kind is still published and still
+attested. What it lacks is a line in the manifest and the `sha256sum -c`
+that goes with it.
+
+Both sections are optional and a product that declares neither sees no
+change. A declaration the socle cannot honour, a target with no runner and
+no default, is a violation of the release scope: `check` exits 2 and
+`adopt` refuses, so nothing reaches a tag through a file nobody read.
+
+Neither section opens a publication channel. A product that publishes to a
+registry still does it from its own mechanism: the socle's `publish` job
+holds `contents: write` and nothing else, and a called workflow cannot
+widen the token beyond what its caller granted.
+
 ## What the release verifies, and what it does not
 
 The workflow verifies the tag: annotated, signed, verified by GitHub, and
