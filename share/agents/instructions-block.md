@@ -47,6 +47,14 @@ are in `docs/conventions.md` of maelys-release.
   GitHub-hosted runners only. A self-hosted runner is reserved for hardware
   gates, on signed tags or `workflow_dispatch`, behind the `release`
   environment.
+- The prose of this repository lives in `maelys-dev/maelys-docs`, directory
+  `@PRODUCT@/`, with a neighbouring checkout at `../maelys-docs`.
+  Documenting means opening a pull request there, not writing in `docs/`
+  here, which carries what a machine writes and what this repository engages
+  publicly. An agent that finds prose in `docs/` moves it rather than
+  enriching it, and `maelys-release migrate` moves it with its history.
+  **That repository is private: never name it from a public README.** The
+  reader of this block has access to it; the reader of a README may not.
 - A tag whose release or formula failed is replayed in full with
   `gh workflow run release.yml -f tag=vX.Y.Z` after adopting a corrected
   socle; a tag is never moved or recreated.
