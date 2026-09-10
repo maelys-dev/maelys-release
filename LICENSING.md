@@ -1,6 +1,6 @@
 # Licensing
 
-Copyright 2026 Maelys Developers.
+Copyright 2026 David Bromberg.
 
 ## Source code: MPL-2.0
 
@@ -8,13 +8,21 @@ Copyright 2026 Maelys Developers.
 tests and the documentation of this repository are available under the
 Mozilla Public License 2.0. The complete terms are in [`LICENSE`](LICENSE).
 
-## Installed texts: CC0-1.0
+## Installed agent texts: CC-BY-4.0
 
-Everything under `share/` is dedicated to the public domain under CC0-1.0
-([`share/LICENSE`](share/LICENSE)): the `AGENTS.md` and `CLAUDE.md` blocks,
-the skill, and the `RELEASING.md`, `LICENSING.md` and `SECURITY.md`
-skeletons this socle installs into a product. A product that receives them
-carries no license obligation of its own for those texts.
+The texts under `share/agents/`, including the managed `AGENTS.md` and
+`CLAUDE.md` blocks and the skill, are licensed under CC-BY-4.0, with
+attribution to David Bromberg. See [`share/agents/LICENSE`](share/agents/LICENSE).
+Each text carries its copyright, source and license link so installation
+preserves attribution. When sharing adaptations, retain those notices and
+indicate your changes. This license covers the installed block, not unrelated
+content a product writes outside it.
+
+## Other installed templates: CC0-1.0
+
+The documents and script under `share/templates/` remain CC0-1.0
+([`share/LICENSE`](share/LICENSE)). This exception does not cover
+`share/agents/` and does not change the source code's MPL-2.0 license.
 
 ## Redistributed material
 

@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.28.0 — 2026-09-10
+
+- Managed agent texts (`share/agents/`) use CC-BY-4.0 with attribution to
+  David Bromberg. The installer preserves their copyright, source and license
+  notices, and a test asserts that it does, for both mechanisms. Other
+  templates and the installed dependency-checkout script remain CC0-1.0;
+  the source code stays MPL-2.0.
+- **This changes a managed text**, so a product sees the notice appear inside
+  its `AGENTS.md` and `CLAUDE.md` blocks at its next adoption. That is the
+  whole point: attribution that does not travel with the text is not
+  attribution.
+- The copyright holder is corrected in the licensing declaration and in the
+  `LICENSING.md` template the socle seeds. The template is written once, when
+  the file is missing, and belongs to the product afterwards: a repository
+  already carrying the former holder keeps it until someone changes it there.
+
 ## 0.27.0 — 2026-09-10
 
 - `declarations` answers what maelys-platform still read with a pattern.

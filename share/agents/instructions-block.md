@@ -1,3 +1,10 @@
+<!-- SPDX-License-Identifier: CC-BY-4.0
+Copyright 2026 David Bromberg.
+Source: https://github.com/maelys-dev/maelys-release/blob/main/share/agents/instructions-block.md
+License: https://creativecommons.org/licenses/by/4.0/
+When sharing adaptations, retain attribution and indicate your changes.
+-->
+
 # Maelys release socle (maelys-release)
 
 This repository publishes through the shared maelys-release workflows. The

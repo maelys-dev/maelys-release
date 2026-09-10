@@ -271,8 +271,9 @@ runners and secrets are normative in [docs/conventions.md](docs/conventions.md).
   `adopt` installs it into products that pin dependencies, and it runs
   where nothing else can be assumed.
 
-Code is MPL-2.0; `share/` texts and scripts installed into consumer
-repositories are CC0-1.0 (`share/LICENSE`).
+Code is MPL-2.0. Installed agent texts are CC-BY-4.0, attributed to
+David Bromberg (`share/agents/LICENSE`); other templates and the installed
+script remain CC0-1.0 (`share/LICENSE`). See `LICENSING.md` for the boundary.
 
 ## Releasing the socle
 
