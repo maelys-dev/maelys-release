@@ -3,6 +3,13 @@ name: maelys-release
 description: Release a Maelys product through the shared maelys-release socle, or change its release, packaging, dependency pins or Homebrew formula files, without breaking the signed-tag, attestation and tap contracts.
 ---
 
+<!-- SPDX-License-Identifier: CC-BY-4.0
+Copyright 2026 David Bromberg.
+Source: https://github.com/maelys-dev/maelys-release/blob/main/share/agents/claude-skill.md
+License: https://creativecommons.org/licenses/by/4.0/
+When sharing adaptations, retain attribution and indicate your changes.
+-->
+
 # Releasing a Maelys product
 
 The product is `@PRODUCT@`; its release mechanics come from maelys-release

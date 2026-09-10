@@ -281,6 +281,13 @@ class AdoptTest(unittest.TestCase):
         self.assertNotIn("if: github.event_name == 'push'", workflow)
         self.assertGreaterEqual(workflow.count("      id-token: write"), 2)
         agents = product.read("AGENTS.md")
+        for name in ("AGENTS.md", "CLAUDE.md", ".claude/skills/maelys-release/SKILL.md"):
+            text = product.read(name)
+            self.assertIn("SPDX-License-Identifier: CC-BY-4.0", text)
+            self.assertIn("Copyright 2026 David Bromberg", text)
+            self.assertIn("https://creativecommons.org/licenses/by/4.0/", text)
+            self.assertIn("Source: https://github.com/maelys-dev/maelys-release/", text)
+            self.assertNotIn("CC0", text)
         self.assertIn("Keep me.", agents)
         self.assertEqual(agents.count("maelys-release:begin"), 1)
         self.assertIn("packaging/homebrew/libmaelys-fixture.rb.in, packaging/homebrew/maelys-fixture.rb.in", agents)
@@ -858,6 +865,12 @@ class MechanismTest(unittest.TestCase):
 
     def test_adopt_leaves_the_products_own_workflow_alone(self) -> None:
         self.product.run("adopt", self.dir, "--apply")
+        for name in ("AGENTS.md", "CLAUDE.md"):
+            text = self.product.read(name)
+            self.assertIn("SPDX-License-Identifier: CC-BY-4.0", text)
+            self.assertIn("Copyright 2026 David Bromberg", text)
+            self.assertIn("https://creativecommons.org/licenses/by/4.0/", text)
+            self.assertNotIn("CC0", text)
         self.assertEqual(self.product.read(".github/workflows/release.yml"), self.OWN_WORKFLOW)
         self.assertFalse((self.product.dir / "scripts" / "checkout-dependency.sh").exists())
         self.assertFalse((self.product.dir / ".claude").exists())

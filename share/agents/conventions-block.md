@@ -1,3 +1,10 @@
+<!-- SPDX-License-Identifier: CC-BY-4.0
+Copyright 2026 David Bromberg.
+Source: https://github.com/maelys-dev/maelys-release/blob/main/share/agents/conventions-block.md
+License: https://creativecommons.org/licenses/by/4.0/
+When sharing adaptations, retain attribution and indicate your changes.
+-->
+
 # Maelys repository conventions (maelys-release)
 
 This repository follows the shared Maelys conventions without publishing
