@@ -173,12 +173,18 @@ jobs:
         # The update reports, the install decides.
         run: |
           sudo apt-get update || echo "::warning::apt-get update reported errors; the install decides"
-          sudo apt-get install -y build-essential clang ${{ steps.socle.outputs.linux_packages }}
+          # libclang-rt carries the compiler-rt static libraries, libFuzzer's
+          # among them: without it a harness linked with -fsanitize=fuzzer
+          # does not link, and a product whose smoke target is a libFuzzer
+          # binary rather than a standalone driver could not replay here.
+          sudo apt-get install -y build-essential clang libclang-rt-18-dev ${{ steps.socle.outputs.linux_packages }}
       - name: Replay the committed corpus
         shell: bash
         # The corpus is committed and read-only here: a smoke run proves the
         # harnesses still build and still pass what they already caught. The
-        # campaign that finds new inputs is not a CI job.
+        # campaign that finds new inputs is not a CI job; docs/conventions.md
+        # of maelys-release says why, under Fuzzing, and that is the text to
+        # read rather than this comment.
         run: ${{ inputs.fuzz_command }} CC=clang CXX=clang++
 
   sanitizers:
