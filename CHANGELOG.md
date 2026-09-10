@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.30.0 — 2026-09-10
+
+- A repository declares the gate it wants, and `preflight` verifies that
+  answer instead of assuming one. `[gate]` of `packaging/release` says
+  `reviewer` or `none`; the socle fails only on a promise unkept, and a
+  repository that has declared nothing gets a note. The socle reports the
+  gap and leaves the choice where it belongs.
+- `preflight` reads the release environment's protection rules at all, which
+  it did not. It checked that deployments are limited to tags `v*` — what
+  may publish — and answered `ok` on an environment that required nobody.
+  The conventions call that environment the human gate; the socle had never
+  seen it closed.
+- **Measured across the fleet**: of twelve repositories, one requires a
+  reviewer, six have a deployment policy and no reviewer, two have an
+  environment with no rule at all, three have no environment. No repository
+  protects its default branch. Nothing here turns any of them red, because
+  none of them has declared anything yet.
+- A gate its approver can walk around is named for what it is: when an
+  administrator may bypass the reviewer, or the reviewer may approve their
+  own deployment, `preflight` says the gate is a pause and not a control.
+- An unprotected default branch is reported as a note. The socle's contract
+  is about tags; it matters because `commit_verification:
+  signed-on-default-branch` relies on that branch meaning something.
+- Reported by maelys-datalog, whose environment had published twice
+  unattended while their document made the approval an invariant.
+
 ## 0.29.1 — 2026-09-10
 
 - A runner label must have the shape of one. `read_runners` accepted

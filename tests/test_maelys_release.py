@@ -1626,13 +1626,15 @@ class UnitTest(unittest.TestCase):
 
     def test_parse_release(self) -> None:
         self.assertEqual(MODULE.parse_release("[targets]\nlinux-arm64\nwasm32 ubuntu-26.04\n"),
-                         ([("linux-arm64", ""), ("wasm32", "ubuntu-26.04")], [], []))
+                         ([("linux-arm64", ""), ("wasm32", "ubuntu-26.04")], [], [], ""))
         self.assertEqual(MODULE.parse_release("[targets]\nmacos-arm64 self-hosted ARM64\n"),
-                         ([("macos-arm64", ["self-hosted", "ARM64"])], [], []))
-        self.assertEqual(MODULE.parse_release("[manifest]\n*.wasm\n"), ([], ["*.wasm"], []))
+                         ([("macos-arm64", ["self-hosted", "ARM64"])], [], [], ""))
+        self.assertEqual(MODULE.parse_release("[manifest]\n*.wasm\n"), ([], ["*.wasm"], [], ""))
         self.assertEqual(MODULE.parse_release("[channels]\nnpm github-packages\n"),
-                         ([], [], [("npm", "github-packages")]))
-        self.assertEqual(MODULE.parse_release("# nothing declared\n"), ([], [], []))
+                         ([], [], [("npm", "github-packages")], ""))
+        self.assertEqual(MODULE.parse_release("[gate]\nnone\n"), ([], [], [], "none"))
+        self.assertEqual(MODULE.parse_release("[gate]\nreviewer\n"), ([], [], [], "reviewer"))
+        self.assertEqual(MODULE.parse_release("# nothing declared\n"), ([], [], [], ""))
         for text in ("linux-arm64\n",                      # outside a section
                      "[bsd]\nlinux-arm64\n",               # unknown section
                      "[targets]\nwasm32\n",                # no runner and no default
@@ -1644,7 +1646,9 @@ class UnitTest(unittest.TestCase):
                      "[channels]\nnpm pypi\n",             # a registry the socle cannot reach
                      "[channels]\nnpm\n",                  # names no registry
                      "[channels]\nNPM github-packages\n",  # not a channel name
-                     "[channels]\nnpm github-packages\nnpm github-packages\n"):  # twice
+                     "[channels]\nnpm github-packages\nnpm github-packages\n",  # twice
+                     "[gate]\nmaybe\n",                    # not a gate the socle knows
+                     "[gate]\nreviewer\nnone\n"):          # one line, not two
             with self.assertRaises(ValueError, msg=text):
                 MODULE.parse_release(text)
 
@@ -1673,6 +1677,51 @@ class UnitTest(unittest.TestCase):
                         self.assertIn("site", report)
         finally:
             MODULE.destination_is_public = original
+
+    def test_environment_gate_verifies_the_answer_a_repository_gave(self) -> None:
+        """The socle checks the gate a repository asked for; it does not
+        choose one in its place. Only a promise unkept is a failure."""
+        def reviewers(prevent_self_review=True, login="someone"):
+            return {"type": "required_reviewers", "prevent_self_review": prevent_self_review,
+                    "reviewers": [{"reviewer": {"login": login}}]}
+
+        bare = {"protection_rules": [], "can_admins_bypass": True}
+        armed = {"protection_rules": [reviewers()], "can_admins_bypass": False}
+        # A repository that has not chosen is told, never refused.
+        self.assertEqual([s for s, _ in MODULE.environment_gate("o/r", bare)], ["note"])
+        # One that asked for a reviewer and has none broke its own promise.
+        self.assertEqual([s for s, _ in MODULE.environment_gate("o/r", bare, "reviewer")], ["fail"])
+        # One that declared it wants none is right, and stays green.
+        declared_none = MODULE.environment_gate("o/r", bare, "none")
+        self.assertEqual([s for s, _ in declared_none], ["ok"])
+        self.assertIn("[gate] none declares", declared_none[0][1])
+        self.assertEqual([s for s, _ in MODULE.environment_gate("o/r", armed, "reviewer")], ["ok"])
+        # Stricter than declared is not a failure, but it is worth saying.
+        self.assertEqual([s for s, _ in MODULE.environment_gate("o/r", armed, "none")], ["ok", "note"])
+
+    def test_environment_gate(self) -> None:
+        """The conventions call the release environment the human gate. The
+        socle described a gate it never saw closed: measured on the fleet,
+        one repository of twelve required a reviewer, and there the reviewer
+        may approve their own deployment."""
+        def reviewers(prevent_self_review, login="someone"):
+            return {"type": "required_reviewers", "prevent_self_review": prevent_self_review,
+                    "reviewers": [{"reviewer": {"login": login}}]}
+
+        self.assertEqual(MODULE.environment_gate("o/r", None), [])
+        empty = MODULE.environment_gate("o/r", {"protection_rules": [], "can_admins_bypass": True}, "reviewer")
+        self.assertEqual([status for status, _ in empty], ["fail"])
+        self.assertIn("runs unattended", empty[0][1])
+        self.assertIn("gh api -X PUT repos/o/r/environments/release", empty[0][1])
+
+        pause = MODULE.environment_gate("o/r", {"protection_rules": [reviewers(False)],
+                                                "can_admins_bypass": True})
+        self.assertEqual([status for status, _ in pause], ["ok", "note", "note"])
+        self.assertTrue(all("a pause, not a control" in message for _, message in pause[1:]), pause)
+
+        control = MODULE.environment_gate("o/r", {"protection_rules": [reviewers(True, "another")],
+                                                  "can_admins_bypass": False})
+        self.assertEqual(control, [("ok", "environment release of o/r requires a reviewer: another")])
 
     def test_managed_block(self) -> None:
         block = "new\n"
