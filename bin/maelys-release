@@ -29,6 +29,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import maelys_cli as cli  # noqa: E402
@@ -1789,91 +1790,459 @@ def environment_gate(repository: str, environment: dict | None, declared: str = 
     return found
 
 
-def handle_preflight(invocation: Invocation) -> tuple[dict, int]:
-    """What the release workflow will demand of the tag, before it exists."""
-    decl, data = check_data(invocation)
-    project = decl.project
-    require_socle_mechanism(project, decl.mechanism, "preflight")
-    preflight: list[dict] = []
+def github_repository(project: pathlib.Path) -> str:
+    """owner/name of the origin remote when it is on GitHub, else ''."""
+    remote = git("remote", "get-url", "origin", cwd=project, check=False)
+    match = re.search(r"github\.com[:/]([^/]+/[^/]+?)(?:\.git)?$", remote)
+    return match.group(1) if match else ""
 
-    def add(status: str, message: str) -> None:
-        preflight.append({"status": status, "message": message})
+
+def tag_checks(project: pathlib.Path, version: str) -> list[tuple[str, str]]:
+    """What the signed tag vVERSION needs of this checkout, whatever publishes it.
+
+    These hold for every Maelys repository, the ones the socle does not
+    release included: a release is a signed annotated tag whose commit
+    carries that VERSION, and nothing but the operator's own checkout can
+    answer for the signing key.
+    """
+    found: list[tuple[str, str]] = []
 
     def config(key: str) -> str:
         return git("config", "--get", key, cwd=project, check=False)
 
-    if data["valid"]:
-        add("ok" if config("tag.gpgsign") == "true" else "fail",
-            "tag.gpgsign = true" if config("tag.gpgsign") == "true" else "tag.gpgsign is not true: git config tag.gpgsign true")
-        fmt = config("gpg.format") or "openpgp"
-        if config("user.signingkey"):
-            add("ok", f"gpg.format = {fmt}, user.signingkey set")
+    signs = config("tag.gpgsign") == "true"
+    found.append(("ok", "tag.gpgsign = true") if signs
+                 else ("fail", "tag.gpgsign is not true: git config tag.gpgsign true"))
+    fmt = config("gpg.format") or "openpgp"
+    if config("user.signingkey"):
+        found.append(("ok", f"gpg.format = {fmt}, user.signingkey set"))
+    else:
+        found.append(("fail", f"user.signingkey is not set (gpg.format = {fmt}); the key must be registered on GitHub"))
+    if git("rev-parse", "--is-shallow-repository", cwd=project, check=False) == "true":
+        found.append(("fail", "shallow clone: previous tags are not visible; run from a full clone"))
+    else:
+        tags = git("tag", "--list", "v*", "--sort=-v:refname", cwd=project, check=False).split()
+        if not tags:
+            found.append(("note", "no v* tag yet"))
         else:
-            add("fail", f"user.signingkey is not set (gpg.format = {fmt}); the key must be registered on GitHub")
-        if git("rev-parse", "--is-shallow-repository", cwd=project, check=False) == "true":
-            add("fail", "shallow clone: previous tags are not visible; run from a full clone")
-        else:
-            tags = git("tag", "--list", "v*", "--sort=-v:refname", cwd=project, check=False).split()
-            if not tags:
-                add("note", "no v* tag yet")
+            last = tags[0]
+            if git("cat-file", "-t", last, cwd=project, check=False) != "tag":
+                found.append(("fail", f"{last} is a lightweight tag; the workflow requires annotated signed tags"))
+            elif not re.search(r"-----BEGIN .*SIGNATURE-----", git("cat-file", "-p", last, cwd=project, check=False)):
+                found.append(("fail", f"{last} is not signed"))
             else:
-                last = tags[0]
-                if git("cat-file", "-t", last, cwd=project, check=False) != "tag":
-                    add("fail", f"{last} is a lightweight tag; the workflow requires annotated signed tags")
-                elif not re.search(r"-----BEGIN .*SIGNATURE-----", git("cat-file", "-p", last, cwd=project, check=False)):
-                    add("fail", f"{last} is not signed")
-                else:
-                    add("ok", f"{last} is annotated and signed")
-        if git("rev-parse", "-q", "--verify", f"refs/tags/v{decl.version}", cwd=project, check=False):
-            add("fail", f"tag v{decl.version} already exists; bump VERSION")
+                found.append(("ok", f"{last} is annotated and signed"))
+    if git("rev-parse", "-q", "--verify", f"refs/tags/v{version}", cwd=project, check=False):
+        found.append(("fail", f"tag v{version} already exists; a published tag is never moved or recreated"))
+    else:
+        found.append(("ok", f"tag v{version} is free"))
+    return found
+
+
+def repository_checks(project: pathlib.Path, gate: str) -> list[tuple[str, str]]:
+    """What the release workflow needs of the GitHub repository behind origin.
+
+    GitHub creates a missing environment on first use, without rules, so
+    presence proves nothing: the environment must limit deployments to tags
+    v*, which keeps a workflow_dispatch from a branch, or a release.yml
+    edited on a branch, from publishing.
+    """
+    found: list[tuple[str, str]] = []
+    repository = github_repository(project)
+    if not repository:
+        return [("note", "origin is not on GitHub: release environment not checked")]
+    if not shutil.which("gh"):
+        return [("note", f"gh is not installed: release environment of {repository} not checked")]
+    repository_data = github_api(f"repos/{repository}") or {}
+    if repository_data.get("private"):
+        found.append(("note", f"{repository} is private: the release ships no provenance attestation (GitHub reserves"
+                              " them to paid plans); the signed tag and SHA256SUMS remain"))
+    environment = github_api(f"repos/{repository}/environments/release")
+    if environment is None:
+        found.append(("fail", f"environment release is missing in {repository}; create it and limit its deployments to tags v*"))
+    elif not (environment.get("deployment_branch_policy") or {}).get("custom_branch_policies"):
+        found.append(("fail", f"environment release of {repository} has no deployment policy: any branch,"
+                              " workflow_dispatch or edited release.yml can publish; limit it to tags v*"))
+    else:
+        policies = github_api(f"repos/{repository}/environments/release/deployment-branch-policies") or {}
+        if any(policy.get("type") == "tag" and policy.get("name") == "v*"
+               for policy in policies.get("branch_policies", [])):
+            found.append(("ok", f"environment release of {repository} limits deployments to tags v*"))
         else:
-            add("ok", f"tag v{decl.version} is free")
-        # GitHub creates a missing environment on first use, without rules,
-        # so presence proves nothing: the environment must limit deployments
-        # to tags v*, which keeps a workflow_dispatch from a branch or a
-        # release.yml edited on a branch from publishing.
-        remote = git("remote", "get-url", "origin", cwd=project, check=False)
-        match = re.search(r"github\.com[:/]([^/]+/[^/]+?)(?:\.git)?$", remote)
-        if not match:
-            add("note", "origin is not on GitHub: release environment not checked")
-        elif not shutil.which("gh"):
-            add("note", f"gh is not installed: release environment of {match.group(1)} not checked")
-        else:
-            repository = match.group(1)
-            repository_data = github_api(f"repos/{repository}") or {}
-            if repository_data.get("private"):
-                add("note", f"{repository} is private: the release ships no provenance attestation (GitHub reserves"
-                    " them to paid plans); the signed tag and SHA256SUMS remain")
-            environment = github_api(f"repos/{repository}/environments/release")
-            if environment is None:
-                add("fail", f"environment release is missing in {repository}; create it and limit its deployments to tags v*")
-            elif not (environment.get("deployment_branch_policy") or {}).get("custom_branch_policies"):
-                add("fail", f"environment release of {repository} has no deployment policy: any branch,"
-                    " workflow_dispatch or edited release.yml can publish; limit it to tags v*")
-            else:
-                policies = github_api(f"repos/{repository}/environments/release/deployment-branch-policies") or {}
-                if any(policy.get("type") == "tag" and policy.get("name") == "v*"
-                       for policy in policies.get("branch_policies", [])):
-                    add("ok", f"environment release of {repository} limits deployments to tags v*")
-                else:
-                    add("fail", f"environment release of {repository} has a deployment policy without the tag rule v*")
-            # A deployment policy says *what* may publish; it says nothing
-            # about *who* approves. The conventions call this environment the
-            # human gate, and the socle used to describe a gate it never saw
-            # closed: a product published unattended and preflight said ok.
-            for status, message in environment_gate(repository, environment, decl.gate):
-                add(status, message)
-            # The default branch is what a tag is expected to come from, and
-            # what commit_verification: signed-on-default-branch relies on.
-            protection = github_api(f"repos/{repository}/branches/"
-                                    + (repository_data.get("default_branch") or "main") + "/protection")
-            if protection is None:
-                add("note", f"the default branch of {repository} is not protected: anyone who can push can move it,"
-                    " and a tag proves only what the tag proves")
-    data["preflight"] = preflight
-    data["violations"].extend(item["message"] for item in preflight if item["status"] == "fail")
-    data["ready"] = data["valid"] and not any(item["status"] == "fail" for item in preflight)
+            found.append(("fail", f"environment release of {repository} has a deployment policy without the tag rule v*"))
+    # A deployment policy says *what* may publish; it says nothing about
+    # *who* approves. The conventions call this environment the human gate,
+    # and the socle used to describe a gate it never saw closed: a product
+    # published unattended and preflight said ok.
+    found.extend(environment_gate(repository, environment, gate))
+    # The default branch is what a tag is expected to come from, and what
+    # commit_verification: signed-on-default-branch relies on.
+    protection = github_api(f"repos/{repository}/branches/"
+                            + (repository_data.get("default_branch") or "main") + "/protection")
+    if protection is None:
+        found.append(("note", f"the default branch of {repository} is not protected: anyone who can push can move it,"
+                              " and a tag proves only what the tag proves"))
+    return found
+
+
+def handle_preflight(invocation: Invocation) -> tuple[dict, int]:
+    """What the release workflow will demand of the tag, before it exists."""
+    decl, data = check_data(invocation)
+    require_socle_mechanism(decl.project, decl.mechanism, "preflight")
+    gate = (tag_checks(decl.project, decl.version) + repository_checks(decl.project, decl.gate)) \
+        if data["valid"] else []
+    data["preflight"] = [{"status": status, "message": message} for status, message in gate]
+    data["violations"].extend(message for status, message in gate if status == "fail")
+    data["ready"] = data["valid"] and not any(status == "fail" for status, _ in gate)
     return data, EXIT_OK if data["ready"] else EXIT_VIOLATIONS
+
+
+# ---- cutting a release -------------------------------------------------------
+#
+# Two stops, and the middle one is GitHub's. The conventions say a release
+# is a signed annotated tag on a commit this repository's own checks passed
+# on, and that a tag is never pushed before they do; no command applied
+# either rule, and the failure mode was human and repeated. `cut` makes the
+# two mechanical without taking the merge: it opens the pull request and
+# waits, the repository merges it under its own rules, and `cut --tag` signs
+# the tag on the merge commit those checks ran on -- not on the branch,
+# which another merge can move between the two.
+
+# What GitHub answers about a check run. `gh pr checks --watch` returns at
+# once when no check has registered yet, which is how a release was tagged
+# on a run that had not started: the socle waits for a check to exist
+# before it waits for it to finish.
+CHECK_PENDING = ("queued", "in_progress", "pending", "waiting", "requested")
+# skipped and neutral are conclusions of a check that ran and refused
+# nothing; a path filter or a matrix exclusion is not a red check.
+CHECK_PASSED = ("success", "skipped", "neutral")
+CHANGELOG_ENTRY = r"^## {version}[^\n]*?([0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}})[^\n]*$\n(.*?)(?=^## |\Z)"
+
+
+def version_tuple(version: str) -> tuple:
+    return tuple(int(part) for part in version.split("."))
+
+
+def changelog_entry(project: pathlib.Path, version: str, at: str = "") -> tuple[str, str]:
+    """(date, body) of the ## VERSION entry, in the worktree or at a commit."""
+    if at:
+        source = git("show", f"{at}:CHANGELOG.md", cwd=project, check=False)
+    else:
+        path = project / "CHANGELOG.md"
+        source = path.read_text(encoding="utf-8") if path.is_file() else ""
+    match = re.search(CHANGELOG_ENTRY.format(version=re.escape(version)), source, re.MULTILINE | re.DOTALL)
+    return (match.group(1), match.group(2).strip("\n")) if match else ("", "")
+
+
+def check_runs(repository: str, sha: str) -> list | None:
+    """Every check run of a commit, paged; None when gh cannot answer.
+
+    The endpoint pages at 100 and a product of the fleet runs thirty-six
+    jobs: a single unpaged read would call a release green on the first
+    hundred of them.
+    """
+    runs: list = []
+    page = 1
+    while True:
+        answer = github_api(f"repos/{repository}/commits/{sha}/check-runs?per_page=100&page={page}")
+        if answer is None:
+            return None
+        batch = answer.get("check_runs") or []
+        runs.extend(batch)
+        if not batch or len(runs) >= int(answer.get("total_count") or 0):
+            return runs
+        page += 1
+
+
+def check_summary(runs: list) -> list:
+    return [{"name": run.get("name") or "?", "status": run.get("status") or "?",
+             "conclusion": run.get("conclusion") or ""} for run in runs]
+
+
+def failed_checks(runs: list) -> list:
+    return [run for run in runs if (run.get("conclusion") or "") not in CHECK_PASSED]
+
+
+def await_checks(repository: str, sha: str, timeout: int, poll: int, log) -> list:
+    """Block until SHA has at least one check run and none is still running.
+
+    A run that fails at startup produces no check at all, and waiting on
+    nothing looks exactly like waiting on a queue: when the deadline passes
+    with no check registered, the workflow runs GitHub does hold for that
+    commit are named in the refusal.
+    """
+    deadline = time.monotonic() + timeout
+    seen: list = []
+    while True:
+        runs = check_runs(repository, sha)
+        if runs is None:
+            raise Failure("PROCESS_FAILED", f"gh could not read the checks of {sha[:7]} in {repository}.",
+                          "Check 'gh auth status' and the network, then run the command again.")
+        seen = runs
+        pending = [run for run in runs if (run.get("status") or "") in CHECK_PENDING]
+        if runs and not pending:
+            return runs
+        if time.monotonic() >= deadline:
+            break
+        print(f"note     {sha[:7]}: "
+              + (f"{len(pending)} of {len(runs)} checks still running" if runs else "no check registered yet"),
+              file=log)
+        log.flush()
+        time.sleep(poll)
+    if not seen:
+        others = ", ".join(f"{run.get('name')} {run.get('status')}/{run.get('conclusion') or '-'}"
+                           for run in (github_api(f"repos/{repository}/actions/runs?head_sha={sha}&per_page=100")
+                                       or {}).get("workflow_runs") or []) or "none"
+        raise Failure("PRECONDITION_FAILED",
+                      f"No check registered on {sha[:7]} of {repository} within {timeout}s; workflow runs for that"
+                      f" commit: {others}.",
+                      "A tag is pushed only on a commit this repository has checked: give the commit a workflow,"
+                      " or read the run that failed to start.")
+    raise Failure("PRECONDITION_FAILED",
+                  f"The checks of {sha[:7]} in {repository} were still running after {timeout}s: "
+                  + ", ".join(f"{run.get('name')} {run.get('status')}" for run in seen
+                              if (run.get("status") or "") in CHECK_PENDING) + ".",
+                  "Wait for them and run the command again; nothing has been tagged.")
+
+
+def cut_repository(project: pathlib.Path) -> str:
+    repository = github_repository(project)
+    if not repository:
+        raise Failure("PRECONDITION_FAILED", f"origin of {project} is not on GitHub.",
+                      "cut opens a pull request and reads its checks through gh; publish by hand elsewhere.")
+    if not shutil.which("gh"):
+        raise Failure("NOT_FOUND", "gh is required to open the pull request and to read its checks.",
+                      "Install the GitHub CLI, or run the ceremony by hand.")
+    return repository
+
+
+def default_branch(project: pathlib.Path, repository: str) -> str:
+    head = git("symbolic-ref", "--quiet", "refs/remotes/origin/HEAD", cwd=project, check=False)
+    if head:
+        return head.rpartition("/")[2]
+    return (github_api(f"repos/{repository}") or {}).get("default_branch") or "main"
+
+
+def cut_gate(decl: Declarations, version: str) -> list:
+    """The gate cut holds before it writes anything.
+
+    Only what the repository's own CI cannot see: the operator's signing
+    configuration, the tags already published, and -- for a product the
+    socle releases -- the environment a tag would deploy into. The product
+    contract is judged by the checks cut then waits for, on the exact
+    commit, rather than a second time here from a socle that may not be the
+    one the product pins.
+    """
+    gate = tag_checks(decl.project, version)
+    if decl.releases_here:
+        gate += repository_checks(decl.project, decl.gate)
+    return gate
+
+
+def cut_open(invocation: Invocation, decl: Declarations, data: dict, log, timeout: int, poll: int) -> tuple[dict, int]:
+    """First stop: the signed bump commit, its pull request, and the wait."""
+    project, product, version = decl.project, decl.product, data["version"]
+    branch, base, repository = data["branch"], data["base"], data["repository"]
+    if not decl.version:
+        raise Failure("PRECONDITION_FAILED", f"{project} carries no VERSION of the form X.Y.Z.",
+                      "Write VERSION before cutting a release.")
+    if version_tuple(version) <= version_tuple(decl.version):
+        raise Failure("VALIDATION_FAILED", f"{version} does not come after the current version {decl.version}.",
+                      "Pass the version this release carries; a published version is never cut twice.")
+    data["previousVersion"] = decl.version
+    # The bump in progress is the only change the release commit may carry:
+    # anything else in the worktree would ride into a tagged commit unread.
+    # The status is read unstripped: the two status columns are what says
+    # tracked from untracked, and a leading space is one of them.
+    dirty = [line for line in run(["git", "status", "--porcelain"], cwd=project).stdout.split("\n") if line]
+    unexpected = sorted(line[3:] for line in dirty
+                        if not line.startswith("??") and line[3:] not in ("VERSION", "CHANGELOG.md"))
+    if unexpected:
+        raise Failure("PRECONDITION_FAILED",
+                      f"{project} has uncommitted changes outside VERSION and CHANGELOG.md: "
+                      + ", ".join(unexpected) + ".",
+                      "Commit or stash them: the release commit carries the bump and nothing else.")
+    date, body = changelog_entry(project, version)
+    if not date:
+        raise Failure("PRECONDITION_FAILED", f"CHANGELOG.md has no dated entry '## {version} - YYYY-MM-DD'.",
+                      "Write the entry first: the release workflow compares VERSION with the tag and never reads it,"
+                      " so nothing downstream would catch its absence.")
+    if date > datetime.date.today().isoformat():
+        raise Failure("VALIDATION_FAILED", f"the CHANGELOG entry of {version} is dated {date}, in the future.",
+                      "Date the entry the day the release is cut.")
+    data["changelog"] = date
+    current = git("rev-parse", "--abbrev-ref", "HEAD", cwd=project, check=False)
+    if current != base:
+        raise Failure("PRECONDITION_FAILED", f"HEAD is on {current}, not {base}: a release is never cut from a branch.",
+                      f"git -C {project} switch {base}")
+    git("fetch", "-q", "origin", base, cwd=project)
+    ahead = git("rev-list", "--count", "FETCH_HEAD..HEAD", cwd=project, check=False)
+    behind = git("rev-list", "--count", "HEAD..FETCH_HEAD", cwd=project, check=False)
+    if (ahead, behind) != ("0", "0"):
+        raise Failure("PRECONDITION_FAILED",
+                      f"{base} is {ahead} ahead and {behind} behind origin/{base}.",
+                      f"Bring the two together before cutting: the pull request is opened against origin/{base}.")
+    if git("rev-parse", "-q", "--verify", f"refs/heads/{branch}", cwd=project, check=False) \
+            or git("ls-remote", "--heads", "origin", branch, cwd=project, check=False):
+        raise Failure("PRECONDITION_FAILED", f"branch {branch} already exists.",
+                      f"Finish that cut with '{PROGRAM} cut {project} {version} --tag', or delete the branch.")
+    gate = cut_gate(decl, version)
+    data["gate"] = [{"status": status, "message": message} for status, message in gate]
+    refused = [message for status, message in gate if status == "fail"]
+    data["ready"] = not refused
+    if refused:
+        return data, EXIT_VIOLATIONS
+    if not invocation.flag("--apply"):
+        data["next"] = f"{PROGRAM} cut {project} {version} --apply"
+        return data, EXIT_OK
+    # VERSION is written by the socle rather than by a heredoc: four tags
+    # once shipped a VERSION holding a literal backslash-n.
+    (project / "VERSION").write_text(version + "\n", encoding="utf-8")
+    git("switch", "-q", "-c", branch, cwd=project)
+    git("add", "--", "VERSION", "CHANGELOG.md", cwd=project)
+    git("-c", "commit.gpgsign=true", "commit", "-q", "-S", "-m", f"{product} {version}", cwd=project)
+    data["commit"] = git("rev-parse", "HEAD", cwd=project)
+    git("push", "-q", "origin", f"HEAD:refs/heads/{branch}", cwd=project)
+    with tempfile.TemporaryDirectory(prefix="maelys-release-cut.") as temp:
+        # The body reaches gh through a file: a changelog entry holds
+        # backticks, and a shell once read five of them as commands.
+        body_file = pathlib.Path(temp) / "body.md"
+        body_file.write_text(f"## {version} - {date}\n\n{body}\n\n---\n\nOpened by `{PROGRAM} cut`."
+                             f" The tag is signed on the merge commit of this pull request, once its checks are"
+                             f" green, by `{PROGRAM} cut {project.name} {version} --tag --apply`.\n", encoding="utf-8")
+        created = run(["gh", "pr", "create", "--repo", repository, "--base", base, "--head", branch,
+                       "--title", f"{product} {version}", "--body-file", str(body_file)], cwd=project)
+    if created.returncode != 0:
+        raise Failure("PROCESS_FAILED", f"gh pr create failed: {created.stderr.strip()}",
+                      f"The signed commit is pushed on {branch}: open the pull request by hand, then"
+                      f" '{PROGRAM} cut {project} {version} --tag'.")
+    viewed = run(["gh", "pr", "view", branch, "--repo", repository, "--json", "number,url,state"], cwd=project)
+    pull = json.loads(viewed.stdout) if viewed.returncode == 0 else {"url": created.stdout.strip()}
+    data["pullRequest"] = {"number": pull.get("number", 0), "url": pull.get("url", ""),
+                           "state": pull.get("state", "OPEN")}
+    print(f"cut      waiting for the checks of {data['commit'][:7]} in {repository}", file=log)
+    log.flush()
+    runs = await_checks(repository, data["commit"], timeout, poll, log)
+    data["checks"] = check_summary(runs)
+    failed = failed_checks(runs)
+    data["ready"] = not failed
+    data["next"] = (f"merge {data['pullRequest']['url']} on GitHub, then"
+                    f" '{PROGRAM} cut {project} {version} --tag --apply'" if not failed
+                    else f"fix what the checks refused and push {branch} again")
+    return data, EXIT_OK if not failed else EXIT_VIOLATIONS
+
+
+def cut_tag(invocation: Invocation, decl: Declarations, data: dict, log, timeout: int, poll: int) -> tuple[dict, int]:
+    """Second stop: the tag, signed on the merge commit whose checks passed."""
+    project, product, version = decl.project, decl.product, data["version"]
+    tag, branch, base, repository = data["tag"], data["branch"], data["base"], data["repository"]
+    apply = invocation.flag("--apply")
+    listed = run(["gh", "pr", "list", "--repo", repository, "--head", branch, "--state", "all",
+                  "--limit", "10", "--json", "number,url,state,mergeCommit"], cwd=project)
+    if listed.returncode != 0:
+        raise Failure("PROCESS_FAILED", f"gh pr list failed: {listed.stderr.strip()}",
+                      "Check 'gh auth status', then run the command again.")
+    pulls = json.loads(listed.stdout or "[]")
+    if not pulls:
+        raise Failure("NOT_FOUND", f"no pull request from {branch} in {repository}.",
+                      f"Open the release first: '{PROGRAM} cut {project} {version} --apply'.")
+    if len(pulls) > 1:
+        raise Failure("PRECONDITION_FAILED",
+                      f"{len(pulls)} pull requests come from {branch} in {repository}: "
+                      + ", ".join(str(pull["number"]) for pull in pulls) + ".",
+                      "Close the ones that do not belong to this release, then run the command again.")
+    pull = pulls[0]
+    data["pullRequest"] = {"number": pull["number"], "url": pull["url"], "state": pull["state"]}
+    if pull["state"] != "MERGED":
+        raise Failure("PRECONDITION_FAILED", f"{pull['url']} is {pull['state'].lower()}, not merged.",
+                      "Merge it on GitHub under this repository's own rules; cut never merges its own pull request,"
+                      " which would work only where the default branch is unprotected.")
+    merge = (pull.get("mergeCommit") or {}).get("oid") or ""
+    if not merge:
+        raise Failure("PRECONDITION_FAILED", f"{pull['url']} is merged but names no merge commit.",
+                      "Read the pull request on GitHub; nothing is tagged.")
+    data["commit"] = merge
+    git("fetch", "-q", "origin", base, cwd=project)
+    head = git("rev-parse", "FETCH_HEAD", cwd=project)
+    if run(["git", "cat-file", "-e", f"{merge}^{{commit}}"], cwd=project).returncode != 0:
+        git("fetch", "-q", "origin", merge, cwd=project)
+    # The tag names the commit whose checks were read, never the branch: a
+    # merge landing between the two would move origin/BASE under the tag.
+    if run(["git", "merge-base", "--is-ancestor", merge, head], cwd=project).returncode != 0:
+        raise Failure("PRECONDITION_FAILED", f"the merge commit {merge[:7]} of {pull['url']} is not on origin/{base}.",
+                      "The pull request was merged elsewhere, or the branch was moved; nothing is tagged.")
+    carried = git("show", f"{merge}:VERSION", cwd=project, check=False).strip()
+    if carried != version:
+        raise Failure("PRECONDITION_FAILED", f"{merge[:7]} carries VERSION {carried or 'nothing'}, not {version}.",
+                      "A tag names a commit that carries its version; read what was merged.")
+    date, body = changelog_entry(project, version, at=merge)
+    if not date:
+        raise Failure("PRECONDITION_FAILED", f"{merge[:7]} has no dated CHANGELOG entry for {version}.",
+                      "Read what was merged; nothing is tagged.")
+    data["changelog"] = date
+    gate = tag_checks(project, version)
+    if merge != head:
+        gate.append(("note", f"origin/{base} has moved past {merge[:7]}: the tag names the commit whose checks"
+                             " were read, not the head of the branch"))
+    if git("ls-remote", "--tags", "origin", f"refs/tags/{tag}", cwd=project, check=False):
+        gate.append(("fail", f"{tag} already exists on origin; a published tag is never moved or recreated"))
+    data["gate"] = [{"status": status, "message": message} for status, message in gate]
+    if apply:
+        print(f"cut      waiting for the checks of {merge[:7]} in {repository}", file=log)
+        log.flush()
+        runs = await_checks(repository, merge, timeout, poll, log)
+    else:
+        runs = check_runs(repository, merge) or []
+    data["checks"] = check_summary(runs)
+    failed = failed_checks(runs)
+    refused = [message for status, message in gate if status == "fail"] \
+        + [f"{run['name']}: {run.get('conclusion') or run.get('status')}" for run in failed]
+    data["ready"] = bool(runs) and not refused
+    if not data["ready"]:
+        return data, EXIT_VIOLATIONS
+    if not apply:
+        data["next"] = f"{PROGRAM} cut {project} {version} --tag --apply"
+        return data, EXIT_OK
+    message = invocation.option("--message")
+    annotation = pathlib.Path(str(message)).read_text(encoding="utf-8") if message \
+        else f"{product} {version}\n\n{body}\n"
+    git("tag", "-s", "-m", annotation, tag, merge, cwd=project)
+    verified = run(["git", "tag", "-v", tag], cwd=project)
+    if verified.returncode != 0:
+        git("tag", "-d", tag, cwd=project)
+        raise Failure("PROCESS_FAILED", f"the signature of {tag} does not verify: {verified.stderr.strip()}",
+                      "Fix the signing key and run the command again; nothing was pushed.")
+    git("push", "-q", "origin", f"refs/tags/{tag}", cwd=project)
+    data["pushed"] = True
+    reference = github_api(f"repos/{repository}/git/ref/tags/{tag}") or {}
+    object_sha = (reference.get("object") or {}).get("sha") or ""
+    annotated = github_api(f"repos/{repository}/git/tags/{object_sha}") if object_sha else None
+    data["verified"] = bool(((annotated or {}).get("verification") or {}).get("verified"))
+    data["next"] = (f"{tag} is published on {merge[:7]}" if data["verified"]
+                    else f"{tag} is pushed, and GitHub does not report it verified: check the signing key on GitHub")
+    return data, EXIT_OK
+
+
+def handle_cut(invocation: Invocation) -> tuple[dict, int]:
+    """Open the release of a version, then sign its tag on the merged commit."""
+    project, product, mechanism = project_of(invocation)
+    version = str(invocation.operands[1])
+    if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version):
+        raise Failure("VALIDATION_FAILED", f"VERSION is X.Y.Z: {version}.",
+                      "Pass the version this release carries.")
+    repository = cut_repository(project)
+    decl = read_declarations(project, product, mechanism)
+    data: dict = {"mode": "apply" if invocation.flag("--apply") else "plan",
+                  "stage": "tag" if invocation.flag("--tag") else "open",
+                  "product": product, "project": str(project), "repository": repository,
+                  "version": version, "tag": f"v{version}", "branch": f"release/v{version}",
+                  "base": default_branch(project, repository),
+                  "gate": [], "checks": [], "ready": False}
+    log = sys.stderr if invocation.format != "text" else sys.stdout
+    timeout = int(invocation.option("--timeout", 30)) * 60
+    poll = int(invocation.option("--poll", 15))
+    stage = cut_tag if invocation.flag("--tag") else cut_open
+    return stage(invocation, decl, data, log, timeout, poll)
 
 
 REHEARSAL = r"""
@@ -2141,6 +2510,22 @@ def text_check(data: dict, with_checks: bool = True) -> str:
     return (checks_text(data["checks"]) if with_checks else "") + "\n".join(lines) + "\n"
 
 
+def text_cut(data: dict) -> str:
+    stage = "opening" if data["stage"] == "open" else "tagging"
+    lines = [f"cut      {stage} {data['product']} {data['version']} on {data['branch']}"
+             f" -> {data['base']} of {data['repository']}"]
+    lines.extend(f"{LABELS.get(item['status'], item['status']):<8} {item['message']}" for item in data["gate"])
+    for check in data["checks"]:
+        state = check["conclusion"] or check["status"]
+        lines.append(f"{('ok' if state in CHECK_PASSED else state.upper()):<8} {check['name']}")
+    if "pullRequest" in data:
+        lines.append(f"{'pull':<8} {data['pullRequest']['url']}")
+    if data.get("commit"):
+        lines.append(f"{'commit':<8} {data['commit']}")
+    lines.append(f"cut: {data.get('next') or ('ready' if data['ready'] else 'not ready')}")
+    return "\n".join(lines) + "\n"
+
+
 def text_preflight(data: dict) -> str:
     # the check part first, with its drift lines when it fails; then the tag preconditions
     lines = [text_check(data).rstrip("\n")]
@@ -2224,6 +2609,7 @@ TEXT = {
     "check": text_check,
     "declarations": text_declarations,
     "preflight": text_preflight,
+    "cut": text_cut,
     "rehearse": lambda data: (f"rehearse: {data['target']} built " + ", ".join(data["artifacts"]) + "\n"
                               if data["mode"] == "package" else f"rehearse: check passed on {data['target']}\n"),
     "render": lambda data: f"rendered {data['output']}\n",
@@ -2269,6 +2655,31 @@ CHECK_SCHEMA = {"type": "object", "additionalProperties": False,
                                "pinned": {"type": ["object", "null"]}, "checks": CHECKS_SCHEMA,
                                "files": FILES_SCHEMA, "violations": STRINGS,
                                "conventions": VERDICT_SCHEMA, "release": VERDICT_SCHEMA}}
+CUT_SCHEMA = {"type": "object", "additionalProperties": False,
+              "required": ["mode", "stage", "product", "project", "repository", "version", "tag", "branch",
+                           "base", "gate", "checks", "ready"],
+              "properties": {"mode": {"enum": ["plan", "apply"]}, "stage": {"enum": ["open", "tag"]},
+                             "product": {"type": "string"}, "project": {"type": "string"},
+                             "repository": {"type": "string"}, "version": {"type": "string"},
+                             "previousVersion": {"type": "string"}, "tag": {"type": "string"},
+                             "branch": {"type": "string"}, "base": {"type": "string"},
+                             "changelog": {"type": "string"},
+                             "gate": {"type": "array", "items": {
+                                 "type": "object", "additionalProperties": False, "required": ["status", "message"],
+                                 "properties": {"status": {"type": "string"}, "message": {"type": "string"}}}},
+                             "checks": {"type": "array", "items": {
+                                 "type": "object", "additionalProperties": False,
+                                 "required": ["name", "status", "conclusion"],
+                                 "properties": {"name": {"type": "string"}, "status": {"type": "string"},
+                                                "conclusion": {"type": "string"}}}},
+                             "ready": {"type": "boolean"}, "commit": {"type": "string"},
+                             "pullRequest": {"type": "object", "additionalProperties": False,
+                                             "required": ["number", "url", "state"],
+                                             "properties": {"number": {"type": "integer"},
+                                                            "url": {"type": "string"},
+                                                            "state": {"type": "string"}}},
+                             "pushed": {"type": "boolean"}, "verified": {"type": "boolean"},
+                             "next": {"type": "string"}}}
 DOCS_CONTRACT_OPTION = cli.flag(
     "--docs-contract", "Refuse prose in docs/ and a CLI reference outside docs/cli.md, instead of noting them.")
 MECHANISM_OPTION = cli.option(
@@ -2402,6 +2813,21 @@ APP = cli.Program(PROGRAM, PRODUCT, socle_version(), [
                                     "socle": SOCLE_SCHEMA, "pinned": {"type": ["object", "null"]},
                                     "checks": CHECKS_SCHEMA, "files": FILES_SCHEMA,
                                     "preflight": CHECKS_SCHEMA, "violations": STRINGS}}),
+    cli.transaction("cut", "cut",
+                    "Open the release of a version, then sign its tag on the merge commit whose checks passed;"
+                    " plan without --apply.",
+                    handle_cut, commit=True,
+                    operands=[DIR_OPERAND, cli.operand("VERSION", "The version this release carries, X.Y.Z.")],
+                    options=[SOCLE_OPTIONS[0], MECHANISM_OPTION,
+                             cli.flag("--tag", "The second stop: read the merged pull request and sign the tag."),
+                             cli.option("--message", "File holding the tag's annotation; the CHANGELOG entry of the"
+                                        " version by default.", cli.argument("FILE"), requires=("--tag",)),
+                             cli.option("--timeout", "Minutes to wait for the checks of a commit.",
+                                        cli.argument("MINUTES", "integer", minimum=1, maximum=240), default="30"),
+                             cli.option("--poll", "Seconds between two readings of the checks.",
+                                        cli.argument("SECONDS", "integer", minimum=5, maximum=300), default="15",
+                                        hidden=True)],
+                    schema=CUT_SCHEMA),
     cli.execute("rehearse", "rehearse",
                 "Replay the Linux build job of the release, or make check with --check, in a Docker container on a copy of the working tree.",
                 handle_rehearse,

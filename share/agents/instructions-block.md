@@ -31,7 +31,11 @@ are in `docs/conventions.md` of maelys-release.
 - A release is a signed, annotated tag `vX.Y.Z` on `main` whose commit
   carries `VERSION` = `X.Y.Z` and a dated `CHANGELOG.md` entry. Never push a
   tag before `make check` passes on that exact commit, never move or force a
-  tag, never publish from a branch.
+  tag, never publish from a branch. `maelys-release cut DIR X.Y.Z --apply`
+  does exactly that in two stops: it writes `VERSION`, commits it signed on
+  `release/vX.Y.Z`, opens the pull request and waits for its checks; after
+  the merge, `cut DIR X.Y.Z --tag --apply` signs the tag on the merge commit
+  those checks ran on. It never merges its own pull request.
 - The workflow verifies the tag through the GitHub API, builds on Linux
   x86_64, Linux arm64 and macOS arm64 with `scripts/package-release.sh
   TARGET`, attests provenance, publishes the GitHub release, renders

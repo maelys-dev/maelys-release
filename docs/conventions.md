@@ -164,6 +164,41 @@ once its prose has moved.
 - A published tag is never moved, deleted or force-pushed. A mistake is
   fixed by the next patch release.
 
+### Cutting a release, in two stops
+
+Two of the rules above — the tag comes after the checks of that exact
+commit, and a release is never published from a branch — held only as
+prose, and the way they were broken was always the same: a hand, at the
+end of a long day, on a checkout that was almost right. `maelys-release
+cut DIR X.Y.Z` makes them mechanical without taking the merge.
+
+The first stop refuses before it writes: a version that does not come
+after the current one, a worktree carrying anything but `VERSION` and
+`CHANGELOG.md`, a missing or future-dated changelog entry, a `HEAD` that
+is not the default branch up to date with `origin`, and the gate
+`preflight` holds — the signing configuration, the previous tag, a free
+`vX.Y.Z`, and, for a product the socle releases, the `release`
+environment. It then writes `VERSION`, commits it signed on
+`release/vX.Y.Z`, opens the pull request and **waits for the checks of
+that commit to exist and to finish**. Waiting for them to exist is the
+point: a checks command that answers at once when no run has registered
+yet reports green on a release nobody has built.
+
+The middle stop is GitHub's. `cut` never merges its own pull request: a
+command that did would work only where the default branch is
+unprotected, and would teach the whole fleet that the releaser approves
+themselves.
+
+`cut DIR X.Y.Z --tag` is the second stop. It reads the merged pull
+request, takes **its merge commit** — never `origin/main`, which another
+merge can move between the two — verifies that commit is on the default
+branch, carries `VERSION` = `X.Y.Z` and a dated changelog entry, waits
+for every one of its checks to be green, then signs the tag on it and
+pushes. The annotation is the changelog entry unless `--message FILE`
+gives another. Both stops plan without `--apply`, and neither is
+required: the ceremony by hand remains what it was.
+
+
 ## Dependencies and packages
 
 - A dependency whose build needs its submodules says so, on a `submodules`
@@ -678,6 +713,7 @@ maelys-release/bin/maelys-release adopt /path/to/product            # plan
 maelys-release/bin/maelys-release adopt /path/to/product --apply    # write
 maelys-release/bin/maelys-release check /path/to/product            # exit 2 on any violation
 maelys-release/bin/maelys-release preflight /path/to/product        # exit 2 when the tag would be refused
+maelys-release/bin/maelys-release cut /path/to/product X.Y.Z       # the release, in two stops
 ```
 
 The command follows the agent-cli/v2 contract (maelys-dev/agent-cli-spec,
@@ -686,7 +722,7 @@ pinned in `dependencies/agent-cli-spec.pin` for its conformance kit): `describe
 with `--format json`, failures are envelopes on stderr. `check` belongs in
 the product's `make check` and in the fleet drift check of maelys-platform;
 `preflight` is the first step of a release, on the machine that will sign
-the tag. `adopt` runs from a checkout of the socle at a tag: a commit
+the tag, and `cut` is that release carried out. `adopt` runs from a checkout of the socle at a tag: a commit
 without a tag is refused, `--allow-untagged` being the trial of a
 candidate before its tag.
 
