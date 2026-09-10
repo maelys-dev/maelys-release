@@ -1001,8 +1001,96 @@ def pinned_socle(project: pathlib.Path) -> dict | None:
         match = re.search(rf"{re.escape(SOCLE_REPOSITORY)}/\.github/workflows/{workflow}\.yml@([0-9a-f]{{40}}) # (\S+)",
                           path.read_text(encoding="utf-8"))
         if match:
-            return {"sha": match.group(1), "tag": match.group(2)}
+            # The file is part of the answer: a fleet observer comparing pins
+            # needs to know which of the two a product names it in, and
+            # reading that back out of the repository is the regular
+            # expression this field exists to retire.
+            return {"sha": match.group(1), "tag": match.group(2),
+                    "file": f".github/workflows/{name}"}
     return None
+
+
+RUNS_ON = re.compile(r"^\s*runs-on:\s*(.+?)\s*$", re.M)
+MATRIX_REFERENCE = re.compile(r"^\$\{\{\s*(?:fromJSON\()?\s*matrix\.([A-Za-z0-9_-]+)\s*\)?\s*\}\}$")
+EXPRESSION = re.compile(r"\$\{\{")
+
+
+def matrix_values(text: str, key: str) -> list[str]:
+    """The literal values a matrix key lists, anywhere in one workflow.
+
+    Line-based on purpose: the socle carries no YAML parser and vendors none.
+    A value it cannot read as a literal is not guessed, it is reported
+    unresolved, because a runner nobody could name must not read as absent.
+    """
+    values: list[str] = []
+    for number, line in enumerate(text.splitlines()):
+        if not re.fullmatch(rf"\s*{re.escape(key)}:\s*(\[.*\])?\s*", line):
+            continue
+        inline = re.search(r"\[(.*)\]", line)
+        if inline:
+            values.extend(item.strip().strip("\"'") for item in inline.group(1).split(",") if item.strip())
+            continue
+        indent = len(line) - len(line.lstrip())
+        for following in text.splitlines()[number + 1:]:
+            if not following.strip():
+                continue
+            if len(following) - len(following.lstrip()) <= indent:
+                break
+            item = re.fullmatch(r"\s*-\s*(.+?)\s*", following)
+            if not item:
+                break
+            values.append(item.group(1).strip("\"'"))
+    # A matrix written as `include:` names the key on each entry rather than
+    # once above a list, and that is the shape maelys-datalog and the socle's
+    # own release.yml used. Collecting the scalar form too may pick up a key
+    # of the same name elsewhere in the file, which adds a label that is not
+    # a runner; for a control that refuses a self-hosted runner, naming one
+    # too many is a nuisance and naming one too few is a hole.
+    for line in text.splitlines():
+        scalar = re.fullmatch(rf"\s*-?\s*{re.escape(key)}:\s*(?!\s*[\[|>])(\S.*?)\s*", line)
+        if scalar:
+            values.append(scalar.group(1).strip("\"'"))
+    return sorted({value for value in values if value and not EXPRESSION.search(value)})
+
+
+def read_runners(project: pathlib.Path) -> dict:
+    """Which runners this repository's workflows select, and what could not be read.
+
+    A public repository may only use runners GitHub hosts, and the fleet
+    checks that before opening one. Searching the text of `runs-on` for a
+    label misses every workflow that selects through a matrix, and reads a
+    repository it could not decide about as clean. So the socle resolves a
+    matrix reference within the same file, and everything it still cannot
+    name goes to `unresolved`: an observer blocks on that rather than
+    passing.
+    """
+    labels: set[str] = set()
+    unresolved: list[str] = []
+    delegated = False
+    workflows = project / ".github" / "workflows"
+    for path in sorted(workflows.glob("*.y*ml")) if workflows.is_dir() else []:
+        text = path.read_text(encoding="utf-8")
+        for match in RUNS_ON.finditer(text):
+            value = match.group(1).strip().strip("\"'")
+            reference = MATRIX_REFERENCE.fullmatch(value)
+            if reference:
+                found = matrix_values(text, reference.group(1))
+                if found:
+                    labels.update(found)
+                else:
+                    unresolved.append(f"{path.name}: {value}")
+                continue
+            if EXPRESSION.search(value):
+                unresolved.append(f"{path.name}: {value}")
+                continue
+            labels.update(item.strip().strip("\"'") for item in value.strip("[]").split(",") if item.strip())
+        if re.search(rf"^\s*uses:\s*{re.escape(SOCLE_REPOSITORY)}/", text, re.M):
+            delegated = True
+    # maelys-oci names no runner at all: every job of its tree calls a
+    # reusable workflow. An empty label list therefore means "this repository
+    # chooses none", not "this repository is safe": the runners it uses are
+    # those of the socle it pins.
+    return {"labels": sorted(labels), "unresolved": unresolved, "delegated": delegated}
 
 
 def socle_data(sha: str, tag: str) -> dict:
@@ -1570,8 +1658,20 @@ def handle_declarations(invocation: Invocation) -> tuple[dict, int]:
     """The product contract as data, for a CI job that installs what it declares."""
     project, product, mechanism = project_of(invocation)
     decl = read_declarations(project, product, mechanism)
+    release_workflow_text = (project / ".github" / "workflows" / "release.yml")
+    stamp = re.search(r"# Managed by maelys-release (\S+) \(([0-9.]+)\)",
+                      release_workflow_text.read_text(encoding="utf-8")
+                      if release_workflow_text.is_file() else "")
     return {"valid": decl.valid, "product": product, "project": str(project), "version": decl.version,
             "mechanism": mechanism,
+            # What the socle would run, and separately what the product asked
+            # for. A field that folds the two says "everyone targets these
+            # three" when it means "nobody declared anything".
+            "declared": {"targets": [name for name, _ in decl.targets],
+                         "manifestPatterns": list(decl.manifest_patterns)},
+            "pinned": pinned_socle(project),
+            "managedBy": stamp.group(1) if stamp else "",
+            "runners": read_runners(project),
             "dependencies": decl.dependencies, "linuxPackages": decl.linux_packages,
             "macosPackages": decl.macos_packages, "formulas": decl.formulas,
             "targets": [name for name, _ in decl.targets] or list(SOCLE_TARGETS),
@@ -1948,7 +2048,14 @@ def text_declarations(data: dict) -> str:
     return checks_text(data["checks"]) + "".join(f"{key:<13} {value}\n" for key, value in (
         ("dependencies", " ".join(data["dependencies"])), ("linux", data["linuxPackages"]),
         ("macos", data["macosPackages"]), ("formulas", " ".join(data["formulas"])),
-        ("targets", " ".join(data["targets"])), ("manifest", data["manifestPatterns"]),
+        ("targets", " ".join(data["targets"]) + ("" if data["declared"]["targets"] else " (default)")),
+        ("manifest", data["manifestPatterns"]
+                     + ("" if data["declared"]["manifestPatterns"] else " (default)")),
+        ("pinned", f"{data['pinned']['tag']} in {data['pinned']['file']}" if data["pinned"] else ""),
+        ("runners", " ".join(data["runners"]["labels"])
+                    + (f" + {len(data['runners']['unresolved'])} unresolved"
+                       if data["runners"]["unresolved"] else "")
+                    + (" (and the socle's, delegated)" if data["runners"]["delegated"] else "")),
         ("channels", " ".join(f"{c['name']} ({c['registry']})" for c in data["channels"])),
         ("fuzz", f"{data['fuzz']['harnesses']}/ run by {data['fuzz']['runs']}"
                  if data["fuzz"]["harnesses"] else "")))
@@ -2147,7 +2254,8 @@ APP = cli.Program(PROGRAM, PRODUCT, socle_version(), [
              schema={"type": "object", "additionalProperties": False,
                      "required": ["valid", "product", "project", "version", "mechanism", "dependencies",
                                   "linuxPackages", "macosPackages", "formulas", "targets",
-                                  "manifestPatterns", "channels", "fuzz", "checks"],
+                                  "manifestPatterns", "channels", "fuzz", "declared", "pinned",
+                                  "managedBy", "runners", "checks"],
                      "properties": {"valid": {"type": "boolean"}, "product": {"type": "string"},
                                     "project": {"type": "string"}, "version": {"type": "string"},
                                     "mechanism": MECHANISM_SCHEMA,
@@ -2159,6 +2267,17 @@ APP = cli.Program(PROGRAM, PRODUCT, socle_version(), [
                                         "required": ["name", "registry"],
                                         "properties": {"name": {"type": "string"},
                                                        "registry": {"type": "string"}}}},
+                                    "declared": {"type": "object", "additionalProperties": False,
+                                                 "required": ["targets", "manifestPatterns"],
+                                                 "properties": {"targets": STRINGS,
+                                                                "manifestPatterns": STRINGS}},
+                                    "pinned": {"type": ["object", "null"]},
+                                    "managedBy": {"type": "string"},
+                                    "runners": {"type": "object", "additionalProperties": False,
+                                                "required": ["labels", "unresolved", "delegated"],
+                                                "properties": {"labels": STRINGS,
+                                                               "unresolved": STRINGS,
+                                                               "delegated": {"type": "boolean"}}},
                                     "fuzz": {"type": "object", "additionalProperties": False,
                                              "required": ["harnesses", "runs"],
                                              "properties": {

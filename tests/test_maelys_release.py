@@ -767,6 +767,52 @@ class ProductNeedsTest(unittest.TestCase):
         self.assertEqual(data["fuzz"], {"harnesses": "", "runs": "none"})
         self.assertEqual([c for c in data["checks"] if "fuzz" in c["message"]], [])
 
+    def test_the_contract_separates_what_is_declared_from_what_is_default(self) -> None:
+        self.product.run("adopt", self.dir, "--apply")
+        data = self.product.json("declarations", self.dir)["data"]
+        # Effective and declared are not the same answer: folding them makes a
+        # fleet read "everyone targets these three" where nobody declared one.
+        self.assertEqual(data["targets"], ["linux-x86_64", "linux-arm64", "macos-arm64"])
+        self.assertEqual(data["declared"], {"targets": [], "manifestPatterns": []})
+        self.product.write("packaging/release", "[targets]\nlinux-arm64\n\n[manifest]\n*.wasm\n")
+        data = self.product.json("declarations", self.dir)["data"]
+        self.assertEqual(data["declared"], {"targets": ["linux-arm64"],
+                                            "manifestPatterns": ["*.wasm"]})
+        self.assertEqual(data["manifestPatterns"], "*.tar.gz *.deb *.rpm *.wasm")
+
+    def test_the_contract_carries_the_pin_its_file_and_the_stamp(self) -> None:
+        self.product.run("adopt", self.dir, "--apply")
+        data = self.product.json("declarations", self.dir)["data"]
+        self.assertEqual(data["pinned"]["file"], ".github/workflows/release.yml")
+        self.assertTrue(data["managedBy"], data)
+
+    def test_runners_are_read_through_a_matrix_and_never_guessed(self) -> None:
+        self.product.run("adopt", self.dir, "--apply")
+        self.product.write(".github/workflows/own.yml", """name: own
+on: [push]
+jobs:
+  plain:
+    runs-on: ubuntu-24.04
+  through-a-matrix:
+    strategy:
+      matrix:
+        os: [ubuntu-24.04, self-hosted]
+    runs-on: ${{ matrix.os }}
+  through-an-input:
+    runs-on: ${{ fromJSON(inputs.runner) }}
+""")
+        runners = self.product.json("declarations", self.dir)["data"]["runners"]
+        # A self-hosted runner named only inside a matrix is found: searching
+        # the text of runs-on for the label would have read this as clean.
+        self.assertIn("self-hosted", runners["labels"])
+        self.assertIn("ubuntu-24.04", runners["labels"])
+        # And what cannot be named is reported rather than omitted, so an
+        # observer blocks on ignorance instead of passing.
+        self.assertEqual(runners["unresolved"], ["own.yml: ${{ fromJSON(inputs.runner) }}"])
+        # A repository whose jobs only call the socle names no runner: an
+        # empty list means it chooses none, not that it is safe.
+        self.assertTrue(runners["delegated"])
+
     def test_the_reusable_workflows_carry_the_new_inputs(self) -> None:
         release = (ROOT / ".github" / "workflows" / "release.yml").read_text()
         self.assertIn("verify_command:", release)
@@ -848,7 +894,10 @@ class MechanismTest(unittest.TestCase):
         # ci.yml line drifted against a socle labelled "untagged".
         self.product.run("adopt", self.dir, "--apply")
         data = self.product.json("check", self.dir, "--socle-sha", "f" * 40)["data"]
-        self.assertEqual(data["pinned"], {"sha": "f" * 40, "tag": "v9.9.9"})
+        # The file is part of the answer: a product that keeps its own
+        # release names the socle in ci.yml and nowhere else.
+        self.assertEqual(data["pinned"], {"sha": "f" * 40, "tag": "v9.9.9",
+                                          "file": ".github/workflows/ci.yml"})
         self.assertEqual(data["socle"]["tag"], "v9.9.9")
         self.assertTrue(data["valid"], data["violations"])
         self.assertEqual([entry["action"] for entry in data["files"]
@@ -1522,6 +1571,19 @@ class UnitTest(unittest.TestCase):
         for text in ("a\n", "[bsd]\na\n", "[linux]\na b\n", "[linux]\n-a\n"):
             with self.assertRaises(ValueError):
                 MODULE.parse_packages(text)
+
+    def test_matrix_values(self) -> None:
+        block = "    strategy:\n      matrix:\n        os:\n          - ubuntu-24.04\n          - self-hosted\n"
+        self.assertEqual(MODULE.matrix_values(block, "os"), ["self-hosted", "ubuntu-24.04"])
+        # The include form names the key on each entry; it is what
+        # maelys-datalog writes, and reading only the list form reported it
+        # unresolved.
+        include = "      matrix:\n        include:\n          - os: ubuntu-24.04\n            target: linux-x86_64\n"
+        self.assertEqual(MODULE.matrix_values(include, "os"), ["ubuntu-24.04"])
+        self.assertEqual(MODULE.matrix_values("        os: [a, \"b\"]\n", "os"), ["a", "b"])
+        # An expression is not a literal and is never guessed at.
+        self.assertEqual(MODULE.matrix_values("        os: [${{ inputs.x }}]\n", "os"), [])
+        self.assertEqual(MODULE.matrix_values("        other: [a]\n", "os"), [])
 
     def test_parse_release(self) -> None:
         self.assertEqual(MODULE.parse_release("[targets]\nlinux-arm64\nwasm32 ubuntu-26.04\n"),
