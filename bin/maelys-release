@@ -1395,12 +1395,26 @@ def migration_notes(data: dict) -> str:
     return "\n".join(lines) + ("\n" if lines else "")
 
 
+def destination_is_public(repository: str) -> bool | None:
+    """Whether the prose's destination can be read by a stranger; None if unknown."""
+    data = github_api(f"repos/{repository}")
+    return None if data is None else data.get("visibility") == "public"
+
+
 def rewrite_readme(clone: pathlib.Path, product: str, data: dict) -> str:
     """Point the README at the prose that left, and say nothing more.
 
     The socle does not rewrite a product's own README: it cannot say what the
     product is. It replaces the links to the documents that moved with one
     line naming where they went, and leaves every other section untouched.
+
+    That line does not name a destination a reader cannot open. maelys-docs
+    is private, and a public README naming it sends the reader to a 404 and
+    plants the private reference the fleet audit blocks a repository on
+    before opening it. The managed AGENTS.md block is where an agent reads
+    the destination; the README is read by strangers. When the destination
+    cannot be checked, the socle assumes it cannot be opened: naming it
+    wrongly is worse than naming nothing.
     """
     readme = clone / "README.md"
     if not readme.is_file():
@@ -1415,7 +1429,11 @@ def rewrite_readme(clone: pathlib.Path, product: str, data: dict) -> str:
     if not dropped:
         return "unchanged: it named none of them"
     text = "\n".join(kept)
-    pointer = (f"The documentation of {product} is in `{data['repository']}`, directory `{product}/`.\n")
+    public = destination_is_public(data["repository"])
+    if public:
+        pointer = f"The documentation of {product} is in `{data['repository']}`, directory `{product}/`.\n"
+    else:
+        pointer = f"The documentation of {product} is no longer kept in this repository.\n"
     if "\n## Documentation\n" in text:
         head, _, tail = text.partition("\n## Documentation\n")
         rest = tail.split("\n## ", 1)
@@ -1423,7 +1441,11 @@ def rewrite_readme(clone: pathlib.Path, product: str, data: dict) -> str:
     else:
         text = text.rstrip("\n") + "\n\n## Documentation\n\n" + pointer
     readme.write_text(re.sub(r"\n{3,}", "\n\n", text).rstrip("\n") + "\n", encoding="utf-8")
-    return f"{dropped} link lines replaced by one pointer"
+    if public:
+        return f"{dropped} link lines replaced by one pointer"
+    reason = "is private" if public is False else "could not be checked, so it is assumed private"
+    return (f"{dropped} link lines replaced by one pointer naming no repository:"
+            f" {data['repository']} {reason}. Point the README at the product's site by hand")
 
 
 def handle_migrate(invocation: Invocation) -> tuple[dict, int]:

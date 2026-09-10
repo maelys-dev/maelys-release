@@ -557,6 +557,24 @@ review.
   that glob is about to match one file instead of nineteen. The socle knows
   it and says it.
 
+### What the README may say about the prose that left
+
+`migrate` replaces the links to the documents it moved with one pointer, and
+that pointer **never names a destination the reader cannot open**.
+maelys-docs is private: a public README naming it sends a reader to a 404,
+and plants exactly the private reference the fleet audit blocks a repository
+on before opening it to the public.
+
+So the socle asks GitHub for the destination's visibility. A public
+destination is named; a private one, or one the socle could not check, is
+not, and the report says what a human must still do: point the README at
+the product's site. An unreachable answer is read as private, because naming
+a destination wrongly is worse than naming none.
+
+The managed `AGENTS.md` block is the other half of this: an agent reads the
+destination there, where the reader is an agent that has access, while the
+README is read by strangers.
+
 ## Creating a repository
 
 ```sh
