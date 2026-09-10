@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.31.0 — 2026-09-10
+
+- **The job that runs a product's own `package_command` no longer holds a
+  write token.** `contents: write` on GitHub is repository-wide: the build
+  could rewrite the assets of releases already published, push to any branch
+  — no repository of the fleet protects its default branch — and create
+  tags. A compromised toolchain in that job held the repository, not a
+  draft. It now holds `contents: read` with OIDC and attestations, and
+  nothing else.
+- The bytes cross the run as workflow artifacts, kept one day, instead of
+  through a draft release. `publish` verifies what `build` produced, not
+  what a writing job could have edited between the two: the former
+  `sha256sum -c` compared artifacts against `.sha256` files that came from
+  the same draft and the same job, which proved consistency and not
+  integrity.
+- The `prepare` job disappears. `publish` creates the release, fills it and
+  publishes it, and is the only job of this workflow that may write. A
+  release therefore asks for one approval instead of two, in front of the
+  only job that can change anything.
+- Reported by maelys-datalog, whose own release separates these privileges.
+  Their question was precise — where does `publish` get the hashes it
+  verifies — and the answer was the draft.
+- **This reverses 0.15.1**, which moved the transport onto a draft release so
+  that publication would not depend on the Actions artifact quota. That trade
+  bought storage with a token, and the token was repository-wide. The
+  artifacts come back with a one-day retention, and the reversal is named
+  rather than slipped in: `maelys-oci` is private, so its releases now
+  consume billed artifact storage for up to a day. The four other products on
+  this mechanism are public, where that storage is free.
+
 ## 0.30.0 — 2026-09-10
 
 - A repository declares the gate it wants, and `preflight` verifies that

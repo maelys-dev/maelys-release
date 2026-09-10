@@ -1,8 +1,10 @@
 name: release (reusable)
 
 # Reusable release of one Maelys product on a signed tag: verify the tag and
-# VERSION, build the packages on every target, attest their provenance and
-# publish one GitHub release with SHA256SUMS. The targets and the archive
+# VERSION, build the packages on every target and attest their provenance,
+# then publish one GitHub release with SHA256SUMS. The build holds no write
+# token: it hands its artifacts to publish, which is the only job that may
+# write, and the human gate stands in front of that one job. The targets and the archive
 # kinds the manifest covers are inputs (`targets`, `manifest_patterns`), so a
 # product builds what it needs. On a private repository the
 # attestation is skipped (input `attestation`). The product supplies
@@ -200,40 +202,19 @@ jobs:
           echo "matrix=$matrix" >>"$GITHUB_OUTPUT"
           echo "::notice::building $(jq -r '.include | map(.target) | join(", ")' <<<"$matrix")"
 
-  prepare:
-    needs: verify
-    runs-on: ubuntu-26.04
-    environment: ${{ inputs.release_environment }}
-    permissions:
-      contents: write
-    steps:
-      - name: Prepare draft GitHub release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ needs.verify.outputs.tag }}
-          PRODUCT: ${{ inputs.product }}
-        run: |
-          set -euo pipefail
-          if release="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/$TAG" 2>/dev/null)"; then
-            gh release edit "$TAG" --repo "${GITHUB_REPOSITORY}" --draft
-            release_id="$(jq -r .id <<<"$release")"
-            gh api --paginate "repos/${GITHUB_REPOSITORY}/releases/$release_id/assets?per_page=100" \
-              --jq '.[].id' | while read -r asset_id; do
-                gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/$asset_id"
-              done
-          else
-            gh release create "$TAG" --repo "${GITHUB_REPOSITORY}" --draft \
-              --title "$PRODUCT $TAG" --generate-notes --verify-tag
-          fi
-
   build:
-    needs: [verify, prepare]
+    needs: verify
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.verify.outputs.matrix) }}
     runs-on: ${{ fromJSON(matrix.runner) }}
     permissions:
-      contents: write
+      # The job that runs the product's own package_command holds no write
+      # token. contents: write here is repository-wide: it can rewrite the
+      # assets of releases already published, push to any branch, and create
+      # tags. A compromised toolchain in this job had the repository, not
+      # just a draft.
+      contents: read
       id-token: write
       attestations: write
     steps:
@@ -292,11 +273,15 @@ jobs:
           reason="private repository: GitHub reserves attestations to paid plans"
           test "$ATTESTATION" != never || reason="the attestation input is never"
           echo "::notice::no provenance attestation ($reason); the signed tag and SHA256SUMS remain"
-      - name: Upload package assets
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ needs.verify.outputs.tag }}
-        run: gh release upload "$TAG" --repo "${GITHUB_REPOSITORY}" --clobber dist/*
+      - name: Hand the artifacts to publish
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dist-${{ matrix.target }}
+          path: dist/
+          if-no-files-found: error
+          # The artifacts exist to cross one run, not to be kept: publish
+          # deletes them, and a day is the ceiling if it never runs.
+          retention-days: 1
 
   publish:
     needs: [verify, build]
@@ -305,12 +290,19 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Collect what build produced
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: dist-*
+          path: incoming
+          merge-multiple: true
       - name: Assemble and verify
         # Word splitting of manifest_patterns is bash's, not the runner's default.
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.verify.outputs.tag }}
+          PRODUCT: ${{ inputs.product }}
           MANIFEST_PATTERNS: ${{ inputs.manifest_patterns }}
         run: |
           set -euo pipefail
@@ -322,8 +314,9 @@ jobs:
           for pattern in $MANIFEST_PATTERNS; do set -- "$@" -o -name "$pattern"; done
           shift
           set +f
-          mkdir -p incoming dist
-          gh release download "$TAG" --repo "${GITHUB_REPOSITORY}" --dir incoming
+          mkdir -p dist
+          # The bytes come from the build's artifacts, never from a draft a
+          # writing job could have edited between the two.
           find incoming -type f \( "$@" -o -name '*.sha256' \) -exec cp {} dist/ \;
           (cd dist && sha256sum -c -- ./*.sha256)
           # Only the archive kinds the product actually built: a library ships
@@ -337,7 +330,23 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.verify.outputs.tag }}
           PRODUCT: ${{ inputs.product }}
+        # One job creates the release, fills it and publishes it, and it is
+        # the only job of this workflow holding a write token. A replay
+        # redrafts and empties an existing release first, so a published tag
+        # never keeps an asset of a former attempt.
         run: |
-          gh release upload "$TAG" --repo "${GITHUB_REPOSITORY}" --clobber dist/SHA256SUMS
+          set -euo pipefail
+          if release="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/$TAG" 2>/dev/null)"; then
+            gh release edit "$TAG" --repo "${GITHUB_REPOSITORY}" --draft
+            release_id="$(jq -r .id <<<"$release")"
+            gh api --paginate "repos/${GITHUB_REPOSITORY}/releases/$release_id/assets?per_page=100" \
+              --jq '.[].id' | while read -r asset_id; do
+                gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/$asset_id"
+              done
+          else
+            gh release create "$TAG" --repo "${GITHUB_REPOSITORY}" --draft \
+              --title "$PRODUCT $TAG" --generate-notes --verify-tag
+          fi
+          gh release upload "$TAG" --repo "${GITHUB_REPOSITORY}" --clobber dist/*
           gh release edit "$TAG" --repo "${GITHUB_REPOSITORY}" \
             --title "$PRODUCT $TAG" --draft=false

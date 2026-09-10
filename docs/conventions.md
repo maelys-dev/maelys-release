@@ -405,6 +405,26 @@ secret. The socle carries the secrets of the fleet, like the tap's token to
 a repository shared by everyone, never the per-product credentials of a
 registry.
 
+## Who may write during a release
+
+One job of `release.yml` holds a write token, and it is the one that
+publishes. The job that runs a product's own `package_command` holds
+`contents: read`, OIDC and attestations, and nothing else.
+
+That is not a detail of tidiness. `contents: write` on GitHub is
+repository-wide: a job holding it can rewrite the assets of releases already
+published, push to any branch, and create tags. The build runs the product's
+own code and whatever its toolchain pulled in, so a compromise there held
+the repository rather than a draft.
+
+The bytes cross the run as workflow artifacts, kept one day. `publish`
+verifies what `build` produced: the earlier `sha256sum -c` compared
+artifacts against `.sha256` files that came from the same draft, uploaded by
+the same job, which proved consistency and not integrity.
+
+The human gate stands in front of `publish`, the only job that can change
+anything, so a release asks for one approval rather than two.
+
 ## What the release verifies, and what it does not
 
 The workflow verifies the tag: annotated, signed, verified by GitHub, and
