@@ -1144,12 +1144,15 @@ class MigrateTest(unittest.TestCase):
         self.assertFalse((documents / "adapter").exists())
         self.assertEqual((documents / "dependencies" / "maelys-fixture.pin").read_text().splitlines(),
                          ["v1.2.3", self.product.git(self.product.dir, "rev-parse", "HEAD")])
-        # And left the product, whose README now names where it went.
+        # And left the product, whose README says the prose went, without
+        # naming a destination a reader of a public repository cannot open:
+        # maelys-docs is private, and the socle used to plant that reference.
         self.assertFalse((product / "docs" / "architecture.md").exists())
         self.assertTrue((product / "docs" / "schema.json").is_file())
         readme = (product / "README.md").read_text()
         self.assertNotIn("docs/architecture.md", readme)
-        self.assertIn("maelys-dev/maelys-docs", readme)
+        self.assertNotIn("maelys-dev/maelys-docs", readme)
+        self.assertIn("no longer kept in this repository", readme)
         self.assertIn("## Licence", readme)      # the rest of the README is untouched
         # The operator's checkout is not written to at all.
         self.assertTrue((self.product.dir / "docs" / "architecture.md").is_file())
@@ -1621,6 +1624,32 @@ class UnitTest(unittest.TestCase):
                      "[channels]\nnpm github-packages\nnpm github-packages\n"):  # twice
             with self.assertRaises(ValueError, msg=text):
                 MODULE.parse_release(text)
+
+    def test_the_readme_pointer_never_names_a_destination_a_reader_cannot_open(self) -> None:
+        """maelys-docs is private; a public README naming it sends the reader
+        to a 404 and plants the private reference the fleet audit blocks on."""
+        import tempfile
+        data = {"repository": "maelys-dev/maelys-docs",
+                "moving": [{"path": "docs/architecture.md"}]}
+        original = MODULE.destination_is_public
+        try:
+            for public, expected in ((True, True), (False, False), (None, False)):
+                MODULE.destination_is_public = lambda repository, value=public: value
+                with tempfile.TemporaryDirectory() as clone:
+                    readme = pathlib.Path(clone) / "README.md"
+                    readme.write_text("# P\n\nSee [architecture](docs/architecture.md).\n")
+                    report = MODULE.rewrite_readme(pathlib.Path(clone), "maelys-egress", data)
+                    written = readme.read_text()
+                    self.assertEqual("maelys-dev/maelys-docs" in written, expected, written)
+                    self.assertNotIn("docs/architecture.md", written)
+                    self.assertIn("Documentation", written)
+                    if not expected:
+                        # An unreachable destination is assumed private, and
+                        # the report says what a human must still do.
+                        self.assertIn("naming no repository", report)
+                        self.assertIn("site", report)
+        finally:
+            MODULE.destination_is_public = original
 
     def test_managed_block(self) -> None:
         block = "new\n"

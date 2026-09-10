@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.28.1 — 2026-09-10
+
+- `migrate` no longer writes a private repository's name into a public
+  product's README. It replaced the links it moved with a pointer built by
+  copying the destination, and the destination is `maelys-dev/maelys-docs`,
+  which is private: the socle planted the private reference that
+  maelys-platform's audit blocks a repository on before opening it to the
+  public. maelys-json carries one such pointer today, written when its prose
+  moved.
+- The socle now asks GitHub for the destination's visibility. A public
+  destination is still named; a private one is not, and the report says what
+  a human must still do. A visibility the socle cannot check is read as
+  private: naming a destination wrongly is worse than naming none.
+
 ## 0.28.0 — 2026-09-10
 
 - Managed agent texts (`share/agents/`) use CC-BY-4.0 with attribution to
