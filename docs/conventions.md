@@ -182,7 +182,9 @@ environment. It then writes `VERSION`, commits it signed on
 `release/vX.Y.Z`, opens the pull request and **waits for the checks of
 that commit to exist and to finish**. Waiting for them to exist is the
 point: a checks command that answers at once when no run has registered
-yet reports green on a release nobody has built.
+yet reports green on a release nobody has built. A wait that times out
+leaves the branch and its pull request behind, and running the first stop
+again re-enters that wait rather than refusing the state it created.
 
 The middle stop is GitHub's. `cut` never merges its own pull request: a
 command that did would work only where the default branch is
@@ -197,7 +199,6 @@ for every one of its checks to be green, then signs the tag on it and
 pushes. The annotation is the changelog entry unless `--message FILE`
 gives another. Both stops plan without `--apply`, and neither is
 required: the ceremony by hand remains what it was.
-
 
 ## Dependencies and packages
 
