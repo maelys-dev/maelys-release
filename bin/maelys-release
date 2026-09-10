@@ -46,6 +46,9 @@ DEFAULT_TAP = "maelys-dev/homebrew-tap"
 DEFAULT_DOCUMENTS = "maelys-dev/maelys-docs"
 DEFAULT_IMAGE = "ubuntu:26.04"
 SOCLE_LINUX_PACKAGES = "build-essential dpkg-dev file rpm"  # the release.yml default
+SOCLE_MANIFEST_PATTERNS = "*.tar.gz *.deb *.rpm"  # the release.yml default
+# The targets release.yml builds when a product declares none of its own.
+SOCLE_TARGETS = ("linux-x86_64", "linux-arm64", "macos-arm64")
 BOTTLES = '\'["macos-15","macos-26"]\''
 PLATFORMS = {"linux-x86_64": "linux/amd64", "linux-arm64": "linux/arm64"}
 # One name and one place for the reference a machine writes from describe
@@ -195,6 +198,12 @@ class Declarations:
         self.cli_flags: list[str] = []
         self.cli_build = ""
         self.verify_command = ""
+        # (target, runner) of packaging/release; an empty runner keeps the
+        # one release.yml holds for that target. Empty means the three the
+        # socle builds by default.
+        self.targets: list[tuple[str, object]] = []
+        # Archive kinds SHA256SUMS covers beyond the socle's three.
+        self.manifest_patterns: list[str] = []
         # name -> repository, for a dependency that does not live in maelys-dev
         self.foreign: dict[str, str] = {}
         # name -> "" or "recursive", for a dependency whose build needs them
@@ -242,6 +251,56 @@ def parse_packages(text: str) -> tuple[str, str]:
             raise ValueError(f"one package per line at line {number}: {raw}")
         packages[section].append(line)
     return " ".join(packages["linux"]), " ".join(packages["macos"])
+
+
+def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str]]:
+    """packaging/release: [targets] one 'TARGET [LABEL...]' per line, [manifest] one glob per line.
+
+    A target line naming no label keeps the runner release.yml holds for that
+    target, which only exists for the three the socle builds; one label is a
+    runner label, several are a label set. The [targets] section replaces the
+    matrix rather than adding to it, so a product that adds one target names
+    the others it keeps. [manifest] adds to the socle's archive kinds.
+    """
+    targets: list[tuple[str, object]] = []
+    manifest: list[str] = []
+    section = ""
+    for number, raw in enumerate(text.splitlines(), 1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("["):
+            if line in ("[targets]", "[manifest]"):
+                section = line[1:-1]
+                continue
+            raise ValueError(f"unknown section {line} at line {number}")
+        if not section:
+            raise ValueError(f"line outside a [targets] or [manifest] section at line {number}")
+        if section == "manifest":
+            if len(line.split()) != 1 or not re.fullmatch(r"[A-Za-z0-9*][A-Za-z0-9*+._-]*", line):
+                raise ValueError(f"one glob per line at line {number}: {raw}")
+            if line in SOCLE_MANIFEST_PATTERNS.split():
+                raise ValueError(f"{line} is already covered at line {number}")
+            if line in manifest:
+                raise ValueError(f"{line} appears twice, at line {number}")
+            manifest.append(line)
+            continue
+        name, *labels = line.split()
+        if not re.fullmatch(r"[a-z0-9][a-z0-9._-]*", name):
+            raise ValueError(f"a target is named [a-z0-9._-] at line {number}: {name}")
+        if any(name == known for known, _ in targets):
+            raise ValueError(f"the target {name} appears twice, at line {number}")
+        if not labels and name not in SOCLE_TARGETS:
+            raise ValueError(f"the target {name} names no runner at line {number},"
+                             f" and the socle only has a default for {', '.join(SOCLE_TARGETS)}")
+        for label in labels:
+            if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", label):
+                raise ValueError(f"a runner label is [A-Za-z0-9._-] at line {number}: {label}")
+        runner: object = "" if not labels else (labels[0] if len(labels) == 1 else labels)
+        targets.append((name, runner))
+    if section and not targets and not manifest:
+        raise ValueError("packaging/release declares no target and no archive kind")
+    return targets, manifest
 
 
 def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCLE_MECHANISM) -> Declarations:
@@ -358,6 +417,18 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
                      "conventions")
         except ValueError as error:
             decl.add("missing", f"dependencies/packages: {error}", "conventions")
+    release = project / "packaging" / "release"
+    if release.is_file():
+        try:
+            decl.targets, decl.manifest_patterns = parse_release(release.read_text(encoding="utf-8"))
+            if decl.targets:
+                decl.add("ok", "packaging/release targets: "
+                               + " ".join(name for name, _ in decl.targets))
+            if decl.manifest_patterns:
+                decl.add("ok", "packaging/release manifest: " + SOCLE_MANIFEST_PATTERNS
+                               + " " + " ".join(decl.manifest_patterns))
+        except ValueError as error:
+            decl.add("missing", f"packaging/release: {error}")
     return decl
 
 
@@ -589,6 +660,13 @@ def release_workflow(decl: Declarations, sha: str, tag: str, version: str) -> st
         lines.append(f"      linux_packages: {SOCLE_LINUX_PACKAGES} {decl.linux_packages}")
     if decl.macos_packages:
         lines.append(f"      macos_packages: {decl.macos_packages}")
+    if decl.targets:
+        entries = [{"target": name} if runner == "" else {"target": name, "runner": runner}
+                   for name, runner in decl.targets]
+        lines.append(f"      targets: '{json.dumps(entries)}'")
+    if decl.manifest_patterns:
+        lines.append(f"      manifest_patterns: '{SOCLE_MANIFEST_PATTERNS} "
+                     + " ".join(decl.manifest_patterns) + "'")
     for formula in decl.formulas:
         lines.extend([
             "",
@@ -1397,7 +1475,11 @@ def handle_declarations(invocation: Invocation) -> tuple[dict, int]:
     return {"valid": decl.valid, "product": product, "project": str(project), "version": decl.version,
             "mechanism": mechanism,
             "dependencies": decl.dependencies, "linuxPackages": decl.linux_packages,
-            "macosPackages": decl.macos_packages, "formulas": decl.formulas, "checks": decl.applicable()}, \
+            "macosPackages": decl.macos_packages, "formulas": decl.formulas,
+            "targets": [name for name, _ in decl.targets] or list(SOCLE_TARGETS),
+            "manifestPatterns": (SOCLE_MANIFEST_PATTERNS + " "
+                                 + " ".join(decl.manifest_patterns)).strip(),
+            "checks": decl.applicable()}, \
         EXIT_OK if decl.valid else EXIT_VIOLATIONS
 
 
@@ -1765,7 +1847,8 @@ def text_preflight(data: dict) -> str:
 def text_declarations(data: dict) -> str:
     return checks_text(data["checks"]) + "".join(f"{key:<13} {value}\n" for key, value in (
         ("dependencies", " ".join(data["dependencies"])), ("linux", data["linuxPackages"]),
-        ("macos", data["macosPackages"]), ("formulas", " ".join(data["formulas"]))))
+        ("macos", data["macosPackages"]), ("formulas", " ".join(data["formulas"])),
+        ("targets", " ".join(data["targets"])), ("manifest", data["manifestPatterns"])))
 
 
 def text_tap(data: dict) -> str:
@@ -1960,12 +2043,15 @@ APP = cli.Program(PROGRAM, PRODUCT, socle_version(), [
              handle_declarations, operands=[DIR_OPERAND], options=[SOCLE_OPTIONS[0]],
              schema={"type": "object", "additionalProperties": False,
                      "required": ["valid", "product", "project", "version", "mechanism", "dependencies",
-                                  "linuxPackages", "macosPackages", "formulas", "checks"],
+                                  "linuxPackages", "macosPackages", "formulas", "targets",
+                                  "manifestPatterns", "checks"],
                      "properties": {"valid": {"type": "boolean"}, "product": {"type": "string"},
                                     "project": {"type": "string"}, "version": {"type": "string"},
                                     "mechanism": MECHANISM_SCHEMA,
                                     "dependencies": STRINGS, "linuxPackages": {"type": "string"},
-                                    "macosPackages": {"type": "string"}, "formulas": STRINGS, "checks": CHECKS_SCHEMA}}),
+                                    "macosPackages": {"type": "string"}, "formulas": STRINGS,
+                                    "targets": STRINGS, "manifestPatterns": {"type": "string"},
+                                    "checks": CHECKS_SCHEMA}}),
     cli.read("preflight", "preflight",
              "Check, then report what the release workflow would refuse of the next tag; exit 2 when not ready.",
              handle_preflight, operands=[DIR_OPERAND], options=[*SOCLE_OPTIONS, DOCS_CONTRACT_OPTION],

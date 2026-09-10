@@ -2,7 +2,9 @@ name: release (reusable)
 
 # Reusable release of one Maelys product on a signed tag: verify the tag and
 # VERSION, build the packages on every target, attest their provenance and
-# publish one GitHub release with SHA256SUMS. On a private repository the
+# publish one GitHub release with SHA256SUMS. The targets and the archive
+# kinds the manifest covers are inputs (`targets`, `manifest_patterns`), so a
+# product builds what it needs. On a private repository the
 # attestation is skipped (input `attestation`). The product supplies
 # `scripts/package-release.sh TARGET` writing into dist/, its `dependencies/` pins
 # and packages. Runner inputs are JSON: a label string such as "macos-15" or
@@ -48,6 +50,27 @@ on:
         required: false
         type: string
         default: bash scripts/package-release.sh TARGET
+      targets:
+        description: >-
+          JSON array of the targets to build, one {"target": …, "runner": …}
+          each, where runner is a JSON label string or label array as the
+          *_runner inputs are, and may be omitted for one of the three
+          targets below to keep taking its runner from them. Empty builds
+          those three; a non-empty value replaces the matrix entirely.
+        required: false
+        type: string
+        default: ""
+      manifest_patterns:
+        description: >-
+          Space-separated globs naming the archive kinds SHA256SUMS covers.
+          The default is the three kinds the socle has always listed; a
+          product publishing another one, a wasm bundle or a build receipt,
+          names it here. dist/* is uploaded and attested whatever this says,
+          so this decides what the manifest vouches for, not what is
+          published.
+        required: false
+        type: string
+        default: '*.tar.gz *.deb *.rpm'
       linux_x86_64_runner:
         required: false
         type: string
@@ -94,6 +117,7 @@ jobs:
     runs-on: ubuntu-26.04
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
+      matrix: ${{ steps.matrix.outputs.matrix }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -140,6 +164,41 @@ jobs:
             git merge-base --is-ancestor "$head" "origin/$branch" \
               || { echo "the commit $head is not an ancestor of $branch: it never landed there" >&2; exit 1; }
           fi
+      - name: Resolve the build matrix
+        id: matrix
+        shell: bash
+        env:
+          TARGETS: ${{ inputs.targets }}
+          LINUX_X86_64_RUNNER: ${{ inputs.linux_x86_64_runner }}
+          LINUX_ARM64_RUNNER: ${{ inputs.linux_arm64_runner }}
+          MACOS_RUNNER: ${{ inputs.macos_runner }}
+        # The matrix is resolved here rather than written in the build job so
+        # a product can name targets the socle does not know. A target that
+        # omits its runner and is one of the three keeps taking it from the
+        # runner inputs, so changing a default runner still reaches every
+        # product that only added a target.
+        run: |
+          set -euo pipefail
+          if [ -z "$TARGETS" ]; then
+            matrix="$(jq -nc --arg x "$LINUX_X86_64_RUNNER" --arg a "$LINUX_ARM64_RUNNER" --arg m "$MACOS_RUNNER" \
+              '{include: [{target: "linux-x86_64", runner: $x},
+                          {target: "linux-arm64", runner: $a},
+                          {target: "macos-arm64", runner: $m}]}')"
+          else
+            jq -e 'type == "array" and length > 0' <<<"$TARGETS" >/dev/null \
+              || { echo "targets must be a non-empty JSON array" >&2; exit 1; }
+            jq -e 'all(.target? | type == "string" and length > 0)' <<<"$TARGETS" >/dev/null \
+              || { echo "every entry of targets needs a non-empty target" >&2; exit 1; }
+            matrix="$(jq -c --arg x "$LINUX_X86_64_RUNNER" --arg a "$LINUX_ARM64_RUNNER" --arg m "$MACOS_RUNNER" '
+              def inherited:
+                {"linux-x86_64": $x, "linux-arm64": $a, "macos-arm64": $m}[.]
+                // error("the target \(.) names no runner and the socle has no default for it");
+              {include: [.[] | {target: .target,
+                                runner: (if has("runner") then (.runner | tojson) else (.target | inherited) end)}]}
+            ' <<<"$TARGETS")"
+          fi
+          echo "matrix=$matrix" >>"$GITHUB_OUTPUT"
+          echo "::notice::building $(jq -r '.include | map(.target) | join(", ")' <<<"$matrix")"
 
   prepare:
     needs: verify
@@ -171,14 +230,7 @@ jobs:
     needs: [verify, prepare]
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - runner: ${{ inputs.linux_x86_64_runner }}
-            target: linux-x86_64
-          - runner: ${{ inputs.linux_arm64_runner }}
-            target: linux-arm64
-          - runner: ${{ inputs.macos_runner }}
-            target: macos-arm64
+      matrix: ${{ fromJSON(needs.verify.outputs.matrix) }}
     runs-on: ${{ fromJSON(matrix.runner) }}
     permissions:
       contents: write
@@ -254,18 +306,30 @@ jobs:
       contents: write
     steps:
       - name: Assemble and verify
+        # Word splitting of manifest_patterns is bash's, not the runner's default.
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.verify.outputs.tag }}
+          MANIFEST_PATTERNS: ${{ inputs.manifest_patterns }}
         run: |
           set -euo pipefail
+          test -n "$MANIFEST_PATTERNS" || { echo "manifest_patterns names no glob" >&2; exit 1; }
+          # The globs are find arguments, never shell words: -f keeps this
+          # shell from expanding them against the working directory.
+          set -f
+          set --
+          for pattern in $MANIFEST_PATTERNS; do set -- "$@" -o -name "$pattern"; done
+          shift
+          set +f
           mkdir -p incoming dist
           gh release download "$TAG" --repo "${GITHUB_REPOSITORY}" --dir incoming
-          find incoming -type f \( -name '*.tar.gz' -o -name '*.deb' -o -name '*.rpm' -o -name '*.sha256' \) -exec cp {} dist/ \;
+          find incoming -type f \( "$@" -o -name '*.sha256' \) -exec cp {} dist/ \;
           (cd dist && sha256sum -c -- ./*.sha256)
           # Only the archive kinds the product actually built: a library ships
-          # tarballs alone, a command may add deb and rpm packages.
-          (cd dist && find . -maxdepth 1 -type f \( -name '*.tar.gz' -o -name '*.deb' -o -name '*.rpm' \) \
+          # tarballs alone, a command may add deb and rpm packages, and
+          # manifest_patterns names any other kind it publishes.
+          (cd dist && find . -maxdepth 1 -type f \( "$@" \) \
             | sed 's|^\./||' | sort | xargs sha256sum >SHA256SUMS)
           test -s dist/SHA256SUMS
       - name: Publish GitHub release

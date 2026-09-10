@@ -320,7 +320,8 @@ class AdoptTest(unittest.TestCase):
         declarations = product.json("declarations", self.dir)["data"]
         self.assertEqual(declarations["dependencies"], ["maelys-system"])
         self.assertEqual(declarations["linuxPackages"], "pkg-config libjansson-dev")
-        self.assertEqual(product.run("declarations", self.dir).stdout.splitlines()[-4], "dependencies  maelys-system")
+        rendered = product.run("declarations", self.dir).stdout.splitlines()
+        self.assertIn("dependencies  maelys-system", rendered)
 
     def test_drift(self) -> None:
         product = self.product
@@ -586,6 +587,48 @@ class ProductNeedsTest(unittest.TestCase):
         self.product.run("adopt", self.dir, "--apply")
         self.assertNotIn("verify_command:", self.product.read(".github/workflows/release.yml"))
 
+    def test_a_product_declares_the_targets_it_builds(self) -> None:
+        self.product.write("packaging/release",
+                           "[targets]\nlinux-x86_64\nlinux-arm64\nmacos-arm64\nwasm32 ubuntu-26.04\n")
+        self.product.run("adopt", self.dir, "--apply")
+        workflow = self.product.read(".github/workflows/release.yml")
+        self.assertIn('targets: \'[{"target": "linux-x86_64"}, {"target": "linux-arm64"},'
+                      ' {"target": "macos-arm64"}, {"target": "wasm32", "runner": "ubuntu-26.04"}]\'', workflow)
+        # A target that names no label keeps the runner release.yml holds for
+        # it, so changing a default runner still reaches this product.
+        self.assertNotIn('"linux-x86_64", "runner"', workflow)
+
+    def test_a_runner_is_a_label_or_a_label_set(self) -> None:
+        self.product.write("packaging/release", "[targets]\nmacos-arm64 self-hosted macOS ARM64\n")
+        self.product.run("adopt", self.dir, "--apply")
+        self.assertIn('{"target": "macos-arm64", "runner": ["self-hosted", "macOS", "ARM64"]}',
+                      self.product.read(".github/workflows/release.yml"))
+
+    def test_a_product_adds_an_archive_kind_to_the_manifest(self) -> None:
+        self.product.write("packaging/release", "[manifest]\n*.wasm\nreceipt.json\n")
+        self.product.run("adopt", self.dir, "--apply")
+        self.assertIn("manifest_patterns: '*.tar.gz *.deb *.rpm *.wasm receipt.json'",
+                      self.product.read(".github/workflows/release.yml"))
+
+    def test_without_that_file_the_release_workflow_asks_for_neither(self) -> None:
+        self.product.run("adopt", self.dir, "--apply")
+        workflow = self.product.read(".github/workflows/release.yml")
+        self.assertNotIn("targets:", workflow)
+        self.assertNotIn("manifest_patterns:", workflow)
+        data = self.product.json("declarations", self.dir)["data"]
+        self.assertEqual(data["targets"], ["linux-x86_64", "linux-arm64", "macos-arm64"])
+        self.assertEqual(data["manifestPatterns"], "*.tar.gz *.deb *.rpm")
+
+    def test_a_release_declaration_the_socle_cannot_honour_is_a_violation(self) -> None:
+        # The scope is the release mechanism, so the product must be on it
+        # before the declaration means anything.
+        self.product.run("adopt", self.dir, "--apply")
+        self.product.write("packaging/release", "[targets]\nwasm32\n")
+        data = self.product.json("declarations", self.dir, expect=2)["data"]
+        self.assertFalse(data["valid"])
+        self.assertTrue(any("names no runner" in check["message"] for check in data["checks"]),
+                        data["checks"])
+
     def test_the_reusable_workflows_carry_the_new_inputs(self) -> None:
         release = (ROOT / ".github" / "workflows" / "release.yml").read_text()
         self.assertIn("verify_command:", release)
@@ -593,6 +636,11 @@ class ProductNeedsTest(unittest.TestCase):
         self.assertIn("signed-on-default-branch", release)
         # The attestation covers everything package_command leaves in dist/.
         self.assertIn("every file\n          package_command leaves there is attested, an SBOM included", release)
+        self.assertIn("targets:", release)
+        self.assertIn("manifest_patterns:", release)
+        # The matrix is resolved once, in verify, so a product can name a
+        # target the socle does not know.
+        self.assertIn("matrix: ${{ fromJSON(needs.verify.outputs.matrix) }}", release)
         check_product = (ROOT / ".github" / "workflows" / "check-product.yml").read_text()
         self.assertIn("fuzz_command:", check_product)
         self.assertIn("make fuzz-smoke", check_product)
@@ -1332,6 +1380,24 @@ class UnitTest(unittest.TestCase):
         for text in ("a\n", "[bsd]\na\n", "[linux]\na b\n", "[linux]\n-a\n"):
             with self.assertRaises(ValueError):
                 MODULE.parse_packages(text)
+
+    def test_parse_release(self) -> None:
+        self.assertEqual(MODULE.parse_release("[targets]\nlinux-arm64\nwasm32 ubuntu-26.04\n"),
+                         ([("linux-arm64", ""), ("wasm32", "ubuntu-26.04")], []))
+        self.assertEqual(MODULE.parse_release("[targets]\nmacos-arm64 self-hosted ARM64\n"),
+                         ([("macos-arm64", ["self-hosted", "ARM64"])], []))
+        self.assertEqual(MODULE.parse_release("[manifest]\n*.wasm\n"), ([], ["*.wasm"]))
+        self.assertEqual(MODULE.parse_release("# nothing declared\n"), ([], []))
+        for text in ("linux-arm64\n",                      # outside a section
+                     "[bsd]\nlinux-arm64\n",               # unknown section
+                     "[targets]\nwasm32\n",                # no runner and no default
+                     "[targets]\nWASM\n",                  # not a target name
+                     "[targets]\nlinux-arm64\nlinux-arm64\n",   # twice
+                     "[targets]\nwasm32 'quoted'\n",       # not a runner label
+                     "[manifest]\n*.tar.gz\n",             # already covered
+                     "[manifest]\n*.a *.b\n"):             # one glob per line
+            with self.assertRaises(ValueError, msg=text):
+                MODULE.parse_release(text)
 
     def test_managed_block(self) -> None:
         block = "new\n"
