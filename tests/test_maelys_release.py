@@ -815,7 +815,7 @@ jobs:
         self.assertIn("ubuntu-24.04", runners["labels"])
         # And what cannot be named is reported rather than omitted, so an
         # observer blocks on ignorance instead of passing.
-        self.assertEqual(runners["unresolved"], ["own.yml: ${{ fromJSON(inputs.runner) }}"])
+        self.assertEqual(runners["unresolved"], ["own.yml:12: ${{ fromJSON(inputs.runner) }}"])
         # A repository whose jobs only call the socle names no runner: an
         # empty list means it chooses none, not that it is safe.
         self.assertTrue(runners["delegated"])
@@ -1614,6 +1614,15 @@ class UnitTest(unittest.TestCase):
         # An expression is not a literal and is never guessed at.
         self.assertEqual(MODULE.matrix_values("        os: [${{ inputs.x }}]\n", "os"), [])
         self.assertEqual(MODULE.matrix_values("        other: [a]\n", "os"), [])
+
+    def test_a_label_the_socle_cannot_vouch_for_is_unresolved(self) -> None:
+        """A label of the wrong shape is not a label. Accepting one let a jq
+        line of the socle's own release.yml pass as a runner, and worse: it
+        made `found` non-empty, so a runs-on nobody could read counted as
+        resolved and the hole it should have shown disappeared."""
+        self.assertEqual(MODULE.matrix_values('        os: [ubuntu-24.04]\n', "os"), ["ubuntu-24.04"])
+        jq = '          runner: (if has("runner") then (.runner | tojson) else x end)}]}\n'
+        self.assertEqual(MODULE.matrix_values(jq, "runner"), [])
 
     def test_parse_release(self) -> None:
         self.assertEqual(MODULE.parse_release("[targets]\nlinux-arm64\nwasm32 ubuntu-26.04\n"),
