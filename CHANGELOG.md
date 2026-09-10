@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.29.0 — 2026-09-10
+
+- The managed `AGENTS.md` and `CLAUDE.md` blocks say where a product's prose
+  lives: `maelys-dev/maelys-docs`, directory `<product>/`, with a
+  neighbouring checkout, and documenting means opening a pull request there.
+  maelys-platform's documentation policy has claimed for a while that the
+  block says this. It did not: neither block mentioned maelys-docs, the
+  prose, or documentation at all.
+- The same bullet carries the distinction 0.28.1 rests on: **that repository
+  is private, so it is never named from a public README.** The reader of a
+  managed block has access to it; the reader of a README may not. The two
+  rules belong together, and separating them is what let the socle plant a
+  private reference in a public README.
+- This changes a managed text, so it is a minor release and a product sees
+  the bullet appear at its next adoption.
+
 ## 0.28.1 — 2026-09-10
 
 - `migrate` no longer writes a private repository's name into a public

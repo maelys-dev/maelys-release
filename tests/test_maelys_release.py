@@ -820,6 +820,20 @@ jobs:
         # empty list means it chooses none, not that it is safe.
         self.assertTrue(runners["delegated"])
 
+    def test_the_block_says_where_the_prose_lives_and_names_the_product(self) -> None:
+        """maelys-platform's documentation policy says this block carries it,
+        and it did not. The reader of a block has access to maelys-docs; the
+        reader of a README may not, which is why only the block names it."""
+        self.product.run("adopt", self.dir, "--apply")
+        for name in ("AGENTS.md", "CLAUDE.md"):
+            text = self.product.read(name)
+            self.assertIn("`maelys-dev/maelys-docs`", text)
+            self.assertIn("../maelys-docs", text)
+            self.assertIn("never name it from a public README", text)
+            # the directory is the product's, not a placeholder left behind
+            self.assertIn("`maelys-fixture/`", text)
+            self.assertNotIn("@PRODUCT@", text)
+
     def test_the_reusable_workflows_carry_the_new_inputs(self) -> None:
         release = (ROOT / ".github" / "workflows" / "release.yml").read_text()
         self.assertIn("verify_command:", release)
