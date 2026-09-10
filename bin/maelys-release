@@ -1937,9 +1937,9 @@ def changelog_entry(project: pathlib.Path, version: str, at: str = "") -> tuple[
 def check_runs(repository: str, sha: str) -> list | None:
     """Every check run of a commit, paged; None when gh cannot answer.
 
-    The endpoint pages at 100 and a product of the fleet runs thirty-six
-    jobs: a single unpaged read would call a release green on the first
-    hundred of them.
+    The endpoint's default page holds thirty, and one commit of
+    maelys-egress carries forty-eight check runs (measured on f797cf7): an
+    unpaged read would call a release green on two thirds of its checks.
     """
     runs: list = []
     page = 1
@@ -2142,7 +2142,7 @@ def cut_open(invocation: Invocation, decl: Declarations, data: dict, log, timeou
                       "Commit or stash them: the release commit carries the bump and nothing else.")
     date, body = changelog_entry(project, version)
     if not date:
-        raise Failure("PRECONDITION_FAILED", f"CHANGELOG.md has no dated entry '## {version} - YYYY-MM-DD'.",
+        raise Failure("PRECONDITION_FAILED", f"CHANGELOG.md has no dated entry '## {version} — YYYY-MM-DD'.",
                       "Write the entry first: the release workflow compares VERSION with the tag and never reads it,"
                       " so nothing downstream would catch its absence.")
     if date > datetime.date.today().isoformat():
@@ -2181,7 +2181,7 @@ def cut_open(invocation: Invocation, decl: Declarations, data: dict, log, timeou
         # The body reaches gh through a file: a changelog entry holds
         # backticks, and a shell once read five of them as commands.
         body_file = pathlib.Path(temp) / "body.md"
-        body_file.write_text(f"## {version} - {date}\n\n{body}\n\n---\n\nOpened by `{PROGRAM} cut`."
+        body_file.write_text(f"## {version} — {date}\n\n{body}\n\n---\n\nOpened by `{PROGRAM} cut`."
                              f" The tag is signed on the merge commit of this pull request, once its checks are"
                              f" green, by `{PROGRAM} cut {project.name} {version} --tag --apply`.\n", encoding="utf-8")
         created = run(["gh", "pr", "create", "--repo", repository, "--base", base, "--head", branch,

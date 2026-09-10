@@ -15,8 +15,9 @@
   Polling `commits/SHA/check-runs` until `total_count` is non-zero and
   nothing is pending closes the race a fleet product paid for: a checks
   command that answers at once when no run has registered yet reports green
-  on a release nobody has built. The reading is paged, because a product of
-  the fleet runs thirty-six jobs and the endpoint stops at a hundred.
+  on a release nobody has built. The reading is paged: one commit of
+  maelys-egress carries forty-eight check runs and the endpoint's default
+  page holds thirty.
 - **`cut DIR X.Y.Z --tag` signs the tag on the merge commit, never on the
   branch.** It reads the merged pull request, takes its merge commit,
   verifies that commit is on the default branch and carries `VERSION` =
