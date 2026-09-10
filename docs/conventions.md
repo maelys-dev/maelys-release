@@ -224,6 +224,13 @@ on Linux with clang, next to the sanitizers. It is opt-in and empty by
 default: the three products that fuzz today spell their targets
 differently, and a default would turn their next adoption red.
 
+That job installs `libclang-rt`, so a smoke target may be a libFuzzer binary
+replaying its corpus as well as a standalone driver reading it; the socle
+does not decide which of the two a product writes. It installs nothing else
+beyond what the product declares in `dependencies/packages`, and it still
+does not host `make fuzz`: the campaign is refused here on its own terms,
+not for want of a library.
+
 ## Packaging
 
 - `scripts/package-release.sh TARGET` builds one target (`linux-x86_64`,

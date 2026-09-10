@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.25.1 — 2026-09-10
+
+- The fuzz job of `check-product.yml` installs `libclang-rt-18-dev`, as the
+  sanitizers job beside it already did. Without it a harness linked with
+  `-fsanitize=fuzzer` does not link, so the job could only host a smoke
+  target written as a standalone driver. maelys-egress reported this as the
+  campaign being impossible; the campaign is refused here on its own terms
+  and stays refused, but the corpus replay is not, and a product that spells
+  its smoke target as a libFuzzer binary was silently locked out.
+- The comment beside that step now names `docs/conventions.md` as the text
+  to read. Two of the three points in that report were already answered
+  there: the campaign has had no place in CI since 0.21.0, and the
+  conventions state that there is no fleet build layout to assume for
+  `docs/cli.reference`, naming maelys-cli's `build/release/bin`.
+
 ## 0.25.0 — 2026-09-10
 
 - A product publishes to a registry through the socle. `channel.yml` is a new
