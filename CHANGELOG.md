@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.29.1 — 2026-09-10
+
+- A runner label must have the shape of one. `read_runners` accepted
+  whatever it read out of a `runs-on:`, and that had two consequences worse
+  than a stray label. A jq line of this repository's own `release.yml`
+  passed as a runner; and because it did, `runs-on: ${{ fromJSON(matrix.runner) }}`
+  counted as resolved, so the `unresolved` entry that should have shown the
+  hole never appeared. Anything that is not a label now goes to
+  `unresolved`, where an observer blocks on it.
+- The block form of `runs-on:`, where the labels sit on the following lines,
+  no longer reads as the single label `- self-hosted`. The value never
+  crosses a line, and a `runs-on:` introducing a block or a `group:` mapping
+  is reported unresolved rather than invented. A `{ group: … }` mapping too.
+  No repository of the fleet writes those forms today; the reader was wrong
+  about them anyway, and a control that refuses self-hosted runners must not
+  be wrong in that direction.
+- `unresolved` names the line, not just the file, so an operator finds what
+  the socle could not read.
+
 ## 0.29.0 — 2026-09-10
 
 - The managed `AGENTS.md` and `CLAUDE.md` blocks say where a product's prose

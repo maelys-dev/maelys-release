@@ -1010,7 +1010,12 @@ def pinned_socle(project: pathlib.Path) -> dict | None:
     return None
 
 
-RUNS_ON = re.compile(r"^\s*runs-on:\s*(.+?)\s*$", re.M)
+RUNS_ON = re.compile(r"^[ \t]*runs-on:[ \t]*(.*?)[ \t]*$", re.M)
+# A runner label is what GitHub accepts as one. Anything else read out of a
+# workflow is not a label the socle may vouch for: it goes to `unresolved`,
+# where an observer blocks on it, rather than into `labels`, where it would
+# pass and, worse, make a genuinely unreadable `runs-on` look resolved.
+LABEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 MATRIX_REFERENCE = re.compile(r"^\$\{\{\s*(?:fromJSON\()?\s*matrix\.([A-Za-z0-9_-]+)\s*\)?\s*\}\}$")
 EXPRESSION = re.compile(r"\$\{\{")
 
@@ -1050,7 +1055,7 @@ def matrix_values(text: str, key: str) -> list[str]:
         scalar = re.fullmatch(rf"\s*-?\s*{re.escape(key)}:\s*(?!\s*[\[|>])(\S.*?)\s*", line)
         if scalar:
             values.append(scalar.group(1).strip("\"'"))
-    return sorted({value for value in values if value and not EXPRESSION.search(value)})
+    return sorted({value for value in values if LABEL.fullmatch(value)})
 
 
 def read_runners(project: pathlib.Path) -> dict:
@@ -1072,18 +1077,23 @@ def read_runners(project: pathlib.Path) -> dict:
         text = path.read_text(encoding="utf-8")
         for match in RUNS_ON.finditer(text):
             value = match.group(1).strip().strip("\"'")
+            # The line, so an operator finds what the socle could not read.
+            where = f"{path.name}:{text.count(chr(10), 0, match.start()) + 1}"
             reference = MATRIX_REFERENCE.fullmatch(value)
             if reference:
                 found = matrix_values(text, reference.group(1))
                 if found:
                     labels.update(found)
                 else:
-                    unresolved.append(f"{path.name}: {value}")
+                    unresolved.append(f"{where}: {value}")
                 continue
-            if EXPRESSION.search(value):
-                unresolved.append(f"{path.name}: {value}")
+            # `runs-on:` alone introduces a block list or a `group:` mapping on
+            # the following lines; the socle does not read either, and says so.
+            named = [item.strip().strip("\"'") for item in value.strip("[]").split(",") if item.strip()]
+            if not named or not all(LABEL.fullmatch(item) for item in named):
+                unresolved.append(f"{where}: {value or 'a block or a group below this line'}")
                 continue
-            labels.update(item.strip().strip("\"'") for item in value.strip("[]").split(",") if item.strip())
+            labels.update(named)
         if re.search(rf"^\s*uses:\s*{re.escape(SOCLE_REPOSITORY)}/", text, re.M):
             delegated = True
     # maelys-oci names no runner at all: every job of its tree calls a
