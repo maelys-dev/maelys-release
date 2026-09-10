@@ -1692,6 +1692,21 @@ class CutTest(unittest.TestCase):
         self.assertEqual(MODULE.changelog_entry(self.dir, "1.2.3")[0], "2026-09-04")
         self.assertEqual(MODULE.changelog_entry(self.dir, "1.2.3", at="HEAD")[0], "2026-09-03")
 
+    def test_a_check_that_skipped_is_not_a_refusal_and_no_check_is_not_a_pass(self) -> None:
+        data = {"project": "/p", "version": "1.3.0", "branch": "release/v1.3.0", "gate": [],
+                "pullRequest": {"number": 1, "url": "https://example.invalid/1", "state": "OPEN"}}
+        green = [{"name": "check", "status": "completed", "conclusion": "success"},
+                 {"name": "package", "status": "completed", "conclusion": "skipped"},
+                 {"name": "lint", "status": "completed", "conclusion": "neutral"}]
+        self.assertEqual(MODULE.cut_report(dict(data, gate=[]), green)[1], MODULE.EXIT_OK)
+        red = green + [{"name": "fuzz", "status": "completed", "conclusion": "cancelled"}]
+        self.assertEqual(MODULE.cut_report(dict(data, gate=[]), red)[1], MODULE.EXIT_VIOLATIONS)
+        # A commit with no check at all has not passed: it has not been read.
+        empty, code = MODULE.cut_report(dict(data, gate=[]), [])
+        self.assertEqual(code, MODULE.EXIT_VIOLATIONS)
+        self.assertFalse(empty["ready"])
+        self.assertIn("no check is registered", empty["gate"][0]["message"])
+
     def test_cut_refuses_a_repository_that_is_not_on_github(self) -> None:
         error = self.product.json("cut", str(self.dir), "1.3.0", expect=1)["error"]
         self.assertEqual(error["code"], "PRECONDITION_FAILED")

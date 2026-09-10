@@ -2039,10 +2039,88 @@ def cut_gate(decl: Declarations, version: str) -> list:
     return gate
 
 
+def one_pull(project: pathlib.Path, repository: str, branch: str) -> dict | None:
+    """The single pull request coming from BRANCH, whatever its state."""
+    listed = run(["gh", "pr", "list", "--repo", repository, "--head", branch, "--state", "all",
+                  "--limit", "10", "--json", "number,url,state,mergeCommit,headRefOid"], cwd=project)
+    if listed.returncode != 0:
+        raise Failure("PROCESS_FAILED", f"gh pr list failed: {listed.stderr.strip()}",
+                      "Check 'gh auth status', then run the command again.")
+    pulls = json.loads(listed.stdout or "[]")
+    if len(pulls) > 1:
+        raise Failure("PRECONDITION_FAILED",
+                      f"{len(pulls)} pull requests come from {branch} in {repository}: "
+                      + ", ".join(str(pull["number"]) for pull in pulls) + ".",
+                      "Close the ones that do not belong to this release, then run the command again.")
+    return pulls[0] if pulls else None
+
+
+def cut_report(data: dict, runs: list) -> tuple[dict, int]:
+    """What the first stop answers once it has read the checks of its commit."""
+    data["checks"] = check_summary(runs)
+    failed = failed_checks(runs)
+    data["ready"] = bool(runs) and not failed
+    if not runs:
+        data["gate"].append({"status": "note", "message": "no check is registered on this commit yet"})
+    data["next"] = (f"merge {data['pullRequest']['url']} on GitHub, then"
+                    f" '{PROGRAM} cut {data['project']} {data['version']} --tag --apply'" if data["ready"]
+                    else (f"fix what the checks refused and push {data['branch']} again" if failed
+                          else f"wait for the checks, then '{PROGRAM} cut {data['project']}"
+                               f" {data['version']} --apply'"))
+    return data, EXIT_OK if data["ready"] else EXIT_VIOLATIONS
+
+
+def cut_resume(invocation: Invocation, decl: Declarations, data: dict, log, timeout: int,
+               poll: int) -> tuple[dict, int] | None:
+    """The wait, re-entered; None when there is nothing to resume.
+
+    A first stop whose wait timed out leaves a branch and an open pull
+    request behind, and every later check of cut_open would refuse them:
+    the version no longer follows, HEAD is no longer the default branch,
+    the branch exists. Refusing a state cut itself created would leave the
+    operator to finish by hand exactly where a command was wanted.
+    """
+    project, version, branch, repository = decl.project, data["version"], data["branch"], data["repository"]
+    if not (git("rev-parse", "-q", "--verify", f"refs/heads/{branch}", cwd=project, check=False)
+            or git("ls-remote", "--heads", "origin", branch, cwd=project, check=False)):
+        return None
+    pull = one_pull(project, repository, branch)
+    if pull is None:
+        raise Failure("PRECONDITION_FAILED", f"branch {branch} exists and no pull request comes from it.",
+                      "Open one, or delete the branch and cut again.")
+    if pull["state"] == "MERGED":
+        raise Failure("PRECONDITION_FAILED", f"{pull['url']} is already merged.",
+                      f"Sign the tag: '{PROGRAM} cut {project} {version} --tag --apply'.")
+    if pull["state"] != "OPEN":
+        raise Failure("PRECONDITION_FAILED", f"{pull['url']} is {pull['state'].lower()}.",
+                      "Reopen it, or delete the branch and cut again.")
+    head = pull["headRefOid"]
+    git("fetch", "-q", "origin", branch, cwd=project)
+    carried = git("show", f"{head}:VERSION", cwd=project, check=False).strip()
+    if carried != version:
+        raise Failure("PRECONDITION_FAILED", f"{branch} carries VERSION {carried or 'nothing'}, not {version}.",
+                      "That branch is not this release; delete it, or cut the version it carries.")
+    data["pullRequest"] = {"number": pull["number"], "url": pull["url"], "state": pull["state"]}
+    data["commit"] = head
+    data["changelog"] = changelog_entry(project, version, at=head)[0]
+    gate = cut_gate(decl, version)
+    data["gate"] = [{"status": status, "message": message} for status, message in gate]
+    if any(status == "fail" for status, _ in gate):
+        return data, EXIT_VIOLATIONS
+    if invocation.flag("--apply"):
+        print(f"cut      waiting for the checks of {head[:7]} in {repository}", file=log)
+        log.flush()
+        return cut_report(data, await_checks(repository, head, timeout, poll, log))
+    return cut_report(data, check_runs(repository, head) or [])
+
+
 def cut_open(invocation: Invocation, decl: Declarations, data: dict, log, timeout: int, poll: int) -> tuple[dict, int]:
     """First stop: the signed bump commit, its pull request, and the wait."""
     project, product, version = decl.project, decl.product, data["version"]
     branch, base, repository = data["branch"], data["base"], data["repository"]
+    resumed = cut_resume(invocation, decl, data, log, timeout, poll)
+    if resumed is not None:
+        return resumed
     if not decl.version:
         raise Failure("PRECONDITION_FAILED", f"{project} carries no VERSION of the form X.Y.Z.",
                       "Write VERSION before cutting a release.")
@@ -2082,10 +2160,6 @@ def cut_open(invocation: Invocation, decl: Declarations, data: dict, log, timeou
         raise Failure("PRECONDITION_FAILED",
                       f"{base} is {ahead} ahead and {behind} behind origin/{base}.",
                       f"Bring the two together before cutting: the pull request is opened against origin/{base}.")
-    if git("rev-parse", "-q", "--verify", f"refs/heads/{branch}", cwd=project, check=False) \
-            or git("ls-remote", "--heads", "origin", branch, cwd=project, check=False):
-        raise Failure("PRECONDITION_FAILED", f"branch {branch} already exists.",
-                      f"Finish that cut with '{PROGRAM} cut {project} {version} --tag', or delete the branch.")
     gate = cut_gate(decl, version)
     data["gate"] = [{"status": status, "message": message} for status, message in gate]
     refused = [message for status, message in gate if status == "fail"]
@@ -2122,14 +2196,7 @@ def cut_open(invocation: Invocation, decl: Declarations, data: dict, log, timeou
                            "state": pull.get("state", "OPEN")}
     print(f"cut      waiting for the checks of {data['commit'][:7]} in {repository}", file=log)
     log.flush()
-    runs = await_checks(repository, data["commit"], timeout, poll, log)
-    data["checks"] = check_summary(runs)
-    failed = failed_checks(runs)
-    data["ready"] = not failed
-    data["next"] = (f"merge {data['pullRequest']['url']} on GitHub, then"
-                    f" '{PROGRAM} cut {project} {version} --tag --apply'" if not failed
-                    else f"fix what the checks refused and push {branch} again")
-    return data, EXIT_OK if not failed else EXIT_VIOLATIONS
+    return cut_report(data, await_checks(repository, data["commit"], timeout, poll, log))
 
 
 def cut_tag(invocation: Invocation, decl: Declarations, data: dict, log, timeout: int, poll: int) -> tuple[dict, int]:
@@ -2137,21 +2204,10 @@ def cut_tag(invocation: Invocation, decl: Declarations, data: dict, log, timeout
     project, product, version = decl.project, decl.product, data["version"]
     tag, branch, base, repository = data["tag"], data["branch"], data["base"], data["repository"]
     apply = invocation.flag("--apply")
-    listed = run(["gh", "pr", "list", "--repo", repository, "--head", branch, "--state", "all",
-                  "--limit", "10", "--json", "number,url,state,mergeCommit"], cwd=project)
-    if listed.returncode != 0:
-        raise Failure("PROCESS_FAILED", f"gh pr list failed: {listed.stderr.strip()}",
-                      "Check 'gh auth status', then run the command again.")
-    pulls = json.loads(listed.stdout or "[]")
-    if not pulls:
+    pull = one_pull(project, repository, branch)
+    if pull is None:
         raise Failure("NOT_FOUND", f"no pull request from {branch} in {repository}.",
                       f"Open the release first: '{PROGRAM} cut {project} {version} --apply'.")
-    if len(pulls) > 1:
-        raise Failure("PRECONDITION_FAILED",
-                      f"{len(pulls)} pull requests come from {branch} in {repository}: "
-                      + ", ".join(str(pull["number"]) for pull in pulls) + ".",
-                      "Close the ones that do not belong to this release, then run the command again.")
-    pull = pulls[0]
     data["pullRequest"] = {"number": pull["number"], "url": pull["url"], "state": pull["state"]}
     if pull["state"] != "MERGED":
         raise Failure("PRECONDITION_FAILED", f"{pull['url']} is {pull['state'].lower()}, not merged.",
@@ -2195,6 +2251,8 @@ def cut_tag(invocation: Invocation, decl: Declarations, data: dict, log, timeout
         runs = check_runs(repository, merge) or []
     data["checks"] = check_summary(runs)
     failed = failed_checks(runs)
+    if not runs:
+        data["gate"].append({"status": "note", "message": f"no check is registered on {merge[:7]} yet"})
     refused = [message for status, message in gate if status == "fail"] \
         + [f"{run['name']}: {run.get('conclusion') or run.get('status')}" for run in failed]
     data["ready"] = bool(runs) and not refused
