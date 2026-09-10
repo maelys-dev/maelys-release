@@ -246,6 +246,42 @@ unbounded one runs it where it can watch it.
 CI job runs gets a note, never a violation. The socle does not know whether
 that is an oversight or a choice.
 
+## What the fleet reads from a product
+
+`declarations` is the one place a fleet observer reads a product from, so
+that nothing has to guess at a repository's files with a pattern.
+maelys-platform runs this command against every repository of its inventory,
+at the socle **it** pins, and renders the contract as it comes.
+
+Three fields exist for that observer rather than for the product:
+
+- **`pinned`** names the socle commit and tag a product calls, **and the file
+  it names them in**: `release.yml` for a product the socle releases,
+  the `check-product.yml@` line of `ci.yml` for a product that keeps its own.
+  `managedBy` is a different fact, the socle version stamped in the header of
+  the generated `release.yml`: what wrote the file, not what the file calls.
+  The two can differ, and an observer that conflates them reports drift where
+  there is none.
+- **`declared`** holds what `packaging/release` declares, and only that.
+  `targets` and `manifestPatterns` beside it hold what the release will
+  actually use, defaults included. A field that folded the two made a fleet
+  read "every product targets these three" where the truth was "no product
+  declared one".
+- **`runners`** holds the runner labels a repository's own workflows select,
+  what the socle could not resolve, and whether the repository delegates.
+  Reading `runs-on` for a label is not enough: a matrix hides it, and a
+  repository that only calls reusable workflows names none at all. So the
+  socle resolves a matrix reference inside the same file, reports every
+  expression it cannot name under `unresolved`, and sets `delegated` when a
+  job calls the socle. **An empty `labels` is not a clean bill**: it means
+  this repository chooses none, and the runners it uses are the socle's.
+  An observer refusing self-hosted runners must block on `unresolved` and
+  look through `delegated`, rather than read either as absence.
+
+The reader is line-based: the socle carries no YAML parser and vendors none.
+It errs towards naming a label too many rather than one too few, because a
+runner nobody named is a hole and a label too many is a nuisance.
+
 ## Packaging
 
 - `scripts/package-release.sh TARGET` builds one target (`linux-x86_64`,

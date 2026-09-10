@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.27.0 — 2026-09-10
+
+- `declarations` answers what maelys-platform still read with a pattern.
+  `pinned` gains the file the socle is named in, `managedBy` carries the
+  version stamped in the generated `release.yml`, and `runners` holds the
+  labels a repository's workflows select. The fleet asked for the first and
+  the third; the second is what retires the last pattern.
+- **`declared` separates what a product asked for from what it gets.**
+  `targets` and `manifestPatterns` return the effective values, defaults
+  included, which made a fleet survey read "the fourteen products target
+  exactly these three" where the truth was "no product declared one". That
+  reading was a defect of this command, not of the survey.
+- The runner reader does not repeat the mistake it replaces. Searching the
+  text of `runs-on` for a label misses a matrix, and misses a repository
+  that names no runner because every job calls a reusable workflow.
+  maelys-oci is that second case today. So a matrix reference is resolved
+  inside the file, including the `include:` form maelys-datalog writes,
+  everything still unnamed is reported under `unresolved`, and `delegated`
+  says the repository chooses none of its own. An empty label list is not a
+  clean bill and the conventions say so.
+- Measured on the fleet: no repository names a self-hosted runner and none
+  is unresolved. The blind spot is latent, and it becomes live the day a
+  self-hosted runner arrives through a matrix.
+
 ## 0.26.0 — 2026-09-10
 
 - The `Fuzzing` section of `docs/conventions.md` is rewritten against a
