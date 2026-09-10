@@ -697,6 +697,29 @@ class ProductNeedsTest(unittest.TestCase):
         self.assertIn("      packages: write", workflow)
         self.assertIn("      publish_command: sh scripts/publish-channel.sh TAG CHANNEL", workflow)
 
+    def test_the_channel_marker_is_written_by_a_job_that_runs_no_product_code(self) -> None:
+        """A publication that happened is recorded by a job that could not
+        have said otherwise: `needs` makes the marker an observation, and one
+        asset per channel keeps two channels from clobbering each other."""
+        channel = (ROOT / ".github" / "workflows" / "channel.yml").read_text()
+        jobs = workflow_permissions(channel)
+        self.assertEqual(jobs["publish"].get("contents"), "read")
+        self.assertEqual(jobs["record"].get("contents"), "write")
+        record = channel.split("\n  record:\n", 1)[1]
+        self.assertIn("needs: publish", record)
+        # no checkout, no dist/, nothing of the product runs in the writing job
+        self.assertNotIn("actions/checkout", record)
+        self.assertIn('gh release upload "$TAG"', record)
+        self.assertIn('"channel-$CHANNEL.json"', record)
+        # the caller must grant what that job narrows to
+        self.product.write("packaging/release", "[channels]\nnpm github-packages\n")
+        self.product.write("scripts/publish-channel.sh", "#!/bin/sh\nexit 0\n", executable=True)
+        self.product.run("adopt", self.dir, "--apply")
+        caller = self.product.read(".github/workflows/release.yml")
+        granted = workflow_permissions(caller)["channel-npm"]
+        self.assertEqual(granted.get("contents"), "write")
+        self.assertEqual(granted.get("packages"), "write")
+
     def test_a_channel_without_its_script_is_a_violation(self) -> None:
         self.product.run("adopt", self.dir, "--apply")
         self.product.write("packaging/release", "[channels]\nnpm github-packages\n")

@@ -770,7 +770,10 @@ def release_workflow(decl: Declarations, sha: str, tag: str, version: str) -> st
             "    if: needs.release.result == 'success'",
             f"    uses: {SOCLE_REPOSITORY}/.github/workflows/channel.yml@{sha} # {tag}",
             "    permissions:",
-            "      contents: read",
+            # The ceiling, which each job of channel.yml narrows: the job that
+            # runs this product's publish script keeps contents: read, and
+            # only the one that attaches the marker writes.
+            "      contents: write",
             "      packages: write",
             "    with:",
             f"      product: {decl.product}",

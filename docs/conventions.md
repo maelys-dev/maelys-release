@@ -395,6 +395,16 @@ with `packages: write`: that is the one place a product's own code executes
 in a job holding a write token to a registry, a deliberate concession rather
 than an oversight.
 
+A channel that published says so, in one asset of the release named
+`channel-<name>.json`, written by a second job that runs no code of the
+product. `needs` is what makes that marker an observation: the job does not
+start unless the publication succeeded, so the asset exists if and only if
+the channel published. One asset per channel, written once and never
+rewritten — a rewritten asset cannot be covered by `SHA256SUMS`, computed
+before it, and two channels publishing at once would lose one another's
+entry. A publish script with something to record writes a JSON object to
+`$CHANNEL_RECORD`, whose fields join the marker.
+
 **`github-packages` is the only registry the socle serves**, and that is
 measured rather than chosen. Trusted publishing on npmjs and PyPI matches an
 OIDC claim, `job_workflow_ref`, which names the socle's workflow rather than
