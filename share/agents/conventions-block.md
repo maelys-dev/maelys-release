@@ -17,7 +17,8 @@ rules below hold whatever that mechanism is; the complete conventions are in
   violation). The block between the `maelys-release` markers of `AGENTS.md`
   and `CLAUDE.md` is regenerated: never edit it by hand. Everything else here
   belongs to this repository. The command follows agent-cli/v2: `--format
-  json` everywhere, `describe` for the catalog.
+  json` everywhere, `describe` for the catalog, and `--field NAME` to read
+  one member of the result without a `jq` expression.
 - `check` reports two verdicts. The conventions apply to this repository; the
   release mechanism of the socle does not, so `check` says nothing about
   `.github/workflows/release.yml`, which this repository owns entirely.

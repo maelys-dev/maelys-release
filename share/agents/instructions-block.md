@@ -19,7 +19,8 @@ are in `docs/conventions.md` of maelys-release.
   wanted tag. `maelys-release check DIR` (exit 2 on any violation) verifies;
   `maelys-release preflight DIR` checks the tag preconditions before a
   release. The command follows agent-cli/v2: `--format json` everywhere,
-  `describe` for the catalog.
+  `describe` for the catalog, and `--field NAME` to read one member of the
+  result without a `jq` expression.
 - A dependency on another Maelys repository is `dependencies/<name>.pin` (tag on
   line 1, commit on line 2), cloned by `scripts/checkout-dependency.sh NAME`.
   The packages the build needs on the runners are listed in

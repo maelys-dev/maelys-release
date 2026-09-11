@@ -1720,6 +1720,17 @@ class CutTest(unittest.TestCase):
         self.assertFalse(empty["ready"])
         self.assertIn("no check is registered", empty["gate"][0]["message"])
 
+    def test_the_plan_names_the_command_that_applies_it(self) -> None:
+        """A plan that does not say what to run next is a plan a reader has to
+        remember. 0.34.0 shipped without this line and nothing caught it."""
+        self.product.write("CHANGELOG.md",
+                           "# Changelog\n\n## 1.3.0 — 2026-09-03\n\n- Next.\n\n## 1.2.3 — 2026-09-03\n\n- Something.\n")
+        self.product.git(self.dir, "config", "tag.gpgsign", "true")
+        self.product.git(self.dir, "config", "user.signingkey", str(self.product.work / "signing-key"))
+        data, code = self.cut()
+        self.assertEqual(code, MODULE.EXIT_OK)
+        self.assertEqual(data["next"], f"maelys-release cut {self.dir} 1.3.0 --apply")
+
     def test_the_gate_names_the_product_own_verify_command(self) -> None:
         """A product's release gates are declared once and held at both ends:
         cut runs scripts/verify-release.sh before it writes anything."""

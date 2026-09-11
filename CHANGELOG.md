@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.35.0 — 2026-09-11
+
+- **`--field NAME` reads one member of a result without a `jq` expression**,
+  in every command of the socle. It comes from agent-cli/v2.4.0 through the
+  vendored framework rather than from code written here: the socle asked the
+  contract for it instead of inventing a local spelling that four other
+  Maelys tools would then have spelled four other ways.
+  `declarations DIR --field targets` prints one target per line;
+  `--field workflows --format jsonl` prints one workflow per line with its
+  members named. Refused with `--format json`, because a filtered envelope
+  would no longer validate against the command's `outputSchema`; a name the
+  result does not carry fails rather than printing nothing.
+- `dependencies/agent-cli-spec.pin` moves to **v2.4.0** and
+  `dependencies/maelys-cli.pin` to **v0.5.23**, with `bin/maelys_cli.py`
+  re-vendored. The conformance kit the socle runs is that tag's, so the new
+  rules are checked here first.
+- The managed instruction blocks name `--field`, so an agent reading them
+  knows the result can be read a member at a time. A product picks the text
+  up at its next adoption.
+- **`cut` names again the command that applies its plan.** 0.34.0 shipped a
+  plan that printed `cut: ready` instead of the line to run next, and nothing
+  caught it: a test now does. Found while cutting 0.34.0 itself.
+
 ## 0.34.0 — 2026-09-11
 
 - **`declarations` says what a repository runs, and when.** A new `workflows`
