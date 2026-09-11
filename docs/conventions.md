@@ -833,6 +833,36 @@ the tag, and `cut` is that release carried out. `adopt` runs from a checkout of 
 without a tag is refused, `--allow-untagged` being the trial of a
 candidate before its tag.
 
+### Rehearsing a channel
+
+`channel.yml` only ever runs on a signed tag, so the contract it rests on —
+**`publish_command` exits 0 without republishing when the registry already
+holds the version** — had never been exercised anywhere. A product could only
+discover its script was not idempotent by replaying a real release.
+
+```sh
+maelys-release rehearse DIR --channel npm --tag vX.Y.Z
+```
+
+It does what the job does: downloads that release's own assets into `dist/`,
+runs the declared publish command with `TAG` and `CHANNEL` substituted and
+the same environment, including `CHANNEL_RECORD`, and requires exit 0 — which
+is the contract, since the registry already holds that version. Then it
+composes the marker the `record` job would attach and **compares it with the
+`channel-<name>.json` the release carries**, ignoring `published` and `run`,
+which differ by construction. A disagreement on any other field means the
+script records something the release does not carry.
+
+It refuses before touching anything: a channel the product does not declare,
+a tag that is not one, a release that does not exist, a non-empty `dist/`
+whose stale files would make the script publish what the release does not
+have. **The registry token is the operator's**: it passes through the
+environment, and the socle never reads one from a file, never supplies one
+and never prints one. Nothing is left behind — the assets it downloaded are
+removed, whether the run succeeded or failed.
+
+Proposed by maelys-datalog, who could not test this any other way.
+
 ## Replaying a tag's release
 
 The generated caller workflow also accepts `workflow_dispatch` with a `tag`
