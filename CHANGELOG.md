@@ -16,7 +16,9 @@
   so git inside the rehearsal reads a path that is not there. Also reported by
   maelys-oci, who worked around it with a full clone; the socle now says that
   itself, in seconds, instead of surfacing as whatever the product's build
-  makes of a broken repository.
+  makes of a broken repository. The refusal comes before the search for
+  `docker`, so it holds on a machine that has none — which is where the first
+  shape of it was caught, by the macOS runner rather than by this laptop.
 
 ## 0.35.0 — 2026-09-11
 

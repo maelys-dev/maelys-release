@@ -2644,10 +2644,6 @@ def handle_rehearse(invocation: Invocation) -> tuple[dict, int]:
     run_pinned_socle(invocation, project)
     target = invocation.operands[1]
     require_socle_mechanism(project, mechanism, "rehearse")
-    if not shutil.which("docker"):
-        raise Failure("NOT_FOUND", "docker is required to rehearse a Linux build.", "Install Docker and retry.")
-    decl = read_declarations(project, product, mechanism)
-    require_valid(decl, "rehearse")
     # The copy carries .git as it stands. In a worktree — and in a submodule
     # checkout — .git is a file naming a directory elsewhere on the host,
     # which the container does not have, so git inside the rehearsal reads a
@@ -2660,6 +2656,10 @@ def handle_rehearse(invocation: Invocation) -> tuple[dict, int]:
                       " directory outside it, and rehearse copies the working tree into a container where"
                       " that directory does not exist.",
                       "Run the rehearsal from a full clone.")
+    if not shutil.which("docker"):
+        raise Failure("NOT_FOUND", "docker is required to rehearse a Linux build.", "Install Docker and retry.")
+    decl = read_declarations(project, product, mechanism)
+    require_valid(decl, "rehearse")
     if decl.dependencies and not os.access(project / "scripts" / "checkout-dependency.sh", os.X_OK):
         raise Failure("PRECONDITION_FAILED", "scripts/checkout-dependency.sh is missing in the product.",
                       f"Run '{PROGRAM} adopt {project} --apply' first.")

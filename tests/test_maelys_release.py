@@ -2095,7 +2095,12 @@ class RehearseRefusalTest(unittest.TestCase):
 
     def test_a_worktree_is_refused_with_its_cause(self) -> None:
         """A worktree's .git is a file naming a directory the container has
-        not got, so git inside the rehearsal reads a path that is not there."""
+        not got, so git inside the rehearsal reads a path that is not there.
+
+        The refusal comes before the search for docker, so it holds on a
+        machine that has none: the first shape of this test passed here and
+        failed on the macOS runner, where the absent docker answered first.
+        """
         (self.product.dir / ".git").write_text("gdir: /elsewhere/.git/worktrees/x\n", encoding="utf-8")
         error = self.product.json("rehearse", self.dir, "linux-arm64", "--check", expect=1)["error"]
         self.assertEqual(error["code"], "PRECONDITION_FAILED")
