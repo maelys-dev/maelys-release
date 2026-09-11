@@ -801,13 +801,25 @@ candidate before its tag.
 ## Replaying a tag's release
 
 The generated caller workflow also accepts `workflow_dispatch` with a `tag`
-input. It rebuilds the existing signed tag through the current socle, uploads
-the packages to a protected draft release, verifies them, publishes the
-release, then runs the tap jobs. Use it after adopting a corrected socle when
-a release or its formula failed; never re-tag for that. A tap push rejected
-because another product published first is retried by the job itself; the
-replay is for a job that failed or was cancelled.
+input. It rebuilds the existing signed tag, uploads the packages to a
+protected draft release, verifies them, publishes the release, then runs the
+tap jobs.
 
 ```bash
-gh workflow run release.yml --repo maelys-dev/PRODUCT -f tag=vX.Y.Z
+gh workflow run release.yml --repo maelys-dev/PRODUCT --ref vX.Y.Z -f tag=vX.Y.Z
 ```
+
+**`--ref` is not optional, and it names the tag.** The `release` environment
+limits deployments to tags `v*` — the socle requires that, and `preflight`
+refuses a repository without it — so a run started from the default branch is
+refused at `publish` by the environment itself. Without `--ref` that is where
+a replay stops.
+
+**A replay therefore runs the socle that tag pinned, never a corrected one.**
+The workflow file it uses is the one at `vX.Y.Z`, and that file names a socle
+commit. So the replay is for a run that failed for a reason outside the code:
+a cancelled job, an approval that expired, a tap push lost to a race with
+another product. **If the socle itself was at fault, the remedy is a new
+patch release of the product carrying the corrected pin** — a published tag
+is never moved, and replaying it would only repeat the fault. This page said
+the opposite until maelys-oci asked why the documented command had no `--ref`.

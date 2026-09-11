@@ -635,10 +635,13 @@ class ProductNeedsTest(unittest.TestCase):
         self.assertTrue((clone("with") / "framework" / "file").is_file())
 
     def test_a_verify_script_is_run_before_packaging_at_the_tag(self) -> None:
+        """With bash, like the package_command beside it. `sh` is dash on
+        Ubuntu and bash in POSIX mode on macOS, so a bashism would pass on the
+        operator's machine and fail on the runner at the tag."""
         self.product.write("scripts/verify-release.sh", "#!/bin/sh\nexit 0\n", executable=True)
         self.product.run("adopt", self.dir, "--apply")
         workflow = self.product.read(".github/workflows/release.yml")
-        self.assertIn("verify_command: sh scripts/verify-release.sh TARGET", workflow)
+        self.assertIn("verify_command: bash scripts/verify-release.sh TARGET", workflow)
 
     def test_without_that_script_the_release_workflow_asks_for_no_verification(self) -> None:
         self.product.run("adopt", self.dir, "--apply")

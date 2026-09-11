@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.36.0 — 2026-09-11
+
+- **The socle invoked its two product scripts with different shells.**
+  `package_command` ran `bash scripts/package-release.sh`, and the generated
+  `verify_command` ran `sh scripts/verify-release.sh`. `sh` is dash on Ubuntu
+  and bash in POSIX mode on macOS, so a `set -o pipefail` in that script
+  passes on the operator's machine and on the first stop of `cut`, and fails
+  on the runner at the tag — the one moment nothing can be retried cheaply.
+  Both are `bash` now. Reported by maelys-datalog, who nearly paid for it.
+  A product regenerates the line at its next adoption.
+- **The documented replay of a tag could not work, in either direction.** It
+  said `gh workflow run release.yml -f tag=vX.Y.Z`, with no `--ref`. Without
+  one the run starts from the default branch, and the `release` environment
+  accepts tags `v*` alone — the socle requires that policy and `preflight`
+  refuses a repository without it — so the run is refused at `publish` by the
+  very guard the socle asks for. With `--ref vX.Y.Z` it runs, and it runs the
+  workflow file at that tag, which pins the socle **that tag pinned**.
+- So the page's claim that a replay applies a corrected socle was false both
+  ways. A replay is for a run that failed for a reason outside the code — a
+  cancelled job, an expired approval, a tap push lost to a race. **When the
+  socle is at fault, the remedy is a new patch release of the product
+  carrying the corrected pin**, never a replay of a tag that would repeat the
+  fault. Corrected in the conventions, the managed instruction block and the
+  seeded `RELEASING.md`. Reported by maelys-oci, who asked why the documented
+  command had no `--ref`; the answer was worse than the question.
+
 ## 0.35.1 — 2026-09-11
 
 - **`rehearse DIR linux-x86_64` works again on an Apple Silicon host.** The

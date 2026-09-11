@@ -461,7 +461,13 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
         decl.add("note", "no packaging/homebrew/*.rb.in: no tap job")
     verifier = project / "scripts" / "verify-release.sh"
     if verifier.is_file() and os.access(verifier, os.X_OK):
-        decl.verify_command = "sh scripts/verify-release.sh TARGET"
+        # bash, like the package_command beside it. `sh` is dash on Ubuntu
+        # and bash in POSIX mode on macOS, so a bashism in this script — a
+        # `set -o pipefail` — passes on the operator's machine and on the
+        # first stop of cut, and fails on the runner at the tag, which is
+        # the one moment nothing can be retried cheaply. maelys-datalog
+        # nearly paid for it.
+        decl.verify_command = "bash scripts/verify-release.sh TARGET"
         decl.add("ok", "scripts/verify-release.sh TARGET runs before packaging at the tag")
     renderer = project / "scripts" / "render-homebrew-formula.sh"
     if renderer.is_file() and os.access(renderer, os.X_OK):
