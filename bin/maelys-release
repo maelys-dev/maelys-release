@@ -2843,28 +2843,47 @@ def text_preflight(data: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
-def workflow_moments(workflow: dict) -> str:
-    """What starts one workflow, said so a reader needs no second file.
+# The order a reader thinks in, which is not the order the files are in:
+# what a contributor triggers, what landing triggers, what releasing
+# triggers, what only a hand triggers, and what another workflow calls.
+MOMENTS = (("pull request", ("pull_request", "pull_request_target")),
+           ("push", ("push",)),
+           ("manual", ("workflow_dispatch", "repository_dispatch")),
+           ("scheduled", ("schedule",)),
+           ("released", ("release",)),
+           ("called", ("workflow_call",)))
 
-    `push` alone is not the same fact as `push` on the default branch or on
-    a tag, and the difference is what tells a doubled CI from a release.
+
+def strategy_lines(workflows: list) -> list:
+    """One line per moment: what starts, and which workflow answers.
+
+    The JSON is per file, because that is where the facts are read. A reader
+    asking "what happens when I open a pull request" needs the other axis,
+    and turning the table is the renderer's job, not a second command's.
     """
-    moments = []
-    for event in workflow["events"]:
-        if event != "push":
-            moments.append(event)
-        elif workflow["tags"]:
-            moments.append("push (tags " + " ".join(workflow["tags"]) + ")")
-        elif workflow["branches"]:
-            moments.append("push (" + " ".join(workflow["branches"]) + ")")
-        else:
-            moments.append("push (every branch)")
-    runs = f"{len(workflow['jobs'])} job" + ("s" if len(workflow["jobs"]) != 1 else "")
-    if workflow["delegates"]:
-        runs += ", one of them the socle's"
-    if workflow["unresolved"]:
-        runs += f", {len(workflow['unresolved'])} runner(s) unread"
-    return f"{workflow['file']}: " + ", ".join(moments or ["no event the socle names"]) + f" — {runs}"
+    lines = []
+    for label, events in MOMENTS:
+        for workflow in workflows:
+            for event in workflow["events"]:
+                if event not in events:
+                    continue
+                moment = label
+                if event == "push":
+                    moment = ("tag " + " ".join(workflow["tags"]) if workflow["tags"]
+                              else "push " + " ".join(workflow["branches"]) if workflow["branches"]
+                              else "push (every branch)")
+                runs = f"{len(workflow['jobs'])} job" + ("s" if len(workflow["jobs"]) != 1 else "")
+                if workflow["delegates"]:
+                    runs += ", one of them the socle's"
+                if workflow["unresolved"]:
+                    runs += f", {len(workflow['unresolved'])} runner(s) unread"
+                lines.append(f"{moment:<20} {workflow['file']} — {runs}")
+    named = {event for _, events in MOMENTS for event in events}
+    for workflow in workflows:
+        for event in workflow["events"]:
+            if event not in named:
+                lines.append(f"{event:<20} {workflow['file']}")
+    return lines
 
 
 def text_declarations(data: dict) -> str:
@@ -2882,8 +2901,8 @@ def text_declarations(data: dict) -> str:
         ("channels", " ".join(f"{c['name']} ({c['registry']})" for c in data["channels"])),
         ("fuzz", f"{data['fuzz']['harnesses']}/ run by {data['fuzz']['runs']}"
                  if data["fuzz"]["harnesses"] else ""))) \
-        + "".join(f"{('workflows' if index == 0 else ''):<13} {workflow_moments(workflow)}\n"
-                  for index, workflow in enumerate(data["workflows"]))
+        + "".join(f"{('strategy' if index == 0 else ''):<13} {line}\n"
+                  for index, line in enumerate(strategy_lines(data["workflows"])))
 
 
 def text_tap(data: dict) -> str:

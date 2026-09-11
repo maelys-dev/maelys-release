@@ -9,6 +9,10 @@
   signed tag, hand — was spread over those files, and reading it meant opening
   every one of them in every repository. It is read from the files alone, so
   the shared CI, which has no API access, gets it too.
+- **The text rendering turns the table.** The JSON is per file, because that
+  is where the facts are read; a reader asks what happens *when*, so
+  `declarations` prints one line per moment — pull request, push, tag,
+  manual, called — and nobody needs `jq` to see a repository's strategy.
 - **A workflow that runs twice on every pull request is now named.** `push`
   with no branch filter beside a `pull_request` runs the same jobs for the
   push and for the pull request. A **note**, never a violation: a repository

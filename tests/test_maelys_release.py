@@ -1948,19 +1948,26 @@ class WorkflowReadingTest(unittest.TestCase):
                          ["check", "package"])
         self.assertEqual(MODULE.file_runners("ci.yml", self.BLOCK)[0], ["macos-15", "ubuntu-26.04"])
 
-    def test_the_moments_a_reader_sees(self) -> None:
-        rendered = MODULE.workflow_moments({"file": "ci.yml", "events": ["push", "pull_request"],
-                                            "branches": [], "tags": [], "jobs": ["a", "b"],
-                                            "runners": [], "unresolved": [], "delegates": True})
-        self.assertIn("push (every branch)", rendered)
-        self.assertIn("2 jobs", rendered)
-        self.assertIn("socle", rendered)
-        released = MODULE.workflow_moments({"file": "release.yml", "events": ["push"],
-                                            "branches": [], "tags": ["v*"], "jobs": ["r"],
-                                            "runners": [], "unresolved": [], "delegates": False})
-        self.assertIn("push (tags v*)", released)
-        self.assertIn("1 job", released)
-        self.assertNotIn("1 jobs", released)
+    def test_the_table_is_turned_for_the_reader(self) -> None:
+        """The JSON is per file, because that is where the facts are read; a
+        reader asks what happens when, so the renderer turns the table."""
+        workflows = [
+            {"file": "ci.yml", "events": ["push", "pull_request"], "branches": [], "tags": [],
+             "jobs": ["a", "b"], "runners": [], "unresolved": [], "delegates": True},
+            {"file": "release.yml", "events": ["push", "workflow_dispatch"], "branches": [],
+             "tags": ["v*"], "jobs": ["r"], "runners": [], "unresolved": [], "delegates": False},
+        ]
+        lines = MODULE.strategy_lines(workflows)
+        self.assertEqual([line.split("  ")[0] for line in lines],
+                         ["pull request", "push (every branch)", "tag v*", "manual"])
+        self.assertIn("2 jobs, one of them the socle's", lines[0])
+        self.assertIn("1 job ", lines[2] + " ")
+        # An event the socle does not order is still named, never dropped.
+        odd = MODULE.strategy_lines([{"file": "x.yml", "events": ["merge_group"], "branches": [],
+                                      "tags": [], "jobs": [], "runners": [], "unresolved": [],
+                                      "delegates": False}])
+        self.assertEqual(len(odd), 1)
+        self.assertIn("merge_group", odd[0])
 
 
 class StrategyNoteTest(unittest.TestCase):
