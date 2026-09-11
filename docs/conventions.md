@@ -429,6 +429,19 @@ vouched for; the sentence that said so outlived the change, in this page and
 in the workflow's own input description. maelys-datalog found it by
 publishing a build receipt that was attested and absent.
 
+A name that reaches the release has to name one file. `build` runs once per
+target and each result arrives as its own artifact, so two targets that
+produce the same name produce one release file: the other target's bytes are
+gone, and `SHA256SUMS` vouches for whichever survived. The manifest then
+agrees with itself and describes something one target never built. Since
+0.38.1 `publish` compares, before it assembles, the digests of every name the
+manifest publishes, and refuses when two targets disagree, naming both. Equal
+bytes are not a collision: a package that does not depend on the architecture
+may be built by every target. A product whose package name omits the target
+either names it, or declares a single target in `[targets]` and builds it
+once. maelys-http reported this, from a source archive its three targets all
+named the same.
+
 ### A version that lives in more than one file
 
 A product whose version is materialised somewhere besides `VERSION` — a
