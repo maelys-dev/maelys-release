@@ -1612,13 +1612,23 @@ class CutTest(unittest.TestCase):
         self.product.git(self.dir, "init", "-q")
         self.product.git(self.dir, "add", "-A")
         self.product.git(self.dir, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "fixture")
+        # An origin, so the plan path reaches the gate: cut fetches the base
+        # branch and refuses a HEAD that is not level with it.
+        self.origin = self.product.work / "origin.git"
+        self.product.git(self.product.work, "init", "-q", "--bare", str(self.origin))
+        self.product.git(self.dir, "config", "user.name", "test")
+        self.product.git(self.dir, "config", "user.email", "test@example.invalid")
+        self.product.git(self.dir, "remote", "add", "origin", str(self.origin))
+        self.product.git(self.dir, "push", "-q", "origin", "main")
         # These tests call the module in process: the host's git
         # configuration must not decide whether the gate passes.
         self.saved = {name: os.environ.get(name) for name in self.ISOLATE}
         os.environ.update({"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null",
                            "GIT_CONFIG_NOSYSTEM": "1"})
+        self.log = open(self.product.work / "cut.log", "w", encoding="utf-8")
 
     def tearDown(self) -> None:
+        self.log.close()
         for name, value in self.saved.items():
             if value is None:
                 os.environ.pop(name, None)
@@ -1634,7 +1644,10 @@ class CutTest(unittest.TestCase):
                 "product": "maelys-fixture", "project": str(self.dir),
                 "repository": "maelys-dev/maelys-fixture", "version": version, "tag": f"v{version}",
                 "branch": f"release/v{version}", "base": "main", "gate": [], "checks": [], "ready": False}
-        return MODULE.cut_open(self.Stub(**options), self.declarations(), data, io.StringIO(), 1, 1)
+        # A real stream: cut hands the verify command's output straight to
+        # this file descriptor, so an operator watching a long `make check`
+        # sees it as it runs rather than at the end.
+        return MODULE.cut_open(self.Stub(**options), self.declarations(), data, self.log, 1, 1)
 
     def refusal(self, version: str = "1.3.0", **options) -> MODULE.Failure:
         with self.assertRaises(MODULE.Failure) as raised:
@@ -1707,6 +1720,134 @@ class CutTest(unittest.TestCase):
         self.assertFalse(empty["ready"])
         self.assertIn("no check is registered", empty["gate"][0]["message"])
 
+    def test_the_gate_names_the_product_own_verify_command(self) -> None:
+        """A product's release gates are declared once and held at both ends:
+        cut runs scripts/verify-release.sh before it writes anything."""
+        self.product.write("CHANGELOG.md",
+                           "# Changelog\n\n## 1.3.0 — 2026-09-03\n\n- Next.\n\n## 1.2.3 — 2026-09-03\n\n- Something.\n")
+        self.product.git(self.dir, "config", "tag.gpgsign", "true")
+        self.product.git(self.dir, "config", "user.signingkey", str(self.product.work / "signing-key"))
+        data, code = self.cut()
+        self.assertEqual(code, MODULE.EXIT_OK)
+        self.assertTrue(data["ready"])
+        self.assertEqual([item for item in data["gate"] if "verify-release" in item["message"]], [])
+        self.product.write("scripts/verify-release.sh", "#!/bin/sh\nexit 0\n", executable=True)
+        data, code = self.cut()
+        noted = [item["message"] for item in data["gate"] if "verify-release" in item["message"]]
+        self.assertEqual(len(noted), 1, data["gate"])
+        self.assertNotIn("TARGET", noted[0])           # the host's own target, not the placeholder
+        self.assertIn("before writing anything", noted[0])
+
+    def test_check_reads_the_after_version_command(self) -> None:
+        self.product.write("packaging/release", "[cut]\nafter-version bash scripts/header.sh\n")
+        messages = self.product.json("check", str(self.dir), expect=2)["data"]["conventions"]["violations"]
+        self.assertTrue(any("scripts/header.sh" in message and "does not carry" in message
+                            for message in messages), messages)
+        self.product.write("scripts/header.sh", "#!/bin/sh\nexit 0\n", executable=True)
+        data = self.product.json("check", str(self.dir))["data"]
+        self.assertTrue(data["conventions"]["valid"])
+        self.assertTrue(any("after-version: bash scripts/header.sh" in check["message"]
+                            for check in data["checks"]))
+
+    def test_the_worktree_snapshot_separates_tracked_from_untracked(self) -> None:
+        """The two status columns are the answer, and the first is often a
+        space: a stripped line loses the first character of the path."""
+        self.product.write("AGENTS.md", "# Agent instructions\n\nEdited.\n")
+        self.product.write("scripts/new-file.sh", "#!/bin/sh\n")
+        paths = MODULE.worktree_paths(self.dir)
+        self.assertEqual(paths.get("AGENTS.md"), " M")
+        self.assertEqual(paths.get("scripts/new-file.sh"), "??")
+
+    CHECK_RUNS = ('{"total_count":1,"check_runs":'
+                  '[{"name":"check","status":"completed","conclusion":"success"}]}')
+
+    def fake_gh(self) -> None:
+        """A gh that answers exactly what the first stop asks of it.
+
+        The first stop is the part of cut that writes: a signed commit, a
+        push, a pull request and the wait. Everything but GitHub is real
+        here — a bare repository is the origin, the commit is signed with a
+        generated key — so what the test exercises is the sequence itself.
+        """
+        directory = self.product.work / "fake-bin"
+        directory.mkdir(exist_ok=True)
+        script = directory / "gh"
+        script.write_text(
+            "#!/bin/sh\n"
+            "case \"$1\" in\n"
+            "api) printf '%s' '" + self.CHECK_RUNS + "' ;;\n"
+            "pr) case \"$2\" in\n"
+            "      create) echo 'https://example.invalid/pull/1' ;;\n"
+            "      view) echo '{\"number\":1,\"url\":\"https://example.invalid/pull/1\",\"state\":\"OPEN\"}' ;;\n"
+            "      list) echo '[]' ;;\n"
+            "      *) exit 1 ;;\n"
+            "    esac ;;\n"
+            "*) exit 1 ;;\n"
+            "esac\n", encoding="utf-8")
+        script.chmod(0o755)
+        os.environ["PATH"] = f"{directory}:{os.environ['PATH']}"
+
+    def signing_key(self) -> bool:
+        if not shutil.which("ssh-keygen"):
+            return False
+        key = self.product.work / "signing-key"
+        if not key.is_file():
+            subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(key)], check=True)
+        self.product.git(self.dir, "config", "tag.gpgsign", "true")
+        self.product.git(self.dir, "config", "gpg.format", "ssh")
+        self.product.git(self.dir, "config", "user.signingkey", str(key))
+        return True
+
+    def test_the_first_stop_commits_what_after_version_regenerated(self) -> None:
+        """A version materialised twice: without this the bump commit is red
+        by construction, and the wait could never see it green."""
+        if not self.signing_key():
+            self.skipTest("ssh-keygen is needed to sign the bump commit")
+        self.fake_gh()
+        self.product.write("CHANGELOG.md",
+                           "# Changelog\n\n## 1.3.0 — 2026-09-03\n\n- Next.\n\n## 1.2.3 — 2026-09-03\n\n- Something.\n")
+        self.product.write("include/version.h", '#define VERSION "1.2.3"\n')
+        self.product.write("scripts/header.sh",
+                           '#!/bin/sh\nprintf \'#define VERSION "%s"\\n\' "$(cat VERSION)" >include/version.h\n',
+                           executable=True)
+        self.product.write("scripts/verify-release.sh", "#!/bin/sh\ntouch verified\n", executable=True)
+        self.product.write("packaging/release", "[cut]\nafter-version sh scripts/header.sh\n")
+        self.product.git(self.dir, "add", "-A")
+        self.product.git(self.dir, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "a version in two files")
+        self.product.git(self.dir, "push", "-q", "origin", "main")
+
+        data, code = self.cut(**{"--apply": True})
+        self.assertEqual(code, MODULE.EXIT_OK, data)
+        self.assertTrue(data["ready"])
+        self.assertEqual(data["regenerated"], ["include/version.h"])
+        # The declared gate ran before anything was written.
+        self.assertTrue((self.dir / "verified").is_file())
+        # One commit, on the release branch, carrying both files and signed.
+        self.assertEqual(self.product.git(self.dir, "rev-parse", "--abbrev-ref", "HEAD"), "release/v1.3.0")
+        self.assertEqual(self.product.read("include/version.h"), '#define VERSION "1.3.0"\n')
+        committed = self.product.git(self.dir, "show", "--name-only", "--format=", "HEAD").split()
+        self.assertEqual(sorted(committed), ["VERSION", "include/version.h"])
+        self.assertIn("SIGNATURE", self.product.git(self.dir, "cat-file", "-p", "HEAD"))
+        # The worktree is clean: nothing the command touched was left behind.
+        self.assertEqual([path for path, code in MODULE.worktree_paths(self.dir).items() if code != "??"], [])
+
+    def test_a_failing_after_version_restores_version_and_writes_nothing(self) -> None:
+        if not self.signing_key():
+            self.skipTest("ssh-keygen is needed to sign the bump commit")
+        self.fake_gh()
+        self.product.write("CHANGELOG.md",
+                           "# Changelog\n\n## 1.3.0 — 2026-09-03\n\n- Next.\n\n## 1.2.3 — 2026-09-03\n\n- Something.\n")
+        self.product.write("scripts/header.sh", "#!/bin/sh\necho broken >&2\nexit 3\n", executable=True)
+        self.product.write("packaging/release", "[cut]\nafter-version sh scripts/header.sh\n")
+        self.product.git(self.dir, "add", "-A")
+        self.product.git(self.dir, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "a generator that fails")
+        self.product.git(self.dir, "push", "-q", "origin", "main")
+        failure = self.refusal(**{"--apply": True})
+        self.assertEqual(failure.code, "PROCESS_FAILED")
+        self.assertIn("exit 3", failure.message)
+        self.assertEqual(self.product.read("VERSION"), "1.2.3\n")
+        self.assertEqual(self.product.git(self.dir, "rev-parse", "--abbrev-ref", "HEAD"), "main")
+
     def test_cut_refuses_a_repository_that_is_not_on_github(self) -> None:
         error = self.product.json("cut", str(self.dir), "1.3.0", expect=1)["error"]
         self.assertEqual(error["code"], "PRECONDITION_FAILED")
@@ -1716,6 +1857,213 @@ class CutTest(unittest.TestCase):
         error = self.product.json("cut", str(self.dir), "1.3.0", "--message", "notes", expect=1)["error"]
         self.assertEqual(error["code"], "VALIDATION_FAILED")
         self.assertIn("--tag", error["message"])
+
+
+class BranchNameTest(unittest.TestCase):
+    """A branch says what changes, not who typed; the socle notes, never refuses."""
+
+    def setUp(self) -> None:
+        self.product = Product()
+        self.dir = self.product.dir
+        self.product.run("adopt", str(self.dir), "--apply")
+        self.product.git(self.dir, "init", "-q")
+        self.product.git(self.dir, "add", "-A")
+        self.product.git(self.dir, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "fixture")
+
+    def tearDown(self) -> None:
+        self.product.close()
+
+    def notes(self) -> list:
+        data = self.product.json("check", str(self.dir))["data"]
+        self.assertTrue(data["conventions"]["valid"], "a branch name is never a violation")
+        return [check["message"] for check in data["checks"] if "named after the tool" in check["message"]]
+
+    def test_an_agent_prefix_is_noted_and_a_change_prefix_is_not(self) -> None:
+        self.assertEqual(self.notes(), [])                                  # main
+        for branch in ("claude/one-asset-per-channel", "codex/ubuntu-26"):
+            self.product.git(self.dir, "switch", "-q", "-c", branch)
+            self.assertEqual(len(self.notes()), 1, branch)
+            self.assertIn(branch, self.notes()[0])
+            self.product.git(self.dir, "switch", "-q", "main")
+            self.product.git(self.dir, "branch", "-q", "-D", branch)
+        for branch in ("fix/a-real-bug", "release/v1.3.0", "docs/the-conventions", "claudette"):
+            self.product.git(self.dir, "switch", "-q", "-c", branch)
+            self.assertEqual(self.notes(), [], branch)
+            self.product.git(self.dir, "switch", "-q", "main")
+
+    def test_a_detached_head_is_not_a_branch_name(self) -> None:
+        """CI checks out a merge ref: the name there is GitHub's, not the author's."""
+        self.product.git(self.dir, "switch", "-q", "--detach", "HEAD")
+        self.assertEqual(self.notes(), [])
+
+
+class WorkflowReadingTest(unittest.TestCase):
+    """What starts a workflow and what it runs, read from the file alone.
+
+    Line-based like the runner reader: the socle carries no YAML parser. The
+    three shapes of `on:` GitHub accepts are all in the fleet.
+    """
+
+    BLOCK = textwrap.dedent("""\
+        name: ci
+
+        on:
+          push:
+            branches: [main]
+          pull_request:
+          workflow_dispatch:
+
+        permissions:
+          contents: read
+
+        jobs:
+          check:
+            runs-on: ubuntu-26.04
+          package:
+            runs-on: macos-15
+        """)
+
+    def test_the_three_shapes_of_on(self) -> None:
+        self.assertEqual(MODULE.workflow_events(self.BLOCK),
+                         ["push", "pull_request", "workflow_dispatch"])
+        self.assertEqual(MODULE.workflow_events("on: [push, pull_request]\njobs:\n"),
+                         ["push", "pull_request"])
+        self.assertEqual(MODULE.workflow_events("on: workflow_dispatch\njobs:\n"),
+                         ["workflow_dispatch"])
+        self.assertEqual(MODULE.workflow_events("name: x\njobs:\n"), [])
+
+    def test_a_push_says_which_push(self) -> None:
+        """push alone, push on a branch and push on a tag are three facts."""
+        block = MODULE.top_block(self.BLOCK, "on")
+        self.assertEqual(MODULE.block_list(MODULE.sub_block(block, "push"), "branches"), ["main"])
+        tagged = self.BLOCK.replace("branches: [main]", "tags:\n      - 'v*'")
+        pushed = MODULE.sub_block(MODULE.top_block(tagged, "on"), "push")
+        # A tag filter is not label-shaped: a reader that kept only labels
+        # would drop the rule that says this workflow releases.
+        self.assertEqual(MODULE.block_list(pushed, "tags"), ["v*"])
+        self.assertEqual(MODULE.block_list(pushed, "branches"), [])
+
+    def test_jobs_and_runners_of_one_file(self) -> None:
+        self.assertEqual(MODULE.JOB_ID.findall(MODULE.top_block(self.BLOCK, "jobs")),
+                         ["check", "package"])
+        self.assertEqual(MODULE.file_runners("ci.yml", self.BLOCK)[0], ["macos-15", "ubuntu-26.04"])
+
+    def test_the_table_is_turned_for_the_reader(self) -> None:
+        """The JSON is per file, because that is where the facts are read; a
+        reader asks what happens when, so the renderer turns the table."""
+        workflows = [
+            {"file": "ci.yml", "events": ["push", "pull_request"], "branches": [], "tags": [],
+             "jobs": ["a", "b"], "runners": [], "unresolved": [], "delegates": True},
+            {"file": "release.yml", "events": ["push", "workflow_dispatch"], "branches": [],
+             "tags": ["v*"], "jobs": ["r"], "runners": [], "unresolved": [], "delegates": False},
+        ]
+        lines = MODULE.strategy_lines(workflows)
+        self.assertEqual([line.split("  ")[0] for line in lines],
+                         ["pull request", "push (every branch)", "tag v*", "manual"])
+        self.assertIn("2 jobs, one of them the socle's", lines[0])
+        self.assertIn("1 job ", lines[2] + " ")
+        # An event the socle does not order is still named, never dropped.
+        odd = MODULE.strategy_lines([{"file": "x.yml", "events": ["merge_group"], "branches": [],
+                                      "tags": [], "jobs": [], "runners": [], "unresolved": [],
+                                      "delegates": False}])
+        self.assertEqual(len(odd), 1)
+        self.assertIn("merge_group", odd[0])
+
+
+class StrategyNoteTest(unittest.TestCase):
+    """A workflow that runs twice on every pull request, named."""
+
+    def setUp(self) -> None:
+        self.product = Product()
+        self.dir = self.product.dir
+        self.product.run("adopt", str(self.dir), "--apply")
+
+    def tearDown(self) -> None:
+        self.product.close()
+
+    def notes(self) -> list:
+        data = self.product.json("check", str(self.dir))["data"]
+        self.assertTrue(data["conventions"]["valid"], "a trigger is never a violation")
+        return [check["message"] for check in data["checks"] if "runs it twice" in check["message"]]
+
+    def test_push_with_no_branch_beside_pull_request_is_noted(self) -> None:
+        self.product.write(".github/workflows/extra.yml",
+                           "name: extra\n\non:\n  push:\n  pull_request:\n\njobs:\n  x:\n    runs-on: ubuntu-26.04\n")
+        noted = self.notes()
+        self.assertEqual(len(noted), 1, noted)
+        self.assertIn("extra.yml", noted[0])
+
+    def test_a_filtered_push_and_a_tag_push_are_not(self) -> None:
+        self.product.write(".github/workflows/extra.yml",
+                           "name: extra\n\non:\n  push:\n    branches: [main]\n  pull_request:\n\n"
+                           "jobs:\n  x:\n    runs-on: ubuntu-26.04\n")
+        self.assertEqual(self.notes(), [])
+        self.product.write(".github/workflows/extra.yml",
+                           "name: extra\n\non:\n  push:\n    tags: ['v*']\n  pull_request:\n\n"
+                           "jobs:\n  x:\n    runs-on: ubuntu-26.04\n")
+        self.assertEqual(self.notes(), [])
+
+
+class GitHubReadingTest(unittest.TestCase):
+    """An answer, a refusal and an absence are three different facts.
+
+    The socle told seventeen private repositories that their default branch
+    was unprotected at the very moment GitHub was refusing to say: `gh`
+    failed, the reader returned None, and None meant absent.
+    """
+
+    class Completed:
+        def __init__(self, returncode=0, stdout="", stderr=""):
+            self.returncode, self.stdout, self.stderr = returncode, stdout, stderr
+
+    def read(self, completed, gh=True):
+        original_run, original_which = MODULE.run, MODULE.shutil.which
+        MODULE.run = lambda *arguments, **keywords: completed
+        MODULE.shutil.which = lambda name: "/usr/bin/gh" if gh else None
+        try:
+            return MODULE.github_read("repos/x/y")
+        finally:
+            MODULE.run, MODULE.shutil.which = original_run, original_which
+
+    def test_the_four_states(self) -> None:
+        self.assertEqual(self.read(self.Completed(0, '{"a": 1}')), ("ok", {"a": 1}))
+        self.assertEqual(self.read(self.Completed(1, "", "gh: Not Found (HTTP 404)")), ("absent", None))
+        self.assertEqual(self.read(self.Completed(1, "", "gh: Upgrade to GitHub Pro (HTTP 403)")),
+                         ("unreadable", None))
+        # A failure with no status at all is unreadable, never absent.
+        self.assertEqual(self.read(self.Completed(1, "", "dial tcp: timeout")), ("unreadable", None))
+        self.assertEqual(self.read(self.Completed(0, "not json")), ("unreadable", None))
+        self.assertEqual(self.read(self.Completed(0, "{}"), gh=False), ("no-gh", None))
+
+    def test_github_api_still_answers_a_body_or_nothing(self) -> None:
+        """The readers that act the same way on every absence keep their shape;
+        a list is not a body for them, because they index it by name."""
+        self.assertEqual(self.read(self.Completed(0, '[1, 2]')), ("ok", [1, 2]))
+        original_read = MODULE.github_read
+        MODULE.github_read = lambda path: ("ok", [1, 2])
+        try:
+            self.assertIsNone(MODULE.github_api("repos/x/y"))
+        finally:
+            MODULE.github_read = original_read
+
+    def test_what_protects_a_branch_and_what_cannot_be_read(self) -> None:
+        def verdict(classic, ruled, rules):
+            return MODULE.branch_protection("o/r", "main", classic, ruled, rules)
+        self.assertEqual(verdict("ok", "ok", [])[0], "ok")
+        self.assertIn("branch protection", verdict("ok", "ok", [])[1])
+        # A ruleset alone protects, and reading only the first endpoint
+        # reported agent-cli-spec open — permanently, not only while locked.
+        status, message = verdict("absent", "ok", [{"type": "deletion"}])
+        self.assertEqual(status, "ok")
+        self.assertIn("a ruleset", message)
+        self.assertIn("branch protection and a ruleset", verdict("ok", "ok", [{"type": "x"}])[1])
+        # Nothing protects it, and both endpoints said so.
+        self.assertIn("is not protected", verdict("absent", "ok", [])[1])
+        # GitHub refused to say: not the same fact, never reported as one.
+        for classic, ruled in (("unreadable", "unreadable"), ("unreadable", "ok"), ("absent", "unreadable")):
+            message = verdict(classic, ruled, [])[1]
+            self.assertIn("cannot read", message, (classic, ruled))
+            self.assertNotIn("is not protected", message, (classic, ruled))
 
 
 class RenderAndTapTest(unittest.TestCase):
@@ -1808,15 +2156,18 @@ class UnitTest(unittest.TestCase):
 
     def test_parse_release(self) -> None:
         self.assertEqual(MODULE.parse_release("[targets]\nlinux-arm64\nwasm32 ubuntu-26.04\n"),
-                         ([("linux-arm64", ""), ("wasm32", "ubuntu-26.04")], [], [], ""))
+                         ([("linux-arm64", ""), ("wasm32", "ubuntu-26.04")], [], [], "", ""))
         self.assertEqual(MODULE.parse_release("[targets]\nmacos-arm64 self-hosted ARM64\n"),
-                         ([("macos-arm64", ["self-hosted", "ARM64"])], [], [], ""))
-        self.assertEqual(MODULE.parse_release("[manifest]\n*.wasm\n"), ([], ["*.wasm"], [], ""))
+                         ([("macos-arm64", ["self-hosted", "ARM64"])], [], [], "", ""))
+        self.assertEqual(MODULE.parse_release("[manifest]\n*.wasm\n"), ([], ["*.wasm"], [], "", ""))
         self.assertEqual(MODULE.parse_release("[channels]\nnpm github-packages\n"),
-                         ([], [], [("npm", "github-packages")], ""))
-        self.assertEqual(MODULE.parse_release("[gate]\nnone\n"), ([], [], [], "none"))
-        self.assertEqual(MODULE.parse_release("[gate]\nreviewer\n"), ([], [], [], "reviewer"))
-        self.assertEqual(MODULE.parse_release("# nothing declared\n"), ([], [], [], ""))
+                         ([], [], [("npm", "github-packages")], "", ""))
+        self.assertEqual(MODULE.parse_release("[gate]\nnone\n"), ([], [], [], "none", ""))
+        self.assertEqual(MODULE.parse_release("[gate]\nreviewer\n"), ([], [], [], "reviewer", ""))
+        self.assertEqual(MODULE.parse_release("# nothing declared\n"), ([], [], [], "", ""))
+        # A version materialised twice: the command that regenerates the second.
+        self.assertEqual(MODULE.parse_release("[cut]\nafter-version bash scripts/header.sh\n"),
+                         ([], [], [], "", "bash scripts/header.sh"))
         for text in ("linux-arm64\n",                      # outside a section
                      "[bsd]\nlinux-arm64\n",               # unknown section
                      "[targets]\nwasm32\n",                # no runner and no default
@@ -1830,7 +2181,10 @@ class UnitTest(unittest.TestCase):
                      "[channels]\nNPM github-packages\n",  # not a channel name
                      "[channels]\nnpm github-packages\nnpm github-packages\n",  # twice
                      "[gate]\nmaybe\n",                    # not a gate the socle knows
-                     "[gate]\nreviewer\nnone\n"):          # one line, not two
+                     "[gate]\nreviewer\nnone\n",           # one line, not two
+                     "[cut]\nbefore-version make\n",       # a key [cut] does not know
+                     "[cut]\nafter-version\n",             # names no command
+                     "[cut]\nafter-version a\nafter-version b\n"):  # one command, not two
             with self.assertRaises(ValueError, msg=text):
                 MODULE.parse_release(text)
 

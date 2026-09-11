@@ -32,6 +32,11 @@ rules below hold whatever that mechanism is; the complete conventions are in
   `release/vX.Y.Z`, opens the pull request and waits for its checks, and
   `cut DIR X.Y.Z --tag --apply` then signs the tag on the merge commit
   those checks ran on. It never merges its own pull request.
+- A branch is named after the change it carries, with the prefix that
+  change would take in a commit message (`fix/`, `docs/`, `release/`…),
+  never after the tool that created it: a name says what changes, not who
+  typed. No list is closed; the commit prefixes this repository already
+  uses are its vocabulary.
 - `RELEASING.md` states how this repository publishes. The socle writes it
   once if it is missing, then it belongs to this repository: it is the place
   to describe the mechanism the socle does not provide here.

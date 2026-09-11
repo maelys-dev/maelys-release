@@ -148,6 +148,28 @@ cannot move its prose to a repository nobody has created yet, and a rule
 that no product can satisfy is a rule that gets disabled. A product opts in
 once its prose has moved.
 
+## Branches
+
+A branch is named after the change it carries, with the prefix that change
+would take in a commit message — `fix/`, `docs/`, `release/`, `refactor/` —
+and never after the tool that created it. `claude/` and `codex/` say who
+typed; they say nothing about what changes, and they are the default of an
+agent's worktree rather than anyone's choice.
+
+**No list is closed.** maelys-datalog, which reported this, already uses ten
+commit prefixes of its own, and no two products of the fleet use the same
+set. The rule is the correspondence between the name and the nature of the
+change, not the vocabulary; each repository's own commit history is its
+vocabulary.
+
+`check` notes a branch named after an agent and never refuses one: a
+convention about branch names is not a property of the working tree it
+reads, and in CI it reads a detached HEAD, where the name is GitHub's and
+not the author's. The note therefore fires where it is useful — on the
+author's own checkout, before the push — and the fleet-wide view belongs to
+maelys-platform, which reads the remote branches of every repository. The
+socle declares, the observer counts: the same split as the release gate.
+
 ## Versions, tags, changelog
 
 - `VERSION` holds `X.Y.Z` and nothing else. A release is the tag `vX.Y.Z`
@@ -175,7 +197,8 @@ cut DIR X.Y.Z` makes them mechanical without taking the merge.
 The first stop refuses before it writes: a version that does not come
 after the current one, a worktree carrying anything but `VERSION` and
 `CHANGELOG.md`, a missing or future-dated changelog entry, a `HEAD` that
-is not the default branch up to date with `origin`, and the gate
+is not the default branch up to date with `origin`, the product's own
+`scripts/verify-release.sh` when it carries one, and the gate
 `preflight` holds — the signing configuration, the previous tag, a free
 `vX.Y.Z`, and, for a product the socle releases, the `release`
 environment. It then writes `VERSION`, commits it signed on
@@ -303,6 +326,19 @@ Three fields exist for that observer rather than for the product:
   actually use, defaults included. A field that folded the two made a fleet
   read "every product targets these three" where the truth was "no product
   declared one".
+- **`workflows`** holds, for each file of `.github/workflows/`, the events
+  that start it, the branch and tag filters of its `push`, its job names, the
+  runners it selects and whether one of its jobs calls the socle. A
+  repository's strategy — what runs on a pull request, what runs on a push,
+  what a signed tag releases, what only a hand starts — was spread across
+  those files, and reading it meant opening every one of them in every
+  repository. `push` with no branch filter beside a `pull_request` is
+  **noted**, never refused: the same jobs then run twice for every pushed
+  commit of a pull request, which a repository may want and nobody could see.
+  This field is read from the files alone, like everything else here: the
+  shared CI calls `declarations` on a runner with no access to the API, so
+  what a repository's **settings** say — its branch protection above all —
+  belongs to `preflight` and to the fleet observer, never here.
 - **`runners`** holds the runner labels a repository's own workflows select,
   what the socle could not resolve, and whether the repository delegates.
   Reading `runs-on` for a label is not enough: a matrix hides it, and a
@@ -356,12 +392,39 @@ the three above; that is how a change of default runner still reaches a
 product that only added a target. A line may name one runner label or a
 label set (`macos-arm64 self-hosted macOS ARM64`).
 
-`[manifest]` **adds** to the socle's three archive kinds. It decides what
-`SHA256SUMS` vouches for, not what is published: the build job uploads
-everything `package_command` leaves in `dist/` and the attestation covers
-`dist/*`, so an artifact of an unnamed kind is still published and still
-attested. What it lacks is a line in the manifest and the `sha256sum -c`
-that goes with it.
+`[manifest]` **adds** to the socle's three archive kinds, and **what is not
+in the manifest is not published.** The build job uploads everything
+`package_command` leaves in `dist/` and the attestation covers `dist/*`, so
+an artifact of an unnamed kind is attested — and then `publish` copies from
+those artifacts only what matches the manifest globs or `*.sha256`, so it
+never reaches the release. That was not true before 0.31.0, when the build
+wrote into the draft itself and the manifest decided only what `SHA256SUMS`
+vouched for; the sentence that said so outlived the change, in this page and
+in the workflow's own input description. maelys-datalog found it by
+publishing a build receipt that was attested and absent.
+
+### A version that lives in more than one file
+
+A product whose version is materialised somewhere besides `VERSION` — a
+generated header, a `package.json`, a formula — declares how to regenerate
+it:
+
+```
+[cut]
+after-version bash scripts/generate-version-header.sh
+```
+
+`cut` runs that command between writing `VERSION` and the bump commit, and
+whatever the command touched joins that commit. Without it the bump commit
+is **red by construction** wherever a check compares the two files, and the
+first stop, which waits for the checks of that very commit, could never see
+them green: the operator would have to push a second commit onto the release
+branch by hand, which is the ceremony `cut` exists to remove.
+
+maelys-datalog found this by migrating onto `cut`, and it is not theirs
+alone: it holds for every product that materialises its version twice. The
+socle checks that the files the command names exist, and nothing more — the
+command belongs to the repository, and it runs on the operator's machine.
 
 Both sections are optional and a product that declares neither sees no
 change. A declaration the socle cannot honour, a target with no runner and
@@ -396,7 +459,15 @@ organisation of one member that is the honest description, and a pause is
 still worth having: a tag has been pushed here before a trial's verdict was
 read.
 
-`preflight` also reports an unprotected default branch, as a note. The
+`preflight` also reports an unprotected default branch, as a note — and
+tells that apart from a branch whose protection it **cannot read**. Two
+endpoints answer about a branch and not for the same thing: the classic
+protection, and a ruleset; a repository of the fleet is protected by a
+ruleset alone, so reading the first alone reported it open. And a private
+repository on a free plan answers 403 to both, which is a refusal to say and
+not an absence. The socle used to turn every failure into "not protected",
+and said so about seventeen repositories at the moment GitHub was declining
+to answer. The
 socle's contract is about tags, but `commit_verification:
 signed-on-default-branch` relies on that branch meaning something.
 

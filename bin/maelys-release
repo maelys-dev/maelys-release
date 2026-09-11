@@ -118,6 +118,12 @@ MANAGED = (
     "SECURITY.md",
     ".github/workflows/ci.yml",
 )
+# The agents that work in the fleet and name a worktree branch after
+# themselves by default. The rule is that a branch carries the prefix of
+# its change and never the name of the tool, so this is the one list the
+# socle can close: it is the set of agents the socle writes instructions
+# for, not a vocabulary of change types, which belongs to each repository.
+AGENT_BRANCHES = ("claude", "codex")
 SOCLE_MECHANISM = "maelys-release"
 MECHANISMS = (SOCLE_MECHANISM, "custom", "none")
 RELEASE_USES = re.compile(rf"{re.escape(SOCLE_REPOSITORY)}/\.github/workflows/release\.yml@[0-9a-f]{{40}}")
@@ -223,6 +229,9 @@ class Declarations:
         self.channels: list[tuple[str, str]] = []
         # "reviewer", "none", or "" when this repository has not chosen.
         self.gate = ""
+        # What cut runs between writing VERSION and the bump commit, for a
+        # product whose version is also materialised somewhere else.
+        self.after_version = ""
         # Observation only: where the harnesses are, and who runs them.
         self.fuzz_harnesses = ""
         self.fuzz_runs = "none"
@@ -275,8 +284,8 @@ def parse_packages(text: str) -> tuple[str, str]:
     return " ".join(packages["linux"]), " ".join(packages["macos"])
 
 
-def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[tuple[str, str]], str]:
-    """packaging/release: [targets], [manifest] and [channels], one declaration per line.
+def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[tuple[str, str]], str, str]:
+    """packaging/release: [targets], [manifest], [channels], [gate] and [cut].
 
     A target line naming no label keeps the runner release.yml holds for that
     target, which only exists for the three the socle builds; one label is a
@@ -284,24 +293,39 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
     matrix rather than adding to it, so a product that adds one target names
     the others it keeps. [manifest] adds to the socle's archive kinds.
     [channels] names one 'CHANNEL REGISTRY' per line, each rendered into a
-    channel.yml job that runs once the release is published.
+    channel.yml job that runs once the release is published. [cut] holds
+    'after-version COMMAND', run by cut between writing VERSION and the
+    bump commit, for a product that materialises its version somewhere
+    else as well.
     """
     targets: list[tuple[str, object]] = []
     manifest: list[str] = []
     channels: list[tuple[str, str]] = []
     gate = ""
+    after_version = ""
     section = ""
     for number, raw in enumerate(text.splitlines(), 1):
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
         if line.startswith("["):
-            if line in ("[targets]", "[manifest]", "[channels]", "[gate]"):
+            if line in ("[targets]", "[manifest]", "[channels]", "[gate]", "[cut]"):
                 section = line[1:-1]
                 continue
             raise ValueError(f"unknown section {line} at line {number}")
         if not section:
-            raise ValueError(f"line outside a [targets], [manifest], [channels] or [gate] section at line {number}")
+            raise ValueError(f"line outside a [targets], [manifest], [channels], [gate]"
+                             f" or [cut] section at line {number}")
+        if section == "cut":
+            key, _, command = line.partition(" ")
+            if key != "after-version":
+                raise ValueError(f"[cut] knows after-version, not {key}, at line {number}")
+            if after_version:
+                raise ValueError(f"[cut] holds one after-version, and line {number} is a second")
+            if not command.strip():
+                raise ValueError(f"[cut] after-version names no command at line {number}")
+            after_version = command.strip()
+            continue
         if section == "gate":
             if gate:
                 raise ValueError(f"[gate] holds one line, and line {number} is a second")
@@ -347,9 +371,9 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
                 raise ValueError(f"a runner label is [A-Za-z0-9._-] at line {number}: {label}")
         runner: object = "" if not labels else (labels[0] if len(labels) == 1 else labels)
         targets.append((name, runner))
-    if section and not targets and not manifest and not channels and not gate:
-        raise ValueError("packaging/release declares no target, archive kind, channel or gate")
-    return targets, manifest, channels, gate
+    if section and not targets and not manifest and not channels and not gate and not after_version:
+        raise ValueError("packaging/release declares no target, archive kind, channel, gate or cut command")
+    return targets, manifest, channels, gate, after_version
 
 
 def read_fuzz(decl: Declarations) -> None:
@@ -381,6 +405,22 @@ def read_fuzz(decl: Declarations) -> None:
         decl.add("note", f"{decl.fuzz_harnesses}/: no job of .github/workflows/ci.yml runs it."
                          " 'fuzz_command: make fuzz-smoke' on the socle's check job would,"
                          " and the socle schedules nothing beyond a pull request", "conventions")
+
+
+def read_branch(decl: Declarations) -> None:
+    """Note a branch named after the agent that created it; never refuse one.
+
+    A branch name is not a property of the working tree, and in CI the
+    checkout is detached, where the ref is GitHub's and not the author's:
+    the note therefore fires where it is useful, on the author's own
+    checkout before the push. Counting the fleet's branches is
+    maelys-platform's, which reads the remote refs of every repository.
+    """
+    branch = git("rev-parse", "--abbrev-ref", "HEAD", cwd=decl.project, check=False)
+    prefix, separator, _ = branch.partition("/")
+    if separator and prefix in AGENT_BRANCHES:
+        decl.add("note", f"branch {branch} is named after the tool that created it, not after its change:"
+                         " a branch carries the prefix its change would take in a commit", "conventions")
 
 
 def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCLE_MECHANISM) -> Declarations:
@@ -500,8 +540,20 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
     release = project / "packaging" / "release"
     if release.is_file():
         try:
-            decl.targets, decl.manifest_patterns, decl.channels, decl.gate = \
+            decl.targets, decl.manifest_patterns, decl.channels, decl.gate, decl.after_version = \
                 parse_release(release.read_text(encoding="utf-8"))
+            if decl.after_version:
+                # The command is this repository's, and cut runs it on the
+                # operator's machine: what the socle can check is that the
+                # files it names are here. The check is a convention, not a
+                # release one — cut serves a repository whatever publishes it.
+                absent = [word for word in decl.after_version.split()
+                          if "/" in word and not (project / word).exists()]
+                if absent:
+                    decl.add("missing", "packaging/release [cut] after-version names "
+                             + " ".join(absent) + ", which this repository does not carry", "conventions")
+                else:
+                    decl.add("ok", f"packaging/release [cut] after-version: {decl.after_version}", "conventions")
             if decl.targets:
                 decl.add("ok", "packaging/release targets: "
                                + " ".join(name for name, _ in decl.targets))
@@ -525,6 +577,8 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
     elif publishes:
         decl.add("note", "scripts/publish-channel.sh exists but packaging/release declares no"
                          " [channels]: nothing calls it, and no channel job is written")
+    read_branch(decl)
+    read_strategy(decl)
     return decl
 
 
@@ -1075,6 +1129,32 @@ def matrix_values(text: str, key: str) -> list[str]:
     return sorted({value for value in values if LABEL.fullmatch(value)})
 
 
+def file_runners(name: str, text: str) -> tuple[list, list]:
+    """(labels, unresolved) of one workflow file, matrix references resolved."""
+    labels: set = set()
+    unresolved: list = []
+    for match in RUNS_ON.finditer(text):
+        value = match.group(1).strip().strip("\"'")
+        # The line, so an operator finds what the socle could not read.
+        where = f"{name}:{text.count(chr(10), 0, match.start()) + 1}"
+        reference = MATRIX_REFERENCE.fullmatch(value)
+        if reference:
+            found = matrix_values(text, reference.group(1))
+            if found:
+                labels.update(found)
+            else:
+                unresolved.append(f"{where}: {value}")
+            continue
+        # `runs-on:` alone introduces a block list or a `group:` mapping on
+        # the following lines; the socle does not read either, and says so.
+        named = [item.strip().strip("\"'") for item in value.strip("[]").split(",") if item.strip()]
+        if not named or not all(LABEL.fullmatch(item) for item in named):
+            unresolved.append(f"{where}: {value or 'a block or a group below this line'}")
+            continue
+        labels.update(named)
+    return sorted(labels), unresolved
+
+
 def read_runners(project: pathlib.Path) -> dict:
     """Which runners this repository's workflows select, and what could not be read.
 
@@ -1092,25 +1172,9 @@ def read_runners(project: pathlib.Path) -> dict:
     workflows = project / ".github" / "workflows"
     for path in sorted(workflows.glob("*.y*ml")) if workflows.is_dir() else []:
         text = path.read_text(encoding="utf-8")
-        for match in RUNS_ON.finditer(text):
-            value = match.group(1).strip().strip("\"'")
-            # The line, so an operator finds what the socle could not read.
-            where = f"{path.name}:{text.count(chr(10), 0, match.start()) + 1}"
-            reference = MATRIX_REFERENCE.fullmatch(value)
-            if reference:
-                found = matrix_values(text, reference.group(1))
-                if found:
-                    labels.update(found)
-                else:
-                    unresolved.append(f"{where}: {value}")
-                continue
-            # `runs-on:` alone introduces a block list or a `group:` mapping on
-            # the following lines; the socle does not read either, and says so.
-            named = [item.strip().strip("\"'") for item in value.strip("[]").split(",") if item.strip()]
-            if not named or not all(LABEL.fullmatch(item) for item in named):
-                unresolved.append(f"{where}: {value or 'a block or a group below this line'}")
-                continue
-            labels.update(named)
+        found, could_not = file_runners(path.name, text)
+        labels.update(found)
+        unresolved.extend(could_not)
         if re.search(rf"^\s*uses:\s*{re.escape(SOCLE_REPOSITORY)}/", text, re.M):
             delegated = True
     # maelys-oci names no runner at all: every job of its tree calls a
@@ -1118,6 +1182,132 @@ def read_runners(project: pathlib.Path) -> dict:
     # chooses none", not "this repository is safe": the runners it uses are
     # those of the socle it pins.
     return {"labels": sorted(labels), "unresolved": unresolved, "delegated": delegated}
+
+
+# ---- what runs, and when ------------------------------------------------------
+#
+# A repository's strategy is spread over its workflow files: what runs on a
+# pull request, what runs on a push, what a signed tag releases, what only a
+# hand starts. Reading it meant opening every file of every repository, and
+# the fleet had no way to ask. These readers answer the question from the
+# files alone, offline, because the shared CI calls `declarations` on a
+# runner with no access to the API.
+#
+# Line-based, like the runner reader above: the socle carries no YAML parser
+# and vendors none. What it cannot read it leaves out rather than guessing.
+
+# The events the socle names; anything else a workflow declares is reported
+# verbatim, because an event nobody named must not read as absence.
+WORKFLOW_EVENTS = ("push", "pull_request", "pull_request_target", "workflow_dispatch",
+                   "workflow_call", "schedule", "release", "merge_group", "issue_comment",
+                   "repository_dispatch")
+JOB_ID = re.compile(r"^  ([A-Za-z0-9_-]+):\s*$", re.M)
+
+
+def top_block(text: str, key: str) -> str:
+    """The body of a top-level `key:`, or its inline value when it has one."""
+    match = re.search(rf"^{re.escape(key)}:(.*)$", text, re.M)
+    if not match:
+        return ""
+    if match.group(1).strip():
+        return match.group(1).strip()
+    rest = text[match.end():]
+    end = re.search(r"^[A-Za-z]", rest, re.M)
+    return rest[:end.start()] if end else rest
+
+
+def sub_block(block: str, key: str) -> str:
+    """The body of `key:` inside a block, by indentation."""
+    match = re.search(rf"^(\s*){re.escape(key)}:\s*$", block, re.M)
+    if not match:
+        return ""
+    indent = len(match.group(1))
+    kept = []
+    for line in block[match.end():].splitlines():
+        if line.strip() and len(line) - len(line.lstrip()) <= indent:
+            break
+        kept.append(line)
+    return "\n".join(kept)
+
+
+def block_list(block: str, key: str) -> list:
+    """The values `key:` lists: inline `[a, b]`, or a `- a` list below it.
+
+    Unlike the runner reader this keeps every value as written: a branch
+    filter is `main` but a tag filter is `v*`, and a reader that only
+    accepted label-shaped words would drop the tag rule silently.
+    """
+    match = re.search(rf"^(\s*){re.escape(key)}:(.*)$", block, re.M)
+    if not match:
+        return []
+    inline = match.group(2).strip()
+    if inline:
+        return [item.strip().strip("\"'") for item in inline.strip("[]").split(",") if item.strip()]
+    indent = len(match.group(1))
+    values = []
+    for line in block[match.end():].splitlines():
+        if not line.strip():
+            continue
+        if len(line) - len(line.lstrip()) <= indent:
+            break
+        item = re.fullmatch(r"\s*-\s*(.+?)\s*", line)
+        if not item:
+            break
+        values.append(item.group(1).strip("\"'"))
+    return values
+
+
+def workflow_events(text: str) -> list:
+    """The events of one workflow, in the three shapes GitHub accepts."""
+    block = top_block(text, "on")
+    if not block:
+        return []
+    found = []
+    for event in WORKFLOW_EVENTS:
+        if re.search(rf"^\s*-?\s*{re.escape(event)}\s*:", block, re.M) \
+                or re.search(rf"(^|[\[,\s]){re.escape(event)}($|[\],\s])", block.split("\n")[0]):
+            found.append(event)
+    return found
+
+
+def read_workflows(project: pathlib.Path) -> list:
+    """Every workflow of the repository: what starts it, and what it runs."""
+    workflows = project / ".github" / "workflows"
+    observed = []
+    for path in sorted(workflows.glob("*.y*ml")) if workflows.is_dir() else []:
+        text = path.read_text(encoding="utf-8")
+        on = top_block(text, "on")
+        push = sub_block(on, "push")
+        labels, unresolved = file_runners(path.name, text)
+        observed.append({
+            "file": path.name,
+            "events": workflow_events(text),
+            # Empty branches with a push event means every branch, which is
+            # not the same fact as no push at all: the renderer says which.
+            "branches": block_list(push, "branches"),
+            "tags": block_list(push, "tags"),
+            "jobs": JOB_ID.findall(top_block(text, "jobs")),
+            "runners": labels,
+            "unresolved": unresolved,
+            "delegates": bool(re.search(rf"^\s*uses:\s*{re.escape(SOCLE_REPOSITORY)}/", text, re.M)),
+        })
+    return observed
+
+
+def read_strategy(decl: Declarations) -> None:
+    """Note a workflow that runs twice on a pull request.
+
+    `push` with no branch filter and `pull_request` in the same workflow run
+    the same jobs twice for every pushed commit of a pull request. It is a
+    choice a repository may make, so this is a note and never a violation —
+    but nobody could see it without opening the file.
+    """
+    for workflow in read_workflows(decl.project):
+        if "push" in workflow["events"] and "pull_request" in workflow["events"] \
+                and not workflow["branches"] and not workflow["tags"]:
+            decl.add("note", f".github/workflows/{workflow['file']}: push names no branch and"
+                             " pull_request is declared too, so every push of a pull request runs"
+                             " it twice; 'branches: [main]' under push runs it once", "conventions")
 
 
 def socle_data(sha: str, tag: str) -> dict:
@@ -1721,6 +1911,7 @@ def handle_declarations(invocation: Invocation) -> tuple[dict, int]:
             "pinned": pinned_socle(project),
             "managedBy": stamp.group(1) if stamp else "",
             "runners": read_runners(project),
+            "workflows": read_workflows(project),
             "dependencies": decl.dependencies, "linuxPackages": decl.linux_packages,
             "macosPackages": decl.macos_packages, "formulas": decl.formulas,
             "targets": [name for name, _ in decl.targets] or list(SOCLE_TARGETS),
@@ -1728,6 +1919,7 @@ def handle_declarations(invocation: Invocation) -> tuple[dict, int]:
                                  + " ".join(decl.manifest_patterns)).strip(),
             "channels": [{"name": name, "registry": kind} for name, kind in decl.channels],
             "gate": decl.gate,
+            "afterVersion": decl.after_version,
             "fuzz": {"harnesses": decl.fuzz_harnesses, "runs": decl.fuzz_runs},
             "checks": decl.applicable()}, \
         EXIT_OK if decl.valid else EXIT_VIOLATIONS
@@ -1738,12 +1930,42 @@ def handle_check(invocation: Invocation) -> tuple[dict, int]:
     return data, EXIT_OK if data["valid"] else EXIT_VIOLATIONS
 
 
-def github_api(path: str) -> dict | None:
-    """GET through gh (its credentials); None when gh is missing or the call fails."""
+HTTP_STATUS = re.compile(r"\(HTTP (\d{3})\)")
+
+
+def github_read(path: str) -> tuple[str, object]:
+    """(state, body) of one GET through gh, the state saying why there is no body.
+
+    `absent` is an answer: a branch that is not protected and an environment
+    that does not exist both say something. `unreadable` is not: GitHub
+    refused to tell, which a 403 does on a private repository of a free plan
+    or with a token that lacks the scope.
+
+    Collapsing the two is how the socle told seventeen private repositories
+    that their default branch was unprotected, at the very moment GitHub was
+    refusing to say — measured while the organization was locked for an
+    Actions billing overage, which rebates it to the free plan's abilities.
+    """
     if not shutil.which("gh"):
-        return None
+        return "no-gh", None
     completed = run(["gh", "api", path])
-    return json.loads(completed.stdout) if completed.returncode == 0 else None
+    if completed.returncode == 0:
+        try:
+            return "ok", json.loads(completed.stdout)
+        except json.JSONDecodeError:
+            return "unreadable", None
+    status = HTTP_STATUS.search(completed.stderr)
+    return ("absent" if status and status.group(1) == "404" else "unreadable"), None
+
+
+def github_api(path: str) -> dict | None:
+    """The body of a GET, or None whatever kept it from arriving.
+
+    For a reader that acts the same way on every absence. Anything that
+    reports on what it could not read uses github_read instead.
+    """
+    body = github_read(path)[1]
+    return body if isinstance(body, dict) else None
 
 
 def environment_gate(repository: str, environment: dict | None, declared: str = "") -> list[tuple[str, str]]:
@@ -1839,6 +2061,28 @@ def tag_checks(project: pathlib.Path, version: str) -> list[tuple[str, str]]:
     return found
 
 
+def branch_protection(repository: str, branch: str, classic: str,
+                      ruled: str, rules: object) -> tuple[str, str]:
+    """What protects a default branch, told apart from what cannot be read.
+
+    Two endpoints answer, and not for the same thing: the classic branch
+    protection, and a ruleset. agent-cli-spec is protected by a ruleset
+    alone, so reading the first alone reported it open — permanently, not
+    only while the organization was locked.
+    """
+    protected = [name for name, state, present in (("branch protection", classic, True),
+                                                   ("a ruleset", ruled, bool(rules)))
+                 if state == "ok" and present]
+    if protected:
+        return "ok", f"the default branch {branch} of {repository} is protected by " + " and ".join(protected)
+    if "unreadable" in (classic, ruled):
+        return "note", (f"the socle cannot read what protects {branch} of {repository}: GitHub refused to say,"
+                        " which a private repository of a free plan does. That is not the same fact as an"
+                        " unprotected branch, and the socle will not report it as one")
+    return "note", (f"the default branch {branch} of {repository} is not protected: anyone who can push can"
+                    " move it, and a tag proves only what the tag proves")
+
+
 def repository_checks(project: pathlib.Path, gate: str) -> list[tuple[str, str]]:
     """What the release workflow needs of the GitHub repository behind origin.
 
@@ -1876,12 +2120,14 @@ def repository_checks(project: pathlib.Path, gate: str) -> list[tuple[str, str]]
     # published unattended and preflight said ok.
     found.extend(environment_gate(repository, environment, gate))
     # The default branch is what a tag is expected to come from, and what
-    # commit_verification: signed-on-default-branch relies on.
-    protection = github_api(f"repos/{repository}/branches/"
-                            + (repository_data.get("default_branch") or "main") + "/protection")
-    if protection is None:
-        found.append(("note", f"the default branch of {repository} is not protected: anyone who can push can move it,"
-                              " and a tag proves only what the tag proves"))
+    # commit_verification: signed-on-default-branch relies on. It is
+    # protected in two ways that do not answer on the same endpoint: the
+    # classic branch protection, and a ruleset. agent-cli-spec is protected
+    # by a ruleset alone, and reading only the first reported it open.
+    branch = repository_data.get("default_branch") or "main"
+    found.append(branch_protection(repository, branch,
+                                   *github_read(f"repos/{repository}/branches/{branch}/protection")[:1],
+                                   *github_read(f"repos/{repository}/rules/branches/{branch}")))
     return found
 
 
@@ -1921,6 +2167,24 @@ CHANGELOG_ENTRY = r"^## {version}[^\n]*?([0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}})[^\n]*
 
 def version_tuple(version: str) -> tuple:
     return tuple(int(part) for part in version.split("."))
+
+
+def host_target() -> str:
+    """The socle target name this machine is, for a verify command run here."""
+    system, machine = os.uname().sysname, os.uname().machine
+    architecture = "arm64" if machine in ("arm64", "aarch64") else "x86_64"
+    return f"{'macos' if system == 'Darwin' else 'linux'}-{architecture}"
+
+
+def worktree_paths(project: pathlib.Path) -> dict:
+    """path -> its two status columns, read unstripped.
+
+    The two columns are what separates a tracked change from an untracked
+    file, and the first of them is a space often enough that stripping the
+    line eats a character of the path.
+    """
+    return {line[3:]: line[:2] for line
+            in run(["git", "status", "--porcelain", "-uall"], cwd=project).stdout.split("\n") if line}
 
 
 def changelog_entry(project: pathlib.Path, version: str, at: str = "") -> tuple[str, str]:
@@ -2130,11 +2394,8 @@ def cut_open(invocation: Invocation, decl: Declarations, data: dict, log, timeou
     data["previousVersion"] = decl.version
     # The bump in progress is the only change the release commit may carry:
     # anything else in the worktree would ride into a tagged commit unread.
-    # The status is read unstripped: the two status columns are what says
-    # tracked from untracked, and a leading space is one of them.
-    dirty = [line for line in run(["git", "status", "--porcelain"], cwd=project).stdout.split("\n") if line]
-    unexpected = sorted(line[3:] for line in dirty
-                        if not line.startswith("??") and line[3:] not in ("VERSION", "CHANGELOG.md"))
+    unexpected = sorted(path for path, code in worktree_paths(project).items()
+                        if code != "??" and path not in ("VERSION", "CHANGELOG.md"))
     if unexpected:
         raise Failure("PRECONDITION_FAILED",
                       f"{project} has uncommitted changes outside VERSION and CHANGELOG.md: "
@@ -2167,13 +2428,54 @@ def cut_open(invocation: Invocation, decl: Declarations, data: dict, log, timeou
     if refused:
         return data, EXIT_VIOLATIONS
     if not invocation.flag("--apply"):
-        data["next"] = f"{PROGRAM} cut {project} {version} --apply"
+        if decl.verify_command:
+            data["gate"].append({"status": "note",
+                                 "message": f"--apply would run {decl.verify_command.replace('TARGET', host_target())}"
+                                            " here before writing anything"})
         return data, EXIT_OK
+    # The gate a product declared for the release runners is held here too,
+    # before a branch and a pull request exist. maelys-datalog found the gap
+    # by migrating onto cut: their own ceremony ran make check and a second
+    # compiler in a container before VERSION was written, and cut left the
+    # branch's CI as the only gate. scripts/verify-release.sh is the socle's
+    # own concept for exactly this, so it is declared once and held at both
+    # ends rather than named twice.
+    if decl.verify_command:
+        command = decl.verify_command.replace("TARGET", host_target())
+        print(f"cut      {command}", file=log)
+        log.flush()
+        verified = subprocess.run(["sh", "-c", command], cwd=project, check=False,
+                                  stdout=log, stderr=subprocess.STDOUT)
+        if verified.returncode != 0:
+            raise Failure("PROCESS_FAILED", f"{command} failed with exit {verified.returncode}.",
+                          "Read the log above; nothing has been written, no branch and no pull request exist.")
     # VERSION is written by the socle rather than by a heredoc: four tags
     # once shipped a VERSION holding a literal backslash-n.
+    before = worktree_paths(project)
     (project / "VERSION").write_text(version + "\n", encoding="utf-8")
+    # A product whose version is also materialised elsewhere — a header, a
+    # package.json, a formula — regenerates it here, and what the command
+    # touched joins the bump commit. Without this the commit is red by
+    # construction wherever a check compares the two, and the wait of the
+    # first stop could never see it green.
+    touched: list[str] = []
+    if decl.after_version:
+        print(f"cut      {decl.after_version}", file=log)
+        log.flush()
+        regenerated = run(["sh", "-c", decl.after_version], cwd=project)
+        touched = sorted(path for path, code in worktree_paths(project).items() if before.get(path) != code)
+        if regenerated.returncode != 0:
+            (project / "VERSION").write_text(decl.version + "\n", encoding="utf-8")
+            raise Failure("PROCESS_FAILED",
+                          f"[cut] after-version failed with exit {regenerated.returncode}:"
+                          f" {(regenerated.stderr or regenerated.stdout).strip() or 'no diagnostic'}",
+                          "VERSION is restored"
+                          + (f"; the command left {' '.join(path for path in touched if path != 'VERSION')}"
+                             " changed" if len(touched) > 1 else "")
+                          + ". Fix the command, then cut again.")
+        data["regenerated"] = [path for path in touched if path != "VERSION"]
     git("switch", "-q", "-c", branch, cwd=project)
-    git("add", "--", "VERSION", "CHANGELOG.md", cwd=project)
+    git("add", "--", "VERSION", "CHANGELOG.md", *touched, cwd=project)
     git("-c", "commit.gpgsign=true", "commit", "-q", "-S", "-m", f"{product} {version}", cwd=project)
     data["commit"] = git("rev-parse", "HEAD", cwd=project)
     git("push", "-q", "origin", f"HEAD:refs/heads/{branch}", cwd=project)
@@ -2578,6 +2880,8 @@ def text_cut(data: dict) -> str:
         lines.append(f"{('ok' if state in CHECK_PASSED else state.upper()):<8} {check['name']}")
     if "pullRequest" in data:
         lines.append(f"{'pull':<8} {data['pullRequest']['url']}")
+    if data.get("regenerated"):
+        lines.append(f"{'cut':<8} after-version also committed " + " ".join(data["regenerated"]))
     if data.get("commit"):
         lines.append(f"{'commit':<8} {data['commit']}")
     lines.append(f"cut: {data.get('next') or ('ready' if data['ready'] else 'not ready')}")
@@ -2591,6 +2895,49 @@ def text_preflight(data: dict) -> str:
     state = "ready to tag" if data["ready"] else "not ready to tag"
     lines.append(f"preflight: {data['product']} is {state}")
     return "\n".join(lines) + "\n"
+
+
+# The order a reader thinks in, which is not the order the files are in:
+# what a contributor triggers, what landing triggers, what releasing
+# triggers, what only a hand triggers, and what another workflow calls.
+MOMENTS = (("pull request", ("pull_request", "pull_request_target")),
+           ("push", ("push",)),
+           ("manual", ("workflow_dispatch", "repository_dispatch")),
+           ("scheduled", ("schedule",)),
+           ("released", ("release",)),
+           ("called", ("workflow_call",)))
+
+
+def strategy_lines(workflows: list) -> list:
+    """One line per moment: what starts, and which workflow answers.
+
+    The JSON is per file, because that is where the facts are read. A reader
+    asking "what happens when I open a pull request" needs the other axis,
+    and turning the table is the renderer's job, not a second command's.
+    """
+    lines = []
+    for label, events in MOMENTS:
+        for workflow in workflows:
+            for event in workflow["events"]:
+                if event not in events:
+                    continue
+                moment = label
+                if event == "push":
+                    moment = ("tag " + " ".join(workflow["tags"]) if workflow["tags"]
+                              else "push " + " ".join(workflow["branches"]) if workflow["branches"]
+                              else "push (every branch)")
+                runs = f"{len(workflow['jobs'])} job" + ("s" if len(workflow["jobs"]) != 1 else "")
+                if workflow["delegates"]:
+                    runs += ", one of them the socle's"
+                if workflow["unresolved"]:
+                    runs += f", {len(workflow['unresolved'])} runner(s) unread"
+                lines.append(f"{moment:<20} {workflow['file']} — {runs}")
+    named = {event for _, events in MOMENTS for event in events}
+    for workflow in workflows:
+        for event in workflow["events"]:
+            if event not in named:
+                lines.append(f"{event:<20} {workflow['file']}")
+    return lines
 
 
 def text_declarations(data: dict) -> str:
@@ -2607,7 +2954,9 @@ def text_declarations(data: dict) -> str:
                     + (" (and the socle's, delegated)" if data["runners"]["delegated"] else "")),
         ("channels", " ".join(f"{c['name']} ({c['registry']})" for c in data["channels"])),
         ("fuzz", f"{data['fuzz']['harnesses']}/ run by {data['fuzz']['runs']}"
-                 if data["fuzz"]["harnesses"] else "")))
+                 if data["fuzz"]["harnesses"] else ""))) \
+        + "".join(f"{('strategy' if index == 0 else ''):<13} {line}\n"
+                  for index, line in enumerate(strategy_lines(data["workflows"])))
 
 
 def text_tap(data: dict) -> str:
@@ -2737,6 +3086,7 @@ CUT_SCHEMA = {"type": "object", "additionalProperties": False,
                                                             "url": {"type": "string"},
                                                             "state": {"type": "string"}}},
                              "pushed": {"type": "boolean"}, "verified": {"type": "boolean"},
+                             "regenerated": STRINGS,
                              "next": {"type": "string"}}}
 DOCS_CONTRACT_OPTION = cli.flag(
     "--docs-contract", "Refuse prose in docs/ and a CLI reference outside docs/cli.md, instead of noting them.")
@@ -2829,8 +3179,8 @@ APP = cli.Program(PROGRAM, PRODUCT, socle_version(), [
              schema={"type": "object", "additionalProperties": False,
                      "required": ["valid", "product", "project", "version", "mechanism", "dependencies",
                                   "linuxPackages", "macosPackages", "formulas", "targets",
-                                  "manifestPatterns", "channels", "gate", "fuzz", "declared", "pinned",
-                                  "managedBy", "runners", "checks"],
+                                  "manifestPatterns", "channels", "gate", "afterVersion", "fuzz",
+                                  "declared", "pinned", "managedBy", "runners", "workflows", "checks"],
                      "properties": {"valid": {"type": "boolean"}, "product": {"type": "string"},
                                     "project": {"type": "string"}, "version": {"type": "string"},
                                     "mechanism": MECHANISM_SCHEMA,
@@ -2843,12 +3193,22 @@ APP = cli.Program(PROGRAM, PRODUCT, socle_version(), [
                                         "properties": {"name": {"type": "string"},
                                                        "registry": {"type": "string"}}}},
                                     "gate": {"enum": ["", "reviewer", "none"]},
+                                    "afterVersion": {"type": "string"},
                                     "declared": {"type": "object", "additionalProperties": False,
                                                  "required": ["targets", "manifestPatterns"],
                                                  "properties": {"targets": STRINGS,
                                                                 "manifestPatterns": STRINGS}},
                                     "pinned": {"type": ["object", "null"]},
                                     "managedBy": {"type": "string"},
+                                    "workflows": {"type": "array", "items": {
+                                        "type": "object", "additionalProperties": False,
+                                        "required": ["file", "events", "branches", "tags", "jobs",
+                                                     "runners", "unresolved", "delegates"],
+                                        "properties": {"file": {"type": "string"}, "events": STRINGS,
+                                                       "branches": STRINGS, "tags": STRINGS,
+                                                       "jobs": STRINGS, "runners": STRINGS,
+                                                       "unresolved": STRINGS,
+                                                       "delegates": {"type": "boolean"}}}},
                                     "runners": {"type": "object", "additionalProperties": False,
                                                 "required": ["labels", "unresolved", "delegated"],
                                                 "properties": {"labels": STRINGS,

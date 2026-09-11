@@ -1,5 +1,87 @@
 # Changelog
 
+## 0.34.0 — 2026-09-11
+
+- **`declarations` says what a repository runs, and when.** A new `workflows`
+  field holds, per file of `.github/workflows/`, the events that start it, the
+  branch and tag filters of its `push`, its jobs, its runners, and whether one
+  of its jobs calls the socle. A repository's strategy — pull request, push,
+  signed tag, hand — was spread over those files, and reading it meant opening
+  every one of them in every repository. It is read from the files alone, so
+  the shared CI, which has no API access, gets it too.
+- **The text rendering turns the table.** The JSON is per file, because that
+  is where the facts are read; a reader asks what happens *when*, so
+  `declarations` prints one line per moment — pull request, push, tag,
+  manual, called — and nobody needs `jq` to see a repository's strategy.
+- **A workflow that runs twice on every pull request is now named.** `push`
+  with no branch filter beside a `pull_request` runs the same jobs for the
+  push and for the pull request. A **note**, never a violation: a repository
+  may want it. Two products of the fleet do it without having chosen to.
+- **The socle stops calling a refusal an absence.** `github_api` turned every
+  failed call into `None`, and `preflight` read `None` as "the default branch
+  is not protected". A private repository on a free plan answers **403** to
+  that endpoint — which is GitHub declining to say, not a branch left open —
+  and seventeen repositories of the fleet were reported unprotected while
+  that was true of none of them, measured. The reader now separates an
+  answer, an absence (404), a refusal (403 or anything else) and a missing
+  `gh`, and `preflight` reports each as what it is.
+- **A branch protected by a ruleset is protected.** The classic protection
+  endpoint answers "Branch not protected" for a repository whose default
+  branch a ruleset guards, and `agent-cli-spec` is exactly that: reported
+  open, permanently, not only while the organization was locked. Both
+  endpoints are read now, and the note says which of the two protects.
+- **`cut` runs what a product declares before it writes anything, and
+  commits what a version bump regenerates.** maelys-datalog found both by
+  migrating onto `cut`, which is the only way either could have been found.
+- **`[cut] after-version COMMAND` in `packaging/release`.** A product whose
+  version is materialised somewhere besides `VERSION` — a generated header, a
+  `package.json`, a formula — names the command that regenerates it. `cut`
+  runs it between writing `VERSION` and the bump commit, and whatever the
+  command touched joins that commit. Without it the bump commit is **red by
+  construction** wherever a check compares the two files, and the first stop,
+  which waits for the checks of that very commit, could never see them green:
+  the operator had to push a second commit onto the release branch by hand,
+  which is the ceremony `cut` exists to remove. It is not datalog's alone — it
+  holds for every product that materialises its version twice.
+- **The first stop runs `scripts/verify-release.sh` when the repository
+  carries one**, with the host's target substituted, and refuses on its
+  failure — before a branch, a commit or a pull request exists. It is the
+  socle's own concept, already rendered into `verify_command` for the release
+  runners: declared once and held at both ends, rather than a gate that ran
+  in a product's old ceremony and nowhere in the new one.
+- **What is not in the manifest is not published, and two texts said
+  otherwise.** Since 0.31.0 `publish` copies from the build's artifacts only
+  what matches the manifest globs or `*.sha256`; a file `dist/` holds outside
+  them is attested and never reaches the release. `docs/conventions.md` and
+  the `manifest_patterns` input description both still claimed the manifest
+  decided nothing about publication. Both corrected. Found by maelys-datalog,
+  whose build receipt was attested and absent.
+- The write path of the first stop is now tested end to end, against a real
+  bare repository with a signed commit: it was not when 0.33.0 shipped it.
+- **A branch is named after the change it carries, never after the tool that
+  created it.** The rule enters the managed blocks of `AGENTS.md` and
+  `CLAUDE.md`, so every session of every repository reads it: a branch takes
+  the prefix its change would take in a commit — `fix/`, `docs/`,
+  `release/` — and `claude/` or `codex/` says who typed rather than what
+  changes.
+- **No list is closed, deliberately.** maelys-datalog, which reported this,
+  already uses ten commit prefixes of its own and no two products share a
+  set. Enumerating change types would import one repository's vocabulary
+  into twelve; the rule is the correspondence between the name and the
+  nature of the change. The one list the socle does close is the other side:
+  the agents it writes instructions for, `claude` and `codex`.
+- `check` **notes** such a branch and never refuses one. A branch name is
+  not a property of the working tree `check` reads, and in CI the checkout
+  is detached, where the ref is GitHub's and not the author's: the note
+  fires where it is useful, on the author's own checkout before the push.
+- The fleet-wide count belongs to maelys-platform, which reads the remote
+  refs of every repository. The socle declares, the observer counts — the
+  same split as the release gate of 0.30.0.
+- Reported by maelys-datalog, who measured that the tool exposes no
+  branch-naming setting and argued against a `WorktreeCreate` hook: a faulty
+  hook does not misname a branch, it breaks session creation, and the trade
+  is bad against a prefix.
+
 ## 0.33.0 — 2026-09-11
 
 - **`maelys-release cut DIR X.Y.Z` carries out a release in two stops.** Two
