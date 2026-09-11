@@ -41,8 +41,9 @@ def assemble_script() -> str:
 class AssembleStepTest(unittest.TestCase):
     """What the step does with the artifacts of more than one target.
 
-    The macOS runner has no sha256sum: the step runs on ubuntu-26.04 alone,
-    and this test says so rather than failing where it cannot run.
+    The guard is for a development machine, not for the fleet's runners:
+    macOS carries sha256sum in /sbin, and these tests run on macos-15 as
+    they do on Linux.
     """
 
     def setUp(self) -> None:

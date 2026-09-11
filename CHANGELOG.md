@@ -24,8 +24,11 @@
   a name that forgets what varies — and it cannot arise there.
 - `tests/test_release_workflow.py` runs the assemble step's own shell
   against artifacts on disk, the way `test_tap_workflow.py` runs the tap's
-  publish step. It is skipped where `sha256sum` is missing, which is the
-  macOS runner; the step itself runs on `ubuntu-26.04` alone.
+  publish step. It skips where `sha256sum` is missing, which is a
+  development machine and not a runner of this fleet: macOS carries
+  `sha256sum` in `/sbin`, and the tag's own CI ran these five tests on
+  `macos-15` as on Linux. The tag published with this sentence claiming the
+  opposite; it was wrong, and the count of skipped tests said so.
 
 ## 0.38.0 — 2026-09-11
 
