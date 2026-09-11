@@ -558,6 +558,15 @@ that wants them replayed installs an executable
 `verify_command` and the workflow runs on each target runner before
 packaging.
 
+**The socle runs both product scripts with `bash`**, this one and
+`package-release.sh`. It named `sh` for one and `bash` for the other until
+0.36.0, and the difference was not cosmetic: `sh` is dash on Ubuntu and bash
+in POSIX mode on macOS, so a `set -o pipefail` passed on every machine of the
+fleet — they are all macOS — and failed on the runner at the tag, the one
+moment nothing can be retried cheaply. A script may therefore use bash; a
+`#!/bin/sh` shebang still governs what a human gets when they run it
+directly, and that asymmetry is the script's to resolve, not the socle's.
+
 The provenance attestation's subject is `dist/*`, so every file
 `package_command` leaves there is attested with the packages: an SBOM, a
 manifest, a signature file. A product needs no separate attestation for
