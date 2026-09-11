@@ -124,6 +124,15 @@ MANAGED = (
 # socle can close: it is the set of agents the socle writes instructions
 # for, not a vocabulary of change types, which belongs to each repository.
 AGENT_BRANCHES = ("claude", "codex")
+# What a repository declares to this command: one grammar, one home. It sat
+# in packaging/release until 0.37.0, and the eleven packaging/ of the fleet
+# hold materials — formula templates, systemd units, Containerfiles, a kernel
+# config — never settings, while eighteen repositories have no packaging/ at
+# all and still want to declare. The name says the tool and the nature; the
+# socle only ever reads this file, never writes it, so the comments a product
+# puts beside each section are the product's.
+DECLARATION_FILE = "maelys-release.conf"
+FORMER_DECLARATION_FILE = "packaging/release"
 SOCLE_MECHANISM = "maelys-release"
 MECHANISMS = (SOCLE_MECHANISM, "custom", "none")
 RELEASE_USES = re.compile(rf"{re.escape(SOCLE_REPOSITORY)}/\.github/workflows/release\.yml@[0-9a-f]{{40}}")
@@ -219,13 +228,13 @@ class Declarations:
         self.cli_flags: list[str] = []
         self.cli_build = ""
         self.verify_command = ""
-        # (target, runner) of packaging/release; an empty runner keeps the
+        # (target, runner) of the declaration file; an empty runner keeps the
         # one release.yml holds for that target. Empty means the three the
         # socle builds by default.
         self.targets: list[tuple[str, object]] = []
         # Archive kinds SHA256SUMS covers beyond the socle's three.
         self.manifest_patterns: list[str] = []
-        # (channel, registry kind) of packaging/release; one channel.yml job each.
+        # (channel, registry kind) of the declaration file; one channel.yml job each.
         self.channels: list[tuple[str, str]] = []
         # "reviewer", "none", or "" when this repository has not chosen.
         self.gate = ""
@@ -285,7 +294,7 @@ def parse_packages(text: str) -> tuple[str, str]:
 
 
 def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[tuple[str, str]], str, str]:
-    """packaging/release: [targets], [manifest], [channels], [gate] and [cut].
+    """The declaration file: [targets], [manifest], [channels], [gate] and [cut].
 
     A target line naming no label keeps the runner release.yml holds for that
     target, which only exists for the three the socle builds; one label is a
@@ -303,6 +312,7 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
     channels: list[tuple[str, str]] = []
     gate = ""
     after_version = ""
+    unknown: list[str] = []
     section = ""
     for number, raw in enumerate(text.splitlines(), 1):
         line = raw.strip()
@@ -312,7 +322,16 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
             if line in ("[targets]", "[manifest]", "[channels]", "[gate]", "[cut]"):
                 section = line[1:-1]
                 continue
-            raise ValueError(f"unknown section {line} at line {number}")
+            # A section this socle does not know is named and skipped, never
+            # fatal. Products pin the socle by commit: one that adds a section
+            # a newer socle understands would otherwise lose its targets, its
+            # channels and its gate in silence, everywhere the older socle
+            # still reads the file — including the fleet observer.
+            unknown.append(f"{line} at line {number}")
+            section = "unknown"
+            continue
+        if section == "unknown":
+            continue
         if not section:
             raise ValueError(f"line outside a [targets], [manifest], [channels], [gate]"
                              f" or [cut] section at line {number}")
@@ -371,9 +390,10 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
                 raise ValueError(f"a runner label is [A-Za-z0-9._-] at line {number}: {label}")
         runner: object = "" if not labels else (labels[0] if len(labels) == 1 else labels)
         targets.append((name, runner))
-    if section and not targets and not manifest and not channels and not gate and not after_version:
-        raise ValueError("packaging/release declares no target, archive kind, channel, gate or cut command")
-    return targets, manifest, channels, gate, after_version
+    if section and not unknown and not targets and not manifest and not channels \
+            and not gate and not after_version:
+        raise ValueError(f"{DECLARATION_FILE} declares no target, archive kind, channel, gate or cut command")
+    return targets, manifest, channels, gate, after_version, unknown
 
 
 def read_fuzz(decl: Declarations) -> None:
@@ -543,11 +563,30 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
                      "conventions")
         except ValueError as error:
             decl.add("missing", f"dependencies/packages: {error}", "conventions")
-    release = project / "packaging" / "release"
+    # The former home is still read, so a repository mid-move keeps its
+    # targets and its channels; carrying it is the violation, not a silence.
+    release, former = project / DECLARATION_FILE, project / FORMER_DECLARATION_FILE
+    if former.is_file():
+        # warn, not missing: check still exits 2 — the repository must move —
+        # but adopt is the remedy, and a status that blocked adopt would make
+        # the remedy unreachable. Carrying both files is refused instead: the
+        # socle cannot choose between them, and a human must delete one.
+        decl.add("refused" if release.is_file() else "warn",
+                 f"{FORMER_DECLARATION_FILE}: the declarations moved to {DECLARATION_FILE} in 0.37.0"
+                 + (f"; this repository carries both, and {DECLARATION_FILE} is the one read"
+                    if release.is_file()
+                    else f"; 'adopt {project} --apply' moves it with git mv, keeping its history"),
+                 "conventions")
+        if not release.is_file():
+            release = former
     if release.is_file():
         try:
-            decl.targets, decl.manifest_patterns, decl.channels, decl.gate, decl.after_version = \
+            decl.targets, decl.manifest_patterns, decl.channels, decl.gate, decl.after_version, unknown = \
                 parse_release(release.read_text(encoding="utf-8"))
+            for section in unknown:
+                decl.add("missing", f"{release.name}: section {section} is not one this socle knows"
+                                    " ([targets], [manifest], [channels], [gate], [cut]); what it declares"
+                                    " is not applied here", "conventions")
             if decl.after_version:
                 # The command is this repository's, and cut runs it on the
                 # operator's machine: what the socle can check is that the
@@ -556,32 +595,32 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
                 absent = [word for word in decl.after_version.split()
                           if "/" in word and not (project / word).exists()]
                 if absent:
-                    decl.add("missing", "packaging/release [cut] after-version names "
+                    decl.add("missing", f"{release.name} [cut] after-version names "
                              + " ".join(absent) + ", which this repository does not carry", "conventions")
                 else:
-                    decl.add("ok", f"packaging/release [cut] after-version: {decl.after_version}", "conventions")
+                    decl.add("ok", f"{release.name} [cut] after-version: {decl.after_version}", "conventions")
             if decl.targets:
-                decl.add("ok", "packaging/release targets: "
+                decl.add("ok", f"{release.name} targets: "
                                + " ".join(name for name, _ in decl.targets))
             if decl.manifest_patterns:
-                decl.add("ok", "packaging/release manifest: " + SOCLE_MANIFEST_PATTERNS
+                decl.add("ok", f"{release.name} manifest: " + SOCLE_MANIFEST_PATTERNS
                                + " " + " ".join(decl.manifest_patterns))
         except ValueError as error:
-            decl.add("missing", f"packaging/release: {error}")
+            decl.add("missing", f"{release.name}: {error}")
     read_fuzz(decl)
     publisher = project / "scripts" / "publish-channel.sh"
     publishes = publisher.is_file() and os.access(publisher, os.X_OK)
     if decl.channels and not publishes:
-        decl.add("missing", "packaging/release declares "
+        decl.add("missing", f"{DECLARATION_FILE} declares "
                             + " ".join(name for name, _ in decl.channels)
                             + ", so scripts/publish-channel.sh TAG CHANNEL must exist and be"
                               " executable: the section says where to publish, the script how")
         decl.channels = []
     elif decl.channels:
-        decl.add("ok", "packaging/release channels: "
+        decl.add("ok", f"{DECLARATION_FILE} channels: "
                        + " ".join(f"{name} ({kind})" for name, kind in decl.channels))
     elif publishes:
-        decl.add("note", "scripts/publish-channel.sh exists but packaging/release declares no"
+        decl.add("note", f"scripts/publish-channel.sh exists but {DECLARATION_FILE} declares no"
                          " [channels]: nothing calls it, and no channel job is written")
     read_branch(decl)
     read_strategy(decl)
@@ -1818,6 +1857,25 @@ def handle_new(invocation: Invocation) -> tuple[dict, int]:
     return data, EXIT_OK
 
 
+def move_declaration(project: pathlib.Path, apply: bool) -> str:
+    """Move the declarations to their new home, keeping their history.
+
+    `git mv` rather than a write: the socle never composes this file. The
+    comments a product puts beside each section are its reasoning — why a
+    version is materialised twice, why a channel exists — and `git log
+    --follow` must still find them after the move.
+    """
+    former, home = project / FORMER_DECLARATION_FILE, project / DECLARATION_FILE
+    if not former.is_file() or home.exists():
+        return ""
+    if not apply:
+        return FORMER_DECLARATION_FILE
+    if run(["git", "mv", FORMER_DECLARATION_FILE, DECLARATION_FILE], cwd=project).returncode != 0:
+        # Not a git repository, or the file is not tracked yet.
+        former.rename(home)
+    return FORMER_DECLARATION_FILE
+
+
 def handle_adopt(invocation: Invocation) -> tuple[dict, int]:
     project, product, mechanism = project_of(invocation)
     apply = invocation.flag("--apply")
@@ -1833,10 +1891,14 @@ def handle_adopt(invocation: Invocation) -> tuple[dict, int]:
         raise Failure("PRECONDITION_FAILED", f"This socle is {described}, not a release: a product pins tagged versions only.",
                       "Check out a tag of maelys-release, or pass --allow-untagged for a trial of a candidate.")
     files = plan(decl, stage(decl, sha, tag), apply)
-    changed = any(entry["action"] != "same" for entry in files)
-    return {"mode": "apply" if apply else "plan", "product": product, "project": str(project),
+    moved = move_declaration(project, apply)
+    changed = moved != "" or any(entry["action"] != "same" for entry in files)
+    data = {"mode": "apply" if apply else "plan", "product": product, "project": str(project),
             "mechanism": mechanism, "socle": socle_data(sha, tag), "changed": changed,
-            "checks": decl.applicable(), "files": files}, EXIT_OK
+            "checks": decl.applicable(), "files": files}
+    if moved:
+        data["moved"] = moved
+    return data, EXIT_OK
 
 
 def check_data(invocation: Invocation) -> tuple[Declarations, dict]:
@@ -1983,7 +2045,7 @@ def environment_gate(repository: str, environment: dict | None, declared: str = 
     gate it had never seen closed.
 
     What it does not do is choose for a repository. `[gate]` of
-    packaging/release says `reviewer` or `none`; the socle compares that
+    The declaration file says `reviewer` or `none`; the socle compares that
     answer with the environment and fails only on a promise unkept. A
     repository that has not answered gets a note, never a failure: the socle
     reports the gap and leaves the decision where it belongs.
@@ -1998,7 +2060,7 @@ def environment_gate(repository: str, environment: dict | None, declared: str = 
         unattended = (f"environment release of {repository} requires no reviewer: the publication runs"
                       " unattended. Arm it with 'gh api -X PUT repos/" + repository + "/environments/release"
                       " -f reviewers[][type]=User -F reviewers[][id]=ID', or declare the choice"
-                      " with [gate] none in packaging/release")
+                      f" with [gate] none in {DECLARATION_FILE}")
         return [("fail" if declared == "reviewer" else "note", unattended)]
     names = " ".join((entry.get("reviewer") or {}).get("login") or "?"
                      for entry in reviewers.get("reviewers") or [])
@@ -2859,6 +2921,9 @@ def text_adopt(data: dict) -> str:
         lines.append(f"{entry['action']:<8} {entry['path']}" + (f" ({entry['reason']})" if "reason" in entry else ""))
         if data["mode"] == "plan" and entry.get("diff"):
             lines.extend("         " + line for line in entry["diff"].rstrip("\n").split("\n"))
+    if data.get("moved"):
+        verb = "moves" if data["mode"] == "plan" else "moved"
+        lines.append(f"{verb:<8} {data['moved']} -> {DECLARATION_FILE} (git mv, its history follows)")
     tag = data["socle"]["tag"]
     scope = "conventions" if data["mechanism"] != SOCLE_MECHANISM else "conventions and release files"
     if data["mode"] == "apply":
@@ -3191,7 +3256,8 @@ APP = cli.Program(PROGRAM, PRODUCT, socle_version(), [
                             "properties": {"mode": {"enum": ["plan", "apply"]}, "product": {"type": "string"},
                                            "project": {"type": "string"}, "mechanism": MECHANISM_SCHEMA,
                                            "socle": SOCLE_SCHEMA,
-                                           "changed": {"type": "boolean"}, "checks": CHECKS_SCHEMA, "files": FILES_SCHEMA}}),
+                                           "changed": {"type": "boolean"}, "checks": CHECKS_SCHEMA,
+                                           "moved": {"type": "string"}, "files": FILES_SCHEMA}}),
     cli.read("check", "check",
              "Report the conventions of a product and, when it publishes through the socle, its release mechanism;"
              " exit 2 on any violation.",
