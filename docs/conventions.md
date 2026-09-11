@@ -608,8 +608,57 @@ directly, and that asymmetry is the script's to resolve, not the socle's.
 
 The provenance attestation's subject is `dist/*`, so every file
 `package_command` leaves there is attested with the packages: an SBOM, a
-manifest, a signature file. A product needs no separate attestation for
-them, and gets one bundle per target rather than one per file.
+manifest, a signature file. Each is vouched for as having come out of this
+workflow, and a product gets one bundle per target rather than one per file.
+
+That is provenance, and it is not a link. Until 0.39.0 this page said a
+product needed no separate attestation for those files, which confused the
+provenance of an SBOM **file** with a proof that the SBOM describes the
+archive beside it. A verifier could confirm both files left this workflow
+and nothing more. maelys-http reported it.
+
+### Attesting an SBOM against what it describes
+
+A product that builds an SBOM declares the glob, and the release attests
+that document against the archive it describes:
+
+```
+[sbom]
+*.spdx.json
+```
+
+The socle does not decide what the document describes. It reads the subject
+the document names itself — an SPDX `DESCRIBES` relationship or the
+`documentDescribes` shorthand, reaching an element that carries
+`packageFileName` or `fileName` with its `checksums`; a CycloneDX
+`metadata.component` with its `hashes` — requires that file to exist in that
+target's `dist/`, and requires its SHA-256 to equal the one the document
+records. Then that file is the subject and the document is the predicate.
+
+The two ways of guessing were both refused, and for the same reason. Pairing
+by file name imposes a convention and still guesses. Attesting every package
+of the target attributes one component list to a `tar.gz`, a `deb` and an
+`rpm` that were assembled by format: sometimes true, and when false it is an
+attestation that is wrong rather than absent. `migrate` learned that rule in
+0.28.1 and it holds here — naming a subject wrongly is worse than naming
+none.
+
+A document that names no subject, names one this target did not build, or
+records a digest that disagrees, stops the release. The check runs even
+where nothing will be attested: a document that disagrees with the archive
+beside it is wrong on a private repository too, and there the check is all
+that is left. On such a repository the run says the SBOM is published but
+not attested, so a reader of the release knows which guarantee is missing.
+
+One document per target, because an attestation carries one predicate and
+`actions/attest` takes a single `sbom-path`. A glob matching two documents
+stops the release rather than attesting one and ignoring the other.
+
+Both bundles travel with the packages, named after their target: the
+provenance and, when there is one, the SBOM. A verifier offline needs the
+predicates themselves, and one without the other says nothing — provenance
+alone does not bind the SBOM to the archive, and the SBOM predicate alone
+does not say where either came from.
 
 ## Homebrew
 

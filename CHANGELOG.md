@@ -1,5 +1,54 @@
 # Changelog
 
+## 0.39.0 — 2026-09-11
+
+- **A product's SBOM is attested against the file it describes, and the socle
+  never guesses which file that is.** `subject-path: dist/*` attests every
+  file a build leaves, the SBOM included, so a verifier could confirm the
+  document and the archive both came out of this workflow and nothing more.
+  Nothing bound the one to the other. A product now declares `[sbom]` with a
+  glob, and the release reads the subject **the document names itself** — an
+  SPDX `DESCRIBES` relationship or the `documentDescribes` shorthand reaching
+  an element with `packageFileName` or `fileName` and its `checksums`, or a
+  CycloneDX `metadata.component` with its `hashes` — requires that file to
+  exist in that target's `dist/`, and requires its SHA-256 to equal the one
+  the document records. Then it attests that file with that document.
+- Two ways of guessing were refused for the same reason. Pairing by file name
+  imposes a convention and still guesses; attesting every package of a target
+  gives one component list to a `tar.gz`, a `deb` and an `rpm` assembled by
+  format, which is sometimes true and, when false, an attestation that is
+  wrong rather than absent. 0.28.1 settled that rule for `migrate` and it
+  holds here: naming a subject wrongly is worse than naming none. maelys-http
+  proposed the reading that does not guess, against both of the socle's own
+  options.
+- The check runs even where nothing will be attested. A document that
+  disagrees with the archive beside it is wrong on a private repository too,
+  and there it is all that is left: the run then says the SBOM is published
+  but not attested, and `preflight` says so before the tag exists, so a
+  reader of the release knows which guarantee is missing.
+- One document per target: `actions/attest` carries one predicate, so a glob
+  matching two documents stops the release instead of attesting one and
+  ignoring the other. A glob matching none stops it as well — a here-string
+  built from no output still feeds one empty line, which would have left the
+  attestation skipped without a word.
+- **Both attestation bundles travel with the packages**, named after their
+  target. A verifier offline needs the predicates, and one without the other
+  says nothing: provenance alone does not bind the SBOM to the archive, and
+  the SBOM predicate alone does not say where either came from. maelys-http
+  keeps both and was right to say so.
+- `docs/conventions.md` claimed a product needed no separate attestation for
+  the files `package_command` leaves beside its packages. That confused the
+  provenance of an SBOM *file* with a proof that it describes the archive
+  beside it. Corrected, with what the socle actually does now.
+- The 0.38.1 entry said the new workflow tests skip on the macOS runner.
+  They do not: macOS carries `sha256sum` in `/sbin`, and that tag's own CI
+  ran 167 tests with `skipped=10` on `macos-15` exactly as on Linux, against
+  162 with `skipped=10` before. The tag is published with the sentence and
+  cannot be moved; the entry now says what happened. The guard the SBOM step
+  carries is real for another reason: the build runner is the product's to
+  declare, and a self-hosted one carries whichever digest tool it was built
+  with.
+
 ## 0.38.1 — 2026-09-11
 
 - **A release no longer publishes one target's bytes under a name two
