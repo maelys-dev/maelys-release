@@ -321,7 +321,7 @@ Three fields exist for that observer rather than for the product:
   the generated `release.yml`: what wrote the file, not what the file calls.
   The two can differ, and an observer that conflates them reports drift where
   there is none.
-- **`declared`** holds what `packaging/release` declares, and only that.
+- **`declared`** holds what `maelys-release.conf` declares, and only that.
   `targets` and `manifestPatterns` beside it hold what the release will
   actually use, defaults included. A field that folded the two made a fleet
   read "every product targets these three" where the truth was "no product
@@ -367,11 +367,37 @@ runner nobody named is a hole and a label too many is a nuisance.
   attestations there to paid plans; the workflow skips the step by
   itself (`attestation: auto`) and `preflight` says so before the tag.
 
+### Where a repository declares, and what the socle never does to it
+
+A repository declares to this command in **`maelys-release.conf`**, at its
+root: sections between brackets, one declaration per line, `#` comments. The
+file sat in `packaging/release` until 0.37.0, and it was in the wrong place —
+the eleven `packaging/` of the fleet hold **materials**, formula templates,
+systemd and launchd units, Containerfiles, a kernel config, a patch, and
+never settings; while eighteen repositories have no `packaging/` at all and
+still want to declare a branch rule or a cut command. The name now says the
+tool and the nature.
+
+`adopt --apply` moves the file with `git mv`, in the same commit that moves
+the pin, so `git log --follow` still finds it. Carrying both paths is
+refused: the socle will not choose between two declarations.
+
+**The socle only ever reads this file. It never writes it, and never
+regenerates it.** The comments a product puts beside each section are its
+reasoning — why a version is materialised twice, why a channel exists — and
+they are the product's to keep. Nothing here is a managed block.
+
+**A section this socle does not know is named and skipped, never fatal.**
+Products pin the socle by commit, so a repository that adds a section a newer
+socle understands would otherwise lose its targets, its channels and its gate
+in silence everywhere an older socle still reads the file — including in the
+fleet observer, which runs the socle each product pins.
+
 ### Targets and archive kinds a product declares
 
 Those three targets and those archive kinds are the socle's defaults, not
 its limits. A product that builds something else declares it in
-`packaging/release`, and the socle renders the declaration into the
+`maelys-release.conf`, and the socle renders the declaration into the
 `targets` and `manifest_patterns` inputs of `release.yml`:
 
 ```
@@ -439,7 +465,7 @@ approves, and the socle used to answer `ok` on an environment that required
 nobody — it described a gate it had never seen closed.
 
 **The socle does not choose that gate.** A repository declares what it wants
-in `packaging/release`:
+in `maelys-release.conf`:
 
 ```
 [gate]

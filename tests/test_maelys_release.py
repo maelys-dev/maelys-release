@@ -1753,7 +1753,7 @@ class CutTest(unittest.TestCase):
         self.assertIn("before writing anything", noted[0])
 
     def test_check_reads_the_after_version_command(self) -> None:
-        self.product.write("packaging/release", "[cut]\nafter-version bash scripts/header.sh\n")
+        self.product.write("maelys-release.conf", "[cut]\nafter-version bash scripts/header.sh\n")
         messages = self.product.json("check", str(self.dir), expect=2)["data"]["conventions"]["violations"]
         self.assertTrue(any("scripts/header.sh" in message and "does not carry" in message
                             for message in messages), messages)
@@ -1825,7 +1825,7 @@ class CutTest(unittest.TestCase):
                            '#!/bin/sh\nprintf \'#define VERSION "%s"\\n\' "$(cat VERSION)" >include/version.h\n',
                            executable=True)
         self.product.write("scripts/verify-release.sh", "#!/bin/sh\ntouch verified\n", executable=True)
-        self.product.write("packaging/release", "[cut]\nafter-version sh scripts/header.sh\n")
+        self.product.write("maelys-release.conf", "[cut]\nafter-version sh scripts/header.sh\n")
         self.product.git(self.dir, "add", "-A")
         self.product.git(self.dir, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "a version in two files")
         self.product.git(self.dir, "push", "-q", "origin", "main")
@@ -2125,6 +2125,75 @@ class RehearsalCopyTest(unittest.TestCase):
         self.assertNotIn("tar -C /src", MODULE.REHEARSAL)
 
 
+class DeclarationHomeTest(unittest.TestCase):
+    """The declarations moved, and the move must not need a human.
+
+    packaging/ holds materials everywhere in the fleet — formula templates,
+    systemd units, a kernel config — and eighteen repositories have none at
+    all while still wanting to declare. The name says the tool and the
+    nature; the socle only ever reads the file.
+    """
+
+    def setUp(self) -> None:
+        self.product = Product()
+        self.dir = self.product.dir
+        self.product.run("adopt", str(self.dir), "--apply")
+        self.product.git(self.dir, "init", "-q")
+
+    def tearDown(self) -> None:
+        self.product.close()
+
+    def commit(self) -> None:
+        self.product.git(self.dir, "add", "-A")
+        self.product.git(self.dir, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "fixture")
+
+    def test_the_former_home_is_still_read_and_reported(self) -> None:
+        """Carrying it is the violation; losing the declarations would be worse."""
+        self.product.write("packaging/release", "[targets]\nlinux-arm64\n")
+        data = self.product.json("check", str(self.dir), expect=2)["data"]
+        self.assertFalse(data["conventions"]["valid"])
+        self.assertTrue(any("moved to maelys-release.conf" in message
+                            for message in data["conventions"]["violations"]))
+        # …and the targets still arrive, so nothing else cascades.
+        self.assertEqual(self.product.json("declarations", str(self.dir))["data"]["declared"]["targets"],
+                         ["linux-arm64"])
+
+    def test_adopt_moves_it_and_git_follows(self) -> None:
+        """A status that blocked adopt would put the remedy out of reach."""
+        self.product.write("packaging/release", "[targets]\nlinux-arm64\n")
+        self.commit()
+        data = self.product.json("adopt", str(self.dir), "--apply")["data"]
+        self.assertEqual(data["moved"], "packaging/release")
+        self.assertTrue((self.dir / "maelys-release.conf").is_file())
+        self.assertFalse((self.dir / "packaging" / "release").exists())
+        # git mv, not a delete and a write: the comments a product puts beside
+        # each section are its reasoning, and the history must still find them.
+        self.assertIn("R  packaging/release -> maelys-release.conf",
+                      self.product.git(self.dir, "status", "--porcelain"))
+        self.commit()
+        self.assertIn("fixture", self.product.git(self.dir, "log", "--follow", "--oneline",
+                                                  "--", "maelys-release.conf"))
+        self.assertEqual(self.product.json("check", str(self.dir))["data"]["conventions"]["valid"], True)
+
+    def test_carrying_both_is_refused_because_the_socle_cannot_choose(self) -> None:
+        self.product.write("packaging/release", "[targets]\nlinux-arm64\n")
+        self.product.write("maelys-release.conf", "[targets]\nmacos-arm64\n")
+        data = self.product.json("check", str(self.dir), expect=2)["data"]
+        self.assertTrue(any("carries both" in message for message in data["conventions"]["violations"]))
+        # The new home is the one read, so the verdict is not ambiguous either.
+        self.assertEqual(self.product.json("declarations", str(self.dir), expect=2)["data"]["declared"]["targets"],
+                         ["macos-arm64"])
+
+    def test_a_section_a_socle_does_not_know_costs_nothing_else(self) -> None:
+        """A product pins the socle by commit: on an older socle, a newer
+        section must not take its targets down with it."""
+        self.product.write("maelys-release.conf", "[targets]\nlinux-arm64\n\n[future]\nsomething\n")
+        data = self.product.json("check", str(self.dir), expect=2)["data"]
+        self.assertTrue(any("[future]" in message for message in data["conventions"]["violations"]))
+        self.assertEqual(self.product.json("declarations", str(self.dir), expect=2)["data"]["declared"]["targets"],
+                         ["linux-arm64"])
+
+
 class RenderAndTapTest(unittest.TestCase):
     def setUp(self) -> None:
         self.product = Product()
@@ -2215,20 +2284,24 @@ class UnitTest(unittest.TestCase):
 
     def test_parse_release(self) -> None:
         self.assertEqual(MODULE.parse_release("[targets]\nlinux-arm64\nwasm32 ubuntu-26.04\n"),
-                         ([("linux-arm64", ""), ("wasm32", "ubuntu-26.04")], [], [], "", ""))
+                         ([("linux-arm64", ""), ("wasm32", "ubuntu-26.04")], [], [], "", "", []))
         self.assertEqual(MODULE.parse_release("[targets]\nmacos-arm64 self-hosted ARM64\n"),
-                         ([("macos-arm64", ["self-hosted", "ARM64"])], [], [], "", ""))
-        self.assertEqual(MODULE.parse_release("[manifest]\n*.wasm\n"), ([], ["*.wasm"], [], "", ""))
+                         ([("macos-arm64", ["self-hosted", "ARM64"])], [], [], "", "", []))
+        self.assertEqual(MODULE.parse_release("[manifest]\n*.wasm\n"), ([], ["*.wasm"], [], "", "", []))
         self.assertEqual(MODULE.parse_release("[channels]\nnpm github-packages\n"),
-                         ([], [], [("npm", "github-packages")], "", ""))
-        self.assertEqual(MODULE.parse_release("[gate]\nnone\n"), ([], [], [], "none", ""))
-        self.assertEqual(MODULE.parse_release("[gate]\nreviewer\n"), ([], [], [], "reviewer", ""))
-        self.assertEqual(MODULE.parse_release("# nothing declared\n"), ([], [], [], "", ""))
+                         ([], [], [("npm", "github-packages")], "", "", []))
+        self.assertEqual(MODULE.parse_release("[gate]\nnone\n"), ([], [], [], "none", "", []))
+        self.assertEqual(MODULE.parse_release("[gate]\nreviewer\n"), ([], [], [], "reviewer", "", []))
+        self.assertEqual(MODULE.parse_release("# nothing declared\n"), ([], [], [], "", "", []))
+        # A section this socle does not know is named and skipped, never fatal:
+        # a product pins the socle by commit, and losing its targets in
+        # silence on an older socle is worse than an unapplied section.
+        self.assertEqual(MODULE.parse_release("[targets]\nlinux-arm64\n[bsd]\nx\n"),
+                         ([("linux-arm64", "")], [], [], "", "", ["[bsd] at line 3"]))
         # A version materialised twice: the command that regenerates the second.
         self.assertEqual(MODULE.parse_release("[cut]\nafter-version bash scripts/header.sh\n"),
-                         ([], [], [], "", "bash scripts/header.sh"))
+                         ([], [], [], "", "bash scripts/header.sh", []))
         for text in ("linux-arm64\n",                      # outside a section
-                     "[bsd]\nlinux-arm64\n",               # unknown section
                      "[targets]\nwasm32\n",                # no runner and no default
                      "[targets]\nWASM\n",                  # not a target name
                      "[targets]\nlinux-arm64\nlinux-arm64\n",   # twice

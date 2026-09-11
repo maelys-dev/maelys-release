@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.37.0 — 2026-09-11
+
+- **A repository declares in `maelys-release.conf`, at its root.** It sat in
+  `packaging/release`, and that was the wrong place: the eleven `packaging/`
+  of the fleet hold **materials** — formula templates, systemd and launchd
+  units, Containerfiles, a kernel config, a patch, a `.pc.in` — and never
+  settings, while **eighteen repositories have no `packaging/` at all** and
+  still want to declare a branch rule or a cut command. The name says the
+  tool and the nature.
+- **`adopt --apply` moves it with `git mv`**, in the same commit that moves
+  the pin, so `git log --follow` still finds it. The old path is still read
+  while a repository has not moved — losing its targets would be worse than
+  the violation — and carrying both is refused, because the socle will not
+  choose between two declarations. `check` exits 2 on the old path and
+  `adopt` still runs: a status that blocked `adopt` would put the remedy out
+  of reach.
+- **The socle only ever reads this file, and that is now written down.** The
+  comments a product puts beside each section are its reasoning, and they are
+  the product's to keep. maelys-json's file explains in six lines why its
+  version is materialised twice; nothing the socle does may cost that.
+- **A section this socle does not know is named and skipped, never fatal.**
+  Products pin the socle by commit, so a repository adding a section a newer
+  socle understands would otherwise lose its targets, its channels and its
+  gate in silence wherever an older socle reads the file — including in the
+  fleet observer, which runs the socle each product pins.
+- Two repositories carry the file already, both since this afternoon:
+  maelys-datalog and maelys-json, the second having adopted `[cut]
+  after-version` within an hour of 0.34.0 for the same reason as the first, a
+  version materialised in a header its consumers assert on. The move costs
+  them one `adopt --apply` each.
+- Arbitrated against two other proposals, and both were mine or a peer's:
+  `RELEASE` at the root would have been the thirteenth capitalised file of
+  maelys-warden and would sit beside `RELEASING.md`, same radical, one prose
+  owned by the product and one grammar read by the tool; a `release/`
+  directory would need one file per section — seven of two lines for
+  maelys-json, which needs one — and reads as a build output where two
+  repositories already declare `build/release/bin`.
+
 ## 0.36.0 — 2026-09-11
 
 - **The socle invoked its two product scripts with different shells.**
