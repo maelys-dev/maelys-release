@@ -41,7 +41,17 @@ checkout at the wanted tag; `maelys-release check DIR` reports drift with exit 2
 
 ## Replaying the release of a tag
 
-When a release or its tap jobs failed, adopt the corrected socle on the
-default branch, then run the `release` workflow by hand with the existing tag
-as input: `gh workflow run release.yml -f tag=vX.Y.Z`. It rebuilds that tag,
-publishes its verified assets, then renders, bottles and publishes the tap.
+When a release or its tap jobs failed for a reason outside the code — a
+cancelled job, an expired approval, a tap push lost to a race — run the
+`release` workflow by hand on the tag itself:
+
+```sh
+gh workflow run release.yml --ref vX.Y.Z -f tag=vX.Y.Z
+```
+
+It rebuilds that tag, publishes its verified assets, then renders, bottles and
+publishes the tap. **`--ref` names the tag and is not optional**: the `release`
+environment only accepts tags `v*`, so a run started from the default branch
+is refused at `publish`. The replay uses the workflow file at that tag, hence
+the socle that tag pinned; when the socle is at fault, the remedy is a new
+patch release carrying the corrected pin, not a replay.
