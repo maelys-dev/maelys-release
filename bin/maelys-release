@@ -879,7 +879,10 @@ def release_workflow(decl: Declarations, sha: str, tag: str, version: str) -> st
             f"      product: {decl.product}",
             "      tag: ${{ inputs.tag || github.ref_name }}",
             f"      channel: {name}",
-            "      publish_command: sh scripts/publish-channel.sh TAG CHANNEL",
+            # bash, like verify_command and package_command: `sh` is dash on
+            # the Ubuntu runner and bash in POSIX mode on the operator's
+            # macOS, and 0.36.0 fixed only two of the three.
+            "      publish_command: bash scripts/publish-channel.sh TAG CHANNEL",
         ])
     for formula in decl.formulas:
         lines.extend([
@@ -2706,12 +2709,130 @@ ls -l /dist
 """
 
 
+PUBLISH_COMMAND = "bash scripts/publish-channel.sh TAG CHANNEL"
+
+
+def channel_marker(product: str, tag: str, channel: str, recorded: dict, run: str) -> dict:
+    """The marker channel.yml attaches, composed the way its jq expression does.
+
+    `{product, tag, channel, published, run} + ($recorded[0] // {})`: what the
+    script recorded wins, which is how a product puts its registry, its
+    package and its dist-tag in without the socle knowing them.
+    """
+    marker = {"product": product, "tag": tag, "channel": channel,
+              "published": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "run": run}
+    marker.update(recorded)
+    return marker
+
+
+def marker_differences(marker: dict, attached: dict) -> list:
+    """The fields on which a composed marker and an attached one disagree.
+
+    `published` and `run` differ by construction — one names this rehearsal,
+    the other the run that published — so they are not a disagreement. Any
+    other field is: it means the script records something different from what
+    the release carries, and the next publication would attach that instead.
+    """
+    volatile = ("published", "run")
+    return sorted({key for key in set(marker) | set(attached)
+                   if key not in volatile and marker.get(key) != attached.get(key)})
+
+
+def rehearse_channel(invocation: Invocation, project: pathlib.Path, product: str,
+                     decl: Declarations, log) -> tuple[dict, int]:
+    """Run a product's publish script against a release that already exists.
+
+    channel.yml only ever runs on a signed tag, so the one contract it rests
+    on — `publish_command` exits 0 without republishing when the registry
+    already holds the version — had never been exercised anywhere. This runs
+    it the way the workflow does: the release's own assets in dist/, the same
+    environment, the same substitutions, and then the marker composed here is
+    compared with the one attached to that release.
+
+    It publishes nothing by design. If the script is not idempotent it either
+    fails, which is the finding, or publishes, which the registry would have
+    refused anyway for a version it already holds. Proposed by maelys-datalog,
+    who could not test this any other way.
+    """
+    channel = str(invocation.option("--channel"))
+    tag = str(invocation.option("--tag"))
+    if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?", tag):
+        raise Failure("VALIDATION_FAILED", f"--tag is vX.Y.Z: {tag}.", "Pass the published tag to rehearse.")
+    declared = [name for name, _ in decl.channels]
+    if channel not in declared:
+        raise Failure("PRECONDITION_FAILED",
+                      f"{product} declares no {channel} channel"
+                      + (f"; it declares {' '.join(declared)}" if declared else "") + ".",
+                      f"Declare it under [channels] of {DECLARATION_FILE}, or rehearse a channel it has.")
+    repository = cut_repository(project)
+    # The registry token is the operator's and never the socle's: it passes
+    # through the environment, is never read from a file and never printed.
+    if not any(os.environ.get(name) for name in ("NODE_AUTH_TOKEN", "GH_TOKEN")):
+        raise Failure("PRECONDITION_FAILED",
+                      "No registry token in the environment: the publish script needs one, and the socle"
+                      " never supplies it.",
+                      "Export NODE_AUTH_TOKEN (or GH_TOKEN) for this run; nothing is written to the registry"
+                      " when the script keeps its side of the contract.")
+    dist = project / "dist"
+    if dist.is_dir() and any(dist.iterdir()):
+        raise Failure("PRECONDITION_FAILED", f"{dist} is not empty, and the rehearsal fills it with the"
+                      " release's own assets.",
+                      "Empty dist/ first: a stale file would make the script publish something the release"
+                      " does not carry.")
+    if github_read(f"repos/{repository}/releases/tags/{tag}")[0] != "ok":
+        raise Failure("NOT_FOUND", f"{repository} has no published release for {tag}.",
+                      "A channel carries a release that exists; rehearse a tag that has one.")
+    dist.mkdir(exist_ok=True)
+    data: dict = {"product": product, "channel": channel, "tag": tag, "repository": repository,
+                  "command": "", "assets": [], "recorded": [], "matches": None}
+    try:
+        downloaded = run(["gh", "release", "download", tag, "--repo", repository, "--dir", str(dist)], cwd=project)
+        if downloaded.returncode != 0:
+            raise Failure("PROCESS_FAILED", f"gh release download {tag} failed: {downloaded.stderr.strip()}",
+                          "Check the release and the credentials, then rehearse again.")
+        data["assets"] = sorted(path.name for path in dist.iterdir())
+        with tempfile.TemporaryDirectory(prefix="maelys-release-channel.") as temp:
+            record = pathlib.Path(temp) / "channel-record.json"
+            command = PUBLISH_COMMAND.replace("TAG", tag).replace("CHANNEL", channel)
+            data["command"] = command
+            print(f"rehearse: {command}", file=log)
+            log.flush()
+            published = subprocess.run(["bash", "-c", command], cwd=project, check=False,
+                                       stdout=log, stderr=subprocess.STDOUT,
+                                       env={**os.environ, "TAG": tag, "CHANNEL": channel,
+                                            "PRODUCT": product, "CHANNEL_RECORD": str(record)})
+            if published.returncode != 0:
+                raise Failure("PROCESS_FAILED",
+                              f"{command} exited {published.returncode} on a version {channel} already holds.",
+                              "channel.yml requires a publish command that succeeds without republishing:"
+                              " a replay of this tag would fail the same way. Read the log above.")
+            recorded = json.loads(record.read_text(encoding="utf-8")) if record.is_file() else {}
+        data["recorded"] = sorted(recorded)
+        marker = channel_marker(product, tag, channel, recorded, "(rehearsal)")
+        attached_file = dist / f"channel-{channel}.json"
+        attached = json.loads(attached_file.read_text(encoding="utf-8")) if attached_file.is_file() else None
+        if attached is not None:
+            data["differs"] = marker_differences(marker, attached)
+            data["matches"] = not data["differs"]
+        data["marker"] = marker
+    finally:
+        for path in sorted(dist.iterdir()) if dist.is_dir() else []:
+            path.unlink()
+    return data, EXIT_OK if data["matches"] is not False else EXIT_VIOLATIONS
+
+
 def handle_rehearse(invocation: Invocation) -> tuple[dict, int]:
     """Replay the build job of release.yml for one Linux target in Docker."""
     project, product, mechanism = project_of(invocation)
     run_pinned_socle(invocation, project)
-    target = invocation.operands[1]
     require_socle_mechanism(project, mechanism, "rehearse")
+    log = sys.stderr if invocation.format != "text" else sys.stdout
+    if invocation.option("--channel"):
+        return rehearse_channel(invocation, project, product, read_declarations(project, product, mechanism), log)
+    if not invocation.operands[1:]:
+        raise Failure("VALIDATION_FAILED", "rehearse takes a TARGET, or --channel NAME --tag vX.Y.Z.",
+                      "Name the Linux target to replay, or the channel to run against a published release.")
     # The copy carries .git as it stands. In a worktree — and in a submodule
     # checkout — .git is a file naming a directory elsewhere on the host,
     # which the container does not have, so git inside the rehearsal reads a
@@ -2724,6 +2845,7 @@ def handle_rehearse(invocation: Invocation) -> tuple[dict, int]:
                       " directory outside it, and rehearse copies the working tree into a container where"
                       " that directory does not exist.",
                       "Run the rehearsal from a full clone.")
+    target = invocation.operands[1]
     if not shutil.which("docker"):
         raise Failure("NOT_FOUND", "docker is required to rehearse a Linux build.", "Install Docker and retry.")
     decl = read_declarations(project, product, mechanism)
@@ -2747,7 +2869,6 @@ def handle_rehearse(invocation: Invocation) -> tuple[dict, int]:
                image, "bash", "-c", REHEARSAL]
     # The container's output is a log: it stays on stdout for a human and
     # moves to stderr when the envelope owns stdout.
-    log = sys.stderr if invocation.format != "text" else sys.stdout
     print(f"rehearse: {mode} {target} on {image} ({PLATFORMS[target]})", file=log)
     log.flush()
     completed = subprocess.run(command, check=False, stdout=log, stderr=subprocess.STDOUT)
@@ -2913,6 +3034,25 @@ LABELS = {"ok": "ok", "note": "note", "warn": "WARN", "missing": "MISSING", "ref
 
 def checks_text(checks: list[dict]) -> str:
     return "".join(f"{LABELS.get(check['status'], check['status']):<8} {check['message']}\n" for check in checks)
+
+
+def text_rehearse(data: dict) -> str:
+    if "channel" not in data:
+        return (f"rehearse: {data['target']} built " + ", ".join(data["artifacts"]) + "\n"
+                if data["mode"] == "package" else f"rehearse: check passed on {data['target']}\n")
+    lines = [f"{'assets':<10} {len(data['assets'])} from {data['tag']}",
+             f"{'command':<10} {data['command']} (exited 0 without republishing)"]
+    if data["recorded"]:
+        lines.append(f"{'recorded':<10} " + " ".join(data["recorded"]))
+    if data["matches"] is None:
+        lines.append(f"{'marker':<10} {data['tag']} carries no channel-{data['channel']}.json to compare with")
+    elif data["matches"]:
+        lines.append(f"{'marker':<10} matches channel-{data['channel']}.json of {data['tag']}")
+    else:
+        lines.append(f"{'marker':<10} differs from channel-{data['channel']}.json on "
+                     + " ".join(data["differs"]))
+    verdict = "ok" if data["matches"] is not False else "the marker differs"
+    return "\n".join(lines) + f"\nrehearse: {data['channel']} of {data['product']} {data['tag']}: {verdict}\n"
 
 
 def text_adopt(data: dict) -> str:
@@ -3106,8 +3246,7 @@ TEXT = {
     "declarations": text_declarations,
     "preflight": text_preflight,
     "cut": text_cut,
-    "rehearse": lambda data: (f"rehearse: {data['target']} built " + ", ".join(data["artifacts"]) + "\n"
-                              if data["mode"] == "package" else f"rehearse: check passed on {data['target']}\n"),
+    "rehearse": lambda data: text_rehearse(data),
     "render": lambda data: f"rendered {data['output']}\n",
     "tap": text_tap,
     "self-test": lambda data: "self-test: ok\n",
@@ -3337,21 +3476,35 @@ APP = cli.Program(PROGRAM, PRODUCT, socle_version(), [
                                         hidden=True)],
                     schema=CUT_SCHEMA),
     cli.execute("rehearse", "rehearse",
-                "Replay the Linux build job of the release, or make check with --check, in a Docker container on a copy of the working tree.",
+                "Replay the Linux build job of the release in a Docker container on a copy of the working"
+                " tree, make check with --check, or a channel's publish script against a published release"
+                " with --channel.",
                 handle_rehearse,
-                operands=[DIR_OPERAND, cli.operand("TARGET", "linux-x86_64 or linux-arm64.", choices=list(PLATFORMS))],
+                operands=[DIR_OPERAND, cli.operand("TARGET", "linux-x86_64 or linux-arm64;"
+                                                   " absent with --channel.", required=False,
+                                                   choices=list(PLATFORMS))],
                 options=[*SOCLE_OPTIONS,
                          cli.option("--image", "Container image.", cli.argument("IMAGE"), default=DEFAULT_IMAGE),
                          cli.option("--package-command", "Command producing dist/; TARGET is substituted.",
                                     cli.argument("COMMAND"), default="bash scripts/package-release.sh TARGET"),
                          cli.flag("--check", "Run the check command instead of packaging; dist/ is left alone."),
                          cli.option("--check-command", "Command run with --check.", cli.argument("COMMAND"), default="make check"),
-                         cli.flag("--keep", "Keep the container for inspection.")],
+                         cli.flag("--keep", "Keep the container for inspection."),
+                         cli.option("--channel", "Run the product's publish script against a published"
+                                    " release instead of a build; needs --tag.",
+                                    cli.argument("NAME"), requires=("--tag",)),
+                         cli.option("--tag", "The published tag the channel carries.",
+                                    cli.argument("TAG"), requires=("--channel",))],
                 schema={"type": "object", "additionalProperties": False,
-                        "required": ["product", "target", "platform", "image", "mode", "artifacts"],
+                        "required": ["product"],
                         "properties": {"product": {"type": "string"}, "target": {"type": "string"},
                                        "platform": {"type": "string"}, "image": {"type": "string"},
-                                       "mode": {"enum": ["package", "check"]}, "artifacts": STRINGS}}),
+                                       "mode": {"enum": ["package", "check"]}, "artifacts": STRINGS,
+                                       "channel": {"type": "string"}, "tag": {"type": "string"},
+                                       "repository": {"type": "string"}, "command": {"type": "string"},
+                                       "assets": STRINGS, "recorded": STRINGS,
+                                       "differs": STRINGS, "marker": {"type": "object"},
+                                       "matches": {"type": ["boolean", "null"]}}}),
     cli.execute("render", "render", "Replace @KEY@ placeholders of a template, refusing to leave one unrendered.",
                 handle_render,
                 operands=[cli.operand("TEMPLATE", "Template file."), cli.operand("OUTPUT", "File written."),

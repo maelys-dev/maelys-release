@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.38.0 — 2026-09-11
+
+- **`rehearse DIR --channel NAME --tag vX.Y.Z` runs a product's publish
+  script against a release that already exists.** `channel.yml` only ever
+  runs on a signed tag, so the one contract it rests on — the publish command
+  exits 0 without republishing when the registry already holds the version —
+  had never been exercised anywhere, and a product could only discover its
+  script was not idempotent by replaying a real release. It does what the job
+  does: the release's own assets in `dist/`, the same substitutions and the
+  same environment, `CHANNEL_RECORD` included.
+- **And it compares the marker.** The object the `record` job would attach is
+  composed here and set against the `channel-<name>.json` the release
+  carries, ignoring `published` and `run`, which differ by construction. A
+  disagreement anywhere else means the script records something the release
+  does not carry, and the next publication would attach that instead.
+- It refuses before touching anything: an undeclared channel, a tag that is
+  not one, a release that does not exist, a non-empty `dist/` whose stale
+  files would make the script publish what the release has not got. **The
+  registry token is the operator's** — it passes through the environment, and
+  the socle never reads one from a file, never supplies one and never prints
+  one. What it downloaded is removed whether the run succeeded or failed.
+- **`publish_command` is `bash` too.** 0.36.0 fixed `verify_command` and left
+  this one on `sh`, which is dash on the runner and bash in POSIX mode on the
+  operator's macOS: the same trap, in the one script that publishes
+  irreversibly. A product regenerates the line at its next adoption.
+- Proposed by maelys-datalog: *« C'est le test que je n'ai pas pu faire. »*
+
 ## 0.37.0 — 2026-09-11
 
 - **A repository declares in `maelys-release.conf`, at its root.** It sat in

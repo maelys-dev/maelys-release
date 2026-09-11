@@ -699,7 +699,7 @@ class ProductNeedsTest(unittest.TestCase):
         # withdrawn, so nothing the socle runs may fail after it.
         self.assertIn("    needs: release\n    if: needs.release.result == 'success'", workflow)
         self.assertIn("      packages: write", workflow)
-        self.assertIn("      publish_command: sh scripts/publish-channel.sh TAG CHANNEL", workflow)
+        self.assertIn("      publish_command: bash scripts/publish-channel.sh TAG CHANNEL", workflow)
 
     def test_the_channel_marker_is_written_by_a_job_that_runs_no_product_code(self) -> None:
         """A publication that happened is recorded by a job that could not
@@ -2192,6 +2192,103 @@ class DeclarationHomeTest(unittest.TestCase):
         self.assertTrue(any("[future]" in message for message in data["conventions"]["violations"]))
         self.assertEqual(self.product.json("declarations", str(self.dir), expect=2)["data"]["declared"]["targets"],
                          ["linux-arm64"])
+
+
+class ChannelMarkerTest(unittest.TestCase):
+    """The marker the rehearsal composes is the one channel.yml attaches.
+
+    `channel.yml` only ever runs on a signed tag, so its jq expression had
+    never been compared with anything. The rehearsal composes the same object
+    in Python, and these fix the two shapes to each other.
+    """
+
+    def test_what_the_script_recorded_wins(self) -> None:
+        """`{product,tag,channel,published,run} + ($recorded[0] // {})`: a
+        product puts its registry and its package in without the socle
+        knowing them, and may correct a field the socle guessed."""
+        marker = MODULE.channel_marker("maelys-datalog", "v0.2.0", "npm",
+                                       {"registry": "npm.pkg.github.com", "package": "@maelys/datalog"},
+                                       "(rehearsal)")
+        self.assertEqual(marker["product"], "maelys-datalog")
+        self.assertEqual(marker["registry"], "npm.pkg.github.com")
+        self.assertEqual(marker["run"], "(rehearsal)")
+        self.assertRegex(marker["published"], r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+        overridden = MODULE.channel_marker("p", "v1.0.0", "npm", {"channel": "npm-next"}, "r")
+        self.assertEqual(overridden["channel"], "npm-next")
+
+    def test_what_counts_as_a_disagreement_with_the_attached_marker(self) -> None:
+        """published and run differ by construction; anything else means the
+        script records something the release does not carry."""
+        attached = {"product": "p", "tag": "v1.0.0", "channel": "npm", "published": "2026-09-01T00:00:00Z",
+                    "run": "https://example.invalid/1", "registry": "npm.pkg.github.com"}
+        same = dict(attached, published="2026-09-11T12:00:00Z", run="(rehearsal)")
+        self.assertEqual(MODULE.marker_differences(same, attached), [])
+        self.assertEqual(MODULE.marker_differences(dict(same, registry="registry.npmjs.org"), attached),
+                         ["registry"])
+        # A field the script stopped recording is a disagreement too.
+        missing = {key: value for key, value in same.items() if key != "registry"}
+        self.assertEqual(MODULE.marker_differences(missing, attached), ["registry"])
+
+    def test_the_socle_records_the_fact_without_a_record_file(self) -> None:
+        """The file is optional: the marker exists because the channel published."""
+        marker = MODULE.channel_marker("p", "v1.0.0", "npm", {}, "r")
+        self.assertEqual(sorted(marker), ["channel", "product", "published", "run", "tag"])
+
+
+class RehearseChannelRefusalTest(unittest.TestCase):
+    """What the channel rehearsal refuses before it touches a registry."""
+
+    def setUp(self) -> None:
+        self.product = Product()
+        self.dir = str(self.product.dir)
+        self.product.write("scripts/publish-channel.sh", "#!/bin/sh\nexit 0\n", executable=True)
+        self.product.write("maelys-release.conf", "[channels]\nnpm github-packages\n")
+        self.product.run("adopt", self.dir, "--apply")
+        # A GitHub origin, so the refusals under test are reached; nothing
+        # here touches the network.
+        self.product.git(self.product.dir, "init", "-q")
+        self.product.git(self.product.dir, "remote", "add", "origin",
+                         "https://github.com/maelys-dev/maelys-fixture.git")
+        self.saved = os.environ.get("NODE_AUTH_TOKEN"), os.environ.get("GH_TOKEN")
+        for name in ("NODE_AUTH_TOKEN", "GH_TOKEN"):
+            os.environ.pop(name, None)
+
+    def tearDown(self) -> None:
+        for name, value in zip(("NODE_AUTH_TOKEN", "GH_TOKEN"), self.saved):
+            if value is not None:
+                os.environ[name] = value
+        self.product.close()
+
+    def test_a_channel_the_product_does_not_declare(self) -> None:
+        error = self.product.json("rehearse", self.dir, "--channel", "pypi", "--tag", "v1.2.3",
+                                  expect=1)["error"]
+        self.assertEqual(error["code"], "PRECONDITION_FAILED")
+        self.assertIn("declares no pypi channel", error["message"])
+        self.assertIn("it declares npm", error["message"])
+
+    def test_a_tag_that_is_not_one(self) -> None:
+        error = self.product.json("rehearse", self.dir, "--channel", "npm", "--tag", "0.2.0",
+                                  expect=1)["error"]
+        self.assertEqual(error["code"], "VALIDATION_FAILED")
+
+    def test_the_token_is_the_operator_s_and_never_the_socle_s(self) -> None:
+        """The socle never reads a token from a file and never supplies one."""
+        if not shutil.which("gh"):
+            self.skipTest("gh is needed to reach the token check")
+        error = self.product.json("rehearse", self.dir, "--channel", "npm", "--tag", "v1.2.3",
+                                  expect=1)["error"]
+        self.assertEqual(error["code"], "PRECONDITION_FAILED")
+        self.assertIn("never supplies it", error["message"])
+
+    def test_channel_and_tag_need_each_other(self) -> None:
+        error = self.product.json("rehearse", self.dir, "--channel", "npm", expect=1)["error"]
+        self.assertEqual(error["code"], "VALIDATION_FAILED")
+        self.assertIn("--tag", error["message"])
+
+    def test_a_rehearse_with_neither_a_target_nor_a_channel(self) -> None:
+        error = self.product.json("rehearse", self.dir, expect=1)["error"]
+        self.assertEqual(error["code"], "VALIDATION_FAILED")
+        self.assertIn("--channel", error["message"])
 
 
 class RenderAndTapTest(unittest.TestCase):
