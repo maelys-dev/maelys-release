@@ -2432,6 +2432,7 @@ def cut_open(invocation: Invocation, decl: Declarations, data: dict, log, timeou
             data["gate"].append({"status": "note",
                                  "message": f"--apply would run {decl.verify_command.replace('TARGET', host_target())}"
                                             " here before writing anything"})
+        data["next"] = f"{PROGRAM} cut {project} {version} --apply"
         return data, EXIT_OK
     # The gate a product declared for the release runners is held here too,
     # before a branch and a pull request exist. maelys-datalog found the gap
