@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.35.1 — 2026-09-11
+
+- **`rehearse DIR linux-x86_64` works again on an Apple Silicon host.** The
+  rehearsal copied the working tree with a `tar` pipe, and GNU tar 1.35
+  extracting under an emulated `linux/amd64` fails every `mkdir` with ENOSYS,
+  "Function not implemented" — so the x86_64 rehearsal was unusable on the
+  machines the fleet develops on, which are all of them. `cp -a` followed by
+  removing `dist/` does the same work and survives the emulation. Reported by
+  maelys-oci, reproduced here, and verified by a full `make check` of
+  maelys-oci under `linux-x86_64` on this host.
+- **`rehearse` refuses a git worktree rather than letting it fail inside the
+  container.** A worktree's `.git` — and a submodule checkout's — is a file
+  naming a directory elsewhere on the host, which the container has not got,
+  so git inside the rehearsal reads a path that is not there. Also reported by
+  maelys-oci, who worked around it with a full clone; the socle now says that
+  itself, in seconds, instead of surfacing as whatever the product's build
+  makes of a broken repository.
+
 ## 0.35.0 — 2026-09-11
 
 - **`--field NAME` reads one member of a result without a `jq` expression**,

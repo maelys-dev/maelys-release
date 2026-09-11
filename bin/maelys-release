@@ -2615,7 +2615,12 @@ apt-get update -q >/dev/null
 apt-get install -y -q --no-install-recommends git ca-certificates $LINUX_PACKAGES >/dev/null
 echo "== Copy the working tree (dist/ excluded)"
 mkdir -p /work/product && cd /work/product
-tar -C /src --exclude=./dist -cf - . | tar -xf -
+# cp rather than a tar pipe: GNU tar 1.35 extracting under an emulated
+# linux/amd64 on an Apple Silicon host fails every mkdir with ENOSYS,
+# "Function not implemented", so the x86_64 rehearsal was unusable on the
+# machines the fleet develops on. Reported by maelys-oci, reproduced here.
+cp -a /src/. /work/product/
+rm -rf /work/product/dist
 git config --global --add safe.directory "*"
 echo "== Pinned dependency checkouts"
 for name in $DEPENDENCIES; do sh scripts/checkout-dependency.sh "$name"; done
@@ -2643,6 +2648,18 @@ def handle_rehearse(invocation: Invocation) -> tuple[dict, int]:
         raise Failure("NOT_FOUND", "docker is required to rehearse a Linux build.", "Install Docker and retry.")
     decl = read_declarations(project, product, mechanism)
     require_valid(decl, "rehearse")
+    # The copy carries .git as it stands. In a worktree — and in a submodule
+    # checkout — .git is a file naming a directory elsewhere on the host,
+    # which the container does not have, so git inside the rehearsal reads a
+    # path that is not there. Reported by maelys-oci, who worked around it
+    # with a full clone; the socle says so rather than letting it surface as
+    # whatever the product's build makes of a broken repository.
+    if (project / ".git").is_file():
+        raise Failure("PRECONDITION_FAILED",
+                      f"{project} is a git worktree or a submodule checkout: its .git is a file naming a"
+                      " directory outside it, and rehearse copies the working tree into a container where"
+                      " that directory does not exist.",
+                      "Run the rehearsal from a full clone.")
     if decl.dependencies and not os.access(project / "scripts" / "checkout-dependency.sh", os.X_OK):
         raise Failure("PRECONDITION_FAILED", "scripts/checkout-dependency.sh is missing in the product.",
                       f"Run '{PROGRAM} adopt {project} --apply' first.")

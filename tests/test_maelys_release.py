@@ -2077,6 +2077,46 @@ class GitHubReadingTest(unittest.TestCase):
             self.assertNotIn("is not protected", message, (classic, ruled))
 
 
+class RehearseRefusalTest(unittest.TestCase):
+    """What rehearse refuses before it starts a container.
+
+    Both cases come from maelys-oci, who hit them while rehearsing a real
+    release: a refusal costs seconds, a container that fails halfway costs
+    minutes and leaves the cause in a log.
+    """
+
+    def setUp(self) -> None:
+        self.product = Product()
+        self.dir = str(self.product.dir)
+        self.product.run("adopt", self.dir, "--apply")
+
+    def tearDown(self) -> None:
+        self.product.close()
+
+    def test_a_worktree_is_refused_with_its_cause(self) -> None:
+        """A worktree's .git is a file naming a directory the container has
+        not got, so git inside the rehearsal reads a path that is not there."""
+        (self.product.dir / ".git").write_text("gdir: /elsewhere/.git/worktrees/x\n", encoding="utf-8")
+        error = self.product.json("rehearse", self.dir, "linux-arm64", "--check", expect=1)["error"]
+        self.assertEqual(error["code"], "PRECONDITION_FAILED")
+        self.assertIn("worktree", error["message"])
+        self.assertIn("full clone", error["hint"])
+
+
+class RehearsalCopyTest(unittest.TestCase):
+    """The rehearsal copies the working tree with cp, not with a tar pipe.
+
+    GNU tar 1.35 extracting under an emulated linux/amd64 on an Apple Silicon
+    host fails every mkdir with ENOSYS, so `rehearse DIR linux-x86_64` was
+    unusable on the machines the fleet develops on. Measured, then fixed.
+    """
+
+    def test_the_copy_uses_cp_and_still_excludes_dist(self) -> None:
+        self.assertIn("cp -a /src/. /work/product/", MODULE.REHEARSAL)
+        self.assertIn("rm -rf /work/product/dist", MODULE.REHEARSAL)
+        self.assertNotIn("tar -C /src", MODULE.REHEARSAL)
+
+
 class RenderAndTapTest(unittest.TestCase):
     def setUp(self) -> None:
         self.product = Product()
