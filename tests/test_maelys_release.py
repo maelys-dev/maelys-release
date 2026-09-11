@@ -1718,6 +1718,44 @@ class CutTest(unittest.TestCase):
         self.assertIn("--tag", error["message"])
 
 
+class BranchNameTest(unittest.TestCase):
+    """A branch says what changes, not who typed; the socle notes, never refuses."""
+
+    def setUp(self) -> None:
+        self.product = Product()
+        self.dir = self.product.dir
+        self.product.run("adopt", str(self.dir), "--apply")
+        self.product.git(self.dir, "init", "-q")
+        self.product.git(self.dir, "add", "-A")
+        self.product.git(self.dir, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "fixture")
+
+    def tearDown(self) -> None:
+        self.product.close()
+
+    def notes(self) -> list:
+        data = self.product.json("check", str(self.dir))["data"]
+        self.assertTrue(data["conventions"]["valid"], "a branch name is never a violation")
+        return [check["message"] for check in data["checks"] if "named after the tool" in check["message"]]
+
+    def test_an_agent_prefix_is_noted_and_a_change_prefix_is_not(self) -> None:
+        self.assertEqual(self.notes(), [])                                  # main
+        for branch in ("claude/one-asset-per-channel", "codex/ubuntu-26"):
+            self.product.git(self.dir, "switch", "-q", "-c", branch)
+            self.assertEqual(len(self.notes()), 1, branch)
+            self.assertIn(branch, self.notes()[0])
+            self.product.git(self.dir, "switch", "-q", "main")
+            self.product.git(self.dir, "branch", "-q", "-D", branch)
+        for branch in ("fix/a-real-bug", "release/v1.3.0", "docs/the-conventions", "claudette"):
+            self.product.git(self.dir, "switch", "-q", "-c", branch)
+            self.assertEqual(self.notes(), [], branch)
+            self.product.git(self.dir, "switch", "-q", "main")
+
+    def test_a_detached_head_is_not_a_branch_name(self) -> None:
+        """CI checks out a merge ref: the name there is GitHub's, not the author's."""
+        self.product.git(self.dir, "switch", "-q", "--detach", "HEAD")
+        self.assertEqual(self.notes(), [])
+
+
 class RenderAndTapTest(unittest.TestCase):
     def setUp(self) -> None:
         self.product = Product()

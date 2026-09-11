@@ -118,6 +118,12 @@ MANAGED = (
     "SECURITY.md",
     ".github/workflows/ci.yml",
 )
+# The agents that work in the fleet and name a worktree branch after
+# themselves by default. The rule is that a branch carries the prefix of
+# its change and never the name of the tool, so this is the one list the
+# socle can close: it is the set of agents the socle writes instructions
+# for, not a vocabulary of change types, which belongs to each repository.
+AGENT_BRANCHES = ("claude", "codex")
 SOCLE_MECHANISM = "maelys-release"
 MECHANISMS = (SOCLE_MECHANISM, "custom", "none")
 RELEASE_USES = re.compile(rf"{re.escape(SOCLE_REPOSITORY)}/\.github/workflows/release\.yml@[0-9a-f]{{40}}")
@@ -383,6 +389,22 @@ def read_fuzz(decl: Declarations) -> None:
                          " and the socle schedules nothing beyond a pull request", "conventions")
 
 
+def read_branch(decl: Declarations) -> None:
+    """Note a branch named after the agent that created it; never refuse one.
+
+    A branch name is not a property of the working tree, and in CI the
+    checkout is detached, where the ref is GitHub's and not the author's:
+    the note therefore fires where it is useful, on the author's own
+    checkout before the push. Counting the fleet's branches is
+    maelys-platform's, which reads the remote refs of every repository.
+    """
+    branch = git("rev-parse", "--abbrev-ref", "HEAD", cwd=decl.project, check=False)
+    prefix, separator, _ = branch.partition("/")
+    if separator and prefix in AGENT_BRANCHES:
+        decl.add("note", f"branch {branch} is named after the tool that created it, not after its change:"
+                         " a branch carries the prefix its change would take in a commit", "conventions")
+
+
 def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCLE_MECHANISM) -> Declarations:
     decl = Declarations(project, product, mechanism)
     version_file = project / "VERSION"
@@ -525,6 +547,7 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
     elif publishes:
         decl.add("note", "scripts/publish-channel.sh exists but packaging/release declares no"
                          " [channels]: nothing calls it, and no channel job is written")
+    read_branch(decl)
     return decl
 
 

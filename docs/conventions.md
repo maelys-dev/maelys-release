@@ -148,6 +148,28 @@ cannot move its prose to a repository nobody has created yet, and a rule
 that no product can satisfy is a rule that gets disabled. A product opts in
 once its prose has moved.
 
+## Branches
+
+A branch is named after the change it carries, with the prefix that change
+would take in a commit message — `fix/`, `docs/`, `release/`, `refactor/` —
+and never after the tool that created it. `claude/` and `codex/` say who
+typed; they say nothing about what changes, and they are the default of an
+agent's worktree rather than anyone's choice.
+
+**No list is closed.** maelys-datalog, which reported this, already uses ten
+commit prefixes of its own, and no two products of the fleet use the same
+set. The rule is the correspondence between the name and the nature of the
+change, not the vocabulary; each repository's own commit history is its
+vocabulary.
+
+`check` notes a branch named after an agent and never refuses one: a
+convention about branch names is not a property of the working tree it
+reads, and in CI it reads a detached HEAD, where the name is GitHub's and
+not the author's. The note therefore fires where it is useful — on the
+author's own checkout, before the push — and the fleet-wide view belongs to
+maelys-platform, which reads the remote branches of every repository. The
+socle declares, the observer counts: the same split as the release gate.
+
 ## Versions, tags, changelog
 
 - `VERSION` holds `X.Y.Z` and nothing else. A release is the tag `vX.Y.Z`

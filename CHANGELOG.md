@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.34.0 — 2026-09-11
+
+- **A branch is named after the change it carries, never after the tool that
+  created it.** The rule enters the managed blocks of `AGENTS.md` and
+  `CLAUDE.md`, so every session of every repository reads it: a branch takes
+  the prefix its change would take in a commit — `fix/`, `docs/`,
+  `release/` — and `claude/` or `codex/` says who typed rather than what
+  changes.
+- **No list is closed, deliberately.** maelys-datalog, which reported this,
+  already uses ten commit prefixes of its own and no two products share a
+  set. Enumerating change types would import one repository's vocabulary
+  into twelve; the rule is the correspondence between the name and the
+  nature of the change. The one list the socle does close is the other side:
+  the agents it writes instructions for, `claude` and `codex`.
+- `check` **notes** such a branch and never refuses one. A branch name is
+  not a property of the working tree `check` reads, and in CI the checkout
+  is detached, where the ref is GitHub's and not the author's: the note
+  fires where it is useful, on the author's own checkout before the push.
+- The fleet-wide count belongs to maelys-platform, which reads the remote
+  refs of every repository. The socle declares, the observer counts — the
+  same split as the release gate of 0.30.0.
+- Reported by maelys-datalog, who measured that the tool exposes no
+  branch-naming setting and argued against a `WorktreeCreate` hook: a faulty
+  hook does not misname a branch, it breaks session creation, and the trade
+  is bad against a prefix.
+
 ## 0.33.0 — 2026-09-11
 
 - **`maelys-release cut DIR X.Y.Z` carries out a release in two stops.** Two

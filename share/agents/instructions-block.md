@@ -36,6 +36,11 @@ are in `docs/conventions.md` of maelys-release.
   `release/vX.Y.Z`, opens the pull request and waits for its checks; after
   the merge, `cut DIR X.Y.Z --tag --apply` signs the tag on the merge commit
   those checks ran on. It never merges its own pull request.
+- A branch is named after the change it carries, with the prefix that
+  change would take in a commit message (`fix/`, `docs/`, `release/`…),
+  never after the tool that created it: a name says what changes, not who
+  typed. No list is closed; the commit prefixes this repository already
+  uses are its vocabulary.
 - The workflow verifies the tag through the GitHub API, builds on Linux
   x86_64, Linux arm64 and macOS arm64 with `scripts/package-release.sh
   TARGET`, attests provenance, publishes the GitHub release, renders
