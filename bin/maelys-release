@@ -229,6 +229,9 @@ class Declarations:
         self.channels: list[tuple[str, str]] = []
         # "reviewer", "none", or "" when this repository has not chosen.
         self.gate = ""
+        # What cut runs between writing VERSION and the bump commit, for a
+        # product whose version is also materialised somewhere else.
+        self.after_version = ""
         # Observation only: where the harnesses are, and who runs them.
         self.fuzz_harnesses = ""
         self.fuzz_runs = "none"
@@ -281,8 +284,8 @@ def parse_packages(text: str) -> tuple[str, str]:
     return " ".join(packages["linux"]), " ".join(packages["macos"])
 
 
-def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[tuple[str, str]], str]:
-    """packaging/release: [targets], [manifest] and [channels], one declaration per line.
+def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[tuple[str, str]], str, str]:
+    """packaging/release: [targets], [manifest], [channels], [gate] and [cut].
 
     A target line naming no label keeps the runner release.yml holds for that
     target, which only exists for the three the socle builds; one label is a
@@ -290,24 +293,39 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
     matrix rather than adding to it, so a product that adds one target names
     the others it keeps. [manifest] adds to the socle's archive kinds.
     [channels] names one 'CHANNEL REGISTRY' per line, each rendered into a
-    channel.yml job that runs once the release is published.
+    channel.yml job that runs once the release is published. [cut] holds
+    'after-version COMMAND', run by cut between writing VERSION and the
+    bump commit, for a product that materialises its version somewhere
+    else as well.
     """
     targets: list[tuple[str, object]] = []
     manifest: list[str] = []
     channels: list[tuple[str, str]] = []
     gate = ""
+    after_version = ""
     section = ""
     for number, raw in enumerate(text.splitlines(), 1):
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
         if line.startswith("["):
-            if line in ("[targets]", "[manifest]", "[channels]", "[gate]"):
+            if line in ("[targets]", "[manifest]", "[channels]", "[gate]", "[cut]"):
                 section = line[1:-1]
                 continue
             raise ValueError(f"unknown section {line} at line {number}")
         if not section:
-            raise ValueError(f"line outside a [targets], [manifest], [channels] or [gate] section at line {number}")
+            raise ValueError(f"line outside a [targets], [manifest], [channels], [gate]"
+                             f" or [cut] section at line {number}")
+        if section == "cut":
+            key, _, command = line.partition(" ")
+            if key != "after-version":
+                raise ValueError(f"[cut] knows after-version, not {key}, at line {number}")
+            if after_version:
+                raise ValueError(f"[cut] holds one after-version, and line {number} is a second")
+            if not command.strip():
+                raise ValueError(f"[cut] after-version names no command at line {number}")
+            after_version = command.strip()
+            continue
         if section == "gate":
             if gate:
                 raise ValueError(f"[gate] holds one line, and line {number} is a second")
@@ -353,9 +371,9 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
                 raise ValueError(f"a runner label is [A-Za-z0-9._-] at line {number}: {label}")
         runner: object = "" if not labels else (labels[0] if len(labels) == 1 else labels)
         targets.append((name, runner))
-    if section and not targets and not manifest and not channels and not gate:
-        raise ValueError("packaging/release declares no target, archive kind, channel or gate")
-    return targets, manifest, channels, gate
+    if section and not targets and not manifest and not channels and not gate and not after_version:
+        raise ValueError("packaging/release declares no target, archive kind, channel, gate or cut command")
+    return targets, manifest, channels, gate, after_version
 
 
 def read_fuzz(decl: Declarations) -> None:
@@ -522,8 +540,20 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
     release = project / "packaging" / "release"
     if release.is_file():
         try:
-            decl.targets, decl.manifest_patterns, decl.channels, decl.gate = \
+            decl.targets, decl.manifest_patterns, decl.channels, decl.gate, decl.after_version = \
                 parse_release(release.read_text(encoding="utf-8"))
+            if decl.after_version:
+                # The command is this repository's, and cut runs it on the
+                # operator's machine: what the socle can check is that the
+                # files it names are here. The check is a convention, not a
+                # release one — cut serves a repository whatever publishes it.
+                absent = [word for word in decl.after_version.split()
+                          if "/" in word and not (project / word).exists()]
+                if absent:
+                    decl.add("missing", "packaging/release [cut] after-version names "
+                             + " ".join(absent) + ", which this repository does not carry", "conventions")
+                else:
+                    decl.add("ok", f"packaging/release [cut] after-version: {decl.after_version}", "conventions")
             if decl.targets:
                 decl.add("ok", "packaging/release targets: "
                                + " ".join(name for name, _ in decl.targets))
@@ -1751,6 +1781,7 @@ def handle_declarations(invocation: Invocation) -> tuple[dict, int]:
                                  + " ".join(decl.manifest_patterns)).strip(),
             "channels": [{"name": name, "registry": kind} for name, kind in decl.channels],
             "gate": decl.gate,
+            "afterVersion": decl.after_version,
             "fuzz": {"harnesses": decl.fuzz_harnesses, "runs": decl.fuzz_runs},
             "checks": decl.applicable()}, \
         EXIT_OK if decl.valid else EXIT_VIOLATIONS
@@ -1944,6 +1975,24 @@ CHANGELOG_ENTRY = r"^## {version}[^\n]*?([0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}})[^\n]*
 
 def version_tuple(version: str) -> tuple:
     return tuple(int(part) for part in version.split("."))
+
+
+def host_target() -> str:
+    """The socle target name this machine is, for a verify command run here."""
+    system, machine = os.uname().sysname, os.uname().machine
+    architecture = "arm64" if machine in ("arm64", "aarch64") else "x86_64"
+    return f"{'macos' if system == 'Darwin' else 'linux'}-{architecture}"
+
+
+def worktree_paths(project: pathlib.Path) -> dict:
+    """path -> its two status columns, read unstripped.
+
+    The two columns are what separates a tracked change from an untracked
+    file, and the first of them is a space often enough that stripping the
+    line eats a character of the path.
+    """
+    return {line[3:]: line[:2] for line
+            in run(["git", "status", "--porcelain", "-uall"], cwd=project).stdout.split("\n") if line}
 
 
 def changelog_entry(project: pathlib.Path, version: str, at: str = "") -> tuple[str, str]:
@@ -2153,11 +2202,8 @@ def cut_open(invocation: Invocation, decl: Declarations, data: dict, log, timeou
     data["previousVersion"] = decl.version
     # The bump in progress is the only change the release commit may carry:
     # anything else in the worktree would ride into a tagged commit unread.
-    # The status is read unstripped: the two status columns are what says
-    # tracked from untracked, and a leading space is one of them.
-    dirty = [line for line in run(["git", "status", "--porcelain"], cwd=project).stdout.split("\n") if line]
-    unexpected = sorted(line[3:] for line in dirty
-                        if not line.startswith("??") and line[3:] not in ("VERSION", "CHANGELOG.md"))
+    unexpected = sorted(path for path, code in worktree_paths(project).items()
+                        if code != "??" and path not in ("VERSION", "CHANGELOG.md"))
     if unexpected:
         raise Failure("PRECONDITION_FAILED",
                       f"{project} has uncommitted changes outside VERSION and CHANGELOG.md: "
@@ -2190,13 +2236,54 @@ def cut_open(invocation: Invocation, decl: Declarations, data: dict, log, timeou
     if refused:
         return data, EXIT_VIOLATIONS
     if not invocation.flag("--apply"):
-        data["next"] = f"{PROGRAM} cut {project} {version} --apply"
+        if decl.verify_command:
+            data["gate"].append({"status": "note",
+                                 "message": f"--apply would run {decl.verify_command.replace('TARGET', host_target())}"
+                                            " here before writing anything"})
         return data, EXIT_OK
+    # The gate a product declared for the release runners is held here too,
+    # before a branch and a pull request exist. maelys-datalog found the gap
+    # by migrating onto cut: their own ceremony ran make check and a second
+    # compiler in a container before VERSION was written, and cut left the
+    # branch's CI as the only gate. scripts/verify-release.sh is the socle's
+    # own concept for exactly this, so it is declared once and held at both
+    # ends rather than named twice.
+    if decl.verify_command:
+        command = decl.verify_command.replace("TARGET", host_target())
+        print(f"cut      {command}", file=log)
+        log.flush()
+        verified = subprocess.run(["sh", "-c", command], cwd=project, check=False,
+                                  stdout=log, stderr=subprocess.STDOUT)
+        if verified.returncode != 0:
+            raise Failure("PROCESS_FAILED", f"{command} failed with exit {verified.returncode}.",
+                          "Read the log above; nothing has been written, no branch and no pull request exist.")
     # VERSION is written by the socle rather than by a heredoc: four tags
     # once shipped a VERSION holding a literal backslash-n.
+    before = worktree_paths(project)
     (project / "VERSION").write_text(version + "\n", encoding="utf-8")
+    # A product whose version is also materialised elsewhere — a header, a
+    # package.json, a formula — regenerates it here, and what the command
+    # touched joins the bump commit. Without this the commit is red by
+    # construction wherever a check compares the two, and the wait of the
+    # first stop could never see it green.
+    touched: list[str] = []
+    if decl.after_version:
+        print(f"cut      {decl.after_version}", file=log)
+        log.flush()
+        regenerated = run(["sh", "-c", decl.after_version], cwd=project)
+        touched = sorted(path for path, code in worktree_paths(project).items() if before.get(path) != code)
+        if regenerated.returncode != 0:
+            (project / "VERSION").write_text(decl.version + "\n", encoding="utf-8")
+            raise Failure("PROCESS_FAILED",
+                          f"[cut] after-version failed with exit {regenerated.returncode}:"
+                          f" {(regenerated.stderr or regenerated.stdout).strip() or 'no diagnostic'}",
+                          "VERSION is restored"
+                          + (f"; the command left {' '.join(path for path in touched if path != 'VERSION')}"
+                             " changed" if len(touched) > 1 else "")
+                          + ". Fix the command, then cut again.")
+        data["regenerated"] = [path for path in touched if path != "VERSION"]
     git("switch", "-q", "-c", branch, cwd=project)
-    git("add", "--", "VERSION", "CHANGELOG.md", cwd=project)
+    git("add", "--", "VERSION", "CHANGELOG.md", *touched, cwd=project)
     git("-c", "commit.gpgsign=true", "commit", "-q", "-S", "-m", f"{product} {version}", cwd=project)
     data["commit"] = git("rev-parse", "HEAD", cwd=project)
     git("push", "-q", "origin", f"HEAD:refs/heads/{branch}", cwd=project)
@@ -2601,6 +2688,8 @@ def text_cut(data: dict) -> str:
         lines.append(f"{('ok' if state in CHECK_PASSED else state.upper()):<8} {check['name']}")
     if "pullRequest" in data:
         lines.append(f"{'pull':<8} {data['pullRequest']['url']}")
+    if data.get("regenerated"):
+        lines.append(f"{'cut':<8} after-version also committed " + " ".join(data["regenerated"]))
     if data.get("commit"):
         lines.append(f"{'commit':<8} {data['commit']}")
     lines.append(f"cut: {data.get('next') or ('ready' if data['ready'] else 'not ready')}")
@@ -2760,6 +2849,7 @@ CUT_SCHEMA = {"type": "object", "additionalProperties": False,
                                                             "url": {"type": "string"},
                                                             "state": {"type": "string"}}},
                              "pushed": {"type": "boolean"}, "verified": {"type": "boolean"},
+                             "regenerated": STRINGS,
                              "next": {"type": "string"}}}
 DOCS_CONTRACT_OPTION = cli.flag(
     "--docs-contract", "Refuse prose in docs/ and a CLI reference outside docs/cli.md, instead of noting them.")
@@ -2852,8 +2942,8 @@ APP = cli.Program(PROGRAM, PRODUCT, socle_version(), [
              schema={"type": "object", "additionalProperties": False,
                      "required": ["valid", "product", "project", "version", "mechanism", "dependencies",
                                   "linuxPackages", "macosPackages", "formulas", "targets",
-                                  "manifestPatterns", "channels", "gate", "fuzz", "declared", "pinned",
-                                  "managedBy", "runners", "checks"],
+                                  "manifestPatterns", "channels", "gate", "afterVersion", "fuzz",
+                                  "declared", "pinned", "managedBy", "runners", "checks"],
                      "properties": {"valid": {"type": "boolean"}, "product": {"type": "string"},
                                     "project": {"type": "string"}, "version": {"type": "string"},
                                     "mechanism": MECHANISM_SCHEMA,
@@ -2866,6 +2956,7 @@ APP = cli.Program(PROGRAM, PRODUCT, socle_version(), [
                                         "properties": {"name": {"type": "string"},
                                                        "registry": {"type": "string"}}}},
                                     "gate": {"enum": ["", "reviewer", "none"]},
+                                    "afterVersion": {"type": "string"},
                                     "declared": {"type": "object", "additionalProperties": False,
                                                  "required": ["targets", "manifestPatterns"],
                                                  "properties": {"targets": STRINGS,

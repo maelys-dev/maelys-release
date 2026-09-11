@@ -64,12 +64,14 @@ on:
         default: ""
       manifest_patterns:
         description: >-
-          Space-separated globs naming the archive kinds SHA256SUMS covers.
+          Space-separated globs naming the archive kinds SHA256SUMS covers
+          and, since the build stopped writing to the draft, the kinds that
+          reach the release at all: publish copies from the build's
+          artifacts what matches these globs or *.sha256, and nothing else.
+          A file dist/ holds outside them is attested and never published.
           The default is the three kinds the socle has always listed; a
           product publishing another one, a wasm bundle or a build receipt,
-          names it here. dist/* is uploaded and attested whatever this says,
-          so this decides what the manifest vouches for, not what is
-          published.
+          names it here.
         required: false
         type: string
         default: '*.tar.gz *.deb *.rpm'

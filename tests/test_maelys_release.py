@@ -1612,13 +1612,23 @@ class CutTest(unittest.TestCase):
         self.product.git(self.dir, "init", "-q")
         self.product.git(self.dir, "add", "-A")
         self.product.git(self.dir, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "fixture")
+        # An origin, so the plan path reaches the gate: cut fetches the base
+        # branch and refuses a HEAD that is not level with it.
+        self.origin = self.product.work / "origin.git"
+        self.product.git(self.product.work, "init", "-q", "--bare", str(self.origin))
+        self.product.git(self.dir, "config", "user.name", "test")
+        self.product.git(self.dir, "config", "user.email", "test@example.invalid")
+        self.product.git(self.dir, "remote", "add", "origin", str(self.origin))
+        self.product.git(self.dir, "push", "-q", "origin", "main")
         # These tests call the module in process: the host's git
         # configuration must not decide whether the gate passes.
         self.saved = {name: os.environ.get(name) for name in self.ISOLATE}
         os.environ.update({"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null",
                            "GIT_CONFIG_NOSYSTEM": "1"})
+        self.log = open(self.product.work / "cut.log", "w", encoding="utf-8")
 
     def tearDown(self) -> None:
+        self.log.close()
         for name, value in self.saved.items():
             if value is None:
                 os.environ.pop(name, None)
@@ -1634,7 +1644,10 @@ class CutTest(unittest.TestCase):
                 "product": "maelys-fixture", "project": str(self.dir),
                 "repository": "maelys-dev/maelys-fixture", "version": version, "tag": f"v{version}",
                 "branch": f"release/v{version}", "base": "main", "gate": [], "checks": [], "ready": False}
-        return MODULE.cut_open(self.Stub(**options), self.declarations(), data, io.StringIO(), 1, 1)
+        # A real stream: cut hands the verify command's output straight to
+        # this file descriptor, so an operator watching a long `make check`
+        # sees it as it runs rather than at the end.
+        return MODULE.cut_open(self.Stub(**options), self.declarations(), data, self.log, 1, 1)
 
     def refusal(self, version: str = "1.3.0", **options) -> MODULE.Failure:
         with self.assertRaises(MODULE.Failure) as raised:
@@ -1706,6 +1719,134 @@ class CutTest(unittest.TestCase):
         self.assertEqual(code, MODULE.EXIT_VIOLATIONS)
         self.assertFalse(empty["ready"])
         self.assertIn("no check is registered", empty["gate"][0]["message"])
+
+    def test_the_gate_names_the_product_own_verify_command(self) -> None:
+        """A product's release gates are declared once and held at both ends:
+        cut runs scripts/verify-release.sh before it writes anything."""
+        self.product.write("CHANGELOG.md",
+                           "# Changelog\n\n## 1.3.0 — 2026-09-03\n\n- Next.\n\n## 1.2.3 — 2026-09-03\n\n- Something.\n")
+        self.product.git(self.dir, "config", "tag.gpgsign", "true")
+        self.product.git(self.dir, "config", "user.signingkey", str(self.product.work / "signing-key"))
+        data, code = self.cut()
+        self.assertEqual(code, MODULE.EXIT_OK)
+        self.assertTrue(data["ready"])
+        self.assertEqual([item for item in data["gate"] if "verify-release" in item["message"]], [])
+        self.product.write("scripts/verify-release.sh", "#!/bin/sh\nexit 0\n", executable=True)
+        data, code = self.cut()
+        noted = [item["message"] for item in data["gate"] if "verify-release" in item["message"]]
+        self.assertEqual(len(noted), 1, data["gate"])
+        self.assertNotIn("TARGET", noted[0])           # the host's own target, not the placeholder
+        self.assertIn("before writing anything", noted[0])
+
+    def test_check_reads_the_after_version_command(self) -> None:
+        self.product.write("packaging/release", "[cut]\nafter-version bash scripts/header.sh\n")
+        messages = self.product.json("check", str(self.dir), expect=2)["data"]["conventions"]["violations"]
+        self.assertTrue(any("scripts/header.sh" in message and "does not carry" in message
+                            for message in messages), messages)
+        self.product.write("scripts/header.sh", "#!/bin/sh\nexit 0\n", executable=True)
+        data = self.product.json("check", str(self.dir))["data"]
+        self.assertTrue(data["conventions"]["valid"])
+        self.assertTrue(any("after-version: bash scripts/header.sh" in check["message"]
+                            for check in data["checks"]))
+
+    def test_the_worktree_snapshot_separates_tracked_from_untracked(self) -> None:
+        """The two status columns are the answer, and the first is often a
+        space: a stripped line loses the first character of the path."""
+        self.product.write("AGENTS.md", "# Agent instructions\n\nEdited.\n")
+        self.product.write("scripts/new-file.sh", "#!/bin/sh\n")
+        paths = MODULE.worktree_paths(self.dir)
+        self.assertEqual(paths.get("AGENTS.md"), " M")
+        self.assertEqual(paths.get("scripts/new-file.sh"), "??")
+
+    CHECK_RUNS = ('{"total_count":1,"check_runs":'
+                  '[{"name":"check","status":"completed","conclusion":"success"}]}')
+
+    def fake_gh(self) -> None:
+        """A gh that answers exactly what the first stop asks of it.
+
+        The first stop is the part of cut that writes: a signed commit, a
+        push, a pull request and the wait. Everything but GitHub is real
+        here — a bare repository is the origin, the commit is signed with a
+        generated key — so what the test exercises is the sequence itself.
+        """
+        directory = self.product.work / "fake-bin"
+        directory.mkdir(exist_ok=True)
+        script = directory / "gh"
+        script.write_text(
+            "#!/bin/sh\n"
+            "case \"$1\" in\n"
+            "api) printf '%s' '" + self.CHECK_RUNS + "' ;;\n"
+            "pr) case \"$2\" in\n"
+            "      create) echo 'https://example.invalid/pull/1' ;;\n"
+            "      view) echo '{\"number\":1,\"url\":\"https://example.invalid/pull/1\",\"state\":\"OPEN\"}' ;;\n"
+            "      list) echo '[]' ;;\n"
+            "      *) exit 1 ;;\n"
+            "    esac ;;\n"
+            "*) exit 1 ;;\n"
+            "esac\n", encoding="utf-8")
+        script.chmod(0o755)
+        os.environ["PATH"] = f"{directory}:{os.environ['PATH']}"
+
+    def signing_key(self) -> bool:
+        if not shutil.which("ssh-keygen"):
+            return False
+        key = self.product.work / "signing-key"
+        if not key.is_file():
+            subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(key)], check=True)
+        self.product.git(self.dir, "config", "tag.gpgsign", "true")
+        self.product.git(self.dir, "config", "gpg.format", "ssh")
+        self.product.git(self.dir, "config", "user.signingkey", str(key))
+        return True
+
+    def test_the_first_stop_commits_what_after_version_regenerated(self) -> None:
+        """A version materialised twice: without this the bump commit is red
+        by construction, and the wait could never see it green."""
+        if not self.signing_key():
+            self.skipTest("ssh-keygen is needed to sign the bump commit")
+        self.fake_gh()
+        self.product.write("CHANGELOG.md",
+                           "# Changelog\n\n## 1.3.0 — 2026-09-03\n\n- Next.\n\n## 1.2.3 — 2026-09-03\n\n- Something.\n")
+        self.product.write("include/version.h", '#define VERSION "1.2.3"\n')
+        self.product.write("scripts/header.sh",
+                           '#!/bin/sh\nprintf \'#define VERSION "%s"\\n\' "$(cat VERSION)" >include/version.h\n',
+                           executable=True)
+        self.product.write("scripts/verify-release.sh", "#!/bin/sh\ntouch verified\n", executable=True)
+        self.product.write("packaging/release", "[cut]\nafter-version sh scripts/header.sh\n")
+        self.product.git(self.dir, "add", "-A")
+        self.product.git(self.dir, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "a version in two files")
+        self.product.git(self.dir, "push", "-q", "origin", "main")
+
+        data, code = self.cut(**{"--apply": True})
+        self.assertEqual(code, MODULE.EXIT_OK, data)
+        self.assertTrue(data["ready"])
+        self.assertEqual(data["regenerated"], ["include/version.h"])
+        # The declared gate ran before anything was written.
+        self.assertTrue((self.dir / "verified").is_file())
+        # One commit, on the release branch, carrying both files and signed.
+        self.assertEqual(self.product.git(self.dir, "rev-parse", "--abbrev-ref", "HEAD"), "release/v1.3.0")
+        self.assertEqual(self.product.read("include/version.h"), '#define VERSION "1.3.0"\n')
+        committed = self.product.git(self.dir, "show", "--name-only", "--format=", "HEAD").split()
+        self.assertEqual(sorted(committed), ["VERSION", "include/version.h"])
+        self.assertIn("SIGNATURE", self.product.git(self.dir, "cat-file", "-p", "HEAD"))
+        # The worktree is clean: nothing the command touched was left behind.
+        self.assertEqual([path for path, code in MODULE.worktree_paths(self.dir).items() if code != "??"], [])
+
+    def test_a_failing_after_version_restores_version_and_writes_nothing(self) -> None:
+        if not self.signing_key():
+            self.skipTest("ssh-keygen is needed to sign the bump commit")
+        self.fake_gh()
+        self.product.write("CHANGELOG.md",
+                           "# Changelog\n\n## 1.3.0 — 2026-09-03\n\n- Next.\n\n## 1.2.3 — 2026-09-03\n\n- Something.\n")
+        self.product.write("scripts/header.sh", "#!/bin/sh\necho broken >&2\nexit 3\n", executable=True)
+        self.product.write("packaging/release", "[cut]\nafter-version sh scripts/header.sh\n")
+        self.product.git(self.dir, "add", "-A")
+        self.product.git(self.dir, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "a generator that fails")
+        self.product.git(self.dir, "push", "-q", "origin", "main")
+        failure = self.refusal(**{"--apply": True})
+        self.assertEqual(failure.code, "PROCESS_FAILED")
+        self.assertIn("exit 3", failure.message)
+        self.assertEqual(self.product.read("VERSION"), "1.2.3\n")
+        self.assertEqual(self.product.git(self.dir, "rev-parse", "--abbrev-ref", "HEAD"), "main")
 
     def test_cut_refuses_a_repository_that_is_not_on_github(self) -> None:
         error = self.product.json("cut", str(self.dir), "1.3.0", expect=1)["error"]
@@ -1846,15 +1987,18 @@ class UnitTest(unittest.TestCase):
 
     def test_parse_release(self) -> None:
         self.assertEqual(MODULE.parse_release("[targets]\nlinux-arm64\nwasm32 ubuntu-26.04\n"),
-                         ([("linux-arm64", ""), ("wasm32", "ubuntu-26.04")], [], [], ""))
+                         ([("linux-arm64", ""), ("wasm32", "ubuntu-26.04")], [], [], "", ""))
         self.assertEqual(MODULE.parse_release("[targets]\nmacos-arm64 self-hosted ARM64\n"),
-                         ([("macos-arm64", ["self-hosted", "ARM64"])], [], [], ""))
-        self.assertEqual(MODULE.parse_release("[manifest]\n*.wasm\n"), ([], ["*.wasm"], [], ""))
+                         ([("macos-arm64", ["self-hosted", "ARM64"])], [], [], "", ""))
+        self.assertEqual(MODULE.parse_release("[manifest]\n*.wasm\n"), ([], ["*.wasm"], [], "", ""))
         self.assertEqual(MODULE.parse_release("[channels]\nnpm github-packages\n"),
-                         ([], [], [("npm", "github-packages")], ""))
-        self.assertEqual(MODULE.parse_release("[gate]\nnone\n"), ([], [], [], "none"))
-        self.assertEqual(MODULE.parse_release("[gate]\nreviewer\n"), ([], [], [], "reviewer"))
-        self.assertEqual(MODULE.parse_release("# nothing declared\n"), ([], [], [], ""))
+                         ([], [], [("npm", "github-packages")], "", ""))
+        self.assertEqual(MODULE.parse_release("[gate]\nnone\n"), ([], [], [], "none", ""))
+        self.assertEqual(MODULE.parse_release("[gate]\nreviewer\n"), ([], [], [], "reviewer", ""))
+        self.assertEqual(MODULE.parse_release("# nothing declared\n"), ([], [], [], "", ""))
+        # A version materialised twice: the command that regenerates the second.
+        self.assertEqual(MODULE.parse_release("[cut]\nafter-version bash scripts/header.sh\n"),
+                         ([], [], [], "", "bash scripts/header.sh"))
         for text in ("linux-arm64\n",                      # outside a section
                      "[bsd]\nlinux-arm64\n",               # unknown section
                      "[targets]\nwasm32\n",                # no runner and no default
@@ -1868,7 +2012,10 @@ class UnitTest(unittest.TestCase):
                      "[channels]\nNPM github-packages\n",  # not a channel name
                      "[channels]\nnpm github-packages\nnpm github-packages\n",  # twice
                      "[gate]\nmaybe\n",                    # not a gate the socle knows
-                     "[gate]\nreviewer\nnone\n"):          # one line, not two
+                     "[gate]\nreviewer\nnone\n",           # one line, not two
+                     "[cut]\nbefore-version make\n",       # a key [cut] does not know
+                     "[cut]\nafter-version\n",             # names no command
+                     "[cut]\nafter-version a\nafter-version b\n"):  # one command, not two
             with self.assertRaises(ValueError, msg=text):
                 MODULE.parse_release(text)
 

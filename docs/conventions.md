@@ -197,7 +197,8 @@ cut DIR X.Y.Z` makes them mechanical without taking the merge.
 The first stop refuses before it writes: a version that does not come
 after the current one, a worktree carrying anything but `VERSION` and
 `CHANGELOG.md`, a missing or future-dated changelog entry, a `HEAD` that
-is not the default branch up to date with `origin`, and the gate
+is not the default branch up to date with `origin`, the product's own
+`scripts/verify-release.sh` when it carries one, and the gate
 `preflight` holds — the signing configuration, the previous tag, a free
 `vX.Y.Z`, and, for a product the socle releases, the `release`
 environment. It then writes `VERSION`, commits it signed on
@@ -378,12 +379,39 @@ the three above; that is how a change of default runner still reaches a
 product that only added a target. A line may name one runner label or a
 label set (`macos-arm64 self-hosted macOS ARM64`).
 
-`[manifest]` **adds** to the socle's three archive kinds. It decides what
-`SHA256SUMS` vouches for, not what is published: the build job uploads
-everything `package_command` leaves in `dist/` and the attestation covers
-`dist/*`, so an artifact of an unnamed kind is still published and still
-attested. What it lacks is a line in the manifest and the `sha256sum -c`
-that goes with it.
+`[manifest]` **adds** to the socle's three archive kinds, and **what is not
+in the manifest is not published.** The build job uploads everything
+`package_command` leaves in `dist/` and the attestation covers `dist/*`, so
+an artifact of an unnamed kind is attested — and then `publish` copies from
+those artifacts only what matches the manifest globs or `*.sha256`, so it
+never reaches the release. That was not true before 0.31.0, when the build
+wrote into the draft itself and the manifest decided only what `SHA256SUMS`
+vouched for; the sentence that said so outlived the change, in this page and
+in the workflow's own input description. maelys-datalog found it by
+publishing a build receipt that was attested and absent.
+
+### A version that lives in more than one file
+
+A product whose version is materialised somewhere besides `VERSION` — a
+generated header, a `package.json`, a formula — declares how to regenerate
+it:
+
+```
+[cut]
+after-version bash scripts/generate-version-header.sh
+```
+
+`cut` runs that command between writing `VERSION` and the bump commit, and
+whatever the command touched joins that commit. Without it the bump commit
+is **red by construction** wherever a check compares the two files, and the
+first stop, which waits for the checks of that very commit, could never see
+them green: the operator would have to push a second commit onto the release
+branch by hand, which is the ceremony `cut` exists to remove.
+
+maelys-datalog found this by migrating onto `cut`, and it is not theirs
+alone: it holds for every product that materialises its version twice. The
+socle checks that the files the command names exist, and nothing more — the
+command belongs to the repository, and it runs on the operator's machine.
 
 Both sections are optional and a product that declares neither sees no
 change. A declaration the socle cannot honour, a target with no runner and

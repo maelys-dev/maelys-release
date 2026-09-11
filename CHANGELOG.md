@@ -2,6 +2,34 @@
 
 ## 0.34.0 — 2026-09-11
 
+- **`cut` runs what a product declares before it writes anything, and
+  commits what a version bump regenerates.** maelys-datalog found both by
+  migrating onto `cut`, which is the only way either could have been found.
+- **`[cut] after-version COMMAND` in `packaging/release`.** A product whose
+  version is materialised somewhere besides `VERSION` — a generated header, a
+  `package.json`, a formula — names the command that regenerates it. `cut`
+  runs it between writing `VERSION` and the bump commit, and whatever the
+  command touched joins that commit. Without it the bump commit is **red by
+  construction** wherever a check compares the two files, and the first stop,
+  which waits for the checks of that very commit, could never see them green:
+  the operator had to push a second commit onto the release branch by hand,
+  which is the ceremony `cut` exists to remove. It is not datalog's alone — it
+  holds for every product that materialises its version twice.
+- **The first stop runs `scripts/verify-release.sh` when the repository
+  carries one**, with the host's target substituted, and refuses on its
+  failure — before a branch, a commit or a pull request exists. It is the
+  socle's own concept, already rendered into `verify_command` for the release
+  runners: declared once and held at both ends, rather than a gate that ran
+  in a product's old ceremony and nowhere in the new one.
+- **What is not in the manifest is not published, and two texts said
+  otherwise.** Since 0.31.0 `publish` copies from the build's artifacts only
+  what matches the manifest globs or `*.sha256`; a file `dist/` holds outside
+  them is attested and never reaches the release. `docs/conventions.md` and
+  the `manifest_patterns` input description both still claimed the manifest
+  decided nothing about publication. Both corrected. Found by maelys-datalog,
+  whose build receipt was attested and absent.
+- The write path of the first stop is now tested end to end, against a real
+  bare repository with a signed commit: it was not when 0.33.0 shipped it.
 - **A branch is named after the change it carries, never after the tool that
   created it.** The rule enters the managed blocks of `AGENTS.md` and
   `CLAUDE.md`, so every session of every repository reads it: a branch takes
