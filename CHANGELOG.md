@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.38.1 — 2026-09-11
+
+- **A release no longer publishes one target's bytes under a name two
+  targets built.** `publish` collected the per-target artifacts with
+  `download-artifact`'s `merge-multiple`, which extracts them in parallel
+  into one directory: a name two targets both produce is not resolved, it is
+  raced. The survivor may be either file, or a mix of both, and `SHA256SUMS`
+  is then computed on it — a manifest that agrees with itself and describes
+  bytes a target never built, with the other target silently absent from the
+  release. The artifacts now stay in their own `incoming/dist-TARGET/`, and
+  the step compares the digests of every name the manifest publishes before
+  assembling anything. Two targets that disagree stop the release, and the
+  message names both artifacts. Equal bytes are not a collision: a package
+  independent of the architecture may be built by every target. Reported by
+  maelys-http, which builds a source archive its three targets all name the
+  same; every product of the fleet already names its packages after the
+  target, so none of them changes behaviour.
+- `tap.yml` keeps its `merge-multiple`, and the reason is not that a
+  collision would be harmless: bottle file names are composed by Homebrew
+  from the platform tag, not by the product's packaging script, so the
+  product cannot omit what distinguishes them. That is the defect above —
+  a name that forgets what varies — and it cannot arise there.
+- `tests/test_release_workflow.py` runs the assemble step's own shell
+  against artifacts on disk, the way `test_tap_workflow.py` runs the tap's
+  publish step. It is skipped where `sha256sum` is missing, which is the
+  macOS runner; the step itself runs on `ubuntu-26.04` alone.
+
 ## 0.38.0 — 2026-09-11
 
 - **`rehearse DIR --channel NAME --tag vX.Y.Z` runs a product's publish

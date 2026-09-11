@@ -293,11 +293,14 @@ jobs:
       contents: write
     steps:
       - name: Collect what build produced
+        # Each target keeps its own incoming/dist-TARGET/ directory. Merged
+        # into one, the archives extract in parallel over each other and a
+        # name two targets both produce is raced rather than resolved; the
+        # step below needs them apart to see that at all.
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: dist-*
           path: incoming
-          merge-multiple: true
       - name: Assemble and verify
         # Word splitting of manifest_patterns is bash's, not the runner's default.
         shell: bash
@@ -317,6 +320,29 @@ jobs:
           shift
           set +f
           mkdir -p dist
+          # A name that reaches the release must name one file. When two
+          # targets produce the same name, the release keeps one set of bytes
+          # and SHA256SUMS vouches for it: the manifest agrees with itself and
+          # describes a file the other target never built. Identical bytes are
+          # the one harmless case, so the test is the digest and not the name.
+          find incoming -type f \( "$@" -o -name '*.sha256' \) -print0 \
+            | while IFS= read -r -d '' path; do
+                printf '%s\t%s\t%s\n' "${path##*/}" \
+                  "$(sha256sum <"$path" | cut -d' ' -f1)" "$path"
+              done | sort >"${RUNNER_TEMP:-.}/incoming.index"
+          clashes="$(awk -F'\t' '
+            { if (($1 in seen) && seen[$1] != $2) { clash[$1] = 1 }
+              seen[$1] = $2
+              where[$1] = where[$1] sprintf("\n    %s  %s", $2, $3) }
+            END { for (name in clash)
+                    printf "%s is built by more than one target, with different bytes:%s\n", \
+                           name, where[name] }
+          ' "${RUNNER_TEMP:-.}/incoming.index")"
+          if [ -n "$clashes" ]; then
+            printf 'the targets disagree on what these files are:\n%s\n' "$clashes" >&2
+            echo "name each one after its target, or declare a single target in [targets]" >&2
+            exit 1
+          fi
           # The bytes come from the build's artifacts, never from a draft a
           # writing job could have edited between the two.
           find incoming -type f \( "$@" -o -name '*.sha256' \) -exec cp {} dist/ \;
