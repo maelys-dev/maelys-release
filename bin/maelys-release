@@ -1930,12 +1930,42 @@ def handle_check(invocation: Invocation) -> tuple[dict, int]:
     return data, EXIT_OK if data["valid"] else EXIT_VIOLATIONS
 
 
-def github_api(path: str) -> dict | None:
-    """GET through gh (its credentials); None when gh is missing or the call fails."""
+HTTP_STATUS = re.compile(r"\(HTTP (\d{3})\)")
+
+
+def github_read(path: str) -> tuple[str, object]:
+    """(state, body) of one GET through gh, the state saying why there is no body.
+
+    `absent` is an answer: a branch that is not protected and an environment
+    that does not exist both say something. `unreadable` is not: GitHub
+    refused to tell, which a 403 does on a private repository of a free plan
+    or with a token that lacks the scope.
+
+    Collapsing the two is how the socle told seventeen private repositories
+    that their default branch was unprotected, at the very moment GitHub was
+    refusing to say — measured while the organization was locked for an
+    Actions billing overage, which rebates it to the free plan's abilities.
+    """
     if not shutil.which("gh"):
-        return None
+        return "no-gh", None
     completed = run(["gh", "api", path])
-    return json.loads(completed.stdout) if completed.returncode == 0 else None
+    if completed.returncode == 0:
+        try:
+            return "ok", json.loads(completed.stdout)
+        except json.JSONDecodeError:
+            return "unreadable", None
+    status = HTTP_STATUS.search(completed.stderr)
+    return ("absent" if status and status.group(1) == "404" else "unreadable"), None
+
+
+def github_api(path: str) -> dict | None:
+    """The body of a GET, or None whatever kept it from arriving.
+
+    For a reader that acts the same way on every absence. Anything that
+    reports on what it could not read uses github_read instead.
+    """
+    body = github_read(path)[1]
+    return body if isinstance(body, dict) else None
 
 
 def environment_gate(repository: str, environment: dict | None, declared: str = "") -> list[tuple[str, str]]:
@@ -2031,6 +2061,28 @@ def tag_checks(project: pathlib.Path, version: str) -> list[tuple[str, str]]:
     return found
 
 
+def branch_protection(repository: str, branch: str, classic: str,
+                      ruled: str, rules: object) -> tuple[str, str]:
+    """What protects a default branch, told apart from what cannot be read.
+
+    Two endpoints answer, and not for the same thing: the classic branch
+    protection, and a ruleset. agent-cli-spec is protected by a ruleset
+    alone, so reading the first alone reported it open — permanently, not
+    only while the organization was locked.
+    """
+    protected = [name for name, state, present in (("branch protection", classic, True),
+                                                   ("a ruleset", ruled, bool(rules)))
+                 if state == "ok" and present]
+    if protected:
+        return "ok", f"the default branch {branch} of {repository} is protected by " + " and ".join(protected)
+    if "unreadable" in (classic, ruled):
+        return "note", (f"the socle cannot read what protects {branch} of {repository}: GitHub refused to say,"
+                        " which a private repository of a free plan does. That is not the same fact as an"
+                        " unprotected branch, and the socle will not report it as one")
+    return "note", (f"the default branch {branch} of {repository} is not protected: anyone who can push can"
+                    " move it, and a tag proves only what the tag proves")
+
+
 def repository_checks(project: pathlib.Path, gate: str) -> list[tuple[str, str]]:
     """What the release workflow needs of the GitHub repository behind origin.
 
@@ -2068,12 +2120,14 @@ def repository_checks(project: pathlib.Path, gate: str) -> list[tuple[str, str]]
     # published unattended and preflight said ok.
     found.extend(environment_gate(repository, environment, gate))
     # The default branch is what a tag is expected to come from, and what
-    # commit_verification: signed-on-default-branch relies on.
-    protection = github_api(f"repos/{repository}/branches/"
-                            + (repository_data.get("default_branch") or "main") + "/protection")
-    if protection is None:
-        found.append(("note", f"the default branch of {repository} is not protected: anyone who can push can move it,"
-                              " and a tag proves only what the tag proves"))
+    # commit_verification: signed-on-default-branch relies on. It is
+    # protected in two ways that do not answer on the same endpoint: the
+    # classic branch protection, and a ruleset. agent-cli-spec is protected
+    # by a ruleset alone, and reading only the first reported it open.
+    branch = repository_data.get("default_branch") or "main"
+    found.append(branch_protection(repository, branch,
+                                   *github_read(f"repos/{repository}/branches/{branch}/protection")[:1],
+                                   *github_read(f"repos/{repository}/rules/branches/{branch}")))
     return found
 
 

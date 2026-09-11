@@ -2004,6 +2004,68 @@ class StrategyNoteTest(unittest.TestCase):
         self.assertEqual(self.notes(), [])
 
 
+class GitHubReadingTest(unittest.TestCase):
+    """An answer, a refusal and an absence are three different facts.
+
+    The socle told seventeen private repositories that their default branch
+    was unprotected at the very moment GitHub was refusing to say: `gh`
+    failed, the reader returned None, and None meant absent.
+    """
+
+    class Completed:
+        def __init__(self, returncode=0, stdout="", stderr=""):
+            self.returncode, self.stdout, self.stderr = returncode, stdout, stderr
+
+    def read(self, completed, gh=True):
+        original_run, original_which = MODULE.run, MODULE.shutil.which
+        MODULE.run = lambda *arguments, **keywords: completed
+        MODULE.shutil.which = lambda name: "/usr/bin/gh" if gh else None
+        try:
+            return MODULE.github_read("repos/x/y")
+        finally:
+            MODULE.run, MODULE.shutil.which = original_run, original_which
+
+    def test_the_four_states(self) -> None:
+        self.assertEqual(self.read(self.Completed(0, '{"a": 1}')), ("ok", {"a": 1}))
+        self.assertEqual(self.read(self.Completed(1, "", "gh: Not Found (HTTP 404)")), ("absent", None))
+        self.assertEqual(self.read(self.Completed(1, "", "gh: Upgrade to GitHub Pro (HTTP 403)")),
+                         ("unreadable", None))
+        # A failure with no status at all is unreadable, never absent.
+        self.assertEqual(self.read(self.Completed(1, "", "dial tcp: timeout")), ("unreadable", None))
+        self.assertEqual(self.read(self.Completed(0, "not json")), ("unreadable", None))
+        self.assertEqual(self.read(self.Completed(0, "{}"), gh=False), ("no-gh", None))
+
+    def test_github_api_still_answers_a_body_or_nothing(self) -> None:
+        """The readers that act the same way on every absence keep their shape;
+        a list is not a body for them, because they index it by name."""
+        self.assertEqual(self.read(self.Completed(0, '[1, 2]')), ("ok", [1, 2]))
+        original_read = MODULE.github_read
+        MODULE.github_read = lambda path: ("ok", [1, 2])
+        try:
+            self.assertIsNone(MODULE.github_api("repos/x/y"))
+        finally:
+            MODULE.github_read = original_read
+
+    def test_what_protects_a_branch_and_what_cannot_be_read(self) -> None:
+        def verdict(classic, ruled, rules):
+            return MODULE.branch_protection("o/r", "main", classic, ruled, rules)
+        self.assertEqual(verdict("ok", "ok", [])[0], "ok")
+        self.assertIn("branch protection", verdict("ok", "ok", [])[1])
+        # A ruleset alone protects, and reading only the first endpoint
+        # reported agent-cli-spec open — permanently, not only while locked.
+        status, message = verdict("absent", "ok", [{"type": "deletion"}])
+        self.assertEqual(status, "ok")
+        self.assertIn("a ruleset", message)
+        self.assertIn("branch protection and a ruleset", verdict("ok", "ok", [{"type": "x"}])[1])
+        # Nothing protects it, and both endpoints said so.
+        self.assertIn("is not protected", verdict("absent", "ok", [])[1])
+        # GitHub refused to say: not the same fact, never reported as one.
+        for classic, ruled in (("unreadable", "unreadable"), ("unreadable", "ok"), ("absent", "unreadable")):
+            message = verdict(classic, ruled, [])[1]
+            self.assertIn("cannot read", message, (classic, ruled))
+            self.assertNotIn("is not protected", message, (classic, ruled))
+
+
 class RenderAndTapTest(unittest.TestCase):
     def setUp(self) -> None:
         self.product = Product()

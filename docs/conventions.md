@@ -459,7 +459,15 @@ organisation of one member that is the honest description, and a pause is
 still worth having: a tag has been pushed here before a trial's verdict was
 read.
 
-`preflight` also reports an unprotected default branch, as a note. The
+`preflight` also reports an unprotected default branch, as a note — and
+tells that apart from a branch whose protection it **cannot read**. Two
+endpoints answer about a branch and not for the same thing: the classic
+protection, and a ruleset; a repository of the fleet is protected by a
+ruleset alone, so reading the first alone reported it open. And a private
+repository on a free plan answers 403 to both, which is a refusal to say and
+not an absence. The socle used to turn every failure into "not protected",
+and said so about seventeen repositories at the moment GitHub was declining
+to answer. The
 socle's contract is about tags, but `commit_verification:
 signed-on-default-branch` relies on that branch meaning something.
 

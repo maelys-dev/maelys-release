@@ -17,6 +17,19 @@
   with no branch filter beside a `pull_request` runs the same jobs for the
   push and for the pull request. A **note**, never a violation: a repository
   may want it. Two products of the fleet do it without having chosen to.
+- **The socle stops calling a refusal an absence.** `github_api` turned every
+  failed call into `None`, and `preflight` read `None` as "the default branch
+  is not protected". A private repository on a free plan answers **403** to
+  that endpoint — which is GitHub declining to say, not a branch left open —
+  and seventeen repositories of the fleet were reported unprotected while
+  that was true of none of them, measured. The reader now separates an
+  answer, an absence (404), a refusal (403 or anything else) and a missing
+  `gh`, and `preflight` reports each as what it is.
+- **A branch protected by a ruleset is protected.** The classic protection
+  endpoint answers "Branch not protected" for a repository whose default
+  branch a ruleset guards, and `agent-cli-spec` is exactly that: reported
+  open, permanently, not only while the organization was locked. Both
+  endpoints are read now, and the note says which of the two protects.
 - **`cut` runs what a product declares before it writes anything, and
   commits what a version bump regenerates.** maelys-datalog found both by
   migrating onto `cut`, which is the only way either could have been found.
