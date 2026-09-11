@@ -1897,6 +1897,106 @@ class BranchNameTest(unittest.TestCase):
         self.assertEqual(self.notes(), [])
 
 
+class WorkflowReadingTest(unittest.TestCase):
+    """What starts a workflow and what it runs, read from the file alone.
+
+    Line-based like the runner reader: the socle carries no YAML parser. The
+    three shapes of `on:` GitHub accepts are all in the fleet.
+    """
+
+    BLOCK = textwrap.dedent("""\
+        name: ci
+
+        on:
+          push:
+            branches: [main]
+          pull_request:
+          workflow_dispatch:
+
+        permissions:
+          contents: read
+
+        jobs:
+          check:
+            runs-on: ubuntu-26.04
+          package:
+            runs-on: macos-15
+        """)
+
+    def test_the_three_shapes_of_on(self) -> None:
+        self.assertEqual(MODULE.workflow_events(self.BLOCK),
+                         ["push", "pull_request", "workflow_dispatch"])
+        self.assertEqual(MODULE.workflow_events("on: [push, pull_request]\njobs:\n"),
+                         ["push", "pull_request"])
+        self.assertEqual(MODULE.workflow_events("on: workflow_dispatch\njobs:\n"),
+                         ["workflow_dispatch"])
+        self.assertEqual(MODULE.workflow_events("name: x\njobs:\n"), [])
+
+    def test_a_push_says_which_push(self) -> None:
+        """push alone, push on a branch and push on a tag are three facts."""
+        block = MODULE.top_block(self.BLOCK, "on")
+        self.assertEqual(MODULE.block_list(MODULE.sub_block(block, "push"), "branches"), ["main"])
+        tagged = self.BLOCK.replace("branches: [main]", "tags:\n      - 'v*'")
+        pushed = MODULE.sub_block(MODULE.top_block(tagged, "on"), "push")
+        # A tag filter is not label-shaped: a reader that kept only labels
+        # would drop the rule that says this workflow releases.
+        self.assertEqual(MODULE.block_list(pushed, "tags"), ["v*"])
+        self.assertEqual(MODULE.block_list(pushed, "branches"), [])
+
+    def test_jobs_and_runners_of_one_file(self) -> None:
+        self.assertEqual(MODULE.JOB_ID.findall(MODULE.top_block(self.BLOCK, "jobs")),
+                         ["check", "package"])
+        self.assertEqual(MODULE.file_runners("ci.yml", self.BLOCK)[0], ["macos-15", "ubuntu-26.04"])
+
+    def test_the_moments_a_reader_sees(self) -> None:
+        rendered = MODULE.workflow_moments({"file": "ci.yml", "events": ["push", "pull_request"],
+                                            "branches": [], "tags": [], "jobs": ["a", "b"],
+                                            "runners": [], "unresolved": [], "delegates": True})
+        self.assertIn("push (every branch)", rendered)
+        self.assertIn("2 jobs", rendered)
+        self.assertIn("socle", rendered)
+        released = MODULE.workflow_moments({"file": "release.yml", "events": ["push"],
+                                            "branches": [], "tags": ["v*"], "jobs": ["r"],
+                                            "runners": [], "unresolved": [], "delegates": False})
+        self.assertIn("push (tags v*)", released)
+        self.assertIn("1 job", released)
+        self.assertNotIn("1 jobs", released)
+
+
+class StrategyNoteTest(unittest.TestCase):
+    """A workflow that runs twice on every pull request, named."""
+
+    def setUp(self) -> None:
+        self.product = Product()
+        self.dir = self.product.dir
+        self.product.run("adopt", str(self.dir), "--apply")
+
+    def tearDown(self) -> None:
+        self.product.close()
+
+    def notes(self) -> list:
+        data = self.product.json("check", str(self.dir))["data"]
+        self.assertTrue(data["conventions"]["valid"], "a trigger is never a violation")
+        return [check["message"] for check in data["checks"] if "runs it twice" in check["message"]]
+
+    def test_push_with_no_branch_beside_pull_request_is_noted(self) -> None:
+        self.product.write(".github/workflows/extra.yml",
+                           "name: extra\n\non:\n  push:\n  pull_request:\n\njobs:\n  x:\n    runs-on: ubuntu-26.04\n")
+        noted = self.notes()
+        self.assertEqual(len(noted), 1, noted)
+        self.assertIn("extra.yml", noted[0])
+
+    def test_a_filtered_push_and_a_tag_push_are_not(self) -> None:
+        self.product.write(".github/workflows/extra.yml",
+                           "name: extra\n\non:\n  push:\n    branches: [main]\n  pull_request:\n\n"
+                           "jobs:\n  x:\n    runs-on: ubuntu-26.04\n")
+        self.assertEqual(self.notes(), [])
+        self.product.write(".github/workflows/extra.yml",
+                           "name: extra\n\non:\n  push:\n    tags: ['v*']\n  pull_request:\n\n"
+                           "jobs:\n  x:\n    runs-on: ubuntu-26.04\n")
+        self.assertEqual(self.notes(), [])
+
+
 class RenderAndTapTest(unittest.TestCase):
     def setUp(self) -> None:
         self.product = Product()

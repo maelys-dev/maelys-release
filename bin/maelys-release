@@ -578,6 +578,7 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
         decl.add("note", "scripts/publish-channel.sh exists but packaging/release declares no"
                          " [channels]: nothing calls it, and no channel job is written")
     read_branch(decl)
+    read_strategy(decl)
     return decl
 
 
@@ -1128,6 +1129,32 @@ def matrix_values(text: str, key: str) -> list[str]:
     return sorted({value for value in values if LABEL.fullmatch(value)})
 
 
+def file_runners(name: str, text: str) -> tuple[list, list]:
+    """(labels, unresolved) of one workflow file, matrix references resolved."""
+    labels: set = set()
+    unresolved: list = []
+    for match in RUNS_ON.finditer(text):
+        value = match.group(1).strip().strip("\"'")
+        # The line, so an operator finds what the socle could not read.
+        where = f"{name}:{text.count(chr(10), 0, match.start()) + 1}"
+        reference = MATRIX_REFERENCE.fullmatch(value)
+        if reference:
+            found = matrix_values(text, reference.group(1))
+            if found:
+                labels.update(found)
+            else:
+                unresolved.append(f"{where}: {value}")
+            continue
+        # `runs-on:` alone introduces a block list or a `group:` mapping on
+        # the following lines; the socle does not read either, and says so.
+        named = [item.strip().strip("\"'") for item in value.strip("[]").split(",") if item.strip()]
+        if not named or not all(LABEL.fullmatch(item) for item in named):
+            unresolved.append(f"{where}: {value or 'a block or a group below this line'}")
+            continue
+        labels.update(named)
+    return sorted(labels), unresolved
+
+
 def read_runners(project: pathlib.Path) -> dict:
     """Which runners this repository's workflows select, and what could not be read.
 
@@ -1145,25 +1172,9 @@ def read_runners(project: pathlib.Path) -> dict:
     workflows = project / ".github" / "workflows"
     for path in sorted(workflows.glob("*.y*ml")) if workflows.is_dir() else []:
         text = path.read_text(encoding="utf-8")
-        for match in RUNS_ON.finditer(text):
-            value = match.group(1).strip().strip("\"'")
-            # The line, so an operator finds what the socle could not read.
-            where = f"{path.name}:{text.count(chr(10), 0, match.start()) + 1}"
-            reference = MATRIX_REFERENCE.fullmatch(value)
-            if reference:
-                found = matrix_values(text, reference.group(1))
-                if found:
-                    labels.update(found)
-                else:
-                    unresolved.append(f"{where}: {value}")
-                continue
-            # `runs-on:` alone introduces a block list or a `group:` mapping on
-            # the following lines; the socle does not read either, and says so.
-            named = [item.strip().strip("\"'") for item in value.strip("[]").split(",") if item.strip()]
-            if not named or not all(LABEL.fullmatch(item) for item in named):
-                unresolved.append(f"{where}: {value or 'a block or a group below this line'}")
-                continue
-            labels.update(named)
+        found, could_not = file_runners(path.name, text)
+        labels.update(found)
+        unresolved.extend(could_not)
         if re.search(rf"^\s*uses:\s*{re.escape(SOCLE_REPOSITORY)}/", text, re.M):
             delegated = True
     # maelys-oci names no runner at all: every job of its tree calls a
@@ -1171,6 +1182,132 @@ def read_runners(project: pathlib.Path) -> dict:
     # chooses none", not "this repository is safe": the runners it uses are
     # those of the socle it pins.
     return {"labels": sorted(labels), "unresolved": unresolved, "delegated": delegated}
+
+
+# ---- what runs, and when ------------------------------------------------------
+#
+# A repository's strategy is spread over its workflow files: what runs on a
+# pull request, what runs on a push, what a signed tag releases, what only a
+# hand starts. Reading it meant opening every file of every repository, and
+# the fleet had no way to ask. These readers answer the question from the
+# files alone, offline, because the shared CI calls `declarations` on a
+# runner with no access to the API.
+#
+# Line-based, like the runner reader above: the socle carries no YAML parser
+# and vendors none. What it cannot read it leaves out rather than guessing.
+
+# The events the socle names; anything else a workflow declares is reported
+# verbatim, because an event nobody named must not read as absence.
+WORKFLOW_EVENTS = ("push", "pull_request", "pull_request_target", "workflow_dispatch",
+                   "workflow_call", "schedule", "release", "merge_group", "issue_comment",
+                   "repository_dispatch")
+JOB_ID = re.compile(r"^  ([A-Za-z0-9_-]+):\s*$", re.M)
+
+
+def top_block(text: str, key: str) -> str:
+    """The body of a top-level `key:`, or its inline value when it has one."""
+    match = re.search(rf"^{re.escape(key)}:(.*)$", text, re.M)
+    if not match:
+        return ""
+    if match.group(1).strip():
+        return match.group(1).strip()
+    rest = text[match.end():]
+    end = re.search(r"^[A-Za-z]", rest, re.M)
+    return rest[:end.start()] if end else rest
+
+
+def sub_block(block: str, key: str) -> str:
+    """The body of `key:` inside a block, by indentation."""
+    match = re.search(rf"^(\s*){re.escape(key)}:\s*$", block, re.M)
+    if not match:
+        return ""
+    indent = len(match.group(1))
+    kept = []
+    for line in block[match.end():].splitlines():
+        if line.strip() and len(line) - len(line.lstrip()) <= indent:
+            break
+        kept.append(line)
+    return "\n".join(kept)
+
+
+def block_list(block: str, key: str) -> list:
+    """The values `key:` lists: inline `[a, b]`, or a `- a` list below it.
+
+    Unlike the runner reader this keeps every value as written: a branch
+    filter is `main` but a tag filter is `v*`, and a reader that only
+    accepted label-shaped words would drop the tag rule silently.
+    """
+    match = re.search(rf"^(\s*){re.escape(key)}:(.*)$", block, re.M)
+    if not match:
+        return []
+    inline = match.group(2).strip()
+    if inline:
+        return [item.strip().strip("\"'") for item in inline.strip("[]").split(",") if item.strip()]
+    indent = len(match.group(1))
+    values = []
+    for line in block[match.end():].splitlines():
+        if not line.strip():
+            continue
+        if len(line) - len(line.lstrip()) <= indent:
+            break
+        item = re.fullmatch(r"\s*-\s*(.+?)\s*", line)
+        if not item:
+            break
+        values.append(item.group(1).strip("\"'"))
+    return values
+
+
+def workflow_events(text: str) -> list:
+    """The events of one workflow, in the three shapes GitHub accepts."""
+    block = top_block(text, "on")
+    if not block:
+        return []
+    found = []
+    for event in WORKFLOW_EVENTS:
+        if re.search(rf"^\s*-?\s*{re.escape(event)}\s*:", block, re.M) \
+                or re.search(rf"(^|[\[,\s]){re.escape(event)}($|[\],\s])", block.split("\n")[0]):
+            found.append(event)
+    return found
+
+
+def read_workflows(project: pathlib.Path) -> list:
+    """Every workflow of the repository: what starts it, and what it runs."""
+    workflows = project / ".github" / "workflows"
+    observed = []
+    for path in sorted(workflows.glob("*.y*ml")) if workflows.is_dir() else []:
+        text = path.read_text(encoding="utf-8")
+        on = top_block(text, "on")
+        push = sub_block(on, "push")
+        labels, unresolved = file_runners(path.name, text)
+        observed.append({
+            "file": path.name,
+            "events": workflow_events(text),
+            # Empty branches with a push event means every branch, which is
+            # not the same fact as no push at all: the renderer says which.
+            "branches": block_list(push, "branches"),
+            "tags": block_list(push, "tags"),
+            "jobs": JOB_ID.findall(top_block(text, "jobs")),
+            "runners": labels,
+            "unresolved": unresolved,
+            "delegates": bool(re.search(rf"^\s*uses:\s*{re.escape(SOCLE_REPOSITORY)}/", text, re.M)),
+        })
+    return observed
+
+
+def read_strategy(decl: Declarations) -> None:
+    """Note a workflow that runs twice on a pull request.
+
+    `push` with no branch filter and `pull_request` in the same workflow run
+    the same jobs twice for every pushed commit of a pull request. It is a
+    choice a repository may make, so this is a note and never a violation —
+    but nobody could see it without opening the file.
+    """
+    for workflow in read_workflows(decl.project):
+        if "push" in workflow["events"] and "pull_request" in workflow["events"] \
+                and not workflow["branches"] and not workflow["tags"]:
+            decl.add("note", f".github/workflows/{workflow['file']}: push names no branch and"
+                             " pull_request is declared too, so every push of a pull request runs"
+                             " it twice; 'branches: [main]' under push runs it once", "conventions")
 
 
 def socle_data(sha: str, tag: str) -> dict:
@@ -1774,6 +1911,7 @@ def handle_declarations(invocation: Invocation) -> tuple[dict, int]:
             "pinned": pinned_socle(project),
             "managedBy": stamp.group(1) if stamp else "",
             "runners": read_runners(project),
+            "workflows": read_workflows(project),
             "dependencies": decl.dependencies, "linuxPackages": decl.linux_packages,
             "macosPackages": decl.macos_packages, "formulas": decl.formulas,
             "targets": [name for name, _ in decl.targets] or list(SOCLE_TARGETS),
@@ -2705,6 +2843,30 @@ def text_preflight(data: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+def workflow_moments(workflow: dict) -> str:
+    """What starts one workflow, said so a reader needs no second file.
+
+    `push` alone is not the same fact as `push` on the default branch or on
+    a tag, and the difference is what tells a doubled CI from a release.
+    """
+    moments = []
+    for event in workflow["events"]:
+        if event != "push":
+            moments.append(event)
+        elif workflow["tags"]:
+            moments.append("push (tags " + " ".join(workflow["tags"]) + ")")
+        elif workflow["branches"]:
+            moments.append("push (" + " ".join(workflow["branches"]) + ")")
+        else:
+            moments.append("push (every branch)")
+    runs = f"{len(workflow['jobs'])} job" + ("s" if len(workflow["jobs"]) != 1 else "")
+    if workflow["delegates"]:
+        runs += ", one of them the socle's"
+    if workflow["unresolved"]:
+        runs += f", {len(workflow['unresolved'])} runner(s) unread"
+    return f"{workflow['file']}: " + ", ".join(moments or ["no event the socle names"]) + f" — {runs}"
+
+
 def text_declarations(data: dict) -> str:
     return checks_text(data["checks"]) + "".join(f"{key:<13} {value}\n" for key, value in (
         ("dependencies", " ".join(data["dependencies"])), ("linux", data["linuxPackages"]),
@@ -2719,7 +2881,9 @@ def text_declarations(data: dict) -> str:
                     + (" (and the socle's, delegated)" if data["runners"]["delegated"] else "")),
         ("channels", " ".join(f"{c['name']} ({c['registry']})" for c in data["channels"])),
         ("fuzz", f"{data['fuzz']['harnesses']}/ run by {data['fuzz']['runs']}"
-                 if data["fuzz"]["harnesses"] else "")))
+                 if data["fuzz"]["harnesses"] else ""))) \
+        + "".join(f"{('workflows' if index == 0 else ''):<13} {workflow_moments(workflow)}\n"
+                  for index, workflow in enumerate(data["workflows"]))
 
 
 def text_tap(data: dict) -> str:
@@ -2943,7 +3107,7 @@ APP = cli.Program(PROGRAM, PRODUCT, socle_version(), [
                      "required": ["valid", "product", "project", "version", "mechanism", "dependencies",
                                   "linuxPackages", "macosPackages", "formulas", "targets",
                                   "manifestPatterns", "channels", "gate", "afterVersion", "fuzz",
-                                  "declared", "pinned", "managedBy", "runners", "checks"],
+                                  "declared", "pinned", "managedBy", "runners", "workflows", "checks"],
                      "properties": {"valid": {"type": "boolean"}, "product": {"type": "string"},
                                     "project": {"type": "string"}, "version": {"type": "string"},
                                     "mechanism": MECHANISM_SCHEMA,
@@ -2963,6 +3127,15 @@ APP = cli.Program(PROGRAM, PRODUCT, socle_version(), [
                                                                 "manifestPatterns": STRINGS}},
                                     "pinned": {"type": ["object", "null"]},
                                     "managedBy": {"type": "string"},
+                                    "workflows": {"type": "array", "items": {
+                                        "type": "object", "additionalProperties": False,
+                                        "required": ["file", "events", "branches", "tags", "jobs",
+                                                     "runners", "unresolved", "delegates"],
+                                        "properties": {"file": {"type": "string"}, "events": STRINGS,
+                                                       "branches": STRINGS, "tags": STRINGS,
+                                                       "jobs": STRINGS, "runners": STRINGS,
+                                                       "unresolved": STRINGS,
+                                                       "delegates": {"type": "boolean"}}}},
                                     "runners": {"type": "object", "additionalProperties": False,
                                                 "required": ["labels", "unresolved", "delegated"],
                                                 "properties": {"labels": STRINGS,

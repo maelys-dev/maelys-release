@@ -2,6 +2,17 @@
 
 ## 0.34.0 — 2026-09-11
 
+- **`declarations` says what a repository runs, and when.** A new `workflows`
+  field holds, per file of `.github/workflows/`, the events that start it, the
+  branch and tag filters of its `push`, its jobs, its runners, and whether one
+  of its jobs calls the socle. A repository's strategy — pull request, push,
+  signed tag, hand — was spread over those files, and reading it meant opening
+  every one of them in every repository. It is read from the files alone, so
+  the shared CI, which has no API access, gets it too.
+- **A workflow that runs twice on every pull request is now named.** `push`
+  with no branch filter beside a `pull_request` runs the same jobs for the
+  push and for the pull request. A **note**, never a violation: a repository
+  may want it. Two products of the fleet do it without having chosen to.
 - **`cut` runs what a product declares before it writes anything, and
   commits what a version bump regenerates.** maelys-datalog found both by
   migrating onto `cut`, which is the only way either could have been found.

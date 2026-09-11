@@ -326,6 +326,19 @@ Three fields exist for that observer rather than for the product:
   actually use, defaults included. A field that folded the two made a fleet
   read "every product targets these three" where the truth was "no product
   declared one".
+- **`workflows`** holds, for each file of `.github/workflows/`, the events
+  that start it, the branch and tag filters of its `push`, its job names, the
+  runners it selects and whether one of its jobs calls the socle. A
+  repository's strategy — what runs on a pull request, what runs on a push,
+  what a signed tag releases, what only a hand starts — was spread across
+  those files, and reading it meant opening every one of them in every
+  repository. `push` with no branch filter beside a `pull_request` is
+  **noted**, never refused: the same jobs then run twice for every pushed
+  commit of a pull request, which a repository may want and nobody could see.
+  This field is read from the files alone, like everything else here: the
+  shared CI calls `declarations` on a runner with no access to the API, so
+  what a repository's **settings** say — its branch protection above all —
+  belongs to `preflight` and to the fleet observer, never here.
 - **`runners`** holds the runner labels a repository's own workflows select,
   what the socle could not resolve, and whether the repository delegates.
   Reading `runs-on` for a label is not enough: a matrix hides it, and a
