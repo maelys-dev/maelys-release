@@ -809,11 +809,11 @@ class ProductNeedsTest(unittest.TestCase):
         # Effective and declared are not the same answer: folding them makes a
         # fleet read "everyone targets these three" where nobody declared one.
         self.assertEqual(data["targets"], ["linux-x86_64", "linux-arm64", "macos-arm64"])
-        self.assertEqual(data["declared"], {"targets": [], "manifestPatterns": [], "sbomPattern": ""})
+        self.assertEqual(data["declared"], {"targets": [], "manifestPatterns": [], "sbomPattern": "", "macosRunner": []})
         self.product.write("packaging/release", "[targets]\nlinux-arm64\n\n[manifest]\n*.wasm\n")
         data = self.product.json("declarations", self.dir)["data"]
         self.assertEqual(data["declared"], {"targets": ["linux-arm64"],
-                                            "manifestPatterns": ["*.wasm"], "sbomPattern": ""})
+                                            "manifestPatterns": ["*.wasm"], "sbomPattern": "", "macosRunner": []})
         self.assertEqual(data["manifestPatterns"], "*.tar.gz *.deb *.rpm *.wasm")
 
     def test_the_contract_carries_the_pin_its_file_and_the_stamp(self) -> None:
@@ -2307,6 +2307,86 @@ class DeclarationHomeTest(unittest.TestCase):
                          ["linux-arm64"])
 
 
+CI_CALL = """name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    uses: maelys-dev/maelys-release/.github/workflows/check-product.yml@%s # v9.9.9
+    with:
+      product: maelys-fixture
+      dependency_checkout: |
+        sh scripts/checkout-dependency.sh maelys-json
+
+  mine:
+    runs-on: ubuntu-26.04
+    steps:
+      - run: make check
+""" % ("0" * 40)
+
+
+class RunnerDeclarationTest(unittest.TestCase):
+    """[runners], and the one line adopt keeps in a ci.yml it does not own."""
+
+    def parse(self, text: str):
+        return MODULE.parse_release(textwrap.dedent(text))
+
+    def test_labels_are_read(self) -> None:
+        *_, runner, _, _, unknown = self.parse("[runners]\nmacos self-hosted macOS ARM64\n")
+        self.assertEqual(runner, ["self-hosted", "macOS", "ARM64"])
+        self.assertEqual(unknown, [])
+
+    def test_one_label_is_a_string_and_several_are_an_array(self) -> None:
+        """runs-on takes either, and the difference is not cosmetic."""
+        self.assertEqual(MODULE.runner_json(["macos-15"]), '"macos-15"')
+        self.assertEqual(MODULE.runner_json(["self-hosted", "macOS"]), '["self-hosted", "macOS"]')
+
+    def test_the_section_is_refused_when_it_makes_no_sense(self) -> None:
+        for text, expected in (("[runners]\nlinux ubuntu-26.04\n", "knows macos"),
+                               ("[runners]\nmacos\n", "names no label"),
+                               ("[runners]\nmacos a\nmacos b\n", "holds one macos line"),
+                               ("[runners]\nmacos self hosted!\n", "runner label is")):
+            with self.assertRaises(ValueError) as refusal:
+                self.parse(text)
+            self.assertIn(expected, str(refusal.exception))
+
+    def test_it_reaches_the_tap_job_of_release_yml(self) -> None:
+        declaration = MODULE.Declarations(pathlib.Path("."), "maelys-fixture")
+        declaration.formulas = ["maelys-fixture"]
+        declaration.macos_runner = ["self-hosted", "macOS", "ARM64"]
+        workflow = MODULE.release_workflow(declaration, "0" * 40, "v9.9.9", "9.9.9")
+        self.assertIn("""      macos_runner: '["self-hosted", "macOS", "ARM64"]'""", workflow)
+
+    def test_adopt_writes_the_line_under_the_socle_call(self) -> None:
+        written = MODULE.ci_macos_runner(CI_CALL, ["self-hosted", "macOS", "ARM64"])
+        # First line of the with: block, so the placement is the same
+        # whatever inputs the product has added below it.
+        self.assertIn("""    with:
+      macos_runner: '["self-hosted", "macOS", "ARM64"]'
+      product: maelys-fixture""", written)
+        # The product's own job is not the socle's business.
+        self.assertIn("  mine:\n    runs-on: ubuntu-26.04\n", written)
+
+    def test_an_empty_declaration_takes_the_line_away(self) -> None:
+        """The declaration decides in both directions, or it decides nothing."""
+        written = MODULE.ci_macos_runner(CI_CALL, ["macos-15"])
+        self.assertEqual(MODULE.ci_macos_runner(written, []), CI_CALL)
+
+    def test_a_declared_runner_replaces_the_one_already_there(self) -> None:
+        first = MODULE.ci_macos_runner(CI_CALL, ["macos-15"])
+        second = MODULE.ci_macos_runner(first, ["self-hosted", "macOS"])
+        self.assertNotIn("macos-15", second)
+        self.assertEqual(second.count("macos_runner:"), 1)
+
+    def test_a_ci_that_does_not_call_the_socle_is_left_alone(self) -> None:
+        foreign = "name: ci\n\njobs:\n  mine:\n    runs-on: ubuntu-26.04\n"
+        self.assertEqual(MODULE.ci_macos_runner(foreign, ["self-hosted"]), foreign)
+
+
 class SbomDeclarationTest(unittest.TestCase):
     """The [sbom] section of the declaration file."""
 
@@ -2314,7 +2394,7 @@ class SbomDeclarationTest(unittest.TestCase):
         return MODULE.parse_release(textwrap.dedent(text))
 
     def test_one_glob_is_read(self) -> None:
-        _, _, _, sbom, _, _, unknown = self.parse("""\
+        _, _, _, sbom, _, _, _, unknown = self.parse("""\
             [sbom]
             *.spdx.json
             """)
@@ -2328,7 +2408,7 @@ class SbomDeclarationTest(unittest.TestCase):
         self.assertIn("holds one glob", str(refusal.exception))
 
     def test_the_section_is_optional(self) -> None:
-        _, _, _, sbom, _, _, _ = self.parse("[manifest]\n*.wasm\n")
+        _, _, _, sbom, _, _, _, _ = self.parse("[manifest]\n*.wasm\n")
         self.assertEqual(sbom, "")
 
     def test_it_renders_into_the_workflow(self) -> None:
@@ -2545,23 +2625,23 @@ class UnitTest(unittest.TestCase):
 
     def test_parse_release(self) -> None:
         self.assertEqual(MODULE.parse_release("[targets]\nlinux-arm64\nwasm32 ubuntu-26.04\n"),
-                         ([("linux-arm64", ""), ("wasm32", "ubuntu-26.04")], [], [], "", "", "", []))
+                         ([("linux-arm64", ""), ("wasm32", "ubuntu-26.04")], [], [], "", [], "", "", []))
         self.assertEqual(MODULE.parse_release("[targets]\nmacos-arm64 self-hosted ARM64\n"),
-                         ([("macos-arm64", ["self-hosted", "ARM64"])], [], [], "", "", "", []))
-        self.assertEqual(MODULE.parse_release("[manifest]\n*.wasm\n"), ([], ["*.wasm"], [], "", "", "", []))
+                         ([("macos-arm64", ["self-hosted", "ARM64"])], [], [], "", [], "", "", []))
+        self.assertEqual(MODULE.parse_release("[manifest]\n*.wasm\n"), ([], ["*.wasm"], [], "", [], "", "", []))
         self.assertEqual(MODULE.parse_release("[channels]\nnpm github-packages\n"),
-                         ([], [], [("npm", "github-packages")], "", "", "", []))
-        self.assertEqual(MODULE.parse_release("[gate]\nnone\n"), ([], [], [], "", "none", "", []))
-        self.assertEqual(MODULE.parse_release("[gate]\nreviewer\n"), ([], [], [], "", "reviewer", "", []))
-        self.assertEqual(MODULE.parse_release("# nothing declared\n"), ([], [], [], "", "", "", []))
+                         ([], [], [("npm", "github-packages")], "", [], "", "", []))
+        self.assertEqual(MODULE.parse_release("[gate]\nnone\n"), ([], [], [], "", [], "none", "", []))
+        self.assertEqual(MODULE.parse_release("[gate]\nreviewer\n"), ([], [], [], "", [], "reviewer", "", []))
+        self.assertEqual(MODULE.parse_release("# nothing declared\n"), ([], [], [], "", [], "", "", []))
         # A section this socle does not know is named and skipped, never fatal:
         # a product pins the socle by commit, and losing its targets in
         # silence on an older socle is worse than an unapplied section.
         self.assertEqual(MODULE.parse_release("[targets]\nlinux-arm64\n[bsd]\nx\n"),
-                         ([("linux-arm64", "")], [], [], "", "", "", ["[bsd] at line 3"]))
+                         ([("linux-arm64", "")], [], [], "", [], "", "", ["[bsd] at line 3"]))
         # A version materialised twice: the command that regenerates the second.
         self.assertEqual(MODULE.parse_release("[cut]\nafter-version bash scripts/header.sh\n"),
-                         ([], [], [], "", "", "bash scripts/header.sh", []))
+                         ([], [], [], "", [], "", "bash scripts/header.sh", []))
         for text in ("linux-arm64\n",                      # outside a section
                      "[targets]\nwasm32\n",                # no runner and no default
                      "[targets]\nWASM\n",                  # not a target name
