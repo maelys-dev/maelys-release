@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.42.0 — 2026-09-12
+
+- **`preflight` reports a formula the tap serves for a repository that the
+  repository no longer declares.** The tap is one repository for every
+  product, so no product can see this from its own packaging; the socle
+  pushes to it and reads the declaration, and is the only place the two sit
+  together. A formula is tied to its product by the repository its `url`
+  names, never by its own name — the case this exists for is maelys-datalog,
+  whose formula the tap still serves at `v0.1.0-alpha.3` while the product
+  stopped declaring a template at `alpha.4` and would carry a different name
+  today, so matching on the name would have missed exactly that. A note, not
+  a violation: the socle cannot know whether the formula is stale or whether
+  the declaration is what went missing. In `preflight` and not `check`,
+  because it reads one file per formula of the tap. Asked for by
+  maelys-datalog, after maelys-platform found the tap serving a September
+  archive six versions later.
+- **`rehearse --channel` sets `CHANNEL_DRY_RUN=1`, which `channel.yml` never
+  sets.** Exit 0 on an already-published version is the contract, and a
+  script honours it by returning early — so the rehearsal proved the path
+  that does *not* publish and, on its own, could never reach the one that
+  does. The gap widens exactly as a channel starts working. A script that
+  reads the variable takes its real publishing path under the registry's own
+  dry run (`npm publish --dry-run`, `twine --dry-run`). maelys-datalog found
+  the hole in the mechanism they had themselves proposed, with a publish
+  command that resolved `dist/x.tgz` as a GitHub shorthand and had never run.
+- **A channel that does not publish says so on the release page.** The
+  release job is green and the channel workflow is red, and those are not the
+  same page: a reader landing on the release saw assets, a manifest, and no
+  hint that a registry was meant to hold this version and does not. The
+  absent marker is the honest record for a machine; this is the honest record
+  for a person, written where they are looking. Replayed on the same tag it
+  does not say it twice.
+
 ## 0.41.0 — 2026-09-12
 
 - **A product declares the runner of the socle's macOS jobs.** `[runners]`

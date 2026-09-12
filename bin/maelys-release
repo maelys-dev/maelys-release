@@ -18,6 +18,7 @@ into products, VERSION its version.
 """
 from __future__ import annotations
 
+import base64
 import datetime
 import difflib
 import hashlib
@@ -2268,7 +2269,68 @@ def branch_protection(repository: str, branch: str, classic: str,
                     " move it, and a tag proves only what the tag proves")
 
 
-def repository_checks(project: pathlib.Path, gate: str, decl_sbom: str = "") -> list[tuple[str, str]]:
+# A formula names its repository in its url, and the socle renders two
+# shapes of it: the source archive of a tag, and the bottle root. Reading
+# only the second missed every formula without bottles, which is most of
+# them.
+FORMULA_REPOSITORY = re.compile(r"github\.com/([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)/(?:archive|releases)")
+FORMULA_VERSIONS = (re.compile(r"/archive/refs/tags/(v?[0-9][A-Za-z0-9.+-]*?)\.tar\.gz"),
+                    re.compile(r"/releases/download/(v?[0-9][A-Za-z0-9.+-]*)/"))
+
+
+def tap_drift(repository: str, formulas: list[str], tap: str = "") -> list[tuple[str, str]]:
+    """Formulas the tap serves for this repository that it no longer declares.
+
+    Nothing else in the fleet can see this. The tap is one repository for
+    every product, so a product only ever reads its own packaging; the socle
+    is the one that pushes to the tap, and the only place where what is
+    served and what is declared sit side by side.
+
+    A formula is tied to its product by the repository its url names, never
+    by its own name: the case this exists for is maelys-datalog, whose
+    formula the tap still serves at v0.1.0-alpha.3 while the product stopped
+    declaring a template at alpha.4 and would carry a different name today.
+    Matching on the name would have missed exactly that.
+    """
+    tap = tap or DEFAULT_TAP
+    listing = github_read(f"repos/{tap}/contents/Formula")[1]
+    if not isinstance(listing, list):
+        return [("note", f"the formulas of {tap} could not be read: drift against what this product"
+                         " declares is not checked")]
+    served: list[tuple[str, str]] = []
+    for entry in listing:
+        name = str(entry.get("name", ""))
+        if not name.endswith(".rb"):
+            continue
+        body = github_read(f"repos/{tap}/contents/Formula/{name}")[1]
+        text = ""
+        if isinstance(body, dict) and body.get("encoding") == "base64":
+            try:
+                text = base64.b64decode(body.get("content", "")).decode("utf-8", "replace")
+            except (ValueError, TypeError):
+                continue
+        named = FORMULA_REPOSITORY.search(text)
+        if named and named.group(1) == repository:
+            version = next((found.group(1) for found in
+                            (pattern.search(text) for pattern in FORMULA_VERSIONS) if found),
+                           "an unreadable version")
+            served.append((name[:-3], version))
+    found: list[tuple[str, str]] = []
+    for name, version in sorted(served):
+        if name in formulas:
+            continue
+        remedy = (f"declare packaging/homebrew/{name}.rb.in again"
+                  if not formulas else
+                  f"this product declares {' '.join(formulas)} instead")
+        found.append(("note", f"{tap} serves Formula/{name}.rb at {version} for this repository and"
+                              f" nothing here declares it: {remedy}, or remove the formula from the"
+                              f" tap. Until then that is what 'brew install {tap.split('/')[0]}/"
+                              f"{tap.split('/')[-1].replace('homebrew-', '')}/{name}' installs"))
+    return found
+
+
+def repository_checks(project: pathlib.Path, gate: str, decl_sbom: str = "",
+                      decl_formulas: list[str] | None = None) -> list[tuple[str, str]]:
     """What the release workflow needs of the GitHub repository behind origin.
 
     GitHub creates a missing environment on first use, without rules, so
@@ -2276,6 +2338,7 @@ def repository_checks(project: pathlib.Path, gate: str, decl_sbom: str = "") -> 
     v*, which keeps a workflow_dispatch from a branch, or a release.yml
     edited on a branch, from publishing.
     """
+    decl_formulas = decl_formulas or []
     found: list[tuple[str, str]] = []
     repository = github_repository(project)
     if not repository:
@@ -2316,6 +2379,10 @@ def repository_checks(project: pathlib.Path, gate: str, decl_sbom: str = "") -> 
     # protected in two ways that do not answer on the same endpoint: the
     # classic branch protection, and a ruleset. agent-cli-spec is protected
     # by a ruleset alone, and reading only the first reported it open.
+    # What the tap serves for this repository, against what it declares.
+    # preflight and not check: this reads one file per formula of the tap,
+    # and check runs on every pull request of every product.
+    found.extend(tap_drift(repository, decl_formulas))
     branch = repository_data.get("default_branch") or "main"
     found.append(branch_protection(repository, branch,
                                    *github_read(f"repos/{repository}/branches/{branch}/protection")[:1],
@@ -2328,7 +2395,7 @@ def handle_preflight(invocation: Invocation) -> tuple[dict, int]:
     decl, data = check_data(invocation)
     require_socle_mechanism(decl.project, decl.mechanism, "preflight")
     gate = (tag_checks(decl.project, decl.version)
-            + repository_checks(decl.project, decl.gate, decl.sbom_pattern)) \
+            + repository_checks(decl.project, decl.gate, decl.sbom_pattern, decl.formulas)) \
         if data["valid"] else []
     data["preflight"] = [{"status": status, "message": message} for status, message in gate]
     data["violations"].extend(message for status, message in gate if status == "fail")
@@ -3073,7 +3140,8 @@ def rehearse_channel(invocation: Invocation, project: pathlib.Path, product: str
             published = subprocess.run(["bash", "-c", command], cwd=project, check=False,
                                        stdout=log, stderr=subprocess.STDOUT,
                                        env={**os.environ, "TAG": tag, "CHANNEL": channel,
-                                            "PRODUCT": product, "CHANNEL_RECORD": str(record)})
+                                            "PRODUCT": product, "CHANNEL_RECORD": str(record),
+                                            "CHANNEL_DRY_RUN": "1"})
             if published.returncode != 0:
                 raise Failure("PROCESS_FAILED",
                               f"{command} exited {published.returncode} on a version {channel} already holds.",

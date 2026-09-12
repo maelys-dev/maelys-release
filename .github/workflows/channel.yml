@@ -133,3 +133,39 @@ jobs:
              + ($recorded[0] // {})' >"channel-$CHANNEL.json"
           gh release upload "$TAG" --repo "${GITHUB_REPOSITORY}" "channel-$CHANNEL.json"
           echo "::notice::$PRODUCT $TAG carries channel-$CHANNEL.json"
+
+  said:
+    # A channel that fails leaves the release page saying nothing. The
+    # release job is green, this workflow is red, and the two are not the
+    # same page: a reader who lands on the release sees assets, a manifest
+    # and no hint that a registry was meant to hold this version and does
+    # not. The absent marker is the honest record for a machine; this is
+    # the honest record for a person, written where they are looking.
+    # maelys-datalog asked for it after its npm channel failed on a
+    # publish command that had never run.
+    needs: publish
+    if: always() && needs.publish.result != 'success'
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: write
+    steps:
+      - name: Say on the release that this channel did not publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          CHANNEL: ${{ inputs.channel }}
+          RUN: ${{ github.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          line="Channel \`$CHANNEL\`: not published (run https://github.com/${GITHUB_REPOSITORY}/actions/runs/$RUN)."
+          body="$(gh release view "$TAG" --repo "${GITHUB_REPOSITORY}" --json body --jq .body)"
+          # Replayed on the same tag, this must not say it twice.
+          case "$body" in
+            *"Channel \`$CHANNEL\`: not published"*)
+              echo "::notice::the release of $TAG already says $CHANNEL did not publish"
+              exit 0 ;;
+          esac
+          printf '%s\n\n---\n\n%s\n' "$body" "$line" >"${RUNNER_TEMP}/body.md"
+          gh release edit "$TAG" --repo "${GITHUB_REPOSITORY}" --notes-file "${RUNNER_TEMP}/body.md"
+          echo "::notice::the release of $TAG now says channel $CHANNEL did not publish"
