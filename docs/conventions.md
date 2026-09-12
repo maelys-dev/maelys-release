@@ -459,8 +459,19 @@ wrote. A product that has never released has nothing to compare with, and
 the run says so rather than refusing; a file that has left the tree is a
 note, not a refusal.
 
-It lags by one release: a place the version reached *since* the previous
-bump is invisible here. The plan says what it found before anything is
+It lags by one release, and the two directions do not cost the same. A
+place the version **reached** since the previous bump is invisible here: a
+missed detection, which the product's own checks still catch. A place the
+version **left** is the dangerous one — a file that has stopped carrying the
+version reads exactly like one this cut forgot. Refusing there would block a
+release with nothing downstream to lift it, since `[cut]` declares a command
+and not a list of files, so the operator's only ways out would be to make a
+file carry a version it should no longer carry, or to cut outside the tool.
+The audit therefore splits the two by force of evidence: a file that **still
+holds the old version** is an omission and stops the release; a file that
+holds **neither** version is a note. maelys-cli found the case in their own
+history, where a generated CLI reference carried the version at `0.1.0 ->
+0.2.0` and carries none today. The plan says what it found before anything is
 written, so a product that needs `after-version` learns it from
 `maelys-release cut DIR X.Y.Z` rather than from a pull request its own
 checks refuse.
