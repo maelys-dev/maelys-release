@@ -236,6 +236,8 @@ class Declarations:
         self.manifest_patterns: list[str] = []
         # (channel, registry kind) of the declaration file; one channel.yml job each.
         self.channels: list[tuple[str, str]] = []
+        # The glob of the SBOM a build leaves in dist/, empty when none.
+        self.sbom_pattern = ""
         # "reviewer", "none", or "" when this repository has not chosen.
         self.gate = ""
         # What cut runs between writing VERSION and the bump commit, for a
@@ -293,15 +295,17 @@ def parse_packages(text: str) -> tuple[str, str]:
     return " ".join(packages["linux"]), " ".join(packages["macos"])
 
 
-def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[tuple[str, str]], str, str]:
-    """The declaration file: [targets], [manifest], [channels], [gate] and [cut].
+def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[tuple[str, str]], str, str, str]:
+    """The declaration file: [targets], [manifest], [sbom], [channels], [gate] and [cut].
 
     A target line naming no label keeps the runner release.yml holds for that
     target, which only exists for the three the socle builds; one label is a
     runner label, several are a label set. The [targets] section replaces the
     matrix rather than adding to it, so a product that adds one target names
     the others it keeps. [manifest] adds to the socle's archive kinds.
-    [channels] names one 'CHANNEL REGISTRY' per line, each rendered into a
+    [sbom] holds one glob, the document a build leaves in dist/ beside the
+    packages it describes; the release then attests that document against
+    the files the document itself names. [channels] names one 'CHANNEL REGISTRY' per line, each rendered into a
     channel.yml job that runs once the release is published. [cut] holds
     'after-version COMMAND', run by cut between writing VERSION and the
     bump commit, for a product that materialises its version somewhere
@@ -310,6 +314,7 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
     targets: list[tuple[str, object]] = []
     manifest: list[str] = []
     channels: list[tuple[str, str]] = []
+    sbom = ""
     gate = ""
     after_version = ""
     unknown: list[str] = []
@@ -319,7 +324,7 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
         if not line or line.startswith("#"):
             continue
         if line.startswith("["):
-            if line in ("[targets]", "[manifest]", "[channels]", "[gate]", "[cut]"):
+            if line in ("[targets]", "[manifest]", "[sbom]", "[channels]", "[gate]", "[cut]"):
                 section = line[1:-1]
                 continue
             # A section this socle does not know is named and skipped, never
@@ -333,8 +338,8 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
         if section == "unknown":
             continue
         if not section:
-            raise ValueError(f"line outside a [targets], [manifest], [channels], [gate]"
-                             f" or [cut] section at line {number}")
+            raise ValueError(f"line outside a [targets], [manifest], [sbom], [channels],"
+                             f" [gate] or [cut] section at line {number}")
         if section == "cut":
             key, _, command = line.partition(" ")
             if key != "after-version":
@@ -351,6 +356,17 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
             if line not in SOCLE_GATES:
                 raise ValueError(f"[gate] is {' or '.join(SOCLE_GATES)}, not {line}, at line {number}")
             gate = line
+            continue
+        if section == "sbom":
+            # One document per target, because one attestation carries one
+            # predicate: actions/attest takes a single sbom-path, and a
+            # second document would need a second step this workflow cannot
+            # write without knowing how many there are.
+            if sbom:
+                raise ValueError(f"[sbom] holds one glob, and line {number} is a second")
+            if len(line.split()) != 1 or not re.fullmatch(r"[A-Za-z0-9*][A-Za-z0-9*+._-]*", line):
+                raise ValueError(f"one glob per line at line {number}: {raw}")
+            sbom = line
             continue
         if section == "channels":
             name, *rest = line.split()
@@ -391,9 +407,9 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
         runner: object = "" if not labels else (labels[0] if len(labels) == 1 else labels)
         targets.append((name, runner))
     if section and not unknown and not targets and not manifest and not channels \
-            and not gate and not after_version:
+            and not gate and not after_version and not sbom:
         raise ValueError(f"{DECLARATION_FILE} declares no target, archive kind, channel, gate or cut command")
-    return targets, manifest, channels, gate, after_version, unknown
+    return targets, manifest, channels, sbom, gate, after_version, unknown
 
 
 def read_fuzz(decl: Declarations) -> None:
@@ -581,8 +597,8 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
             release = former
     if release.is_file():
         try:
-            decl.targets, decl.manifest_patterns, decl.channels, decl.gate, decl.after_version, unknown = \
-                parse_release(release.read_text(encoding="utf-8"))
+            decl.targets, decl.manifest_patterns, decl.channels, decl.sbom_pattern, decl.gate, \
+                decl.after_version, unknown = parse_release(release.read_text(encoding="utf-8"))
             for section in unknown:
                 decl.add("missing", f"{release.name}: section {section} is not one this socle knows"
                                     " ([targets], [manifest], [channels], [gate], [cut]); what it declares"
@@ -605,6 +621,9 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
             if decl.manifest_patterns:
                 decl.add("ok", f"{release.name} manifest: " + SOCLE_MANIFEST_PATTERNS
                                + " " + " ".join(decl.manifest_patterns))
+            if decl.sbom_pattern:
+                decl.add("ok", f"{release.name} sbom: {decl.sbom_pattern},"
+                               " attested against the files it names")
         except ValueError as error:
             decl.add("missing", f"{release.name}: {error}")
     read_fuzz(decl)
@@ -862,6 +881,8 @@ def release_workflow(decl: Declarations, sha: str, tag: str, version: str) -> st
     if decl.manifest_patterns:
         lines.append(f"      manifest_patterns: '{SOCLE_MANIFEST_PATTERNS} "
                      + " ".join(decl.manifest_patterns) + "'")
+    if decl.sbom_pattern:
+        lines.append(f"      sbom_pattern: '{decl.sbom_pattern}'")
     for name, _kind in decl.channels:
         lines.extend([
             "",
@@ -1978,7 +1999,8 @@ def handle_declarations(invocation: Invocation) -> tuple[dict, int]:
             # for. A field that folds the two says "everyone targets these
             # three" when it means "nobody declared anything".
             "declared": {"targets": [name for name, _ in decl.targets],
-                         "manifestPatterns": list(decl.manifest_patterns)},
+                         "manifestPatterns": list(decl.manifest_patterns),
+                         "sbomPattern": decl.sbom_pattern},
             "pinned": pinned_socle(project),
             "managedBy": stamp.group(1) if stamp else "",
             "runners": read_runners(project),
@@ -2154,7 +2176,7 @@ def branch_protection(repository: str, branch: str, classic: str,
                     " move it, and a tag proves only what the tag proves")
 
 
-def repository_checks(project: pathlib.Path, gate: str) -> list[tuple[str, str]]:
+def repository_checks(project: pathlib.Path, gate: str, decl_sbom: str = "") -> list[tuple[str, str]]:
     """What the release workflow needs of the GitHub repository behind origin.
 
     GitHub creates a missing environment on first use, without rules, so
@@ -2172,6 +2194,13 @@ def repository_checks(project: pathlib.Path, gate: str) -> list[tuple[str, str]]
     if repository_data.get("private"):
         found.append(("note", f"{repository} is private: the release ships no provenance attestation (GitHub reserves"
                               " them to paid plans); the signed tag and SHA256SUMS remain"))
+        if decl_sbom:
+            # The check that the document names its subject still runs; what
+            # is missing is the signature over that link, and a reader of the
+            # release has to be told which of the two they are holding.
+            found.append(("note", f"{repository} is private: the SBOM {decl_sbom} is published but not attested."
+                                  " The release still refuses a document that names no subject or records a"
+                                  " digest that disagrees; nothing signs the link"))
     environment = github_api(f"repos/{repository}/environments/release")
     if environment is None:
         found.append(("fail", f"environment release is missing in {repository}; create it and limit its deployments to tags v*"))
@@ -2206,7 +2235,8 @@ def handle_preflight(invocation: Invocation) -> tuple[dict, int]:
     """What the release workflow will demand of the tag, before it exists."""
     decl, data = check_data(invocation)
     require_socle_mechanism(decl.project, decl.mechanism, "preflight")
-    gate = (tag_checks(decl.project, decl.version) + repository_checks(decl.project, decl.gate)) \
+    gate = (tag_checks(decl.project, decl.version)
+            + repository_checks(decl.project, decl.gate, decl.sbom_pattern)) \
         if data["valid"] else []
     data["preflight"] = [{"status": status, "message": message} for status, message in gate]
     data["violations"].extend(message for status, message in gate if status == "fail")

@@ -75,6 +75,21 @@ on:
         required: false
         type: string
         default: '*.tar.gz *.deb *.rpm'
+      sbom_pattern:
+        description: >-
+          Glob of the SBOM a build leaves in dist/, SPDX or CycloneDX. Empty
+          by default, which attests nothing beyond provenance. When it names
+          a document, the release does not guess what that document
+          describes: it reads the subject the document names itself (SPDX
+          DESCRIBES or documentDescribes, CycloneDX metadata.component),
+          requires that file to exist in this target's dist/, and requires
+          its SHA-256 to equal the one the document records. A document that
+          names no subject, or names one whose digest differs, stops the
+          release rather than producing a link nobody can rely on. One
+          document per target: an attestation carries one predicate.
+        required: false
+        type: string
+        default: ''
       linux_x86_64_runner:
         required: false
         type: string
@@ -262,19 +277,147 @@ jobs:
           set -euo pipefail
           eval "${PACKAGE_COMMAND//TARGET/$TARGET}"
           test -n "$(ls dist 2>/dev/null)"
+      - name: Read the subject the SBOM names
+        # Runs whether or not anything will be attested. A document that
+        # disagrees with the archive beside it is wrong on a private
+        # repository too, and there the check is the only thing left.
+        id: sbom
+        if: inputs.sbom_pattern != ''
+        shell: bash
+        env:
+          SBOM_PATTERN: ${{ inputs.sbom_pattern }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          command -v jq >/dev/null || { echo "::error::sbom_pattern needs jq on this runner" >&2; exit 1; }
+          # The build runner is the product's to declare, so neither digest
+          # tool is assumed: Linux carries sha256sum, macOS carries it in
+          # /sbin and shasum everywhere, and a self-hosted runner carries
+          # whichever it was built with.
+          digest_of() {
+            if command -v sha256sum >/dev/null 2>&1; then sha256sum <"$1" | cut -d' ' -f1
+            else shasum -a 256 <"$1" | cut -d' ' -f1; fi
+          }
+          # The glob is a find argument, never a shell word: this shell
+          # never expands it against the working directory.
+          found=""
+          count=0
+          while IFS= read -r path; do
+            # A here-string built from no output still feeds one empty line,
+            # and an empty document name would leave the attestation step
+            # skipped without a word: the silence this entry exists to end.
+            [ -n "$path" ] || continue
+            found="$found $path"
+            count=$((count + 1))
+            document="$path"
+          done <<<"$(find dist -maxdepth 1 -type f -name "$SBOM_PATTERN" | sort)"
+          if [ "$count" -eq 0 ]; then
+            echo "::error::sbom_pattern is $SBOM_PATTERN and dist/ holds no such document" >&2
+            exit 1
+          fi
+          if [ "$count" -gt 1 ]; then
+            echo "::error::$SBOM_PATTERN names $count documents in dist/ ($found ); an attestation carries one predicate, so declare a glob naming one per target" >&2
+            exit 1
+          fi
+          # The document names its own subject. SPDX says so with a DESCRIBES
+          # relationship or the documentDescribes shorthand, and the element
+          # it points at carries packageFileName or fileName with its
+          # checksums; CycloneDX says so with metadata.component and its
+          # hashes. The socle reads that and nothing else: pairing by file
+          # name would be a convention, and attesting every package of the
+          # target would attribute one component list to archives assembled
+          # by format. Naming a subject wrongly is worse than naming none.
+          short="${document##*/}"
+          named="$(jq -r '
+            . as $doc
+            | if $doc.spdxVersion then
+                ((($doc.documentDescribes // [])
+                  + [$doc.relationships[]?
+                     | select(.relationshipType == "DESCRIBES")
+                     | .relatedSpdxElement]) | unique) as $ids
+                | (($doc.packages // []) + ($doc.files // []))
+                | map(select(.SPDXID as $i | $ids | index($i)))[]
+                | [(.packageFileName // .fileName // ""),
+                   ((.checksums // [] | map(select(.algorithm == "SHA256"))
+                     | first | .checksumValue) // "")]
+                | @tsv
+              else
+                $doc.metadata.component as $c
+                | [($c.name // ""),
+                   (($c.hashes // [] | map(select(.alg == "SHA-256"))
+                     | first | .content) // "")]
+                | @tsv
+              end
+            ' "$document" 2>/dev/null || true)"
+          # A document may point at nothing, or at an element that is not
+          # there. Both leave this empty, and both are a refusal.
+          if [ -z "$named" ]; then
+            echo "::error::$short names no subject: an SPDX document needs a DESCRIBES relationship (or documentDescribes) reaching an element with packageFileName, a CycloneDX document needs metadata.component" >&2
+            exit 1
+          fi
+          subjects=""
+          while IFS="$(printf '\t')" read -r name want; do
+            [ -n "$name" ] || { echo "::error::$short describes an element that names no file" >&2; exit 1; }
+            [ -n "$want" ] || { echo "::error::$short records no SHA-256 for $name" >&2; exit 1; }
+            [ -f "dist/$name" ] || { echo "::error::$short describes $name, which target $TARGET did not build" >&2; exit 1; }
+            got="$(digest_of "dist/$name")"
+            if [ "$got" != "$want" ]; then
+              echo "::error::$short records $want for $name and dist/$name is $got; the document does not describe what would be published" >&2
+              exit 1
+            fi
+            echo "the SBOM describes $name and its digest agrees"
+            subjects="${subjects}dist/$name"$'\n'
+          done <<<"$named"
+          {
+            echo "document=$document"
+            echo "subjects<<SUBJECTS"
+            printf '%s' "$subjects"
+            echo "SUBJECTS"
+          } >>"$GITHUB_OUTPUT"
       - name: Provenance attestation
+        id: provenance
         if: inputs.attestation == 'always' || (inputs.attestation == 'auto' && !github.event.repository.private)
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: dist/*
+      - name: SBOM attestation
+        id: sbom-attestation
+        if: steps.sbom.outputs.document != '' && steps.provenance.outcome == 'success'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ steps.sbom.outputs.subjects }}
+          sbom-path: ${{ steps.sbom.outputs.document }}
+      - name: Keep both attestation bundles with the artifacts
+        # A verifier offline needs the predicates, not a promise that GitHub
+        # holds them. One bundle without the other says nothing: provenance
+        # alone does not bind the SBOM to the archive, and the SBOM predicate
+        # alone does not say where either came from. The names carry the
+        # target, because publish assembles every target into one directory.
+        if: steps.provenance.outcome == 'success'
+        shell: bash
+        env:
+          PRODUCT: ${{ inputs.product }}
+          TARGET: ${{ matrix.target }}
+          PROVENANCE: ${{ steps.provenance.outputs.bundle-path }}
+          SBOM_BUNDLE: ${{ steps.sbom-attestation.outputs.bundle-path }}
+        run: |
+          set -euo pipefail
+          cp "$PROVENANCE" "dist/${PRODUCT}-${TARGET}.provenance.intoto.jsonl"
+          if [ -n "$SBOM_BUNDLE" ]; then
+            cp "$SBOM_BUNDLE" "dist/${PRODUCT}-${TARGET}.sbom.intoto.jsonl"
+          fi
       - name: No provenance attestation
         if: inputs.attestation == 'never' || (inputs.attestation == 'auto' && github.event.repository.private)
         env:
           ATTESTATION: ${{ inputs.attestation }}
+          SBOM_DOCUMENT: ${{ steps.sbom.outputs.document }}
         run: |
           reason="private repository: GitHub reserves attestations to paid plans"
           test "$ATTESTATION" != never || reason="the attestation input is never"
           echo "::notice::no provenance attestation ($reason); the signed tag and SHA256SUMS remain"
+          if [ -n "$SBOM_DOCUMENT" ]; then
+            echo "::notice::the SBOM is published but not attested ($reason): it names the file it describes and the socle checked that digest, but nothing signs that link. A consumer has the document, not a proof it belongs to this archive"
+          fi
       - name: Hand the artifacts to publish
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -319,13 +462,16 @@ jobs:
           for pattern in $MANIFEST_PATTERNS; do set -- "$@" -o -name "$pattern"; done
           shift
           set +f
+          # The attestation bundles travel with the packages: a verifier
+          # offline needs the predicates themselves. They carry their target
+          # in their name, so the check below holds them to the same rule.
           mkdir -p dist
           # A name that reaches the release must name one file. When two
           # targets produce the same name, the release keeps one set of bytes
           # and SHA256SUMS vouches for it: the manifest agrees with itself and
           # describes a file the other target never built. Identical bytes are
           # the one harmless case, so the test is the digest and not the name.
-          find incoming -type f \( "$@" -o -name '*.sha256' \) -print0 \
+          find incoming -type f \( "$@" -o -name '*.sha256' -o -name '*.intoto.jsonl' \) -print0 \
             | while IFS= read -r -d '' path; do
                 printf '%s\t%s\t%s\n' "${path##*/}" \
                   "$(sha256sum <"$path" | cut -d' ' -f1)" "$path"
@@ -345,7 +491,7 @@ jobs:
           fi
           # The bytes come from the build's artifacts, never from a draft a
           # writing job could have edited between the two.
-          find incoming -type f \( "$@" -o -name '*.sha256' \) -exec cp {} dist/ \;
+          find incoming -type f \( "$@" -o -name '*.sha256' -o -name '*.intoto.jsonl' \) -exec cp {} dist/ \;
           (cd dist && sha256sum -c -- ./*.sha256)
           # Only the archive kinds the product actually built: a library ships
           # tarballs alone, a command may add deb and rpm packages, and

@@ -809,11 +809,11 @@ class ProductNeedsTest(unittest.TestCase):
         # Effective and declared are not the same answer: folding them makes a
         # fleet read "everyone targets these three" where nobody declared one.
         self.assertEqual(data["targets"], ["linux-x86_64", "linux-arm64", "macos-arm64"])
-        self.assertEqual(data["declared"], {"targets": [], "manifestPatterns": []})
+        self.assertEqual(data["declared"], {"targets": [], "manifestPatterns": [], "sbomPattern": ""})
         self.product.write("packaging/release", "[targets]\nlinux-arm64\n\n[manifest]\n*.wasm\n")
         data = self.product.json("declarations", self.dir)["data"]
         self.assertEqual(data["declared"], {"targets": ["linux-arm64"],
-                                            "manifestPatterns": ["*.wasm"]})
+                                            "manifestPatterns": ["*.wasm"], "sbomPattern": ""})
         self.assertEqual(data["manifestPatterns"], "*.tar.gz *.deb *.rpm *.wasm")
 
     def test_the_contract_carries_the_pin_its_file_and_the_stamp(self) -> None:
@@ -2194,6 +2194,41 @@ class DeclarationHomeTest(unittest.TestCase):
                          ["linux-arm64"])
 
 
+class SbomDeclarationTest(unittest.TestCase):
+    """The [sbom] section of the declaration file."""
+
+    def parse(self, text: str):
+        return MODULE.parse_release(textwrap.dedent(text))
+
+    def test_one_glob_is_read(self) -> None:
+        _, _, _, sbom, _, _, unknown = self.parse("""\
+            [sbom]
+            *.spdx.json
+            """)
+        self.assertEqual(sbom, "*.spdx.json")
+        self.assertEqual(unknown, [])
+
+    def test_a_second_glob_is_refused(self) -> None:
+        """An attestation carries one predicate, so the entry names one document."""
+        with self.assertRaises(ValueError) as refusal:
+            self.parse("[sbom]\n*.spdx.json\n*.cdx.json\n")
+        self.assertIn("holds one glob", str(refusal.exception))
+
+    def test_the_section_is_optional(self) -> None:
+        _, _, _, sbom, _, _, _ = self.parse("[manifest]\n*.wasm\n")
+        self.assertEqual(sbom, "")
+
+    def test_it_renders_into_the_workflow(self) -> None:
+        declaration = MODULE.Declarations(pathlib.Path("."), "maelys-fixture")
+        declaration.sbom_pattern = "*.spdx.json"
+        workflow = MODULE.release_workflow(declaration, "0" * 40, "v9.9.9", "9.9.9")
+        self.assertIn("      sbom_pattern: '*.spdx.json'", workflow)
+
+    def test_nothing_is_rendered_without_it(self) -> None:
+        declaration = MODULE.Declarations(pathlib.Path("."), "maelys-fixture")
+        self.assertNotIn("sbom_pattern", MODULE.release_workflow(declaration, "0" * 40, "v9.9.9", "9.9.9"))
+
+
 class ChannelMarkerTest(unittest.TestCase):
     """The marker the rehearsal composes is the one channel.yml attaches.
 
@@ -2381,23 +2416,23 @@ class UnitTest(unittest.TestCase):
 
     def test_parse_release(self) -> None:
         self.assertEqual(MODULE.parse_release("[targets]\nlinux-arm64\nwasm32 ubuntu-26.04\n"),
-                         ([("linux-arm64", ""), ("wasm32", "ubuntu-26.04")], [], [], "", "", []))
+                         ([("linux-arm64", ""), ("wasm32", "ubuntu-26.04")], [], [], "", "", "", []))
         self.assertEqual(MODULE.parse_release("[targets]\nmacos-arm64 self-hosted ARM64\n"),
-                         ([("macos-arm64", ["self-hosted", "ARM64"])], [], [], "", "", []))
-        self.assertEqual(MODULE.parse_release("[manifest]\n*.wasm\n"), ([], ["*.wasm"], [], "", "", []))
+                         ([("macos-arm64", ["self-hosted", "ARM64"])], [], [], "", "", "", []))
+        self.assertEqual(MODULE.parse_release("[manifest]\n*.wasm\n"), ([], ["*.wasm"], [], "", "", "", []))
         self.assertEqual(MODULE.parse_release("[channels]\nnpm github-packages\n"),
-                         ([], [], [("npm", "github-packages")], "", "", []))
-        self.assertEqual(MODULE.parse_release("[gate]\nnone\n"), ([], [], [], "none", "", []))
-        self.assertEqual(MODULE.parse_release("[gate]\nreviewer\n"), ([], [], [], "reviewer", "", []))
-        self.assertEqual(MODULE.parse_release("# nothing declared\n"), ([], [], [], "", "", []))
+                         ([], [], [("npm", "github-packages")], "", "", "", []))
+        self.assertEqual(MODULE.parse_release("[gate]\nnone\n"), ([], [], [], "", "none", "", []))
+        self.assertEqual(MODULE.parse_release("[gate]\nreviewer\n"), ([], [], [], "", "reviewer", "", []))
+        self.assertEqual(MODULE.parse_release("# nothing declared\n"), ([], [], [], "", "", "", []))
         # A section this socle does not know is named and skipped, never fatal:
         # a product pins the socle by commit, and losing its targets in
         # silence on an older socle is worse than an unapplied section.
         self.assertEqual(MODULE.parse_release("[targets]\nlinux-arm64\n[bsd]\nx\n"),
-                         ([("linux-arm64", "")], [], [], "", "", ["[bsd] at line 3"]))
+                         ([("linux-arm64", "")], [], [], "", "", "", ["[bsd] at line 3"]))
         # A version materialised twice: the command that regenerates the second.
         self.assertEqual(MODULE.parse_release("[cut]\nafter-version bash scripts/header.sh\n"),
-                         ([], [], [], "", "bash scripts/header.sh", []))
+                         ([], [], [], "", "", "bash scripts/header.sh", []))
         for text in ("linux-arm64\n",                      # outside a section
                      "[targets]\nwasm32\n",                # no runner and no default
                      "[targets]\nWASM\n",                  # not a target name
