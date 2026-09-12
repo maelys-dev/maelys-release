@@ -2458,6 +2458,36 @@ class DependenciesTest(unittest.TestCase):
         self.assertTrue(any("untracked" in note and "left.o" in note for note in data["notes"]), data["notes"])
         self.assertTrue((self.home / "maelys-system" / "left.o").exists())
 
+    def test_a_disagreement_between_pins_is_noted_and_changes_nothing(self) -> None:
+        """The case the design must survive, not the case that happens to be absent.
+
+        Two products pin the same dependency at different commits whenever
+        one has adopted a release and the other has not. What is on disk is
+        the product's pin, which is what CI clones, so a build here and a
+        build there fail and pass together. The disagreement is named; it is
+        never materialised, because a directory holding a dependency's own
+        pins would pass a build CI refuses, and never refused, because the
+        fleet disagrees while green.
+        """
+        self.product.run("dependencies", self.dir, "--apply")
+        checkout = self.home / "maelys-system"
+        # The dependency pins the product's own dependency elsewhere, and one
+        # the product does not pin at all.
+        (checkout / "dependencies").mkdir()
+        (checkout / "dependencies" / "maelys-system.pin").write_text(
+            f"{PINNED_TAG}\n{self.product.tagged}\n", encoding="utf-8")
+        (checkout / "dependencies" / "absent.pin").write_text("v9.9.9\n" + "c" * 40 + "\n", encoding="utf-8")
+        data = self.product.json("dependencies", self.dir, "--apply")["data"]
+        self.assertFalse(data["blocked"], "a disagreement is not a refusal")
+        self.assertEqual([entry["name"] for entry in data["dependencies"]], ["maelys-system"])
+        self.assertFalse((self.home / "absent").exists(), "what a dependency pins is not materialised")
+        notes = "\n".join(data["notes"])
+        self.assertIn("pins absent v9.9.9", notes)
+        self.assertIn(f"pins maelys-system at {PINNED_TAG}", notes)
+        self.assertIn("as in CI", notes)
+        # And what is on disk is still the product's pin, not the other one.
+        self.assertEqual(self.product.git(checkout, "rev-parse", "HEAD"), self.product.pinned)
+
     def test_a_broken_pin_materialises_nothing(self) -> None:
         self.product.write("dependencies/broken.pin", "v1.0.0\nnot-a-commit\n")
         error = self.product.json("dependencies", self.dir, "--apply", expect=1)["error"]
@@ -2552,6 +2582,23 @@ jobs:
         (work / ".github" / "workflows" / "ci.yml").write_text("name: ci\njobs:\n  mine:\n    runs-on: x\n",
                                                                encoding="utf-8")
         self.assertEqual(MODULE.socle_check_contexts(work), ("", []))
+
+
+class RepositoryChecksTest(unittest.TestCase):
+    """One reader of the repository, and no way for a caller to pass half of it."""
+
+    def test_it_takes_the_declaration_and_not_a_handful_of_fields(self) -> None:
+        """cut passed two of four, so every product with a formula in the tap
+        was told under `cut` that nothing declared it, remedy inverted, at the
+        moment of cutting a release. An optional parameter is a way to lose
+        something quietly."""
+        source = CLI.read_text(encoding="utf-8")
+        self.assertIn("def repository_checks(decl: Declarations)", source)
+        callers = [line.strip() for line in source.splitlines() if "repository_checks(" in line
+                   and not line.strip().startswith("def ")]
+        self.assertTrue(callers)
+        for caller in callers:
+            self.assertIn("repository_checks(decl)", caller, caller)
 
 
 class TapDriftTest(unittest.TestCase):

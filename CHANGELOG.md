@@ -29,6 +29,20 @@
   a dependency pins, the product pins it, as maelys-oci pins maelys-json for
   the maelys-cli it builds. What a materialised dependency pins is read and
   noted, never materialised and never refused.
+- **A disagreement between a product's pin and a dependency's own is noted
+  and changes nothing.** What is on disk is the product's pin, which is what
+  CI clones, so a build here and a build there fail and pass together. That
+  property is what makes the design right, not the fact that the fleet
+  happens to agree today: it holds under disagreement, which is the state
+  every product is in between one adoption and the next.
+- **`repository_checks` takes the declaration and not a handful of its
+  fields.** It took four, three with a default, and `cut` passed two: every
+  product with a formula in the tap was told under `cut` that nothing
+  declared it, **with the remedy inverted**, at the moment the operator was
+  cutting a release — and the SBOM note went missing there too. An optional
+  parameter is a way for a caller to lose something quietly; a declaration
+  cannot be passed by halves. A test holds every call site to it. Reported by
+  maelys-http, who met the note while cutting.
 - `parse_pin` reads one pin for both `check` and this command, so a second
   reading cannot drift from the first. `cache_root` and `git_base` name the
   two conventions the socle already had in two places.

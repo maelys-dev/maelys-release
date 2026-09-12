@@ -2376,16 +2376,24 @@ def tap_drift(repository: str, formulas: list[str], tap: str = "") -> list[tuple
     return found
 
 
-def repository_checks(project: pathlib.Path, gate: str, decl_sbom: str = "",
-                      decl_formulas: list[str] | None = None) -> list[tuple[str, str]]:
+def repository_checks(decl: Declarations) -> list[tuple[str, str]]:
     """What the release workflow needs of the GitHub repository behind origin.
 
     GitHub creates a missing environment on first use, without rules, so
     presence proves nothing: the environment must limit deployments to tags
     v*, which keeps a workflow_dispatch from a branch, or a release.yml
     edited on a branch, from publishing.
+
+    It takes the declaration and not a handful of its fields. It took four
+    of them, three with a default, and cut passed two: every product with a
+    formula in the tap was told under `cut` that nothing declared it, with
+    the remedy inverted, at the moment the operator was cutting a release --
+    and the sbom note went missing there too. An optional parameter is a way
+    for a caller to lose something quietly; a declaration cannot be passed
+    by halves. maelys-http reported it.
     """
-    decl_formulas = decl_formulas or []
+    project, gate = decl.project, decl.gate
+    decl_sbom, decl_formulas = decl.sbom_pattern, decl.formulas
     found: list[tuple[str, str]] = []
     repository = github_repository(project)
     if not repository:
@@ -2442,7 +2450,7 @@ def handle_preflight(invocation: Invocation) -> tuple[dict, int]:
     decl, data = check_data(invocation)
     require_socle_mechanism(decl.project, decl.mechanism, "preflight")
     gate = (tag_checks(decl.project, decl.version)
-            + repository_checks(decl.project, decl.gate, decl.sbom_pattern, decl.formulas)) \
+            + repository_checks(decl)) \
         if data["valid"] else []
     data["preflight"] = [{"status": status, "message": message} for status, message in gate]
     data["violations"].extend(message for status, message in gate if status == "fail")
@@ -2726,7 +2734,7 @@ def cut_gate(decl: Declarations, version: str) -> list:
     """
     gate = tag_checks(decl.project, version)
     if decl.releases_here:
-        gate += repository_checks(decl.project, decl.gate)
+        gate += repository_checks(decl)
     return gate
 
 
