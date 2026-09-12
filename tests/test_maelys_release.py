@@ -24,6 +24,10 @@ import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 CLI = ROOT / "bin" / "maelys-release"
+# A conformant product with pins says where its build reads them. Appended
+# and never prepended: the refusals of this file are reported with their
+# line number, and three lines at the top would move every one of them.
+APART = "\n[dependencies]\napart\n"
 PINNED_TAG = "v0.0.1"
 
 
@@ -72,6 +76,8 @@ class Product:
         self.write("scripts/package-release.sh", "#!/bin/sh\nexit 0\n", executable=True)
         self.write("dependencies/maelys-system.pin", f"{PINNED_TAG}-1-g{self.pinned[:7]}\n{self.pinned}\n")
         self.write("dependencies/packages", "# build inputs\n[linux]\npkg-config\nlibjansson-dev\n\n[macos]\njansson\n")
+        self.write("maelys-release.conf", APART.lstrip("\n"))
+        # A conformant product with pins says where its build reads them.
         self.write("packaging/homebrew/maelys-fixture.rb.in", "class MaelysFixture < Formula\nend\n")
         self.write("packaging/homebrew/libmaelys-fixture.rb.in", "class LibmaelysFixture < Formula\nend\n")
         self.write("AGENTS.md", "# Agent instructions\n\nKeep me.\n")
@@ -273,7 +279,7 @@ class AdoptTest(unittest.TestCase):
             "\n  id-token: write",
             "  workflow_dispatch:",
             "      tag: ${{ inputs.tag || github.ref_name }}",
-            "        sh scripts/checkout-dependency.sh maelys-system\n",
+            '        sh scripts/checkout-dependencies.sh "$RUNNER_TEMP/dependencies" >>"$GITHUB_ENV"\n',
             "      linux_packages: build-essential dpkg-dev file rpm pkg-config libjansson-dev\n",
             "      macos_packages: jansson\n",
             "  tap-maelys-fixture:",
@@ -650,8 +656,8 @@ class ProductNeedsTest(unittest.TestCase):
         self.assertNotIn("verify_command:", self.product.read(".github/workflows/release.yml"))
 
     def test_a_product_declares_the_targets_it_builds(self) -> None:
-        self.product.write("packaging/release",
-                           "[targets]\nlinux-x86_64\nlinux-arm64\nmacos-arm64\nwasm32 ubuntu-26.04\n")
+        self.product.write("maelys-release.conf",
+                           "[targets]\nlinux-x86_64\nlinux-arm64\nmacos-arm64\nwasm32 ubuntu-26.04\n" + APART)
         self.product.run("adopt", self.dir, "--apply")
         workflow = self.product.read(".github/workflows/release.yml")
         self.assertIn('targets: \'[{"target": "linux-x86_64"}, {"target": "linux-arm64"},'
@@ -661,13 +667,13 @@ class ProductNeedsTest(unittest.TestCase):
         self.assertNotIn('"linux-x86_64", "runner"', workflow)
 
     def test_a_runner_is_a_label_or_a_label_set(self) -> None:
-        self.product.write("packaging/release", "[targets]\nmacos-arm64 self-hosted macOS ARM64\n")
+        self.product.write("maelys-release.conf", "[targets]\nmacos-arm64 self-hosted macOS ARM64\n" + APART)
         self.product.run("adopt", self.dir, "--apply")
         self.assertIn('{"target": "macos-arm64", "runner": ["self-hosted", "macOS", "ARM64"]}',
                       self.product.read(".github/workflows/release.yml"))
 
     def test_a_product_adds_an_archive_kind_to_the_manifest(self) -> None:
-        self.product.write("packaging/release", "[manifest]\n*.wasm\nreceipt.json\n")
+        self.product.write("maelys-release.conf", "[manifest]\n*.wasm\nreceipt.json\n" + APART)
         self.product.run("adopt", self.dir, "--apply")
         self.assertIn("manifest_patterns: '*.tar.gz *.deb *.rpm *.wasm receipt.json'",
                       self.product.read(".github/workflows/release.yml"))
@@ -685,14 +691,14 @@ class ProductNeedsTest(unittest.TestCase):
         # The scope is the release mechanism, so the product must be on it
         # before the declaration means anything.
         self.product.run("adopt", self.dir, "--apply")
-        self.product.write("packaging/release", "[targets]\nwasm32\n")
+        self.product.write("maelys-release.conf", "[targets]\nwasm32\n" + APART)
         data = self.product.json("declarations", self.dir, expect=2)["data"]
         self.assertFalse(data["valid"])
         self.assertTrue(any("names no runner" in check["message"] for check in data["checks"]),
                         data["checks"])
 
     def test_a_product_declares_a_publication_channel(self) -> None:
-        self.product.write("packaging/release", "[channels]\nnpm github-packages\n")
+        self.product.write("maelys-release.conf", "[channels]\nnpm github-packages\n" + APART)
         self.product.write("scripts/publish-channel.sh", "#!/bin/sh\nexit 0\n", executable=True)
         self.product.run("adopt", self.dir, "--apply")
         workflow = self.product.read(".github/workflows/release.yml")
@@ -718,7 +724,7 @@ class ProductNeedsTest(unittest.TestCase):
         self.assertIn('gh release upload "$TAG"', record)
         self.assertIn('"channel-$CHANNEL.json"', record)
         # the caller must grant what that job narrows to
-        self.product.write("packaging/release", "[channels]\nnpm github-packages\n")
+        self.product.write("maelys-release.conf", "[channels]\nnpm github-packages\n" + APART)
         self.product.write("scripts/publish-channel.sh", "#!/bin/sh\nexit 0\n", executable=True)
         self.product.run("adopt", self.dir, "--apply")
         caller = self.product.read(".github/workflows/release.yml")
@@ -728,7 +734,7 @@ class ProductNeedsTest(unittest.TestCase):
 
     def test_a_channel_without_its_script_is_a_violation(self) -> None:
         self.product.run("adopt", self.dir, "--apply")
-        self.product.write("packaging/release", "[channels]\nnpm github-packages\n")
+        self.product.write("maelys-release.conf", "[channels]\nnpm github-packages\n" + APART)
         data = self.product.json("declarations", self.dir, expect=2)["data"]
         self.assertFalse(data["valid"])
         self.assertTrue(any("publish-channel.sh" in check["message"] for check in data["checks"]),
@@ -745,7 +751,7 @@ class ProductNeedsTest(unittest.TestCase):
 
     def test_the_socle_serves_no_registry_it_cannot_reach(self) -> None:
         self.product.run("adopt", self.dir, "--apply")
-        self.product.write("packaging/release", "[channels]\nsdk pypi\n")
+        self.product.write("maelys-release.conf", "[channels]\nsdk pypi\n" + APART)
         data = self.product.json("declarations", self.dir, expect=2)["data"]
         self.assertTrue(any("serves no pypi channel" in check["message"] for check in data["checks"]),
                         data["checks"])
@@ -753,7 +759,7 @@ class ProductNeedsTest(unittest.TestCase):
     def test_the_generated_caller_grants_every_scope_its_workflows_declare(self) -> None:
         """A caller that under-grants fails the whole run at startup, the
         release job included, so this is checked here and not on a runner."""
-        self.product.write("packaging/release", "[channels]\nnpm github-packages\n")
+        self.product.write("maelys-release.conf", "[channels]\nnpm github-packages\n" + APART)
         self.product.write("scripts/publish-channel.sh", "#!/bin/sh\nexit 0\n", executable=True)
         self.product.write("packaging/homebrew/maelys-fixture.rb.in", "class F < Formula\nend\n")
         self.product.run("adopt", self.dir, "--apply")
@@ -811,11 +817,11 @@ class ProductNeedsTest(unittest.TestCase):
         # Effective and declared are not the same answer: folding them makes a
         # fleet read "everyone targets these three" where nobody declared one.
         self.assertEqual(data["targets"], ["linux-x86_64", "linux-arm64", "macos-arm64"])
-        self.assertEqual(data["declared"], {"targets": [], "manifestPatterns": [], "sbomPattern": "", "macosRunner": []})
-        self.product.write("packaging/release", "[targets]\nlinux-arm64\n\n[manifest]\n*.wasm\n")
+        self.assertEqual(data["declared"], {"targets": [], "manifestPatterns": [], "sbomPattern": "", "macosRunner": [], "dependenciesApart": True})
+        self.product.write("maelys-release.conf", "[targets]\nlinux-arm64\n\n[manifest]\n*.wasm\n" + APART)
         data = self.product.json("declarations", self.dir)["data"]
         self.assertEqual(data["declared"], {"targets": ["linux-arm64"],
-                                            "manifestPatterns": ["*.wasm"], "sbomPattern": "", "macosRunner": []})
+                                            "manifestPatterns": ["*.wasm"], "sbomPattern": "", "macosRunner": [], "dependenciesApart": True})
         self.assertEqual(data["manifestPatterns"], "*.tar.gz *.deb *.rpm *.wasm")
 
     def test_the_contract_carries_the_pin_its_file_and_the_stamp(self) -> None:
@@ -1468,10 +1474,12 @@ class GoldenTest(unittest.TestCase):
         ok       pinned dependencies: maelys-system
         ok       .github/workflows/ci.yml calls check-product.yml of the socle
         ok       dependencies/packages: linux [pkg-config libjansson-dev] macos [jansson]
+        ok       maelys-release.conf [dependencies] apart: the build reads $MAELYS_DEPENDENCIES_DIR, and the socle materialises the pins there
         """)
     FILES = textwrap.dedent("""\
         same     .github/workflows/release.yml
         same     scripts/checkout-dependency.sh
+        same     scripts/checkout-dependencies.sh
         same     AGENTS.md
         same     CLAUDE.md
         same     .claude/skills/maelys-release/SKILL.md
@@ -1755,7 +1763,7 @@ class CutTest(unittest.TestCase):
         self.assertIn("before writing anything", noted[0])
 
     def test_check_reads_the_after_version_command(self) -> None:
-        self.product.write("maelys-release.conf", "[cut]\nafter-version bash scripts/header.sh\n")
+        self.product.write("maelys-release.conf", "[cut]\nafter-version bash scripts/header.sh\n" + APART)
         messages = self.product.json("check", str(self.dir), expect=2)["data"]["conventions"]["violations"]
         self.assertTrue(any("scripts/header.sh" in message and "does not carry" in message
                             for message in messages), messages)
@@ -1827,7 +1835,7 @@ class CutTest(unittest.TestCase):
                            '#!/bin/sh\nprintf \'#define VERSION "%s"\\n\' "$(cat VERSION)" >include/version.h\n',
                            executable=True)
         self.product.write("scripts/verify-release.sh", "#!/bin/sh\ntouch verified\n", executable=True)
-        self.product.write("maelys-release.conf", "[cut]\nafter-version sh scripts/header.sh\n")
+        self.product.write("maelys-release.conf", "[cut]\nafter-version sh scripts/header.sh\n" + APART)
         self.product.git(self.dir, "add", "-A")
         self.product.git(self.dir, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "a version in two files")
         self.product.git(self.dir, "push", "-q", "origin", "main")
@@ -1854,7 +1862,7 @@ class CutTest(unittest.TestCase):
         self.product.write("CHANGELOG.md",
                            "# Changelog\n\n## 1.3.0 — 2026-09-03\n\n- Next.\n\n## 1.2.3 — 2026-09-03\n\n- Something.\n")
         self.product.write("scripts/header.sh", "#!/bin/sh\necho broken >&2\nexit 3\n", executable=True)
-        self.product.write("packaging/release", "[cut]\nafter-version sh scripts/header.sh\n")
+        self.product.write("maelys-release.conf", "[cut]\nafter-version sh scripts/header.sh\n" + APART)
         self.product.git(self.dir, "add", "-A")
         self.product.git(self.dir, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "a generator that fails")
         self.product.git(self.dir, "push", "-q", "origin", "main")
@@ -1921,7 +1929,7 @@ class CutTest(unittest.TestCase):
         self.product.write("scripts/header.sh",
                            '#!/bin/sh\nprintf \'#define VERSION "%s"\\n\' "$(cat VERSION)" >include/version.h\n',
                            executable=True)
-        self.product.write("maelys-release.conf", "[cut]\nafter-version sh scripts/header.sh\n")
+        self.product.write("maelys-release.conf", "[cut]\nafter-version sh scripts/header.sh\n" + APART)
         self.product.write("CHANGELOG.md",
                            "# Changelog\n\n## 1.3.0 — 2026-09-03\n\n- Next.\n\n## 1.2.3 — 2026-09-03\n\n- Something.\n")
         self.product.git(self.dir, "add", "-A")
@@ -2253,6 +2261,10 @@ class DeclarationHomeTest(unittest.TestCase):
         self.product = Product()
         self.dir = self.product.dir
         self.product.run("adopt", str(self.dir), "--apply")
+        # These tests are about a repository whose declarations are still at
+        # the former path, so the current one must not also be there: the
+        # fixture carries it, and carrying both is a different violation.
+        (self.dir / "maelys-release.conf").unlink(missing_ok=True)
         self.product.git(self.dir, "init", "-q")
 
     def tearDown(self) -> None:
@@ -2264,7 +2276,7 @@ class DeclarationHomeTest(unittest.TestCase):
 
     def test_the_former_home_is_still_read_and_reported(self) -> None:
         """Carrying it is the violation; losing the declarations would be worse."""
-        self.product.write("packaging/release", "[targets]\nlinux-arm64\n")
+        self.product.write("packaging/release", "[targets]\nlinux-arm64\n" + APART)
         data = self.product.json("check", str(self.dir), expect=2)["data"]
         self.assertFalse(data["conventions"]["valid"])
         self.assertTrue(any("moved to maelys-release.conf" in message
@@ -2275,7 +2287,7 @@ class DeclarationHomeTest(unittest.TestCase):
 
     def test_adopt_moves_it_and_git_follows(self) -> None:
         """A status that blocked adopt would put the remedy out of reach."""
-        self.product.write("packaging/release", "[targets]\nlinux-arm64\n")
+        self.product.write("packaging/release", "[targets]\nlinux-arm64\n" + APART)
         self.commit()
         data = self.product.json("adopt", str(self.dir), "--apply")["data"]
         self.assertEqual(data["moved"], "packaging/release")
@@ -2291,8 +2303,8 @@ class DeclarationHomeTest(unittest.TestCase):
         self.assertEqual(self.product.json("check", str(self.dir))["data"]["conventions"]["valid"], True)
 
     def test_carrying_both_is_refused_because_the_socle_cannot_choose(self) -> None:
-        self.product.write("packaging/release", "[targets]\nlinux-arm64\n")
-        self.product.write("maelys-release.conf", "[targets]\nmacos-arm64\n")
+        self.product.write("packaging/release", "[targets]\nlinux-arm64\n" + APART)
+        self.product.write("maelys-release.conf", "[targets]\nmacos-arm64\n" + APART)
         data = self.product.json("check", str(self.dir), expect=2)["data"]
         self.assertTrue(any("carries both" in message for message in data["conventions"]["violations"]))
         # The new home is the one read, so the verdict is not ambiguous either.
@@ -2302,7 +2314,7 @@ class DeclarationHomeTest(unittest.TestCase):
     def test_a_section_a_socle_does_not_know_costs_nothing_else(self) -> None:
         """A product pins the socle by commit: on an older socle, a newer
         section must not take its targets down with it."""
-        self.product.write("maelys-release.conf", "[targets]\nlinux-arm64\n\n[future]\nsomething\n")
+        self.product.write("maelys-release.conf", "[targets]\nlinux-arm64\n\n[future]\nsomething\n" + APART)
         data = self.product.json("check", str(self.dir), expect=2)["data"]
         self.assertTrue(any("[future]" in message for message in data["conventions"]["violations"]))
         self.assertEqual(self.product.json("declarations", str(self.dir), expect=2)["data"]["declared"]["targets"],
@@ -2365,6 +2377,173 @@ class RehearsalEnvironmentTest(unittest.TestCase):
         self.assertIn("gh release edit", channel)
         # Replayed on the same tag, it must not say it twice.
         self.assertIn("already says", channel)
+
+
+class DependenciesApartTest(unittest.TestCase):
+    """Pins without a declaration of where the build reads them.
+
+    The `?= ../NAME` default cannot tell a pinned checkout from the working
+    copy of whoever develops that dependency too, and beside the product is
+    where both would sit: maelys-egress lost four `make check` runs in a day
+    to it. A violation and not a warning, and that is safe: check runs in CI
+    at the socle a product pins, so this bites at the adoption of this socle
+    and nowhere else -- the pull request that adopts carries the Makefile
+    with it.
+    """
+
+    def setUp(self) -> None:
+        self.product = Product()
+        self.dir = str(self.product.dir)
+        self.addCleanup(self.product.close)
+        # Adopted first, so what the tests below read is the declaration and
+        # not the generated files that are missing before any adoption.
+        self.product.run("adopt", self.dir, "--apply")
+
+    def test_pins_without_the_declaration_are_a_violation(self) -> None:
+        self.product.write("maelys-release.conf", "[targets]\nlinux-arm64\n")
+        data = self.product.json("check", self.dir, expect=2)["data"]
+        self.assertFalse(data["conventions"]["valid"])
+        self.assertTrue(any("assumes a sibling" in message
+                            for message in data["conventions"]["violations"]), data["conventions"])
+        # And it blocks adopt, which is where it is meant to be met.
+        error = self.product.json("adopt", self.dir, "--apply", expect=1)["error"]
+        self.assertIn("assumes a sibling", error["message"])
+
+    def test_the_rule_is_read_after_the_declaration_and_not_with_the_pins(self) -> None:
+        """The placement, which was wrong twice in one day.
+
+        The pins are read before the declaration file, so a rule written
+        beside them sees a declaration that has not been parsed yet and
+        refuses a product that declares perfectly well.
+        """
+        data = self.product.json("check", self.dir)["data"]
+        self.assertTrue(data["conventions"]["valid"], data["conventions"]["violations"])
+        self.assertTrue(any("[dependencies] apart" in check["message"] for check in data["checks"]))
+
+    def test_a_product_with_no_pin_is_not_asked_to_declare(self) -> None:
+        for pin in (self.product.dir / "dependencies").glob("*.pin"):
+            pin.unlink()
+        self.product.write("maelys-release.conf", "[targets]\nlinux-arm64\n")
+        self.product.run("adopt", self.dir, "--apply")
+        data = self.product.json("check", self.dir)["data"]
+        self.assertTrue(data["conventions"]["valid"], data["conventions"]["violations"])
+
+    def test_the_declaration_takes_one_word_and_nothing_else(self) -> None:
+        """One word, because every Makefile of the fleet reads <root>/<name>.
+
+        A variable per dependency would be a second list to keep true with
+        the Makefile and with ci.yml, for nothing the root does not give --
+        and the names differ for the same dependency, SYSTEM_DIR here and
+        MAELYS_SYSTEM_DIR there, so the socle would have to learn them.
+        """
+        for text, expected in (("[dependencies]\nmaelys-json MAELYS_JSON_DIR\n", "single word apart"),
+                               ("[dependencies]\napart\napart\n", "holds one line")):
+            with self.assertRaises(ValueError) as refusal:
+                MODULE.parse_release(text)
+            self.assertIn(expected, str(refusal.exception))
+
+    def script(self, *arguments: str, expect: int = 0) -> subprocess.CompletedProcess:
+        completed = subprocess.run(["sh", str(self.product.dir / "scripts" / "checkout-dependencies.sh"),
+                                    *arguments], cwd=self.product.dir, env=self.product.env,
+                                   text=True, check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(completed.returncode, expect, completed.stderr)
+        return completed
+
+    def test_the_plural_script_clones_every_pin_and_prints_one_line(self) -> None:
+        """What the trial of 0.45.0 was missing.
+
+        The socle exports the root in the job it runs, and a job of the
+        product clones on its own runner where that path names nothing: six
+        jobs of maelys-egress failed on the product's own message because
+        nothing had given it to them.
+        """
+        destination = self.product.work / "deps"
+        completed = self.script(str(destination))
+        # One line and nothing else: stdout is appended to $GITHUB_ENV whole.
+        self.assertEqual(len(completed.stdout.splitlines()), 1, completed.stdout)
+        variable, _, printed = completed.stdout.strip().partition("=")
+        self.assertEqual(variable, "MAELYS_DEPENDENCIES_DIR")
+        self.assertEqual(pathlib.Path(printed).resolve(), destination.resolve())
+        self.assertTrue(pathlib.Path(printed).is_absolute(), printed)
+        self.assertEqual(self.product.git(destination / "maelys-system", "rev-parse", "HEAD"),
+                         self.product.pinned)
+        self.assertIn("maelys-system", completed.stderr, "the clones are reported, on stderr")
+
+    def test_the_destination_is_given_and_never_chosen(self) -> None:
+        """A script that picked one would be the ambient default, one level down."""
+        self.assertIn("DESTINATION", self.script(expect=1).stderr)
+
+    def test_an_occupied_destination_is_refused_and_not_replaced(self) -> None:
+        """The singular refuses to replace, and the plural inherits that.
+
+        The command is the tool for a machine that has state -- it refreshes,
+        and refuses a working copy. This clones into what is not there yet,
+        which is what a runner and a container offer.
+        """
+        destination = self.product.work / "deps"
+        self.script(str(destination))
+        again = self.script(str(destination), expect=1)
+        self.assertIn("refusing to replace", again.stderr)
+
+    def test_it_is_managed_and_not_a_stray_script(self) -> None:
+        """adopt writes it beside the singular, so the rule that refuses a
+        product's own checkout-*.sh has to know both names."""
+        files = {entry["path"]: entry for entry in self.product.json("adopt", self.dir)["data"]["files"]}
+        self.assertEqual(files["scripts/checkout-dependencies.sh"]["action"], "same")
+        self.assertTrue(os.access(self.product.dir / "scripts" / "checkout-dependencies.sh", os.X_OK))
+        self.assertTrue(self.product.json("check", self.dir)["data"]["conventions"]["valid"])
+
+    def test_the_release_workflow_gives_the_root_without_listing_the_pins(self) -> None:
+        """The script reads the pins when it runs, so a new pin needs no
+        file regenerated to be cloned everywhere."""
+        workflow = self.product.read(".github/workflows/release.yml")
+        self.assertIn('sh scripts/checkout-dependencies.sh "$RUNNER_TEMP/dependencies" >>"$GITHUB_ENV"',
+                      workflow)
+        self.assertNotIn("checkout-dependency.sh maelys-system", workflow)
+
+    def test_a_job_that_still_clones_beside_the_product_is_named(self) -> None:
+        """The failure of the trial, said before a push instead of by six red
+        jobs after it. A note: ci.yml is the product's file, and the job that
+        clones beside itself already fails on the build's own message."""
+        self.product.write(".github/workflows/ci.yml",
+                           self.product.read(".github/workflows/ci.yml")
+                           + "\n  own:\n    runs-on: ubuntu-26.04\n    steps:\n"
+                             "      - run: sh scripts/checkout-dependency.sh maelys-system\n")
+        data = self.product.json("check", self.dir)["data"]
+        # A note and not a warning: check counts a warning as a violation and
+        # exits 2 while adopt proceeds, which is a product adopting and going
+        # red. The job that clones beside itself already fails on its own.
+        self.assertTrue(data["conventions"]["valid"], data["conventions"]["violations"])
+        self.assertTrue(any(check["status"] == "note" and "clones beside the product" in check["message"]
+                            for check in data["checks"]), data["checks"])
+
+    def test_the_workflow_is_told_which_layout_to_make(self) -> None:
+        """Three places clone, and all three have to know.
+
+        check-product.yml, release.yml through dependency_checkout, and the
+        rehearsal's container. A product that dropped its default while one
+        of them still cloned beside it would break at its next tag, not in
+        CI -- which is the worst place to find out.
+        """
+        check_product = (ROOT / ".github" / "workflows" / "check-product.yml").read_text(encoding="utf-8")
+        self.assertEqual(check_product.count("steps.socle.outputs.apart == ''"), 3)
+        self.assertEqual(check_product.count("steps.socle.outputs.apart != ''"), 3)
+        source = CLI.read_text(encoding="utf-8")
+        self.assertEqual(check_product.count('sh scripts/checkout-dependencies.sh'
+                                            ' "$RUNNER_TEMP/dependencies" >>"$GITHUB_ENV"'), 3)
+        source = CLI.read_text(encoding="utf-8")
+        self.assertIn("DEPENDENCIES_APART", source)
+        self.assertIn("checkout-dependencies.sh /work/dependencies", source)
+
+    def test_adopt_renders_the_layout_the_declaration_asks_for(self) -> None:
+        self.product.write("maelys-release.conf", "[dependencies]\napart\n")
+        self.product.run("adopt", self.dir, "--apply")
+        workflow = self.product.read(".github/workflows/release.yml")
+        self.assertIn('sh scripts/checkout-dependencies.sh "$RUNNER_TEMP/dependencies"', workflow)
+        self.product.write("maelys-release.conf", "[targets]\nlinux-arm64\n")
+        # Not conformant any more, so adopt refuses: the rendering above is
+        # what a product gets only once it has said it reads the root.
+        self.product.json("adopt", self.dir, "--apply", expect=1)
 
 
 class DependenciesTest(unittest.TestCase):
@@ -2666,7 +2845,7 @@ class RunnerDeclarationTest(unittest.TestCase):
         return MODULE.parse_release(textwrap.dedent(text))
 
     def test_labels_are_read(self) -> None:
-        *_, runner, _, _, unknown = self.parse("[runners]\nmacos self-hosted macOS ARM64\n")
+        *_, runner, _, _, _, unknown = self.parse("[runners]\nmacos self-hosted macOS ARM64\n")
         self.assertEqual(runner, ["self-hosted", "macOS", "ARM64"])
         self.assertEqual(unknown, [])
 
@@ -2724,7 +2903,7 @@ class SbomDeclarationTest(unittest.TestCase):
         return MODULE.parse_release(textwrap.dedent(text))
 
     def test_one_glob_is_read(self) -> None:
-        _, _, _, sbom, _, _, _, unknown = self.parse("""\
+        _, _, _, sbom, _, _, _, _, unknown = self.parse("""\
             [sbom]
             *.spdx.json
             """)
@@ -2738,7 +2917,7 @@ class SbomDeclarationTest(unittest.TestCase):
         self.assertIn("holds one glob", str(refusal.exception))
 
     def test_the_section_is_optional(self) -> None:
-        _, _, _, sbom, _, _, _, _ = self.parse("[manifest]\n*.wasm\n")
+        _, _, _, sbom, _, _, _, _, _ = self.parse("[manifest]\n*.wasm\n")
         self.assertEqual(sbom, "")
 
     def test_it_renders_into_the_workflow(self) -> None:
@@ -2800,7 +2979,7 @@ class RehearseChannelRefusalTest(unittest.TestCase):
         self.product = Product()
         self.dir = str(self.product.dir)
         self.product.write("scripts/publish-channel.sh", "#!/bin/sh\nexit 0\n", executable=True)
-        self.product.write("maelys-release.conf", "[channels]\nnpm github-packages\n")
+        self.product.write("maelys-release.conf", "[channels]\nnpm github-packages\n" + APART)
         self.product.run("adopt", self.dir, "--apply")
         # A GitHub origin, so the refusals under test are reached; nothing
         # here touches the network.
@@ -2955,23 +3134,23 @@ class UnitTest(unittest.TestCase):
 
     def test_parse_release(self) -> None:
         self.assertEqual(MODULE.parse_release("[targets]\nlinux-arm64\nwasm32 ubuntu-26.04\n"),
-                         ([("linux-arm64", ""), ("wasm32", "ubuntu-26.04")], [], [], "", [], "", "", []))
+                         ([("linux-arm64", ""), ("wasm32", "ubuntu-26.04")], [], [], "", [], False, "", "", []))
         self.assertEqual(MODULE.parse_release("[targets]\nmacos-arm64 self-hosted ARM64\n"),
-                         ([("macos-arm64", ["self-hosted", "ARM64"])], [], [], "", [], "", "", []))
-        self.assertEqual(MODULE.parse_release("[manifest]\n*.wasm\n"), ([], ["*.wasm"], [], "", [], "", "", []))
+                         ([("macos-arm64", ["self-hosted", "ARM64"])], [], [], "", [], False, "", "", []))
+        self.assertEqual(MODULE.parse_release("[manifest]\n*.wasm\n"), ([], ["*.wasm"], [], "", [], False, "", "", []))
         self.assertEqual(MODULE.parse_release("[channels]\nnpm github-packages\n"),
-                         ([], [], [("npm", "github-packages")], "", [], "", "", []))
-        self.assertEqual(MODULE.parse_release("[gate]\nnone\n"), ([], [], [], "", [], "none", "", []))
-        self.assertEqual(MODULE.parse_release("[gate]\nreviewer\n"), ([], [], [], "", [], "reviewer", "", []))
-        self.assertEqual(MODULE.parse_release("# nothing declared\n"), ([], [], [], "", [], "", "", []))
+                         ([], [], [("npm", "github-packages")], "", [], False, "", "", []))
+        self.assertEqual(MODULE.parse_release("[gate]\nnone\n"), ([], [], [], "", [], False, "none", "", []))
+        self.assertEqual(MODULE.parse_release("[gate]\nreviewer\n"), ([], [], [], "", [], False, "reviewer", "", []))
+        self.assertEqual(MODULE.parse_release("# nothing declared\n"), ([], [], [], "", [], False, "", "", []))
         # A section this socle does not know is named and skipped, never fatal:
         # a product pins the socle by commit, and losing its targets in
         # silence on an older socle is worse than an unapplied section.
         self.assertEqual(MODULE.parse_release("[targets]\nlinux-arm64\n[bsd]\nx\n"),
-                         ([("linux-arm64", "")], [], [], "", [], "", "", ["[bsd] at line 3"]))
+                         ([("linux-arm64", "")], [], [], "", [], False, "", "", ["[bsd] at line 3"]))
         # A version materialised twice: the command that regenerates the second.
         self.assertEqual(MODULE.parse_release("[cut]\nafter-version bash scripts/header.sh\n"),
-                         ([], [], [], "", [], "", "bash scripts/header.sh", []))
+                         ([], [], [], "", [], False, "", "bash scripts/header.sh", []))
         for text in ("linux-arm64\n",                      # outside a section
                      "[targets]\nwasm32\n",                # no runner and no default
                      "[targets]\nWASM\n",                  # not a target name
