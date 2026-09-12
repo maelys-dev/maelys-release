@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.40.0 — 2026-09-12
+
+- **`cut` audits its own write before it creates a branch.** It wrote
+  `VERSION`, ran `[cut] after-version` when one was declared, and nothing
+  read the result until the pull request's own checks did — after a branch
+  was pushed and a pull request opened, and only where the product compares
+  the two at all. `cut` now takes the last commit that moved `VERSION` and
+  the files whose diff there dropped the old version and added the new one,
+  and requires this cut to have moved the version in the same ones. The
+  conjunction is what makes it usable: `CHANGELOG.md` adds the new version
+  without dropping the old, so it falls out, and so does every file an
+  adoption changed in the same commit — on a maelys-json release commit that
+  touched eight files it leaves `VERSION` and one header.
+- It is `cut` auditing itself, not the socle judging the product twice: the
+  product contract stays with the checks `cut` waits for, on the exact
+  commit. A product that has never released has nothing to compare with and
+  the run says so; a carrier that has left the tree is a note. It lags by one
+  release, and a place the version reached since the previous bump is
+  invisible — the plan says what it found before anything is written, so the
+  warning arrives before the branch.
+- Reported by maelys-cli, from a `VERSION` and a header compared by `make
+  check-version`. Two products were one cut away from it and not in the same
+  way: **maelys-system** compares the two, so its next cut would have failed
+  late; **maelys-egress** compares nothing, so its next cut would have gone
+  green to the tag and published node and python SDKs whose `package.json`
+  and `pyproject.toml` announced the previous version. Neither declares
+  `[cut] after-version` today.
+- The version is matched as a version and not as a substring of one. A digit
+  or a dot on the left disqualifies, so `0.1.1` does not match inside
+  `10.1.1`; on the right only a dot **followed by a digit** disqualifies, so
+  it does not match inside `0.1.10` or `0.1.1.2` and does match in
+  `0.1.1.tar.gz`. A first anchor that refused a dash and a trailing dot lost
+  two real carriers of maelys-egress, whose README installs the archive by
+  name.
+
 ## 0.39.0 — 2026-09-11
 
 - **A product's SBOM is attested against the file it describes, and the socle

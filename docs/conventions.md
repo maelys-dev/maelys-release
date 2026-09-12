@@ -444,6 +444,36 @@ named the same.
 
 ### A version that lives in more than one file
 
+`cut` audits its own write. After it has written `VERSION` and run
+`after-version`, and **before** it creates a branch, it looks at the last
+commit that moved `VERSION` and takes the files whose diff there dropped the
+old version and added the new one. `CHANGELOG.md` falls out on its own,
+because it adds the new version without dropping the old, and so does every
+file an adoption changed in the same commit. Those files are where the
+version lived last time, and this cut has to have moved it in all of them.
+
+This is not the socle judging the product a second time — the product
+contract is judged by the checks `cut` then waits for, on the exact commit.
+It is the narrower question of whether this cut wrote what the last one
+wrote. A product that has never released has nothing to compare with, and
+the run says so rather than refusing; a file that has left the tree is a
+note, not a refusal.
+
+It lags by one release: a place the version reached *since* the previous
+bump is invisible here. The plan says what it found before anything is
+written, so a product that needs `after-version` learns it from
+`maelys-release cut DIR X.Y.Z` rather than from a pull request its own
+checks refuse.
+
+maelys-cli reported the gap, from a `VERSION` and a header compared by `make
+check-version`: the refusal arrived after the branch was pushed and the pull
+request opened. Two products of the fleet were one cut away from it, and not
+in the same way. maelys-system compares the two, so its next cut would have
+failed late and loudly. maelys-egress compares nothing, so its next cut
+would have gone green to the tag and published node and python SDKs whose
+`package.json` and `pyproject.toml` announced the previous version.
+
+
 A product whose version is materialised somewhere besides `VERSION` — a
 generated header, a `package.json`, a formula — declares how to regenerate
 it:

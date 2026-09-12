@@ -2388,6 +2388,108 @@ def default_branch(project: pathlib.Path, repository: str) -> str:
     return (github_api(f"repos/{repository}") or {}).get("default_branch") or "main"
 
 
+def version_pattern(version: str) -> "re.Pattern[str]":
+    """VERSION as a version, not as a substring of one.
+
+    On the left, a digit or a dot disqualifies: 0.1.1 must not match inside
+    10.1.1. On the right the test is finer, because a dot means two
+    different things. A dot followed by a digit continues the version, so
+    0.1.1 must not match inside 0.1.10 or 0.1.1.2; a dot followed by
+    anything else ends it, and 0.1.1.tar.gz carries 0.1.1. A letter or a
+    dash never disqualifies: v0.19.9 and maelys-egress-node-sdk-0.19.9 are
+    how versions are written, and an anchor that refused them lost real
+    carriers of maelys-egress, whose README installs an archive by name.
+    """
+    return re.compile(r"(?<![0-9.])" + re.escape(version) + r"(?!\.?[0-9])")
+
+
+def previous_bump(project: pathlib.Path) -> tuple[str, str, str]:
+    """The last commit that moved VERSION, and the two versions it moved between.
+
+    Empty when there is none to learn from: a first release, a shallow
+    clone, or a repository whose first commit already carried VERSION.
+    """
+    commit = git("log", "-1", "--format=%H", "--", "VERSION", cwd=project, check=False)
+    if not commit:
+        return "", "", ""
+    old = git("show", f"{commit}~1:VERSION", cwd=project, check=False).strip()
+    new = git("show", f"{commit}:VERSION", cwd=project, check=False).strip()
+    if not old or not new or old == new:
+        return "", "", ""
+    return commit, old, new
+
+
+def version_carriers(project: pathlib.Path, commit: str, old: str, new: str) -> list[str]:
+    """The files COMMIT moved the version in, VERSION excluded.
+
+    A file qualifies when the same diff drops the old version and adds the
+    new one. The conjunction is what makes this usable: CHANGELOG.md adds
+    the new version without dropping the old, so it falls out on its own,
+    and so does every file an adoption changed in the same commit.
+    """
+    patch = git("show", "--format=", "--no-color", commit, cwd=project, check=False)
+    drops, adds = version_pattern(old), version_pattern(new)
+    carriers, path, dropped, added = [], "", False, False
+    def close() -> None:
+        if path and path != "VERSION" and dropped and added:
+            carriers.append(path)
+    for line in patch.splitlines():
+        if line.startswith("diff --git "):
+            close()
+            _, _, tail = line.partition(" b/")
+            path, dropped, added = tail, False, False
+        elif line.startswith("-") and not line.startswith("---"):
+            dropped = dropped or bool(drops.search(line))
+        elif line.startswith("+") and not line.startswith("+++"):
+            added = added or bool(adds.search(line))
+    close()
+    return sorted(set(carriers))
+
+
+def bump_audit(project: pathlib.Path, old: str, new: str) -> tuple[list[tuple[str, str]], list[str]]:
+    """What cut has just written, held against what the previous bump moved.
+
+    cut writes VERSION and runs [cut] after-version, and nothing then reads
+    the result until the pull request's own checks do -- after a branch is
+    pushed and a pull request is opened, which is late, and only where the
+    product happens to compare the two at all. This is cut auditing its own
+    write rather than the socle judging the product a second time: the
+    question is not what carries a version, which no socle can know, but
+    whether this cut moved the version everywhere the last one did.
+
+    It lags by one release. A place the version reached since the previous
+    bump is invisible here, and so is the first release of a product.
+    maelys-cli reported the gap, from a VERSION and a header compared by
+    make check-version.
+    """
+    commit, was, became = previous_bump(project)
+    if not commit:
+        return [("note", "no previous bump to compare this one with: nothing says where else the version lives")], []
+    carriers = version_carriers(project, commit, was, became)
+    if not carriers:
+        return [("ok", f"the bump {was} -> {became} moved the version in VERSION alone")], []
+    found: list[tuple[str, str]] = []
+    stale: list[str] = []
+    for name in carriers:
+        path = project / name
+        if not path.is_file():
+            found.append(("note", f"{name} carried the version at {was} -> {became} and is no longer in the tree"))
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError as error:
+            found.append(("note", f"{name} cannot be read: {error}"))
+            continue
+        if version_pattern(new).search(text):
+            found.append(("ok", f"{name} carries {new}"))
+        else:
+            stale.append(name)
+            found.append(("fail", f"{name} carries the version and still holds {old}"
+                                  if version_pattern(old).search(text) else
+                                  f"{name} carries the version and does not hold {new}"))
+    return found, stale
+
+
 def cut_gate(decl: Declarations, version: str) -> list:
     """The gate cut holds before it writes anything.
 
@@ -2533,6 +2635,17 @@ def cut_open(invocation: Invocation, decl: Declarations, data: dict, log, timeou
             data["gate"].append({"status": "note",
                                  "message": f"--apply would run {decl.verify_command.replace('TARGET', host_target())}"
                                             " here before writing anything"})
+        # Said before anything is written, so a product that needs
+        # [cut] after-version learns it from the plan rather than from a
+        # pull request its own checks refuse.
+        commit, was, became = previous_bump(project)
+        elsewhere = version_carriers(project, commit, was, became) if commit else []
+        if elsewhere and not decl.after_version:
+            data["gate"].append({"status": "note",
+                                 "message": f"the bump {was} -> {became} moved the version in "
+                                            + ", ".join(elsewhere)
+                                            + " as well, and no [cut] after-version is declared:"
+                                              " --apply would write VERSION alone and refuse"})
         data["next"] = f"{PROGRAM} cut {project} {version} --apply"
         return data, EXIT_OK
     # The gate a product declared for the release runners is held here too,
@@ -2576,6 +2689,25 @@ def cut_open(invocation: Invocation, decl: Declarations, data: dict, log, timeou
                              " changed" if len(touched) > 1 else "")
                           + ". Fix the command, then cut again.")
         data["regenerated"] = [path for path in touched if path != "VERSION"]
+    # The write is now complete, and this is the last moment it costs
+    # nothing to be wrong: no branch, no pull request, no run.
+    audit, stale = bump_audit(project, decl.version, version)
+    data["bump"] = [{"status": status, "message": message} for status, message in audit]
+    for status, message in audit:
+        print(f"{status:<8} {message}", file=log)
+    log.flush()
+    if stale:
+        (project / "VERSION").write_text(decl.version + "\n", encoding="utf-8")
+        left = [path for path in touched if path not in ("VERSION", "CHANGELOG.md")]
+        raise Failure("PRECONDITION_FAILED",
+                      f"VERSION was written and {', '.join(stale)} did not follow:"
+                      f" the previous bump moved the version there too.",
+                      "VERSION is restored"
+                      + (f"; {' '.join(left)} is left changed" if left else "")
+                      + ". Declare 'after-version COMMAND' in the [cut] section of "
+                      + DECLARATION_FILE + " so the product regenerates them, then cut again."
+                      " Without it the commit is red by construction wherever a check compares the two,"
+                      " and silent wherever none does.")
     git("switch", "-q", "-c", branch, cwd=project)
     git("add", "--", "VERSION", "CHANGELOG.md", *touched, cwd=project)
     git("-c", "commit.gpgsign=true", "commit", "-q", "-S", "-m", f"{product} {version}", cwd=project)
