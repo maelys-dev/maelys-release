@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.43.0 — 2026-09-12
+
+- **`maelys-release protect DIR [--apply]` derives what a default branch
+  should require instead of it being typed.** A branch protection requires a
+  check by its name, and those names are the socle's jobs prefixed by the job
+  that calls them. Typed by hand, a required context is a copy of what some
+  pin produced on the day somebody looked: when the socle renames a leg,
+  every context naming the old one waits for a run that never starts, and the
+  branch locks with no warning until a pull request refuses to merge. 0.41.0
+  came within one adoption of doing exactly that to ten repositories.
+- **The two halves are found in different ways, and deliberately so.** The
+  socle's jobs are *computed*, from the `check-product.yml` this socle
+  carries and from the call in the product's `ci.yml`, so a renamed leg is
+  known before a single run exists; each job's input decides it, defaults
+  included, since `sanitizer_command` is opt-out and `fuzz_command` opt-in.
+  The product's own jobs are *observed*, from the check runs of its recent
+  merged pull requests, intersected — nothing here can predict their names.
+  The evidence is pull requests and never the tip of the default branch,
+  which also carries what the tag pointing at it ran and the push-only runs
+  besides: maelys-cli leaves a run named `ci` there that no pull request
+  makes, and requiring it would have made every pull request wait forever.
+- Observing the socle's legs too would have confused the two: right after an
+  adoption the older pull requests still carry the previous names, and an
+  intersection would have called a renamed leg intermittent and dropped it.
+  An intermittent name is left out with the count that left it out.
+- `github_list` reads an endpoint that answers an array. `github_api` keeps
+  its shape — a mapping or nothing — because everything that reports on an
+  absence relies on it.
+- Swept over the fleet: the derivation now agrees with what every protected
+  repository's pull requests actually produce, on all eight products that
+  call the socle's check job.
+
 ## 0.42.0 — 2026-09-12
 
 - **`preflight` reports a formula the tap serves for a repository that the

@@ -2366,6 +2366,77 @@ class RehearsalEnvironmentTest(unittest.TestCase):
         self.assertIn("already says", channel)
 
 
+class ProtectionContextsTest(unittest.TestCase):
+    """The names a branch protection should require, derived and not typed.
+
+    A protection requires a check by its name, and those names are the
+    socle's jobs prefixed by the job that calls them. Typed by hand they are
+    a copy of what some pin produced on the day somebody looked; the socle
+    can compute them, and must, because it is the socle that renames them.
+    """
+
+    CALL = """name: ci
+
+jobs:
+  %s:
+    uses: maelys-dev/maelys-release/.github/workflows/check-product.yml@%s # v9.9.9
+    with:
+      product: maelys-fixture
+%s
+  mine:
+    runs-on: ubuntu-26.04
+"""
+
+    def product(self, caller: str = "check", inputs: str = "") -> pathlib.Path:
+        work = pathlib.Path(tempfile.mkdtemp(prefix="maelys-release-protect-test."))
+        self.addCleanup(shutil.rmtree, work, True)
+        (work / ".github" / "workflows").mkdir(parents=True)
+        (work / ".github" / "workflows" / "ci.yml").write_text(
+            self.CALL % (caller, "0" * 40, inputs), encoding="utf-8")
+        return work
+
+    def test_the_legs_come_from_the_workflow_not_from_a_list(self) -> None:
+        legs = MODULE.check_product_legs()
+        self.assertTrue(legs, "check-product.yml must name its legs")
+        self.assertIn("macos-15", legs)
+
+    def test_the_calling_job_prefixes_every_name(self) -> None:
+        """Some products call it check; maelys-egress calls it socle."""
+        caller, contexts = MODULE.socle_check_contexts(self.product("socle"))
+        self.assertEqual(caller, "socle")
+        for name in contexts:
+            self.assertTrue(name.startswith("socle / "), name)
+
+    def test_sanitizers_is_opt_out_and_fuzz_is_opt_in(self) -> None:
+        """Their inputs have opposite defaults, and both decide a job."""
+        _, plain = MODULE.socle_check_contexts(self.product())
+        self.assertIn("check / sanitizers", plain)
+        self.assertNotIn("check / fuzz", plain)
+        _, fuzzing = MODULE.socle_check_contexts(self.product(inputs="      fuzz_command: make fuzz-smoke\n"))
+        self.assertIn("check / fuzz", fuzzing)
+        _, quiet = MODULE.socle_check_contexts(self.product(inputs="      sanitizer_command: ''\n"))
+        self.assertNotIn("check / sanitizers", quiet)
+
+    def test_a_block_scalar_is_a_value_and_not_an_absence(self) -> None:
+        """`sanitizer_command: |` says the value is below, not that there is none.
+
+        Reading it as empty made the socle announce that two protected
+        repositories required a job that never runs, when it runs and passes
+        on every pull request they have.
+        """
+        _, contexts = MODULE.socle_check_contexts(
+            self.product(inputs="      sanitizer_command: |\n        make asan\n"))
+        self.assertIn("check / sanitizers", contexts)
+
+    def test_a_product_that_does_not_call_the_socle_has_no_socle_contexts(self) -> None:
+        work = pathlib.Path(tempfile.mkdtemp(prefix="maelys-release-protect-test."))
+        self.addCleanup(shutil.rmtree, work, True)
+        (work / ".github" / "workflows").mkdir(parents=True)
+        (work / ".github" / "workflows" / "ci.yml").write_text("name: ci\njobs:\n  mine:\n    runs-on: x\n",
+                                                               encoding="utf-8")
+        self.assertEqual(MODULE.socle_check_contexts(work), ("", []))
+
+
 class TapDriftTest(unittest.TestCase):
     """What the tap serves for a repository, against what it declares.
 
