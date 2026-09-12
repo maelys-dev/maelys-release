@@ -238,6 +238,9 @@ class Declarations:
         self.channels: list[tuple[str, str]] = []
         # The glob of the SBOM a build leaves in dist/, empty when none.
         self.sbom_pattern = ""
+        # Labels of the macOS runner for the socle's own jobs, empty for
+        # the hosted default. Honoured on a private repository only.
+        self.macos_runner: list[str] = []
         # "reviewer", "none", or "" when this repository has not chosen.
         self.gate = ""
         # What cut runs between writing VERSION and the bump commit, for a
@@ -296,14 +299,15 @@ def parse_packages(text: str) -> tuple[str, str]:
 
 
 def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[tuple[str, str]], str, str, str]:
-    """The declaration file: [targets], [manifest], [sbom], [channels], [gate] and [cut].
+    """The declaration file: [targets], [manifest], [sbom], [runners], [channels], [gate] and [cut].
 
     A target line naming no label keeps the runner release.yml holds for that
     target, which only exists for the three the socle builds; one label is a
     runner label, several are a label set. The [targets] section replaces the
     matrix rather than adding to it, so a product that adds one target names
     the others it keeps. [manifest] adds to the socle's archive kinds.
-    [sbom] holds one glob, the document a build leaves in dist/ beside the
+    [runners] holds one 'macos LABEL...' line, the runner the socle's own
+    macOS jobs use on a private repository. [sbom] holds one glob, the document a build leaves in dist/ beside the
     packages it describes; the release then attests that document against
     the files the document itself names. [channels] names one 'CHANNEL REGISTRY' per line, each rendered into a
     channel.yml job that runs once the release is published. [cut] holds
@@ -315,6 +319,7 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
     manifest: list[str] = []
     channels: list[tuple[str, str]] = []
     sbom = ""
+    macos_runner: list[str] = []
     gate = ""
     after_version = ""
     unknown: list[str] = []
@@ -324,7 +329,7 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
         if not line or line.startswith("#"):
             continue
         if line.startswith("["):
-            if line in ("[targets]", "[manifest]", "[sbom]", "[channels]", "[gate]", "[cut]"):
+            if line in ("[targets]", "[manifest]", "[sbom]", "[runners]", "[channels]", "[gate]", "[cut]"):
                 section = line[1:-1]
                 continue
             # A section this socle does not know is named and skipped, never
@@ -338,8 +343,8 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
         if section == "unknown":
             continue
         if not section:
-            raise ValueError(f"line outside a [targets], [manifest], [sbom], [channels],"
-                             f" [gate] or [cut] section at line {number}")
+            raise ValueError(f"line outside a [targets], [manifest], [sbom], [runners],"
+                             f" [channels], [gate] or [cut] section at line {number}")
         if section == "cut":
             key, _, command = line.partition(" ")
             if key != "after-version":
@@ -356,6 +361,19 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
             if line not in SOCLE_GATES:
                 raise ValueError(f"[gate] is {' or '.join(SOCLE_GATES)}, not {line}, at line {number}")
             gate = line
+            continue
+        if section == "runners":
+            key, *labels = line.split()
+            if key != "macos":
+                raise ValueError(f"[runners] knows macos, not {key}, at line {number}")
+            if macos_runner:
+                raise ValueError(f"[runners] holds one macos line, and line {number} is a second")
+            if not labels:
+                raise ValueError(f"[runners] macos names no label at line {number}")
+            for label in labels:
+                if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", label):
+                    raise ValueError(f"a runner label is [A-Za-z0-9._-] at line {number}: {label}")
+            macos_runner = labels
             continue
         if section == "sbom":
             # One document per target, because one attestation carries one
@@ -407,9 +425,9 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
         runner: object = "" if not labels else (labels[0] if len(labels) == 1 else labels)
         targets.append((name, runner))
     if section and not unknown and not targets and not manifest and not channels \
-            and not gate and not after_version and not sbom:
+            and not gate and not after_version and not sbom and not macos_runner:
         raise ValueError(f"{DECLARATION_FILE} declares no target, archive kind, channel, gate or cut command")
-    return targets, manifest, channels, sbom, gate, after_version, unknown
+    return targets, manifest, channels, sbom, macos_runner, gate, after_version, unknown
 
 
 def read_fuzz(decl: Declarations) -> None:
@@ -597,8 +615,9 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
             release = former
     if release.is_file():
         try:
-            decl.targets, decl.manifest_patterns, decl.channels, decl.sbom_pattern, decl.gate, \
-                decl.after_version, unknown = parse_release(release.read_text(encoding="utf-8"))
+            decl.targets, decl.manifest_patterns, decl.channels, decl.sbom_pattern, \
+                decl.macos_runner, decl.gate, decl.after_version, unknown = \
+                parse_release(release.read_text(encoding="utf-8"))
             for section in unknown:
                 decl.add("missing", f"{release.name}: section {section} is not one this socle knows"
                                     " ([targets], [manifest], [channels], [gate], [cut]); what it declares"
@@ -624,6 +643,19 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
             if decl.sbom_pattern:
                 decl.add("ok", f"{release.name} sbom: {decl.sbom_pattern},"
                                " attested against the files it names")
+            if decl.macos_runner:
+                decl.add("ok", f"{release.name} [runners] macos: " + " ".join(decl.macos_runner)
+                               + " (honoured on a private repository only)")
+                # ci.yml belongs to the product: adopt keeps its socle line
+                # current and writes nothing else there. A declared runner
+                # reaches release.yml, which the socle owns, and is reported
+                # here rather than written -- the socle reports drift in what
+                # it does not own instead of editing it.
+                ci_file = project / ".github" / "workflows" / "ci.yml"
+                if ci_file.is_file() and "macos_runner:" not in ci_file.read_text(encoding="utf-8"):
+                    decl.add("warn", f"[runners] macos declares {' '.join(decl.macos_runner)} and"
+                             " .github/workflows/ci.yml does not pass it to check-product.yml:"
+                             f" '{PROGRAM} adopt DIR --apply' writes the line")
         except ValueError as error:
             decl.add("missing", f"{release.name}: {error}")
     read_fuzz(decl)
@@ -830,6 +862,62 @@ def render_text(template: pathlib.Path, mapping: dict[str, str]) -> str:
     return text
 
 
+def runner_json(labels: list[str]) -> str:
+    """A runs-on value: one label is a string, several are an array."""
+    return json.dumps(labels[0] if len(labels) == 1 else labels)
+
+
+def macos_runner_input(decl: Declarations) -> list[str]:
+    """The macos_runner line of a call, or nothing when none is declared."""
+    if not decl.macos_runner:
+        return []
+    return [f"      macos_runner: '{runner_json(decl.macos_runner)}'"]
+
+
+def ci_macos_runner(text: str, labels: list[str]) -> str:
+    """Set, replace or remove the macos_runner line of ci.yml's socle call.
+
+    ci.yml belongs to the product everywhere else, and the socle has always
+    kept only the line naming itself current there. This adds one more line
+    under the same job's with:, because a runner is declared once in
+    maelys-release.conf and applied, never typed into a workflow by hand --
+    and an empty declaration takes the line away again, so the file follows
+    the declaration in both directions. Everything else is left byte for
+    byte, blank lines and comments included.
+    """
+    lines = text.splitlines(keepends=True)
+    at = next((index for index, line in enumerate(lines) if CI_USES.search(line)), None)
+    if at is None:
+        return text
+    indent = len(lines[at]) - len(lines[at].lstrip())
+    with_at = None
+    for index in range(at + 1, len(lines)):
+        stripped = lines[index].strip()
+        if not stripped:
+            continue
+        here = len(lines[index]) - len(lines[index].lstrip())
+        if here < indent:
+            break
+        if here == indent and stripped == "with:":
+            with_at = index
+            break
+    if with_at is None:
+        return text
+    body = indent + 2
+    end = with_at + 1
+    while end < len(lines):
+        stripped = lines[end].strip()
+        if stripped and (len(lines[end]) - len(lines[end].lstrip())) < body:
+            break
+        end += 1
+    for index in reversed([i for i in range(with_at + 1, end)
+                           if lines[i].strip().startswith("macos_runner:")]):
+        del lines[index]
+    if labels:
+        lines.insert(with_at + 1, f"{' ' * body}macos_runner: '{runner_json(labels)}'\n")
+    return "".join(lines)
+
+
 def release_workflow(decl: Declarations, sha: str, tag: str, version: str) -> str:
     lines = [
         "name: release",
@@ -924,6 +1012,7 @@ def release_workflow(decl: Declarations, sha: str, tag: str, version: str) -> st
             lines.append(f"      render_command: {decl.render_command} {formula}")
         lines.extend([
             f"      bottles: {BOTTLES}",
+            *macos_runner_input(decl),
             "    secrets:",
             "      tap_token: ${{ secrets.HOMEBREW_TAP_TOKEN }}",
             "      tap_signing_key: ${{ secrets.HOMEBREW_TAP_SIGNING_KEY }}",
@@ -951,6 +1040,7 @@ def ci_workflow(decl: Declarations, sha: str, tag: str, version: str) -> str:
         f"    uses: {SOCLE_REPOSITORY}/.github/workflows/check-product.yml@{sha} # {tag}",
         "    with:",
         f"      product: {decl.product}",
+        *macos_runner_input(decl),
     ]
     return "\n".join(lines) + "\n"
 
@@ -1022,7 +1112,8 @@ def stage(decl: Declarations, sha: str, tag: str) -> dict[str, tuple[str, bool]]
         # The product owns its ci.yml; only the line naming the socle is managed.
         existing = ci.read_text(encoding="utf-8")
         if CI_USES.search(existing):
-            staged[".github/workflows/ci.yml"] = (CI_USES.sub(rf"\g<1>{sha} # {tag}", existing), False)
+            updated = CI_USES.sub(rf"\g<1>{sha} # {tag}", existing)
+            staged[".github/workflows/ci.yml"] = (ci_macos_runner(updated, decl.macos_runner), False)
     return staged
 
 
@@ -2000,7 +2091,8 @@ def handle_declarations(invocation: Invocation) -> tuple[dict, int]:
             # three" when it means "nobody declared anything".
             "declared": {"targets": [name for name, _ in decl.targets],
                          "manifestPatterns": list(decl.manifest_patterns),
-                         "sbomPattern": decl.sbom_pattern},
+                         "sbomPattern": decl.sbom_pattern,
+                         "macosRunner": list(decl.macos_runner)},
             "pinned": pinned_socle(project),
             "managedBy": stamp.group(1) if stamp else "",
             "runners": read_runners(project),
