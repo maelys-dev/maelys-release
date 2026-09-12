@@ -103,12 +103,14 @@ CONVENTION_SEEDED = ("RELEASING.md", "LICENSING.md", "SECURITY.md")
 RELEASE_MANAGED = (
     ".github/workflows/release.yml",
     "scripts/checkout-dependency.sh",
+    "scripts/checkout-dependencies.sh",
     ".claude/skills/maelys-release/SKILL.md",
     ".github/workflows/ci.yml",
 )
 MANAGED = (
     ".github/workflows/release.yml",
     "scripts/checkout-dependency.sh",
+    "scripts/checkout-dependencies.sh",
     CLI_REFERENCE,
     CLI_CONTRACT,
     "AGENTS.md",
@@ -620,12 +622,14 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
         decl.add("ok", f"dependencies/{name}.pin initialises its submodules"
                  + (" recursively" if mode else "") + ", from the URLs its .gitmodules names", "conventions")
     scripts = project / "scripts"
+    managed_names = {name.split("/")[-1] for name in CHECKOUT_SCRIPTS}
     stray = sorted(path.name for path in scripts.glob("checkout-*.sh")
-                   if path.name != "checkout-dependency.sh") if scripts.is_dir() else []
+                   if path.name not in managed_names) if scripts.is_dir() else []
     if stray:
         decl.add("refused", "scripts/" + " scripts/".join(stray)
                  + ": dependencies are cloned from dependencies/*.pin by the managed"
-                 " scripts/checkout-dependency.sh NAME; delete these")
+                 " scripts/checkout-dependency.sh NAME and"
+                 " scripts/checkout-dependencies.sh DESTINATION; delete these")
     ci = project / ".github" / "workflows" / "ci.yml"
     if ci.is_file():
         if CI_USES.search(ci.read_text(encoding="utf-8")):
@@ -692,6 +696,20 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
             if decl.dependencies_apart:
                 decl.add("ok", f"{release.name} [dependencies] apart: the build reads"
                          f" ${DEPENDENCIES_VARIABLE}, and the socle materialises the pins there")
+                # What the trial of 0.45.0 found, reported before a push
+                # instead of by six red jobs after it: the socle exports the
+                # root in the job it runs, and a job of the product clones
+                # on its own runner where that path names nothing. ci.yml is
+                # the product's file, so this is a warning that names the
+                # line and not a violation.
+                ci_file = project / ".github" / "workflows" / "ci.yml"
+                for number, line in enumerate(ci_file.read_text(encoding="utf-8").splitlines(), 1) \
+                        if ci_file.is_file() else []:
+                    if BESIDE_CALL.search(line):
+                        decl.add("warn", f".github/workflows/ci.yml line {number} clones beside the product,"
+                                 " which the build no longer reads: one line gives it the root instead,"
+                                 " 'sh scripts/checkout-dependencies.sh \"$RUNNER_TEMP/dependencies\""
+                                 " >>\"$GITHUB_ENV\"'", "conventions")
             elif decl.dependencies:
                 # Read after the declaration file and not with the pins: the
                 # pins are read first, so a rule placed there sees a
@@ -1023,10 +1041,12 @@ def release_workflow(decl: Declarations, sha: str, tag: str, version: str) -> st
             # The root is exported for the packaging command that follows,
             # so a release and a `make check` read their dependencies from
             # the same place -- and ../NAME names nothing here either.
-            lines.append('        mkdir -p "$RUNNER_TEMP/dependencies"')
-            lines.extend(f'        sh scripts/checkout-dependency.sh {name}'
-                         f' "$RUNNER_TEMP/dependencies/{name}"' for name in decl.dependencies)
-            lines.append('        echo "MAELYS_DEPENDENCIES_DIR=$RUNNER_TEMP/dependencies" >>"$GITHUB_ENV"')
+            # One line, and no list of pins: the script reads them when it
+            # runs, so a new pin is cloned without this file being
+            # regenerated. That is the lesson of 0.6.0, where the job
+            # started reading the product's declarations itself.
+            lines.append('        sh scripts/checkout-dependencies.sh'
+                         ' "$RUNNER_TEMP/dependencies" >>"$GITHUB_ENV"')
         else:
             lines.extend(f"        sh scripts/checkout-dependency.sh {name}" for name in decl.dependencies)
     if decl.verify_command:
@@ -1153,8 +1173,8 @@ def stage(decl: Declarations, sha: str, tag: str) -> dict[str, tuple[str, bool]]
         staged[".claude/skills/maelys-release/SKILL.md"] = (
             render_text(share / "agents" / "claude-skill.md", mapping), False)
         if decl.dependencies:
-            staged["scripts/checkout-dependency.sh"] = (
-                render_text(share / "templates" / "checkout-dependency.sh", mapping), True)
+            for relative in CHECKOUT_SCRIPTS:
+                staged[relative] = (render_text(share / "templates" / relative.split("/")[-1], mapping), True)
     # The managed block states the rules that hold here: the socle's release
     # mechanism for a product it releases, the conventions alone otherwise.
     block_source = "instructions-block.md" if decl.releases_here else "conventions-block.md"
@@ -3140,9 +3160,7 @@ echo "== Pinned dependency checkouts"
 # clones, and the one that decides whether a rehearsal is the same object as
 # the run it rehearses.
 if [ -n "${DEPENDENCIES_APART:-}" ]; then
-    mkdir -p /work/dependencies
-    for name in $DEPENDENCIES; do sh scripts/checkout-dependency.sh "$name" "/work/dependencies/$name"; done
-    MAELYS_DEPENDENCIES_DIR=/work/dependencies
+    eval "$(sh scripts/checkout-dependencies.sh /work/dependencies)"
     export MAELYS_DEPENDENCIES_DIR
 else
     for name in $DEPENDENCIES; do sh scripts/checkout-dependency.sh "$name"; done
@@ -3415,6 +3433,11 @@ CLONE_FLAGS = ("--filter=blob:none", "--no-checkout")
 
 
 DEPENDENCIES_VARIABLE = "MAELYS_DEPENDENCIES_DIR"
+# The two managed clone scripts: one pin, or every pin into a given root.
+CHECKOUT_SCRIPTS = ("scripts/checkout-dependency.sh", "scripts/checkout-dependencies.sh")
+# A call of the singular with no destination: it clones beside the product,
+# which a build that reads the root no longer looks at.
+BESIDE_CALL = re.compile(r"checkout-dependency\.sh\s+[a-z0-9-]+\s*(&&|$)")
 
 
 def dependencies_home(product: str) -> pathlib.Path:
@@ -3751,8 +3774,10 @@ def handle_rehearse(invocation: Invocation) -> tuple[dict, int]:
         raise Failure("NOT_FOUND", "docker is required to rehearse a Linux build.", "Install Docker and retry.")
     decl = read_declarations(project, product, mechanism)
     require_valid(decl, "rehearse")
-    if decl.dependencies and not os.access(project / "scripts" / "checkout-dependency.sh", os.X_OK):
-        raise Failure("PRECONDITION_FAILED", "scripts/checkout-dependency.sh is missing in the product.",
+    needed = CHECKOUT_SCRIPTS if decl.dependencies_apart else CHECKOUT_SCRIPTS[:1]
+    absent = [name for name in needed if not os.access(project / name, os.X_OK)] if decl.dependencies else []
+    if absent:
+        raise Failure("PRECONDITION_FAILED", " and ".join(absent) + " is missing in the product.",
                       f"Run '{PROGRAM} adopt {project} --apply' first.")
     (project / "dist").mkdir(exist_ok=True)
     image = str(invocation.option("--image", os.environ.get("REHEARSE_IMAGE", DEFAULT_IMAGE)))
@@ -4383,7 +4408,8 @@ APP = cli.Program(PROGRAM, PRODUCT, socle_version(), [
                     "Materialise the product's pinned dependencies at their commits in one directory apart"
                     " from any working copy, refreshing what is already there; plan without --apply.",
                     handle_dependencies, operands=[DIR_OPERAND],
-                    options=[cli.option("--directory", "Where the checkouts go;"
+                    options=[SOCLE_OPTIONS[0],
+                             cli.option("--directory", "Where the checkouts go;"
                                         " ~/.cache/maelys-release/dependencies/PRODUCT by default.",
                                         cli.argument("DIR"))],
                     schema={"type": "object", "additionalProperties": False,

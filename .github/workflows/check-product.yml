@@ -148,9 +148,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          "${{ steps.socle.outputs.dir }}/bin/maelys-release" dependencies . \
-            --product "${{ inputs.product }}" --directory "$RUNNER_TEMP/dependencies" --apply
-          echo "MAELYS_DEPENDENCIES_DIR=$RUNNER_TEMP/dependencies" >>"$GITHUB_ENV"
+          # The managed script, the same one the product's own jobs run, so
+          # there is one way of cloning and not two. The guard is because
+          # this step precedes the drift check: a product that declared
+          # without re-adopting would otherwise die on "No such file"
+          # instead of reading what check has to say.
+          test -f scripts/checkout-dependencies.sh || {
+            echo "::error::scripts/checkout-dependencies.sh is missing: run 'maelys-release adopt . --apply'" >&2
+            exit 1
+          }
+          sh scripts/checkout-dependencies.sh "$RUNNER_TEMP/dependencies" >>"$GITHUB_ENV"
       - name: Install Linux packages
         if: runner.os == 'Linux'
         # The runner image carries third-party apt sources of its own; one of
@@ -231,9 +238,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          "${{ steps.socle.outputs.dir }}/bin/maelys-release" dependencies . \
-            --product "${{ inputs.product }}" --directory "$RUNNER_TEMP/dependencies" --apply
-          echo "MAELYS_DEPENDENCIES_DIR=$RUNNER_TEMP/dependencies" >>"$GITHUB_ENV"
+          # The managed script, the same one the product's own jobs run, so
+          # there is one way of cloning and not two. The guard is because
+          # this step precedes the drift check: a product that declared
+          # without re-adopting would otherwise die on "No such file"
+          # instead of reading what check has to say.
+          test -f scripts/checkout-dependencies.sh || {
+            echo "::error::scripts/checkout-dependencies.sh is missing: run 'maelys-release adopt . --apply'" >&2
+            exit 1
+          }
+          sh scripts/checkout-dependencies.sh "$RUNNER_TEMP/dependencies" >>"$GITHUB_ENV"
       - name: Install Linux packages
         # The runner image carries third-party apt sources of its own; one of
         # them breaking must not fail an install of Ubuntu archive packages.
@@ -311,9 +325,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          "${{ steps.socle.outputs.dir }}/bin/maelys-release" dependencies . \
-            --product "${{ inputs.product }}" --directory "$RUNNER_TEMP/dependencies" --apply
-          echo "MAELYS_DEPENDENCIES_DIR=$RUNNER_TEMP/dependencies" >>"$GITHUB_ENV"
+          # The managed script, the same one the product's own jobs run, so
+          # there is one way of cloning and not two. The guard is because
+          # this step precedes the drift check: a product that declared
+          # without re-adopting would otherwise die on "No such file"
+          # instead of reading what check has to say.
+          test -f scripts/checkout-dependencies.sh || {
+            echo "::error::scripts/checkout-dependencies.sh is missing: run 'maelys-release adopt . --apply'" >&2
+            exit 1
+          }
+          sh scripts/checkout-dependencies.sh "$RUNNER_TEMP/dependencies" >>"$GITHUB_ENV"
       - name: Install Linux packages
         # The runner image carries third-party apt sources of its own; one of
         # them breaking must not fail an install of Ubuntu archive packages.
