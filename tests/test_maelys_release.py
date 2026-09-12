@@ -1940,6 +1940,34 @@ class CutTest(unittest.TestCase):
         self.assertEqual([status for status, _ in audit], ["note"])
         self.assertIn("no previous bump", audit[0][1])
 
+    def test_a_carrier_that_stopped_carrying_the_version_is_a_note(self) -> None:
+        """The twin of the documented limit, and the dangerous one.
+
+        A place the version reaches since the previous bump is invisible: a
+        missed detection the product's own checks still catch. A place the
+        version *leaves* would be a refusal with nothing downstream to lift
+        it, because [cut] declares a command and not a list. maelys-cli found
+        it in their own history: a generated CLI reference carried the
+        version at 0.1.0 -> 0.2.0 and carries none today.
+        """
+        self.previous_release("1.2.2", "1.2.3", "include/version.h", "docs/reference.md")
+        # The generated reference stopped naming a version altogether.
+        self.product.write("docs/reference.md", "# Reference\n\nNo version here any more.\n")
+        self.product.write("include/version.h", '#define VERSION "1.3.0"\n')
+        audit, stale = MODULE.bump_audit(self.dir, "1.2.3", "1.3.0")
+        self.assertEqual(stale, [], "a retired carrier must not stop the release")
+        verdicts = {name: status for status, name in
+                    ((status, message.split()[0]) for status, message in audit)}
+        self.assertEqual(verdicts["docs/reference.md"], "note")
+        self.assertEqual(verdicts["include/version.h"], "ok")
+
+    def test_a_carrier_still_holding_the_old_version_is_a_refusal(self) -> None:
+        """The other reading, where nothing else explains the file."""
+        self.previous_release("1.2.2", "1.2.3", "include/version.h")
+        audit, stale = MODULE.bump_audit(self.dir, "1.2.3", "1.3.0")
+        self.assertEqual(stale, ["include/version.h"])
+        self.assertIn("still holds 1.2.3", audit[0][1])
+
     def test_a_carrier_that_left_the_tree_is_a_note(self) -> None:
         self.previous_release("1.2.2", "1.2.3", "include/version.h")
         (self.dir / "include" / "version.h").unlink()

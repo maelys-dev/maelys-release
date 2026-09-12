@@ -2482,11 +2482,29 @@ def bump_audit(project: pathlib.Path, old: str, new: str) -> tuple[list[tuple[st
             continue
         if version_pattern(new).search(text):
             found.append(("ok", f"{name} carries {new}"))
-        else:
+        elif version_pattern(old).search(text):
+            # The version is still there, one release behind. Nothing else
+            # explains that, so this is the omission the audit exists for.
             stale.append(name)
-            found.append(("fail", f"{name} carries the version and still holds {old}"
-                                  if version_pattern(old).search(text) else
-                                  f"{name} carries the version and does not hold {new}"))
+            found.append(("fail", f"{name} carries the version and still holds {old}"))
+        else:
+            # Neither version is in the file, and that has two readings: a
+            # carrier this cut forgot and whose contents moved on anyway, or
+            # a file that has simply stopped carrying the version. They read
+            # the same, and their consequences do not. The documented limit
+            # -- a place the version reaches since the previous bump is
+            # invisible -- costs a missed detection the product's own checks
+            # still catch. Its twin, a place the version leaves, would cost a
+            # refusal nothing downstream can lift: [cut] declares a command,
+            # not a list, so the operator's only ways out would be to make a
+            # file carry a version it should not, or to cut outside the tool.
+            # maelys-cli found it in their own history: 0.1.0 -> 0.2.0 moved
+            # the version in a generated CLI reference that no longer carries
+            # it at all.
+            found.append(("note", f"{name} moved the version at the previous bump and holds neither"
+                                  f" {old} nor {new}: either this cut missed it, or it has stopped"
+                                  " carrying the version. Refusing on that would block a release"
+                                  " with nothing to unblock it"))
     return found, stale
 
 
