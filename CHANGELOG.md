@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.44.0 — 2026-09-12
+
+- **`maelys-release dependencies DIR [--apply]` materialises a product's
+  pins apart from its working copies.** `scripts/checkout-dependency.sh`
+  clones next to the product and refuses an existing destination, and next
+  to the product is where the working copies of somebody who develops the
+  dependencies too already live: the step the conventions describe cannot
+  work for them, by construction. maelys-egress counted four `make check`
+  failures in one day with no file of the product at fault. Every pin is
+  cloned or refreshed at its commit in one flat directory,
+  `~/.cache/maelys-release/dependencies/<product>/` by default — flat so a
+  dependency's own `../NAME` resolves, per product because maelys-warden
+  pins maelys-json `v0.1.0` where maelys-oci pins `v0.2.0` and both are
+  green.
+- **It refuses rather than resets, and never deletes.** What is detached and
+  unmodified is refreshed, since a fetch and a checkout lose nothing there.
+  A branch, a tracked change, a symbolic link, a clone of another
+  repository: refused before anything is written, because the day this was
+  reported one sibling carried another session's uncommitted work and
+  another had been moved back by hand, and a command that reset either would
+  have destroyed the first and silently corrected the second.
+- **The product's pins, and nothing below them.** `check-product.yml` clones
+  the pins of the product it builds and no dependency's, so a directory
+  holding more would let a build pass locally that CI refuses, hiding a
+  missing pin exactly where CI shows it. The transitive closure was the
+  design this started from and it was the wrong one: when a build needs what
+  a dependency pins, the product pins it, as maelys-oci pins maelys-json for
+  the maelys-cli it builds. What a materialised dependency pins is read and
+  noted, never materialised and never refused.
+- `parse_pin` reads one pin for both `check` and this command, so a second
+  reading cannot drift from the first. `cache_root` and `git_base` name the
+  two conventions the socle already had in two places.
+
 ## 0.43.0 — 2026-09-12
 
 - **`maelys-release protect DIR [--apply]` derives what a default branch

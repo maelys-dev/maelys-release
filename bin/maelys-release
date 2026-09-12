@@ -222,6 +222,10 @@ class Declarations:
         self.formulas: list[str] = []
         self.render_command = ""
         self.dependencies: list[str] = []
+        # name -> the pin as parse_pin reads it; dependencies keeps the order
+        self.pins: dict[str, dict] = {}
+        # what parse_pin refused: nothing is materialised on a broken pin
+        self.pin_problems: list[str] = []
         self.linux_packages = ""
         self.macos_packages = ""
         self.generates_reference = False
@@ -297,6 +301,46 @@ def parse_packages(text: str) -> tuple[str, str]:
             raise ValueError(f"one package per line at line {number}: {raw}")
         packages[section].append(line)
     return " ".join(packages["linux"]), " ".join(packages["macos"])
+
+
+def parse_pin(name: str, text: str) -> tuple[dict, list[str]]:
+    """One dependencies/NAME.pin as data: (pin, problems); an empty pin when unusable.
+
+    Line 1 is the nearest tag, for humans; line 2 the commit, for everything
+    else. A dependency outside maelys-dev says where it lives, once, on a
+    `repository <https URL>` line: maelys-http builds Mbed TLS from a pinned
+    commit because the distribution's version is under its security floor.
+    A dependency whose build needs its submodules says so on a `submodules`
+    line, or `submodules recursive`: a submodule's commit is pinned by its
+    superproject, but its URL comes from a .gitmodules this pin does not
+    name, so fetching one is declared, never automatic.
+
+    Read here rather than in read_declarations alone, because the command
+    that materialises the pins needs the same reading and a second one would
+    drift from it.
+    """
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", name):
+        return {}, [f"dependencies/{name}.pin: the file is named after the repository, [a-z0-9-]"]
+    lines = text.splitlines()
+    if len(lines) < 2 or not re.fullmatch(r"[0-9a-f]{40}", lines[1].strip()):
+        return {}, [f"dependencies/{name}.pin: line 2 must be the pinned commit (line 1 its tag)"]
+    pin: dict = {"name": name, "tag": lines[0].strip(), "commit": lines[1].strip(),
+                 "repository": "", "submodules": None}
+    problems: list[str] = []
+    for attribute in lines[2:]:
+        if attribute.startswith("repository "):
+            repository = attribute[len("repository "):].strip()
+            if not re.fullmatch(r"https://[^\s]+", repository):
+                problems.append(f"dependencies/{name}.pin: the repository line must be an https URL")
+            else:
+                pin["repository"] = repository
+        elif attribute.split(" ")[0] == "submodules":
+            mode = attribute[len("submodules"):].strip()
+            if mode not in ("", "recursive"):
+                problems.append(f"dependencies/{name}.pin: the submodules line takes nothing, or recursive")
+            else:
+                pin["submodules"] = mode
+    return pin, problems
 
 
 def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[tuple[str, str]], str, str, str]:
@@ -532,38 +576,19 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
     # tag on line 1 for humans and the pinned commit on line 2. The managed
     # scripts/checkout-dependency.sh clones each of them from the pin.
     dependencies = project / "dependencies"
-    for pin in sorted(dependencies.glob("*.pin")) if dependencies.is_dir() else []:
-        name = pin.name[: -len(".pin")]
-        lines = pin.read_text(encoding="utf-8").splitlines()
-        if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", name):
-            decl.add("missing", f"dependencies/{pin.name}: the file is named after the repository, [a-z0-9-]",
-                     "conventions")
-        elif len(lines) >= 2 and re.fullmatch(r"[0-9a-f]{40}", lines[1].strip()):
-            decl.dependencies.append(name)
-            # A dependency outside maelys-dev says where it lives, once, in
-            # its own pin: maelys-http builds Mbed TLS from a pinned commit
-            # because the distribution's version is under its security floor.
-            for attribute in lines[2:]:
-                if attribute.startswith("repository "):
-                    repository = attribute[len("repository "):].strip()
-                    if not re.fullmatch(r"https://[^\s]+", repository):
-                        decl.add("missing", f"dependencies/{pin.name}: the repository line must be an https URL",
-                                 "conventions")
-                    else:
-                        decl.foreign[name] = repository
-                elif attribute.split(" ")[0] == "submodules":
-                    # A submodule's commit is pinned by its superproject, but
-                    # its URL comes from a .gitmodules this pin does not name:
-                    # fetching one is declared, never automatic.
-                    mode = attribute[len("submodules"):].strip()
-                    if mode not in ("", "recursive"):
-                        decl.add("missing", f"dependencies/{pin.name}: the submodules line takes nothing,"
-                                 " or recursive", "conventions")
-                    else:
-                        decl.submodules[name] = mode
-        else:
-            decl.add("missing", f"dependencies/{pin.name}: line 2 must be the pinned commit (line 1 its tag)",
-                     "conventions")
+    for pin_file in sorted(dependencies.glob("*.pin")) if dependencies.is_dir() else []:
+        pin, problems = parse_pin(pin_file.name[: -len(".pin")], pin_file.read_text(encoding="utf-8"))
+        for problem in problems:
+            decl.add("missing", problem, "conventions")
+        decl.pin_problems.extend(problems)
+        if not pin:
+            continue
+        decl.dependencies.append(pin["name"])
+        decl.pins[pin["name"]] = pin
+        if pin["repository"]:
+            decl.foreign[pin["name"]] = pin["repository"]
+        if pin["submodules"] is not None:
+            decl.submodules[pin["name"]] = pin["submodules"]
     if (project / "adapter").is_dir():
         decl.add("refused", "adapter/ is the pre-0.14 layout: git mv adapter/<NAME>_PIN dependencies/<name>.pin"
                  " and adapter/PACKAGES dependencies/packages, then delete adapter/ and the Makefile lines that read it")
@@ -1475,6 +1500,16 @@ def socle_data(sha: str, tag: str) -> dict:
     return {"version": socle_version(), "tag": tag, "sha": sha}
 
 
+def cache_root() -> pathlib.Path:
+    """~/.cache/maelys-release: the one place the socle writes outside a product."""
+    return pathlib.Path(os.environ.get("XDG_CACHE_HOME") or pathlib.Path.home() / ".cache") / "maelys-release"
+
+
+def git_base() -> str:
+    """Where a maelys-dev repository is cloned from, as the managed script reads it."""
+    return os.environ.get("MAELYS_GIT_BASE", "https://github.com/maelys-dev")
+
+
 def pinned_checkout(name: str, sha: str, witness: str) -> pathlib.Path | None:
     """A checkout of `name` at `sha`, fetched once into the user's cache.
 
@@ -1483,11 +1518,11 @@ def pinned_checkout(name: str, sha: str, witness: str) -> pathlib.Path | None:
     failing; a checkout that lacks the witness is still returned, because
     "fetched but old" and "not fetched" are different answers.
     """
-    root = pathlib.Path(os.environ.get("XDG_CACHE_HOME") or pathlib.Path.home() / ".cache") / "maelys-release"
+    root = cache_root()
     cache = root / sha if name == "maelys-release" else root / f"{name}-{sha}"
     if (cache / witness).is_file():
         return cache
-    base = os.environ.get("MAELYS_GIT_BASE", "https://github.com/maelys-dev")
+    base = git_base()
     cache.parent.mkdir(parents=True, exist_ok=True)
     git("init", "-q", str(cache))
     fetched = run(["git", "fetch", "-q", "--depth", "1", f"{base}/{name}.git", sha], cwd=cache)
@@ -3307,6 +3342,207 @@ PROTECTION_SHAPE = {"enforce_admins": True, "restrictions": None,
                     "required_linear_history": False, "required_conversation_resolution": True}
 
 
+# The clone scripts/checkout-dependency.sh makes, so that what this command
+# leaves in a directory is what CI leaves next to the product; a test holds
+# the two together.
+CLONE_FLAGS = ("--filter=blob:none", "--no-checkout")
+
+
+def dependencies_home(product: str) -> pathlib.Path:
+    """One flat directory per product for its pinned checkouts.
+
+    Flat, because a dependency's own Makefile looks for ../NAME. Per
+    product, because two products pin the same dependency at different
+    commits and both are green: maelys-warden pins maelys-json v0.1.0 where
+    maelys-oci pins v0.2.0. A directory shared across the fleet would make
+    one of them wrong on every switch.
+    """
+    return cache_root() / "dependencies" / product
+
+
+def dependency_repository(pin: dict) -> str:
+    return pin["repository"] or f"{git_base()}/{pin['name']}.git"
+
+
+def checkout_state(path: pathlib.Path, pin: dict, repository: str) -> tuple[str, str, str]:
+    """(action, reason, head) for what sits at `path`: clone, same, refresh or blocked.
+
+    Blocked is anything the socle did not put there, or that somebody has
+    changed since: a symbolic link, a directory that is not a repository, a
+    checkout on a branch, a tracked modification, a clone of another
+    repository. The day maelys-egress reported this, one sibling carried
+    another session's uncommitted work and another had been moved back to an
+    older version by hand: both are working copies, and a command that reset
+    either would have destroyed the first and silently corrected the second.
+    What is detached and unmodified holds nothing a fetch and a checkout can
+    lose -- local branches, stashes and the reflog all survive -- so it is
+    refreshed. Nothing here, and nothing below, ever deletes a directory.
+    """
+    if path.is_symlink():
+        # The obvious shortcut to "use my working copy instead": refreshing
+        # through it is resetting the working copy.
+        return "blocked", f"{path} is a symbolic link; the socle refreshes only what it cloned", ""
+    if not path.exists():
+        return "clone", "", ""
+    if not (path / ".git").exists():
+        return "blocked", f"{path} is not a git repository", ""
+    if run(["git", "symbolic-ref", "-q", "HEAD"], cwd=path).returncode == 0:
+        branch = git("rev-parse", "--abbrev-ref", "HEAD", cwd=path, check=False)
+        return "blocked", f"{path} is on branch {branch}: a working copy, not a pinned checkout", ""
+    if run(["git", "status", "--porcelain", "--untracked-files=no"], cwd=path).stdout.strip():
+        return "blocked", f"{path} carries uncommitted changes to tracked files", ""
+    origin = git("remote", "get-url", "origin", cwd=path, check=False)
+    if origin != repository:
+        return "blocked", (f"{path} was cloned from {origin or 'no remote'} and the pin names {repository};"
+                           " move it aside by hand"), ""
+    head = git("rev-parse", "HEAD", cwd=path, check=False)
+    return ("same" if head == pin["commit"] else "refresh"), "", head
+
+
+def materialise(path: pathlib.Path, pin: dict, repository: str, action: str) -> None:
+    """Bring `path` to the pin, with the managed script's git in the socle's hands.
+
+    The script refuses an existing destination and finds its pins from its
+    own location, so it can neither refresh nor run from elsewhere; and a
+    product the socle does not release carries no copy of it at all. The
+    commands are the script's -- a partial clone, a detached checkout, a
+    verified HEAD, submodules only when declared -- so a checkout made here
+    and one CI makes next to the product are the same object.
+    """
+    if action == "clone":
+        path.parent.mkdir(parents=True, exist_ok=True)
+        git("clone", "--quiet", *CLONE_FLAGS, repository, str(path))
+    if action in ("clone", "refresh"):
+        # By commit first, from origin by name so a partial clone keeps its
+        # promisor. A server that will not serve a bare commit is asked for
+        # its refs instead, which reach any tagged pin.
+        if action == "refresh" and run(["git", "fetch", "--quiet", "origin", pin["commit"]],
+                                       cwd=path).returncode != 0:
+            git("fetch", "--quiet", "--tags", "origin", cwd=path)
+        git("checkout", "--quiet", "--detach", pin["commit"], cwd=path)
+        if git("rev-parse", "HEAD", cwd=path) != pin["commit"]:
+            raise Failure("FAILED", f"{path} is not at {pin['commit'][:7]} after checkout.",
+                          "This is a defect of the socle or of git; inspect the checkout.")
+    if pin["submodules"] is not None:
+        # On a `same` too: a pin that gained its submodules line takes effect.
+        arguments = ["submodule", "update", "--quiet", "--init"] + (["--recursive"] if pin["submodules"] else [])
+        if run(["git", *arguments, "--depth", "1"], cwd=path).returncode != 0:
+            git(*arguments, cwd=path)
+
+
+def neighbour_pins(decl: Declarations, name: str, path: pathlib.Path) -> list[str]:
+    """What a materialised dependency pins itself, held against the product's; notes only.
+
+    Not materialised, and deliberately: check-product.yml clones the pins of
+    the product it builds and nothing below them, so a directory that held
+    more would let a build pass here that CI refuses -- hiding a missing pin
+    exactly where CI shows it. When a product's build needs what a
+    dependency pins, the product pins it: maelys-oci pins maelys-json for
+    the maelys-cli it builds. Whether two pins must agree is the product's
+    rule as well, and maelys-egress has one. Never a refusal: the fleet
+    disagrees today, maelys-warden pinning maelys-json v0.1.0 where
+    maelys-oci pins v0.2.0, and both are green.
+    """
+    notes: list[str] = []
+    pins_dir = path / "dependencies"
+    for pin_file in sorted(pins_dir.glob("*.pin")) if pins_dir.is_dir() else []:
+        pin, _problems = parse_pin(pin_file.name[: -len(".pin")], pin_file.read_text(encoding="utf-8"))
+        if not pin:
+            continue
+        mine = decl.pins.get(pin["name"])
+        if mine is None:
+            notes.append(f"{name} pins {pin['name']} {pin['tag']} ({pin['commit'][:7]}), which {decl.product}"
+                         f" does not: not materialised, as in CI; a build that needs it pins it here")
+        elif mine["commit"] != pin["commit"]:
+            notes.append(f"{name} pins {pin['name']} at {pin['tag']} ({pin['commit'][:7]}); {decl.product}"
+                         f" pins {mine['tag']} ({mine['commit'][:7]}), which is what is here, as in CI")
+    return notes
+
+
+def handle_dependencies(invocation: Invocation) -> tuple[dict, int]:
+    """Every pin of the product at its commit, in a directory that is not a working copy."""
+    project, product, mechanism = project_of(invocation)
+    apply = invocation.flag("--apply")
+    decl = read_declarations(project, product, mechanism)
+    if decl.pin_problems:
+        raise Failure("PRECONDITION_FAILED", "A pin cannot be read: " + "; ".join(decl.pin_problems) + ".",
+                      f"Fix the pin; '{PROGRAM} check {project}' reports it.")
+    chosen = str(invocation.option("--directory", "") or "")
+    directory = (pathlib.Path(chosen).expanduser() if chosen else dependencies_home(product)).resolve()
+    if directory == project or project in directory.parents:
+        raise Failure("VALIDATION_FAILED", f"{directory} is the product or inside it.",
+                      "The pinned checkouts live apart from the product; pass another --directory, or none.")
+    entries: list[dict] = []
+    blocked: list[str] = []
+    for name in decl.dependencies:
+        pin = decl.pins[name]
+        repository = dependency_repository(pin)
+        path = directory / name
+        action, reason, head = checkout_state(path, pin, repository)
+        entry = {"name": name, "tag": pin["tag"], "commit": pin["commit"], "repository": repository,
+                 "path": str(path), "action": action}
+        if pin["submodules"] is not None:
+            entry["submodules"] = pin["submodules"]
+        if action == "blocked":
+            entry["reason"] = reason
+            blocked.append(reason)
+        elif action == "refresh":
+            entry["previous"] = head
+        entries.append(entry)
+    if apply and blocked:
+        # Before the first clone: a directory half materialised is the state
+        # the report describes, and the operator frees one path and reruns.
+        raise Failure("PRECONDITION_FAILED", "Nothing written: " + "; ".join(blocked) + ".",
+                      "Free these paths by hand -- they are working copies, or not the socle's -- or pass"
+                      " --directory; the socle never deletes a checkout.")
+    if apply:
+        for entry in entries:
+            materialise(pathlib.Path(entry["path"]), decl.pins[entry["name"]],
+                        entry["repository"], entry["action"])
+    notes: list[str] = []
+    for entry in entries:
+        if entry["action"] == "blocked" or (entry["action"] == "clone" and not apply):
+            continue
+        path = pathlib.Path(entry["path"])
+        # Left in place: a build, most likely, and the fleet builds its
+        # dependencies out of tree so as not to leave any.
+        untracked = [line for line in
+                     run(["git", "ls-files", "--others", "--exclude-standard"], cwd=path).stdout.split("\n") if line]
+        if untracked:
+            notes.append(f"{entry['name']}: {len(untracked)} untracked file(s) left in place,"
+                         f" {untracked[0]} first")
+        if entry["name"] not in decl.foreign:
+            notes.extend(neighbour_pins(decl, entry["name"], path))
+    data = {"mode": "apply" if apply else "plan", "product": product, "project": str(project),
+            "directory": str(directory), "dependencies": entries, "notes": notes, "blocked": bool(blocked)}
+    return data, EXIT_VIOLATIONS if blocked else EXIT_OK
+
+
+def text_dependencies(data: dict) -> str:
+    lines = []
+    for entry in data["dependencies"]:
+        head = f"{entry['name']} {entry['tag']} ({entry['commit'][:7]})"
+        if entry["action"] == "clone":
+            lines.append(f"{'clone':<8} {head} from {entry['repository']}")
+        elif entry["action"] == "refresh":
+            lines.append(f"{'refresh':<8} {head}, here {entry['previous'][:7]}")
+        elif entry["action"] == "blocked":
+            lines.append(f"{'BLOCKED':<8} {entry['name']}: {entry['reason']}")
+        else:
+            lines.append(f"{'same':<8} {head}")
+    lines.extend(f"{'note':<8} {note}" for note in data["notes"])
+    count = len(data["dependencies"])
+    if not count:
+        lines.append(f"dependencies: {data['product']} pins nothing")
+    elif data["blocked"]:
+        lines.append("dependencies: nothing written; free the blocked paths, or pass --directory")
+    elif data["mode"] == "apply":
+        lines.append(f"dependencies: {count} pinned checkout(s) in {data['directory']}")
+    else:
+        lines.append(f"dependencies: {count} pinned checkout(s) would be in {data['directory']}; add --apply")
+    return "\n".join(lines) + "\n"
+
+
 def handle_protect(invocation: Invocation) -> tuple[dict, int]:
     """What the default branch should require, derived rather than typed.
 
@@ -3829,6 +4065,7 @@ TEXT = {
     "migrate": text_migrate,
     "new": text_new,
     "adopt": text_adopt,
+    "dependencies": text_dependencies,
     "check": text_check,
     "declarations": text_declarations,
     "preflight": text_preflight,
@@ -4063,6 +4300,33 @@ APP = cli.Program(PROGRAM, PRODUCT, socle_version(), [
                                         cli.argument("SECONDS", "integer", minimum=5, maximum=300), default="15",
                                         hidden=True)],
                     schema=CUT_SCHEMA),
+    cli.transaction("dependencies", "dependencies",
+                    "Materialise the product's pinned dependencies at their commits in one directory apart"
+                    " from any working copy, refreshing what is already there; plan without --apply.",
+                    handle_dependencies, operands=[DIR_OPERAND],
+                    options=[cli.option("--directory", "Where the checkouts go;"
+                                        " ~/.cache/maelys-release/dependencies/PRODUCT by default.",
+                                        cli.argument("DIR"))],
+                    schema={"type": "object", "additionalProperties": False,
+                            "required": ["mode", "product", "project", "directory", "dependencies",
+                                         "notes", "blocked"],
+                            "properties": {"mode": {"enum": ["plan", "apply"]}, "product": {"type": "string"},
+                                           "project": {"type": "string"}, "directory": {"type": "string"},
+                                           "dependencies": {"type": "array", "items": {
+                                               "type": "object", "additionalProperties": False,
+                                               "required": ["name", "tag", "commit", "repository", "path",
+                                                            "action"],
+                                               "properties": {"name": {"type": "string"},
+                                                              "tag": {"type": "string"},
+                                                              "commit": {"type": "string"},
+                                                              "repository": {"type": "string"},
+                                                              "path": {"type": "string"},
+                                                              "action": {"enum": ["clone", "refresh", "same",
+                                                                                  "blocked"]},
+                                                              "submodules": {"enum": ["", "recursive"]},
+                                                              "previous": {"type": "string"},
+                                                              "reason": {"type": "string"}}}},
+                                           "notes": STRINGS, "blocked": {"type": "boolean"}}}),
     cli.execute("protect", "protect",
                 "Report what the default branch should require, derived from the workflows and the runs it"
                 " carries rather than typed by hand; --apply writes it.",

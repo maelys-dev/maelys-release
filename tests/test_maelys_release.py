@@ -198,7 +198,8 @@ class ContractTest(unittest.TestCase):
         self.assertIn("--apply", self.product.run("__complete", "--", "adopt", "x", "--").stdout.split())
         self.assertEqual(self.product.run("__complete", "--", "rehearse", "x", "li").stdout, "linux-arm64\nlinux-x86_64\n")
         completed = self.product.run("__complete", "--format", "json", "--compact", "--", "de")
-        self.assertEqual(json.loads(completed.stdout)["data"]["records"], [{"word": "declarations"}, {"word": "describe"}])
+        self.assertEqual(json.loads(completed.stdout)["data"]["records"],
+                         [{"word": "declarations"}, {"word": "dependencies"}, {"word": "describe"}])
         jsonl = self.product.run("__complete", "--format", "jsonl", "--", "ver").stdout
         self.assertEqual(json.loads(jsonl), {"word": "version"})
         for shell in ("bash", "zsh", "fish"):
@@ -2364,6 +2365,122 @@ class RehearsalEnvironmentTest(unittest.TestCase):
         self.assertIn("gh release edit", channel)
         # Replayed on the same tag, it must not say it twice.
         self.assertIn("already says", channel)
+
+
+class DependenciesTest(unittest.TestCase):
+    """The pins materialised apart from the working copies, and refreshed.
+
+    maelys-egress counted four `make check` failures in one day with no file
+    of the product at fault: the managed script clones next to the product,
+    and next to the product is where the working copies of someone who
+    develops the dependencies too already live. The command owns one
+    directory per product, refreshes what holds nothing to lose, refuses the
+    rest before writing, and never deletes.
+    """
+
+    def setUp(self) -> None:
+        self.product = Product()
+        self.dir = str(self.product.dir)
+        self.product.env["XDG_CACHE_HOME"] = str(self.product.work / "cache")
+        # resolve(): the socle resolves the destination, and /var is a
+        # symbolic link to /private/var on this platform.
+        self.home = (self.product.work / "cache" / "maelys-release" / "dependencies"
+                     / "maelys-fixture").resolve()
+        self.source = self.product.work / "src" / "maelys-system"
+        self.addCleanup(self.product.close)
+
+    def entries(self, *arguments: str, expect: int = 0) -> list:
+        return self.product.json("dependencies", self.dir, *arguments, expect=expect)["data"]["dependencies"]
+
+    def test_a_plan_writes_nothing_and_names_one_directory_per_product(self) -> None:
+        data = self.product.json("dependencies", self.dir)["data"]
+        self.assertEqual(data["mode"], "plan")
+        self.assertEqual(data["directory"], str(self.home))
+        self.assertEqual([(e["name"], e["action"]) for e in data["dependencies"]], [("maelys-system", "clone")])
+        self.assertFalse(self.home.exists(), "a plan clones nothing")
+
+    def test_apply_clones_at_the_pin_detached_and_a_second_run_does_nothing(self) -> None:
+        self.assertEqual(self.entries("--apply")[0]["action"], "clone")
+        path = self.home / "maelys-system"
+        self.assertEqual(self.product.git(path, "rev-parse", "HEAD"), self.product.pinned)
+        detached = subprocess.run(["git", "symbolic-ref", "-q", "HEAD"], cwd=path, check=False,
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertNotEqual(detached.returncode, 0, "a pinned checkout is detached, as the script leaves it")
+        self.assertEqual(self.entries("--apply")[0]["action"], "same")
+
+    def test_a_moved_pin_is_fetched_without_losing_anything(self) -> None:
+        self.product.run("dependencies", self.dir, "--apply")
+        path = self.home / "maelys-system"
+        # What an rm -rf would have taken with it.
+        self.product.git(path, "branch", "keep")
+        self.product.write("dependencies/maelys-system.pin", f"{PINNED_TAG}\n{self.product.tagged}\n")
+        planned = self.entries()[0]
+        self.assertEqual((planned["action"], planned["previous"]), ("refresh", self.product.pinned))
+        self.assertEqual(self.product.git(path, "rev-parse", "HEAD"), self.product.pinned, "a plan moves nothing")
+        self.product.run("dependencies", self.dir, "--apply")
+        self.assertEqual(self.product.git(path, "rev-parse", "HEAD"), self.product.tagged)
+        self.assertIn("keep", self.product.git(path, "branch", "--list", "keep"))
+
+    def test_a_working_copy_is_refused_before_anything_is_written(self) -> None:
+        """The incident's layout: the destination is where someone works."""
+        entry = self.entries("--directory", str(self.product.work / "src"), expect=2)[0]
+        self.assertEqual(entry["action"], "blocked")
+        self.assertIn("on branch", entry["reason"])
+        error = self.product.json("dependencies", self.dir, "--directory", str(self.product.work / "src"),
+                                  "--apply", expect=1)["error"]
+        self.assertEqual(error["code"], "PRECONDITION_FAILED")
+        self.assertIn("never deletes", error["hint"])
+        self.assertEqual(self.product.git(self.source, "rev-parse", "--abbrev-ref", "HEAD"), "main",
+                         "the working copy is left exactly as it was")
+
+    def test_a_tracked_change_blocks_and_is_not_reverted(self) -> None:
+        self.product.run("dependencies", self.dir, "--apply")
+        path = self.home / "maelys-system"
+        tracked = next(child for child in path.iterdir() if child.is_file() and child.name != ".git")
+        tracked.write_text("edited here\n", encoding="utf-8")
+        self.assertIn("uncommitted changes", self.entries(expect=2)[0]["reason"])
+        self.product.json("dependencies", self.dir, "--apply", expect=1)
+        self.assertEqual(tracked.read_text(encoding="utf-8"), "edited here\n")
+
+    def test_a_symbolic_link_to_a_working_copy_is_refused(self) -> None:
+        """The obvious shortcut to 'use my checkout': refreshing through it
+        would reset the checkout."""
+        self.home.mkdir(parents=True)
+        (self.home / "maelys-system").symlink_to(self.source)
+        self.assertIn("symbolic link", self.entries(expect=2)[0]["reason"])
+        self.assertTrue((self.home / "maelys-system").is_symlink())
+
+    def test_untracked_files_are_left_in_place_and_noted(self) -> None:
+        self.product.run("dependencies", self.dir, "--apply")
+        (self.home / "maelys-system" / "left.o").write_text("", encoding="utf-8")
+        data = self.product.json("dependencies", self.dir, "--apply")["data"]
+        self.assertEqual(data["dependencies"][0]["action"], "same")
+        self.assertTrue(any("untracked" in note and "left.o" in note for note in data["notes"]), data["notes"])
+        self.assertTrue((self.home / "maelys-system" / "left.o").exists())
+
+    def test_a_broken_pin_materialises_nothing(self) -> None:
+        self.product.write("dependencies/broken.pin", "v1.0.0\nnot-a-commit\n")
+        error = self.product.json("dependencies", self.dir, "--apply", expect=1)["error"]
+        self.assertEqual(error["code"], "PRECONDITION_FAILED")
+        self.assertIn("dependencies/broken.pin", error["message"])
+        self.assertFalse(self.home.exists())
+
+    def test_the_product_is_not_a_home_for_its_own_pins(self) -> None:
+        error = self.product.json("dependencies", self.dir, "--directory", self.dir, expect=1)["error"]
+        self.assertEqual(error["code"], "VALIDATION_FAILED")
+
+    def test_a_foreign_pin_is_cloned_from_its_repository_line(self) -> None:
+        self.product.write("dependencies/mbedtls.pin", "v3.6.7\n" + "b" * 40
+                           + "\nrepository https://example.invalid/mbedtls.git\nsubmodules\n")
+        planned = {entry["name"]: entry for entry in self.entries()}
+        self.assertEqual(planned["mbedtls"]["repository"], "https://example.invalid/mbedtls.git")
+        self.assertEqual(planned["mbedtls"]["submodules"], "")
+        self.assertTrue(planned["maelys-system"]["repository"].endswith("/maelys-system.git"))
+
+    def test_the_clone_is_the_managed_script_s_clone(self) -> None:
+        """One object, whether CI made it next to the product or this made it here."""
+        template = (ROOT / "share" / "templates" / "checkout-dependency.sh").read_text(encoding="utf-8")
+        self.assertIn(" ".join(MODULE.CLONE_FLAGS), template)
 
 
 class ProtectionContextsTest(unittest.TestCase):
