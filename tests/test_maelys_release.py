@@ -1862,6 +1862,91 @@ class CutTest(unittest.TestCase):
         self.assertEqual(self.product.read("VERSION"), "1.2.3\n")
         self.assertEqual(self.product.git(self.dir, "rev-parse", "--abbrev-ref", "HEAD"), "main")
 
+    def previous_release(self, old: str, new: str, *carriers: str) -> None:
+        """The release before this one: VERSION and CARRIERS moved OLD -> NEW.
+
+        This is the only thing the audit learns from, so a fixture that
+        wants to be audited has to have released once.
+        """
+        for version in (old, new):
+            for name in carriers:
+                self.product.write(name, f'#define VERSION "{version}"\n')
+            self.product.write("VERSION", version + "\n")
+            self.product.git(self.dir, "add", "-A")
+            self.product.git(self.dir, "-c", "commit.gpgsign=false", "commit", "-q",
+                             "-m", f"maelys-fixture {version}")
+        self.product.git(self.dir, "push", "-q", "origin", "main")
+
+    def test_a_version_that_moved_elsewhere_last_time_stops_this_cut(self) -> None:
+        """The reported defect: VERSION bumped alone, and the branch already pushed.
+
+        maelys-cli reported it from a VERSION and a header compared by make
+        check-version; the refusal arrived after the branch and the pull
+        request, and only because that product compares them at all.
+        """
+        if not self.signing_key():
+            self.skipTest("ssh-keygen is needed to sign the bump commit")
+        self.fake_gh()
+        self.previous_release("1.2.2", "1.2.3", "include/version.h")
+        self.product.write("CHANGELOG.md",
+                           "# Changelog\n\n## 1.3.0 — 2026-09-03\n\n- Next.\n\n## 1.2.3 — 2026-09-03\n\n- Something.\n")
+        failure = self.refusal(**{"--apply": True})
+        self.assertEqual(failure.code, "PRECONDITION_FAILED")
+        self.assertIn("include/version.h", failure.message)
+        self.assertIn("after-version", failure.hint)
+        # Nothing was written, nothing was pushed, and the operator is where
+        # they started: that is the whole point of auditing before the branch.
+        self.assertEqual(self.product.read("VERSION"), "1.2.3\n")
+        self.assertEqual(self.product.git(self.dir, "rev-parse", "--abbrev-ref", "HEAD"), "main")
+        self.assertNotIn("release/v1.3.0", self.product.git(self.dir, "branch", "--list"))
+
+    def test_the_plan_says_so_before_anything_is_written(self) -> None:
+        if not self.signing_key():
+            self.skipTest("the plan reaches the gate, which reads the signing configuration")
+        self.previous_release("1.2.2", "1.2.3", "include/version.h")
+        self.product.write("CHANGELOG.md",
+                           "# Changelog\n\n## 1.3.0 — 2026-09-03\n\n- Next.\n\n## 1.2.3 — 2026-09-03\n\n- Something.\n")
+        data, code = self.cut()
+        self.assertEqual(code, MODULE.EXIT_OK)
+        notes = [entry["message"] for entry in data["gate"] if entry["status"] == "note"]
+        self.assertTrue(any("include/version.h" in note and "after-version" in note for note in notes), notes)
+
+    def test_a_declared_after_version_satisfies_the_audit(self) -> None:
+        if not self.signing_key():
+            self.skipTest("ssh-keygen is needed to sign the bump commit")
+        self.fake_gh()
+        self.previous_release("1.2.2", "1.2.3", "include/version.h")
+        self.product.write("scripts/header.sh",
+                           '#!/bin/sh\nprintf \'#define VERSION "%s"\\n\' "$(cat VERSION)" >include/version.h\n',
+                           executable=True)
+        self.product.write("maelys-release.conf", "[cut]\nafter-version sh scripts/header.sh\n")
+        self.product.write("CHANGELOG.md",
+                           "# Changelog\n\n## 1.3.0 — 2026-09-03\n\n- Next.\n\n## 1.2.3 — 2026-09-03\n\n- Something.\n")
+        self.product.git(self.dir, "add", "-A")
+        self.product.git(self.dir, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "declare the generator")
+        self.product.git(self.dir, "push", "-q", "origin", "main")
+        data, code = self.cut(**{"--apply": True})
+        self.assertEqual(code, MODULE.EXIT_OK, data)
+        self.assertEqual(self.product.read("include/version.h"), '#define VERSION "1.3.0"\n')
+        verdicts = {entry["message"] for entry in data["bump"] if entry["status"] == "ok"}
+        self.assertIn("include/version.h carries 1.3.0", verdicts)
+
+    def test_a_first_release_has_nothing_to_compare_with(self) -> None:
+        """No previous bump is a note, never a refusal."""
+        self.product.write("CHANGELOG.md",
+                           "# Changelog\n\n## 1.3.0 — 2026-09-03\n\n- Next.\n\n## 1.2.3 — 2026-09-03\n\n- Something.\n")
+        audit, stale = MODULE.bump_audit(self.dir, "1.2.3", "1.3.0")
+        self.assertEqual(stale, [])
+        self.assertEqual([status for status, _ in audit], ["note"])
+        self.assertIn("no previous bump", audit[0][1])
+
+    def test_a_carrier_that_left_the_tree_is_a_note(self) -> None:
+        self.previous_release("1.2.2", "1.2.3", "include/version.h")
+        (self.dir / "include" / "version.h").unlink()
+        audit, stale = MODULE.bump_audit(self.dir, "1.2.3", "1.3.0")
+        self.assertEqual(stale, [])
+        self.assertIn("no longer in the tree", audit[0][1])
+
     def test_cut_refuses_a_repository_that_is_not_on_github(self) -> None:
         error = self.product.json("cut", str(self.dir), "1.3.0", expect=1)["error"]
         self.assertEqual(error["code"], "PRECONDITION_FAILED")
@@ -2413,6 +2498,22 @@ class UnitTest(unittest.TestCase):
         self.assertEqual(MODULE.matrix_values('        os: [ubuntu-24.04]\n', "os"), ["ubuntu-24.04"])
         jq = '          runner: (if has("runner") then (.runner | tojson) else x end)}]}\n'
         self.assertEqual(MODULE.matrix_values(jq, "runner"), [])
+
+    def test_version_pattern_matches_a_version_and_not_a_longer_one(self) -> None:
+        inside = MODULE.version_pattern("0.1.1")
+        self.assertTrue(inside.search("v0.1.1"))
+        self.assertTrue(inside.search("#define VERSION \"0.1.1\""))
+        # The reason the pattern exists at all: a dot that continues the
+        # version, and a digit on either side.
+        self.assertFalse(inside.search("0.1.10"))
+        self.assertFalse(inside.search("10.1.1"))
+        self.assertFalse(inside.search("0.1.1.2"))
+        # And the reason it stops there. A dash before a version is how a
+        # tarball is named and a dot after it is an extension; refusing
+        # either lost real carriers of maelys-egress, whose README installs
+        # the archive by name.
+        self.assertTrue(inside.search("maelys-egress-node-sdk-0.1.1.tar.gz"))
+        self.assertTrue(inside.search("pip install maelys-egress==0.1.1"))
 
     def test_parse_release(self) -> None:
         self.assertEqual(MODULE.parse_release("[targets]\nlinux-arm64\nwasm32 ubuntu-26.04\n"),
