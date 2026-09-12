@@ -992,6 +992,48 @@ the tag, and `cut` is that release carried out. `adopt` runs from a checkout of 
 without a tag is refused, `--allow-untagged` being the trial of a
 candidate before its tag.
 
+### Protecting a default branch without typing its checks
+
+A branch protection requires a check **by its name**, and those names are the
+socle's jobs prefixed by the job that calls them —
+`check / check (macos-15)`, or `socle / check (macos-15)` where the product
+named its calling job `socle`. Typed by hand, a required context is a copy of
+what some pin produced on the day somebody looked. When the socle renames a
+leg, every context naming the old one waits for a run that never starts, and
+the branch locks with no warning until a pull request refuses to merge.
+
+```sh
+maelys-release protect DIR            # what it should require, and why
+maelys-release protect DIR --apply    # writes it
+```
+
+The two halves are found in different ways, and deliberately so:
+
+- **The socle's jobs are computed**, from the `check-product.yml` this socle
+  carries and from the call in the product's `ci.yml`. Nothing is observed,
+  so a leg renamed by an adoption is known here before a single run exists.
+  Each job's input decides it, defaults included: `sanitizer_command`
+  defaults to a command and is opt-out, `fuzz_command` defaults to nothing
+  and is opt-in.
+- **The product's own jobs are observed**, from the check runs of its recent
+  merged pull requests, intersected. Nothing here can predict their names.
+  The evidence is pull requests and never the tip of the default branch,
+  which also carries what the tag pointing at it ran and the push-only runs
+  besides. The intersection keeps out a name that appears on one head and
+  not the next: requiring an intermittent check blocks a pull request at
+  random, and what is left out is reported with the count that left it out.
+
+Observing the socle's legs too would have confused the two: right after an
+adoption the older pull requests still carry the previous names, and an
+intersection would have called a renamed leg intermittent and dropped it.
+
+What the protection requires and what the socle computes are compared, so a
+context that is required and never produced is named as such. The shape is
+the fleet's: a pull request required, **no approving review** — a sole
+operator cannot approve their own, and requiring one would stop every
+release — the checks above, `enforce_admins`, and neither force-push nor
+deletion.
+
 ### What the tap serves and what a product declares
 
 The tap is one repository for every product, so no product can see this from

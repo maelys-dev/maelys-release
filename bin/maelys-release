@@ -2154,6 +2154,18 @@ def github_api(path: str) -> dict | None:
     return body if isinstance(body, dict) else None
 
 
+def github_list(path: str) -> list:
+    """The body of a GET that answers a list, or an empty one.
+
+    github_api keeps its shape -- a mapping or nothing -- because everything
+    that reports on an absence relies on it. A listing endpoint answers an
+    array, and widening that reader to carry both would have made every
+    caller ask which it got.
+    """
+    body = github_read(path)[1]
+    return body if isinstance(body, list) else []
+
+
 def environment_gate(repository: str, environment: dict | None, declared: str = "") -> list[tuple[str, str]]:
     """Whether the release environment holds the gate this repository asked for.
 
@@ -3162,6 +3174,241 @@ def rehearse_channel(invocation: Invocation, project: pathlib.Path, product: str
     return data, EXIT_OK if data["matches"] is not False else EXIT_VIOLATIONS
 
 
+CI_JOB = re.compile(r"^  ([A-Za-z0-9_-]+):\s*$")
+TAG_WORKFLOWS = ("release", "tap", "channel")
+
+
+def socle_check_contexts(project: pathlib.Path) -> tuple[str, list[str]]:
+    """The contexts the socle's check job produces, and the job that calls it.
+
+    Read from the product's own ci.yml and the check-product.yml this socle
+    carries, never typed. A branch protection requires a check by its name,
+    and that name is '<calling job> / <called job>': the calling job is the
+    product's to name -- some call it check, maelys-egress calls it socle --
+    and the called ones are the socle's matrix legs plus the jobs that run
+    beside it.
+    """
+    ci = project / ".github" / "workflows" / "ci.yml"
+    if not ci.is_file():
+        return "", []
+    caller = ""
+    for line in ci.read_text(encoding="utf-8").splitlines():
+        named = CI_JOB.match(line)
+        if named:
+            caller = named.group(1)
+        elif CI_USES.search(line) and caller:
+            break
+    else:
+        return "", []
+    # Every job of check-product.yml that this product's call turns on, not
+    # the matrix alone: fuzz and sanitizers are jobs of the socle too, and
+    # leaving them out of what is computed made them look like product jobs
+    # that had stopped running.
+    text = ci.read_text(encoding="utf-8")
+    names = [f"check ({leg})" for leg in check_product_legs()]
+    # Each of these jobs runs when its input is not empty, and each input
+    # has a default: sanitizer_command defaults to a command and fuzz_command
+    # to nothing, so one is opt-out and the other opt-in. Reading only the
+    # call missed every product that takes the default -- which is every
+    # product, for sanitizers.
+    for job, gate in (("fuzz", "fuzz_command"), ("sanitizers", "sanitizer_command")):
+        called = re.search(rf"^\s+{gate}:(.*)$", text, re.MULTILINE)
+        value = (called.group(1) if called else check_product_default(gate)).strip()
+        # A block indicator is not an empty value: it says the value is on
+        # the lines below. Reading `sanitizer_command: |` as empty made the
+        # socle announce that two protected repositories required a job that
+        # never runs, when it runs and passes on every pull request they have.
+        if value in ("|", "|-", ">", ">-") or value.strip("'\"") != "":
+            names.append(job)
+    return caller, [f"{caller} / {name}" for name in names]
+
+
+def check_product_legs() -> list[str]:
+    """The legs of check-product.yml's matrix, from the workflow itself."""
+    workflow = socle_root() / ".github" / "workflows" / "check-product.yml"
+    if not workflow.is_file():
+        return []
+    legs = []
+    for line in workflow.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("- leg:"):
+            legs.append(stripped.split(":", 1)[1].strip())
+    return legs
+
+
+def check_product_default(name: str) -> str:
+    """The default of one input of check-product.yml, from the workflow."""
+    workflow = socle_root() / ".github" / "workflows" / "check-product.yml"
+    if not workflow.is_file():
+        return ""
+    lines = workflow.read_text(encoding="utf-8").splitlines()
+    for index, line in enumerate(lines):
+        if line.strip() == f"{name}:":
+            for following in lines[index + 1:index + 12]:
+                if following.strip().startswith("default:"):
+                    return following.split(":", 1)[1]
+                if re.match(r"^      [a-z_]+:", following):
+                    break
+            return ""
+    return ""
+
+
+def observed_contexts(repository: str, branch: str, samples: int = 3) -> tuple[list[str], list[str], dict]:
+    """Check names that every recent pull request of this repository produced.
+
+    A branch protection can only require what a pull request produces, so
+    the evidence is pull requests and never the tip of the default branch:
+    that tip also carries what the tag pointing at it ran, and the push-only
+    runs besides.
+
+    And it is several pull requests, intersected, not one. A name seen on
+    one head and not the next is either new or intermittent, and requiring
+    either blocks a pull request at random -- maelys-cli carries a run named
+    `ci` on some heads and not others. What appears on some but not all is
+    reported and left out: a protection should require what reliably runs,
+    and the operator can add the rest by hand once it does.
+    """
+    pulls = github_list(f"repos/{repository}/pulls?state=closed&per_page=30")
+    heads = [pull.get("head", {}).get("sha", "") for pull in pulls
+             if isinstance(pull, dict) and pull.get("merged_at")][:samples]
+    if not heads:
+        head = github_api(f"repos/{repository}/commits/{branch}") or {}
+        heads = [head.get("sha", "")] if head.get("sha") else []
+    if not heads:
+        return [], [], {}
+    per_head: list[set] = []
+    from_tag: set = set()
+    for sha in heads:
+        runs = (github_api(f"repos/{repository}/commits/{sha}/check-runs?per_page=100") or {}).get("check_runs", [])
+        names = set()
+        for run in runs:
+            name = str(run.get("name", ""))
+            if not name:
+                continue
+            if name.split(" / ")[0] in TAG_WORKFLOWS:
+                from_tag.add(name)
+                continue
+            if run.get("conclusion") in ("skipped", "neutral", None):
+                continue
+            names.add(name)
+        per_head.append(names)
+    every = set.intersection(*per_head) if per_head else set()
+    some = set().union(*per_head) - every if per_head else set()
+    counted = {name: sum(1 for names in per_head if name in names) for name in sorted(some)}
+    return sorted(every), sorted(from_tag), {"heads": len(per_head), "partial": counted,
+                                             "ever": sorted(set().union(*per_head)) if per_head else []}
+
+
+PROTECTION_SHAPE = {"enforce_admins": True, "restrictions": None,
+                    "required_pull_request_reviews": {"required_approving_review_count": 0,
+                                                      "dismiss_stale_reviews": False,
+                                                      "require_code_owner_reviews": False},
+                    "allow_force_pushes": False, "allow_deletions": False,
+                    "required_linear_history": False, "required_conversation_resolution": True}
+
+
+def handle_protect(invocation: Invocation) -> tuple[dict, int]:
+    """What the default branch should require, derived rather than typed.
+
+    A branch protection requires a check by name, and those names are the
+    socle's matrix legs prefixed by the job that calls it -- so a protection
+    posted by hand is a copy of what some pin produced on the day somebody
+    looked. When the socle's legs move, every context that named the old
+    ones waits for a run that will never start, and the branch locks with no
+    warning until a pull request refuses to merge. This reads the names from
+    the workflows and from the runs the default branch actually carries, and
+    says which of them the protection is missing or naming wrongly.
+    """
+    project, _product, _mechanism = project_of(invocation)
+    repository = github_repository(project)
+    if not repository:
+        raise Failure("PRECONDITION_FAILED", f"{project} has no GitHub origin.",
+                      "A branch protection is a GitHub setting; this reads and writes one.")
+    if not shutil.which("gh"):
+        raise Failure("PRECONDITION_FAILED", "gh is not installed.", "Install gh: this reads the GitHub API.")
+    data = github_api(f"repos/{repository}") or {}
+    branch = data.get("default_branch") or "main"
+    caller, derived = socle_check_contexts(project)
+    seen, from_tag, partial = observed_contexts(repository, branch)
+    state, current = github_read(f"repos/{repository}/branches/{branch}/protection")
+    holds = current if isinstance(current, dict) else {}
+    required = list(((holds.get("required_status_checks") or {}).get("contexts") or []))
+    # The socle's legs are computed, never observed: they come from the
+    # check-product.yml this socle carries, so an adoption that renames them
+    # is known here before any run exists. The product's own jobs are the
+    # opposite -- nothing here can predict their names, so they are taken
+    # from what its pull requests produced, intersected to keep an
+    # intermittent one out. Observing the socle's legs too would have
+    # confused the two: right after an adoption the older pull requests
+    # still carry the previous names, and an intersection would have called
+    # a renamed leg intermittent and dropped it.
+    others = [name for name in seen if name not in derived and not name.startswith(f"{caller} / ")]
+    proposed = derived + others
+    # "never seen" is judged on every pull request sampled, not on their
+    # intersection: a leg renamed by a recent adoption runs on the newest
+    # head alone, and calling that absent would have been the same mistake
+    # as calling it intermittent.
+    ever = partial.get("ever", [])
+    absent = [name for name in derived if ever and name not in ever]
+    stale = [name for name in required if name not in proposed]
+    report = {"repository": repository, "branch": branch, "protected": state == "ok",
+              "caller": caller, "socleContexts": derived, "observed": seen,
+              "fromTag": from_tag, "required": sorted(required),
+              "seenOnSome": {name: count for name, count in (partial.get("partial") or {}).items()
+                             if name not in derived and not name.startswith(f"{caller} / ")},
+              "pullRequests": partial.get("heads", 0),
+              "missingFromRuns": absent, "requiredButNeverRun": stale,
+              "proposed": proposed, "applied": False}
+    if state == "unreadable":
+        report["note"] = (f"GitHub refused to say what protects {branch} of {repository}, which a private"
+                          " repository of a free plan does. That is not the same fact as an open branch.")
+    if invocation.flag("--apply"):
+        if not proposed:
+            raise Failure("PRECONDITION_FAILED",
+                          f"no check run was seen on {branch} of {repository}.",
+                          "A protection that requires nothing is not what this writes. Let the branch run"
+                          " its checks once, then protect it.")
+        body = {**PROTECTION_SHAPE, "required_status_checks": {"strict": False, "contexts": seen}}
+        with tempfile.TemporaryDirectory(prefix="maelys-release-protect.") as temp:
+            payload = pathlib.Path(temp) / "protection.json"
+            payload.write_text(json.dumps(body), encoding="utf-8")
+            done = run(["gh", "api", "-X", "PUT",
+                        f"repos/{repository}/branches/{branch}/protection", "--input", str(payload)],
+                       cwd=project)
+        if done.returncode != 0:
+            raise Failure("PROCESS_FAILED", f"the protection of {branch} was refused: {done.stderr.strip()}",
+                          "A private repository needs a paid plan for branch protection; read the message above.")
+        report["applied"] = True
+    return report, EXIT_OK if not (absent or stale) else EXIT_VIOLATIONS
+
+
+def text_protect(data: dict) -> str:
+    lines = [f"branch   {data['branch']} of {data['repository']}"
+             + ("" if data["protected"] else " is NOT protected")]
+    if data.get("note"):
+        lines.append(f"note     {data['note']}")
+    if data["caller"]:
+        lines.append(f"socle    called by the job '{data['caller']}': "
+                     + ", ".join(data["socleContexts"]))
+    for name in data["proposed"]:
+        mark = "ok" if name in data["required"] else "add"
+        lines.append(f"{mark:<8} {name}")
+    for name in data["requiredButNeverRun"]:
+        lines.append(f"STALE    {name} is required and no run on {data['branch']} produces it:"
+                     " a pull request would wait for it forever")
+    for name in data["missingFromRuns"]:
+        lines.append(f"NOT YET  {name} is what this socle's check job produces and no recent pull request"
+                     " carries it: adopt this socle first, or its next pull request will be the first to"
+                     " run under that name")
+    for name, count in (data.get("seenOnSome") or {}).items():
+        lines.append(f"note     {name} is left out: {count} of {data.get('pullRequests', 0)} recent pull"
+                     " requests produced it, and a protection should require what reliably runs")
+    for name in data["fromTag"]:
+        lines.append(f"note     {name} is left out: a tag produces it, a pull request never does")
+    lines.append(f"protect: {'applied' if data['applied'] else 'nothing written; add --apply'}")
+    return "\n".join(lines) + "\n"
+
+
 def handle_rehearse(invocation: Invocation) -> tuple[dict, int]:
     """Replay the build job of release.yml for one Linux target in Docker."""
     project, product, mechanism = project_of(invocation)
@@ -3586,6 +3833,7 @@ TEXT = {
     "declarations": text_declarations,
     "preflight": text_preflight,
     "cut": text_cut,
+    "protect": lambda data: text_protect(data),
     "rehearse": lambda data: text_rehearse(data),
     "render": lambda data: f"rendered {data['output']}\n",
     "tap": text_tap,
@@ -3815,6 +4063,26 @@ APP = cli.Program(PROGRAM, PRODUCT, socle_version(), [
                                         cli.argument("SECONDS", "integer", minimum=5, maximum=300), default="15",
                                         hidden=True)],
                     schema=CUT_SCHEMA),
+    cli.execute("protect", "protect",
+                "Report what the default branch should require, derived from the workflows and the runs it"
+                " carries rather than typed by hand; --apply writes it.",
+                handle_protect,
+                operands=[DIR_OPERAND],
+                options=[cli.flag("--apply", "Write the protection instead of only reporting it.")],
+                schema={"type": "object", "additionalProperties": False,
+                        "required": ["repository", "branch", "proposed"],
+                        "properties": {"repository": {"type": "string"}, "branch": {"type": "string"},
+                                       "protected": {"type": "boolean"}, "caller": {"type": "string"},
+                                       "socleContexts": {"type": "array", "items": {"type": "string"}},
+                                       "observed": {"type": "array", "items": {"type": "string"}},
+                                       "fromTag": {"type": "array", "items": {"type": "string"}},
+                                       "required": {"type": "array", "items": {"type": "string"}},
+                                       "missingFromRuns": {"type": "array", "items": {"type": "string"}},
+                                       "requiredButNeverRun": {"type": "array", "items": {"type": "string"}},
+                                       "proposed": {"type": "array", "items": {"type": "string"}},
+                                       "seenOnSome": {"type": "object"},
+                                       "pullRequests": {"type": "integer"},
+                                       "applied": {"type": "boolean"}, "note": {"type": "string"}}}),
     cli.execute("rehearse", "rehearse",
                 "Replay the Linux build job of the release in a Docker container on a copy of the working"
                 " tree, make check with --check, or a channel's publish script against a published release"
