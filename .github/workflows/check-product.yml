@@ -57,6 +57,20 @@ on:
         type: boolean
         default: false
 
+      macos_runner:
+        description: >-
+          JSON naming the runner of the macOS leg: a label string such as
+          "macos-15", or a label array such as ["self-hosted","macOS","ARM64"].
+          It is read **only on a private repository**; a public one always
+          runs macos-15, whatever is declared. That is not a preference. A
+          self-hosted runner executes what the workflow checks out on a
+          machine somebody owns, and on a public repository a pull request
+          can carry anyone's code. The socle therefore never lets a
+          declaration put an outsider's code on a private machine.
+        required: false
+        type: string
+        default: '"macos-15"'
+
 permissions:
   contents: read
 
@@ -65,8 +79,22 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [ubuntu-26.04, ubuntu-26.04-arm, macos-15]
-    runs-on: ${{ matrix.runner }}
+        include:
+          - leg: ubuntu-26.04
+            runner: '"ubuntu-26.04"'
+          - leg: ubuntu-26.04-arm
+            runner: '"ubuntu-26.04-arm"'
+          - leg: macos-15
+            runner: ${{ github.event.repository.private && inputs.macos_runner || '"macos-15"' }}
+    # The name is the leg, never the machine. A matrix of two dimensions
+    # would otherwise name each job after both -- check (macos, "macos-15")
+    # where it used to read check (macos-15) -- and a check run's name is
+    # what a branch protection requires by. Renaming these would lock the
+    # default branch of every product that requires them, and a product
+    # that declares a runner of its own must not rename its own checks
+    # either: the leg it runs is the same leg.
+    name: check (${{ matrix.leg }})
+    runs-on: ${{ fromJSON(matrix.runner) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -122,7 +150,7 @@ jobs:
         shell: bash
         run: ${{ inputs.check_command }}
       - name: Release socle drift
-        if: matrix.runner == 'ubuntu-26.04'
+        if: matrix.leg == 'ubuntu-26.04'
         shell: bash
         # The socle pinned by release.yml is the pin of record: check from
         # that checkout regenerates the managed files and fails on any drift,

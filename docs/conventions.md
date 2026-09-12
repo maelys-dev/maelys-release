@@ -658,6 +658,46 @@ provenance of an SBOM **file** with a proof that the SBOM describes the
 archive beside it. A verifier could confirm both files left this workflow
 and nothing more. maelys-http reported it.
 
+### Choosing the macOS runner
+
+The runner of the `build` job has been a product's to declare since 0.24.0,
+in `[targets]`: a target line naming labels replaces the hosted default, so
+`macos-arm64 self-hosted macOS ARM64` already sends a release build to a
+machine of your own. The socle's other macOS legs had no such entry — the
+`render` and `publish` jobs of `tap.yml` were fixed on `macos-15`, and the
+matrix of `check-product.yml` was written into the workflow with no input at
+all. They are declared now:
+
+```
+[runners]
+macos self-hosted macOS ARM64
+```
+
+One line, one runner: a single label is rendered as a string and several as
+a label array, which is what `runs-on` takes. The declaration reaches
+`release.yml`, which the socle owns, and `adopt` also writes the one line it
+governs into the `with:` of the job that calls `check-product.yml` in
+`ci.yml` — the second thing the socle keeps current in a file that is
+otherwise the product's. Removing the section takes the line away again, so
+the file follows the declaration in both directions and `check` reports the
+gap in the meantime.
+
+**It is honoured on a private repository only, and that is not a
+preference.** A self-hosted runner executes what the workflow checks out, on
+a machine somebody owns. `check-product.yml`'s `check` job is reachable from
+a pull request, and on a public repository a pull request can carry
+anybody's code. The socle therefore never lets a declaration put an
+outsider's code on a private machine: a public repository runs `macos-15`
+whatever is declared. The `bottle` job keeps its own hosted runners for a
+different reason — a Homebrew bottle is tied to the macOS version it was
+built on, so it is named after the releases it targets.
+
+That gate is why this entry has no user in the fleet today: every repository
+that publishes through the socle is public. It is written because the choice
+belongs in the declaration rather than in a hand-edited workflow, and
+because the repository that goes private next should not have to discover
+the rule by breaking it.
+
 ### Attesting an SBOM against what it describes
 
 A product that builds an SBOM declares the glob, and the release attests

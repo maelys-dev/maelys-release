@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.41.0 — 2026-09-12
+
+- **A product declares the runner of the socle's macOS jobs.** `[runners]`
+  holds one `macos LABEL...` line; a single label renders as a string and
+  several as a label array, which is what `runs-on` takes. Until now the
+  `render` and `publish` jobs of `tap.yml` were fixed on `macos-15` and the
+  matrix of `check-product.yml` was written into the workflow with no input
+  at all. The `build` job of `release.yml` was already a product's to
+  declare, through a `[targets]` line naming labels, since 0.24.0.
+- **`adopt` writes the line, and takes it away again.** The declaration
+  reaches `release.yml`, which the socle owns, and `adopt` also maintains
+  the one line it governs inside the `with:` of the job calling
+  `check-product.yml` in `ci.yml` — the second thing the socle keeps current
+  in a file that is otherwise the product's, after the `uses:` line.
+  Removing the section removes the line, so the file follows the declaration
+  in both directions; `check` reports the gap until the next adoption.
+- **Honoured on a private repository only, and that is not a preference.** A
+  self-hosted runner executes what the workflow checks out, on a machine
+  somebody owns, and `check-product.yml`'s `check` job is reachable from a
+  pull request. On a public repository a pull request carries anybody's
+  code, so a public repository runs `macos-15` whatever is declared. The
+  socle does not let a declaration put an outsider's code on a private
+  machine.
+- This resumes [#8](https://github.com/maelys-dev/maelys-release/pull/8),
+  open since 6 September and 124 commits behind, whose gating condition had
+  emptied under it: it moved the tag-triggered macOS legs to a self-hosted
+  runner on a private repository, and named maelys-oci as the only private
+  repository it would reach. maelys-oci is public now, and no private
+  repository uses the socle's `release.yml` or `tap.yml` at all. What that
+  pull request got right is kept whole — a self-hosted runner must never run
+  a pull request's code — and what it hardcoded is declared instead, which
+  is what was asked of the socle for branch protection, CI triggers and
+  runners alike.
+
 ## 0.40.1 — 2026-09-12
 
 - **A carrier that has stopped carrying the version is a note, not a

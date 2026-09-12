@@ -41,6 +41,19 @@ on:
         required: false
         type: string
         default: maelys-dev/homebrew-tap
+      macos_runner:
+        description: >-
+          JSON naming the runner of the macOS legs: a label string such as
+          "macos-15", or a label array such as ["self-hosted","macOS","ARM64"].
+          Read **only on a private repository**; a public one always runs
+          macos-15, whatever is declared. That is not a preference. A
+          self-hosted runner executes what the workflow checks out on a
+          machine somebody owns, and on a public repository anyone's pull
+          request can reach it. The socle never lets a declaration put an
+          outsider's code on a private machine.
+        required: false
+        type: string
+        default: '"macos-15"'
       attestation:
         description: auto (by repository visibility), always or never, as in release.yml
         required: false
@@ -57,7 +70,7 @@ permissions:
 
 jobs:
   render:
-    runs-on: macos-15
+    runs-on: ${{ fromJSON(github.event.repository.private && inputs.macos_runner || '"macos-15"') }}
     env:
       HOMEBREW_NO_AUTO_UPDATE: "1"
     steps:
@@ -165,7 +178,7 @@ jobs:
   publish:
     needs: [render, bottle]
     if: always() && needs.render.result == 'success' && (needs.bottle.result == 'success' || needs.bottle.result == 'skipped')
-    runs-on: macos-15
+    runs-on: ${{ fromJSON(github.event.repository.private && inputs.macos_runner || '"macos-15"') }}
     # One publication at a time per tap in this repository: the formula jobs
     # of one release, or a replay during a release, wait for each other
     # instead of racing on the push. GitHub scopes the group to the
