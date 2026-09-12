@@ -203,6 +203,47 @@ class SbomSubjectTest(unittest.TestCase):
         self.spdx(element=element, files=True)
         self.assertEqual(self.read().returncode, 0)
 
+    def test_reads_every_subject_one_document_describes(self) -> None:
+        """A target that builds three packages writes one document for three.
+
+        SPDX repeats DESCRIBES and documentDescribes is an array, so the
+        per-package precision lives in the packages array rather than in the
+        number of files. maelys-http made the point after the socle had
+        written the single-document rule down as a limitation: it is the
+        form SPDX was built to carry, and subject-path takes the list.
+        """
+        elements, describes = [], []
+        for name, body in (("p-1.0.0-linux-x86_64.tar.gz", "the tarball"),
+                           ("p_1.0.0_amd64.deb", "the debian package"),
+                           ("p-1.0.0.x86_64.rpm", "the rpm")):
+            digest = self.package(name, body)
+            spdxid = "SPDXRef-Package-" + name.replace(".", "-").replace("_", "-")
+            elements.append({"SPDXID": spdxid, "packageFileName": name,
+                             "checksums": [{"algorithm": "SHA256", "checksumValue": digest}]})
+            describes.append({"spdxElementId": "SPDXRef-DOCUMENT", "relationshipType": "DESCRIBES",
+                              "relatedSpdxElement": spdxid})
+        document = {"spdxVersion": "SPDX-2.3", "SPDXID": "SPDXRef-DOCUMENT",
+                    "packages": elements, "relationships": describes}
+        (self.work / "dist" / "product.spdx.json").write_text(json.dumps(document), encoding="utf-8")
+        done = self.read()
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        for name in ("p-1.0.0-linux-x86_64.tar.gz", "p_1.0.0_amd64.deb", "p-1.0.0.x86_64.rpm"):
+            self.assertIn(f"dist/{name}", done.outputs)
+
+    def test_one_wrong_digest_among_several_stops_the_release(self) -> None:
+        good = self.package("p-1.0.0.tar.gz", "the tarball")
+        self.package("p_1.0.0_amd64.deb", "the debian package")
+        document = {"spdxVersion": "SPDX-2.3", "SPDXID": "SPDXRef-DOCUMENT",
+                    "packages": [{"SPDXID": "SPDXRef-a", "packageFileName": "p-1.0.0.tar.gz",
+                                  "checksums": [{"algorithm": "SHA256", "checksumValue": good}]},
+                                 {"SPDXID": "SPDXRef-b", "packageFileName": "p_1.0.0_amd64.deb",
+                                  "checksums": [{"algorithm": "SHA256", "checksumValue": "0" * 64}]}],
+                    "documentDescribes": ["SPDXRef-a", "SPDXRef-b"]}
+        (self.work / "dist" / "product.spdx.json").write_text(json.dumps(document), encoding="utf-8")
+        done = self.read()
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("p_1.0.0_amd64.deb", done.stderr)
+
     def test_reads_a_cyclonedx_component(self) -> None:
         digest = self.package("p-1.0.0.tar.gz", "the archive")
         document = {"bomFormat": "CycloneDX", "specVersion": "1.5",

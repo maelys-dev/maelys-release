@@ -680,9 +680,25 @@ beside it is wrong on a private repository too, and there the check is all
 that is left. On such a repository the run says the SBOM is published but
 not attested, so a reader of the release knows which guarantee is missing.
 
-One document per target, because an attestation carries one predicate and
-`actions/attest` takes a single `sbom-path`. A glob matching two documents
-stops the release rather than attesting one and ignoring the other.
+**One document per target, describing everything that target built.** This
+is the rule, not a limitation worked around. SPDX repeats `DESCRIBES` and
+`documentDescribes` is an array, so a target that leaves a `tar.gz`, a `deb`
+and an `rpm` writes one document with three entries in `packages`, each with
+its own `packageFileName` and `checksums`. The resolver takes all three as
+subjects and `subject-path` accepts the list; the per-package precision
+lives in the `packages` array, not in the number of files. A glob matching
+two documents therefore stops the release because two documents are the
+wrong shape, not because the workflow cannot hold them.
+
+A product that one day has to ship several — a third party's document beside
+its own, or two formats — has a way out that needs no dynamic steps: steps
+cannot be computed, jobs can, and `release.yml` already resolves its targets
+that way. One job would resolve the list to JSON and a second would take
+`strategy.matrix` on it. That is written here and not in the workflow on
+purpose: no product in the fleet needs it, and a mechanism with no user is a
+mechanism nobody verifies. The explicit refusal is the right behaviour until
+one turns up. maelys-http made both points, after the socle had written the
+single-document rule down as something it suffered.
 
 Both bundles travel with the packages, named after their target: the
 provenance and, when there is one, the SBOM. A verifier offline needs the
