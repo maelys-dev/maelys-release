@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.40.1 — 2026-09-12
+
+- **A carrier that has stopped carrying the version is a note, not a
+  refusal.** `bump_audit` wrote two messages and reached one verdict. The
+  two readings do not weigh the same: a file that **still holds the old
+  version** is an omission and nothing else explains it, so the release
+  stops; a file that holds **neither** version may be a carrier this cut
+  forgot, or one that has simply stopped naming a version, and the two read
+  identically. Refusing there blocked a release with nothing downstream to
+  lift it, because `[cut]` declares a command and not a list of files: the
+  operator's only ways out were to make a file carry a version it should no
+  longer carry, or to cut outside the tool.
+- This is the twin of the limit 0.40.0 documented, and the dangerous half.
+  A place the version *reaches* since the previous bump is invisible — a
+  missed detection the product's own checks still catch. A place the version
+  *leaves* was a false refusal. maelys-cli found it by measuring **all
+  thirty bumps of their history**: twenty-nine were made by hand and every
+  one of them is clean, including commits touching thirty, twenty-eight and
+  twenty-five files, so the worry that a bump not made by `cut` would give a
+  noisy baseline was the wrong worry. The one wide baseline came from a
+  generated CLI reference that carried the version at `0.1.0 -> 0.2.0` and
+  carries none today. They read the split out of the socle's own code before
+  the socle did.
+- `docs/conventions.md` states that one document per target is the rule
+  rather than a limitation of `actions/attest`. SPDX repeats `DESCRIBES` and
+  `documentDescribes` is an array, so a target that leaves a `tar.gz`, a
+  `deb` and an `rpm` writes one document with three entries and the resolver
+  already takes all three as subjects. Two tests cover it, one of which was
+  a real gap: a wrong digest among several still stops the release. The
+  matrix escape hatch for several documents is written in the conventions
+  and deliberately not in the workflow, because no product needs it and a
+  mechanism with no user is a mechanism nobody verifies. maelys-http made
+  both points.
+
 ## 0.40.0 — 2026-09-12
 
 - **`cut` audits its own write before it creates a branch.** It wrote
