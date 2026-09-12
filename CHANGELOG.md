@@ -1,5 +1,48 @@
 # Changelog
 
+## 0.45.0 — 2026-09-12
+
+- **A product says where its build reads its pinned dependencies, and the
+  socle gives the path instead of the build assuming a sibling.**
+  `[dependencies] apart` in the declaration file; the socle then materialises
+  the pins away from the product and exports `MAELYS_DEPENDENCIES_DIR`, in
+  all three places it clones — `check-product.yml`, the
+  `dependency_checkout` of `release.yml`, and the rehearsal's container.
+  `../NAME` names nothing there any more, so a build that still assumes a
+  sibling fails with the product's own message rather than by silently
+  reading whatever sits beside it.
+- **Why the ambient default had to go.** Thirteen `?= ../NAME` across five
+  repositories, **not one place requiring the variable**, and ten
+  hand-written checks that the path holds the pinned commit — near one per
+  default, which is the fleet already paying in test code for the
+  convenience. `../maelys-json` cannot be told apart from the working copy of
+  somebody who develops maelys-json too, and beside the product is where both
+  sit: maelys-egress lost four `make check` runs in a day to it.
+- **One word, not a variable per dependency.** Every Makefile of the fleet
+  reads `<root>/<name>` and nothing else, and the names differ for the same
+  dependency — `SYSTEM_DIR` here, `MAELYS_SYSTEM_DIR` there — so a
+  declaration naming them would be a second list to keep true with the
+  Makefile and with `ci.yml`, for nothing the root does not give. The first
+  draft of this change declared them one by one and also passed them as a
+  workflow input, which was the mistake 0.6.0 had already corrected: the job
+  reads the product's declarations itself.
+- **Pins without the declaration are a violation, and that is safe.** `check`
+  runs in CI at the socle a product pins, so the rule bites at the adoption
+  of this socle and nowhere else — the pull request that adopts carries the
+  Makefile with it, which is the only moment the two can move together. The
+  first draft made it a warning on the grounds that a violation would turn
+  the fleet red; that was false, and `valid()` accepts a warning anyway, so
+  the warning would have blocked nothing at all.
+- The ten checks that a path holds the pinned commit **stay**. A path says
+  where, not what: they verify `VERSION` against the tag, an ABI number, a
+  contract string, the agreement between two pins, and they are the one
+  defence against a declaration that is wrong. Proposing to delete them was
+  the third error of the first draft.
+- The rule is read after the declaration file and not beside the pins, which
+  are read first. A rule placed there sees a declaration that has not been
+  parsed yet — the same misplacement as the tap drift check of 0.42.0, twice
+  in one day, and a test now holds the placement.
+
 ## 0.44.0 — 2026-09-12
 
 - **`maelys-release dependencies DIR [--apply]` materialises a product's

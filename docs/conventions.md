@@ -992,6 +992,60 @@ the tag, and `cut` is that release carried out. `adopt` runs from a checkout of 
 without a tag is refused, `--allow-untagged` being the trial of a
 candidate before its tag.
 
+### The path is given, not assumed
+
+A Makefile of this fleet used to find its dependencies by an **ambient
+default**:
+
+```make
+MAELYS_JSON_DIR ?= ../maelys-json
+```
+
+Thirteen of those, across five repositories, and **not one place where the
+variable was required**. What they bought was a `make` that works with
+nothing set. What they cost is that `../maelys-json` cannot be told apart
+from the working copy of somebody who develops maelys-json too, and beside
+the product is exactly where both would sit. maelys-egress lost four `make
+check` runs in one day to it, with no file of its own at fault. The fleet was
+already paying for the convenience in test code: ten hand-written checks
+that the path holds the pinned commit, unmodified — near one per default.
+
+A product therefore says where its build reads them:
+
+```
+[dependencies]
+apart
+```
+
+One word, and one variable of a fixed name, `MAELYS_DEPENDENCIES_DIR`. Not a
+variable per dependency: every Makefile of the fleet reads
+`<root>/<name>` and nothing else, and the names they use for the roots
+differ for the same dependency — `SYSTEM_DIR` in one repository,
+`MAELYS_SYSTEM_DIR` in the next — so a declaration naming them would be a
+second list to keep true, for nothing the root does not already give. Each
+product derives its own: `SYSTEM_DIR ?= $(MAELYS_DEPENDENCIES_DIR)/maelys-system`.
+
+**The socle then stops cloning beside the product, in all three places it
+clones**: `check-product.yml`, the `dependency_checkout` of `release.yml`,
+and the rehearsal's container. `../NAME` names nothing there any more, so a
+build that still assumes a sibling fails with the product's own message
+rather than by silently reading whatever sits beside it — and a build on a
+machine and a build in CI read the same root, which is what makes them fail
+and pass together.
+
+**Pins without this declaration are a violation.** That is safe, and the
+reason is worth knowing: `check` runs in CI at the socle a product pins, so
+the rule bites at the adoption of this socle and nowhere else. The pull
+request that adopts carries the Makefile change with it, which is the only
+moment the two can move together.
+
+The ten checks that the path holds the pinned commit **stay**. The path says
+where, not what: they verify `VERSION` against the tag, an ABI number, a
+contract string, the agreement between two pins — none of which follows from
+a path. And they are the one defence against a declaration that is wrong,
+where a build would otherwise compile against the headers of the wrong
+library and fail far from the cause.
+
 ### The pins, apart from the working copies
 
 `scripts/checkout-dependency.sh NAME` clones next to the product and refuses
