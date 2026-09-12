@@ -992,6 +992,36 @@ the tag, and `cut` is that release carried out. `adopt` runs from a checkout of 
 without a tag is refused, `--allow-untagged` being the trial of a
 candidate before its tag.
 
+### What the tap serves and what a product declares
+
+The tap is one repository for every product, so no product can see this from
+its own packaging. The socle pushes to it and reads the declaration, and is
+the only place where the two sit side by side. `preflight` therefore reports
+a formula the tap serves **for this repository** that this repository no
+longer declares:
+
+```
+note  maelys-dev/homebrew-tap serves Formula/maelys-datalog.rb at v0.1.0-alpha.3
+      for this repository and nothing here declares it: [...] or remove the
+      formula from the tap. Until then that is what
+      'brew install maelys-dev/tap/maelys-datalog' installs
+```
+
+A formula is tied to its product by the repository its `url` names, never by
+its own name. That is not a detail: the case this exists for is a product
+that stopped declaring a template and would carry a different name today, so
+matching on the name would have missed it. A product that renames its formula
+— the `lib` prefix a library takes — leaves the old one behind in the same
+way, and this finds that too.
+
+It is a note and never a violation: the socle cannot know whether the formula
+is stale or whether the declaration is what went missing. And it is in
+`preflight` rather than `check`, because it reads one file per formula of the
+tap and `check` runs on every pull request of every product.
+
+maelys-datalog asked for it, after maelys-platform found that the tap had been
+serving its September archive for six versions.
+
 ### Rehearsing a channel
 
 `channel.yml` only ever runs on a signed tag, so the contract it rests on —
@@ -1011,6 +1041,16 @@ composes the marker the `record` job would attach and **compares it with the
 `channel-<name>.json` the release carries**, ignoring `published` and `run`,
 which differ by construction. A disagreement on any other field means the
 script records something the release does not carry.
+
+It also sets **`CHANNEL_DRY_RUN=1`**, which `channel.yml` never sets. Exit 0
+on an already-published version is the contract, and a script honours it by
+returning early — so the rehearsal proves the path that does *not* publish
+and, on its own, can never reach the one that does. That is not a small gap:
+it widens exactly as a channel starts working. A script that reads the
+variable can take its real publishing path under the registry's own dry run
+(`npm publish --dry-run`, `twine --dry-run`) and exercise the half the
+contract hides. maelys-datalog found this the hard way, with a publish
+command that resolved `dist/x.tgz` as a GitHub shorthand and had never run.
 
 It refuses before touching anything: a channel the product does not declare,
 a tag that is not one, a release that does not exist, a non-empty `dist/`

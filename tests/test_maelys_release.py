@@ -11,6 +11,7 @@ from __future__ import annotations
 import importlib.machinery
 import importlib.util
 import io
+import base64
 import json
 import os
 import pathlib
@@ -2327,6 +2328,100 @@ jobs:
     steps:
       - run: make check
 """ % ("0" * 40)
+
+
+FORMULA = """class LibmaelysJson < Formula
+  desc "A library"
+  homepage "https://github.com/maelys-dev/%s"
+  url "https://github.com/maelys-dev/%s/archive/refs/tags/%s.tar.gz"
+  sha256 "%s"
+end
+"""
+
+
+class RehearsalEnvironmentTest(unittest.TestCase):
+    """What the rehearsal hands the product's publish script."""
+
+    def test_the_rehearsal_offers_a_dry_run_the_job_never_does(self) -> None:
+        """The contract hides the publishing half, so the rehearsal opens it.
+
+        Exit 0 on an already-published version is what channel.yml requires,
+        and a script honours it by returning early -- so the rehearsal alone
+        proves the path that does not publish. CHANNEL_DRY_RUN lets a script
+        take its real path under the registry's own dry run. channel.yml must
+        never set it, or a release would announce a publication that did not
+        happen.
+        """
+        source = CLI.read_text(encoding="utf-8")
+        self.assertIn('"CHANNEL_DRY_RUN": "1"', source)
+        channel = (ROOT / ".github" / "workflows" / "channel.yml").read_text(encoding="utf-8")
+        self.assertNotIn("CHANNEL_DRY_RUN", channel)
+
+    def test_a_failed_channel_is_said_on_the_release_page(self) -> None:
+        """The absent marker is the record for a machine, not for a person."""
+        channel = (ROOT / ".github" / "workflows" / "channel.yml").read_text(encoding="utf-8")
+        self.assertIn("needs.publish.result != 'success'", channel)
+        self.assertIn("gh release edit", channel)
+        # Replayed on the same tag, it must not say it twice.
+        self.assertIn("already says", channel)
+
+
+class TapDriftTest(unittest.TestCase):
+    """What the tap serves for a repository, against what it declares.
+
+    The tap is one repository for every product, so no product can see this
+    from its own packaging; the socle pushes to it and reads the
+    declaration, and is the only place the two sit together.
+    """
+
+    def formulas(self, *entries: tuple) -> dict:
+        listing = [{"name": f"{name}.rb", "type": "file"} for name, _, _ in entries]
+        contents = {f"repos/maelys-dev/homebrew-tap/contents/Formula": ("ok", listing)}
+        for name, repository, version in entries:
+            body = FORMULA % (repository, repository, version, "0" * 64)
+            contents[f"repos/maelys-dev/homebrew-tap/contents/Formula/{name}.rb"] = (
+                "ok", {"encoding": "base64", "content": base64.b64encode(body.encode()).decode()})
+        return contents
+
+    def drift(self, contents: dict, repository: str, declared: list):
+        saved = MODULE.github_read
+        MODULE.github_read = lambda path: contents.get(path, ("absent", None))
+        try:
+            return MODULE.tap_drift(repository, declared)
+        finally:
+            MODULE.github_read = saved
+
+    def test_a_formula_nobody_declares_is_named_with_what_it_serves(self) -> None:
+        contents = self.formulas(("maelys-datalog", "maelys-datalog", "v0.1.0-alpha.3"))
+        found = self.drift(contents, "maelys-dev/maelys-datalog", [])
+        self.assertEqual(len(found), 1)
+        status, message = found[0]
+        self.assertEqual(status, "note")
+        self.assertIn("Formula/maelys-datalog.rb at v0.1.0-alpha.3", message)
+        # What a person would type to get the stale thing.
+        self.assertIn("brew install maelys-dev/tap/maelys-datalog", message)
+
+    def test_a_declared_formula_is_not_drift(self) -> None:
+        contents = self.formulas(("libmaelys-json", "maelys-json", "v0.2.0"))
+        self.assertEqual(self.drift(contents, "maelys-dev/maelys-json", ["libmaelys-json"]), [])
+
+    def test_a_formula_of_another_repository_is_not_this_product_s(self) -> None:
+        """The tie is the repository the url names, never the formula's name."""
+        contents = self.formulas(("libmaelys-json", "maelys-json", "v0.2.0"))
+        self.assertEqual(self.drift(contents, "maelys-dev/maelys-datalog", []), [])
+
+    def test_a_renamed_formula_leaves_the_old_one_behind(self) -> None:
+        contents = self.formulas(("maelys-json", "maelys-json", "v0.1.0"),
+                                 ("libmaelys-json", "maelys-json", "v0.2.0"))
+        found = self.drift(contents, "maelys-dev/maelys-json", ["libmaelys-json"])
+        self.assertEqual(len(found), 1)
+        self.assertIn("Formula/maelys-json.rb at v0.1.0", found[0][1])
+        self.assertIn("declares libmaelys-json instead", found[0][1])
+
+    def test_a_tap_that_cannot_be_read_says_so_rather_than_passing(self) -> None:
+        found = self.drift({}, "maelys-dev/maelys-json", [])
+        self.assertEqual(len(found), 1)
+        self.assertIn("could not be read", found[0][1])
 
 
 class RunnerDeclarationTest(unittest.TestCase):
