@@ -246,11 +246,15 @@ required: the ceremony by hand remains what it was.
   humans, the pinned commit on line 2. The build verifies the checkout
   (`git rev-parse HEAD` equal to the pin, no local modification of the
   contract paths).
-- The checkout is the managed `scripts/checkout-dependency.sh NAME`, written
-  by `maelys-release adopt` from the pins; it clones `maelys-dev/NAME` next to the
-  product at the pinned commit. The release workflow, the product's CI and
-  developers run that one script. A product writes no `scripts/checkout-*.sh`
-  of its own; `adopt` refuses them.
+- The checkout is managed, and there are two of it, written by
+  `maelys-release adopt` from the pins. `scripts/checkout-dependency.sh NAME
+  [DESTINATION]` clones `maelys-dev/NAME` at its pinned commit — next to the
+  product without a destination, which is the layout of a product that has
+  not declared `[dependencies] apart`. `scripts/checkout-dependencies.sh
+  DESTINATION` clones **every** pin under that root, one call of the
+  singular each, and prints `MAELYS_DEPENDENCIES_DIR=<absolute path>` for a
+  shell to take whole. A product writes no `scripts/checkout-*.sh` of its
+  own; `adopt` refuses them.
 - The system packages the build needs on the runners are declared in
   `dependencies/packages`, one per line under `[linux]` (apt names) or `[macos]`
   (brew names). `adopt` emits them into the release workflow after the
@@ -1045,6 +1049,41 @@ contract string, the agreement between two pins — none of which follows from
 a path. And they are the one defence against a declaration that is wrong,
 where a build would otherwise compile against the headers of the wrong
 library and fail far from the cause.
+
+### The product's own jobs clone on their own runners
+
+The socle exports the root in the job it runs, and a variable in
+`$GITHUB_ENV` reaches no other job: **each runs on another machine**, where a
+path of the socle's runner names nothing. So a job of the product that builds
+runs one line, in place of the one to three it ran before:
+
+```yaml
+- run: sh scripts/checkout-dependencies.sh "$RUNNER_TEMP/dependencies" >>"$GITHUB_ENV"
+```
+
+`scripts/checkout-dependencies.sh DESTINATION` is managed, beside the
+singular it calls once per pin: every `dependencies/*.pin` at its commit
+under `DESTINATION/NAME`, and one line on stdout,
+`MAELYS_DEPENDENCIES_DIR=<absolute path>`, for a shell to take whole. **The
+destination is given and never chosen**: a script that picked one would be
+the ambient default again, one level down. It reads the pins when it runs, so
+`ci.yml` and `release.yml` name no dependency any more and a new pin is
+cloned everywhere without a file being regenerated. A Dockerfile gives its
+own — `RUN sh scripts/checkout-dependencies.sh /dependencies`, then `ENV
+MAELYS_DEPENDENCIES_DIR=/dependencies`.
+
+It clones into what is not there yet, which is what a runner and a container
+offer, and refuses an occupied destination because the singular does. On a
+machine with state the command `maelys-release dependencies DIR --apply` is
+the tool: it refreshes, and refuses a working copy.
+
+**The trial of this change is why this paragraph exists.** The socle gave the
+root in its own three places, and the six jobs maelys-egress owns failed on
+the build's own message, because nothing had given it to them. `check` now
+names a job that still clones beside the product — a note, not a warning:
+`check` counts a warning among its violations and exits 2 while `adopt`
+proceeds, which is a product adopting and going red, and a job that clones
+beside itself already fails on its own. Naming the line is the whole value.
 
 ### The pins, apart from the working copies
 

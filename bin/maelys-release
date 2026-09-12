@@ -699,14 +699,20 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
                 # What the trial of 0.45.0 found, reported before a push
                 # instead of by six red jobs after it: the socle exports the
                 # root in the job it runs, and a job of the product clones
-                # on its own runner where that path names nothing. ci.yml is
-                # the product's file, so this is a warning that names the
-                # line and not a violation.
+                # on its own runner where that path names nothing.
+                #
+                # A note, and the status matters here. `check` collects
+                # everything that is not ok or note into its violations, so
+                # a warning makes it exit 2 while adopt still proceeds --
+                # the worst pairing, a product adopting and going red. And a
+                # second red would say nothing new: a job that clones beside
+                # itself already fails on the build's own message. Naming
+                # the line is the whole value.
                 ci_file = project / ".github" / "workflows" / "ci.yml"
                 for number, line in enumerate(ci_file.read_text(encoding="utf-8").splitlines(), 1) \
                         if ci_file.is_file() else []:
                     if BESIDE_CALL.search(line):
-                        decl.add("warn", f".github/workflows/ci.yml line {number} clones beside the product,"
+                        decl.add("note", f".github/workflows/ci.yml line {number} clones beside the product,"
                                  " which the build no longer reads: one line gives it the root instead,"
                                  " 'sh scripts/checkout-dependencies.sh \"$RUNNER_TEMP/dependencies\""
                                  " >>\"$GITHUB_ENV\"'", "conventions")

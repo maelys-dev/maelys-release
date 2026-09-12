@@ -279,9 +279,7 @@ class AdoptTest(unittest.TestCase):
             "\n  id-token: write",
             "  workflow_dispatch:",
             "      tag: ${{ inputs.tag || github.ref_name }}",
-            '        sh scripts/checkout-dependency.sh maelys-system'
-            ' "$RUNNER_TEMP/dependencies/maelys-system"\n',
-            '        echo "MAELYS_DEPENDENCIES_DIR=$RUNNER_TEMP/dependencies" >>"$GITHUB_ENV"\n',
+            '        sh scripts/checkout-dependencies.sh "$RUNNER_TEMP/dependencies" >>"$GITHUB_ENV"\n',
             "      linux_packages: build-essential dpkg-dev file rpm pkg-config libjansson-dev\n",
             "      macos_packages: jansson\n",
             "  tap-maelys-fixture:",
@@ -1481,6 +1479,7 @@ class GoldenTest(unittest.TestCase):
     FILES = textwrap.dedent("""\
         same     .github/workflows/release.yml
         same     scripts/checkout-dependency.sh
+        same     scripts/checkout-dependencies.sh
         same     AGENTS.md
         same     CLAUDE.md
         same     .claude/skills/maelys-release/SKILL.md
@@ -2443,6 +2442,81 @@ class DependenciesApartTest(unittest.TestCase):
                 MODULE.parse_release(text)
             self.assertIn(expected, str(refusal.exception))
 
+    def script(self, *arguments: str, expect: int = 0) -> subprocess.CompletedProcess:
+        completed = subprocess.run(["sh", str(self.product.dir / "scripts" / "checkout-dependencies.sh"),
+                                    *arguments], cwd=self.product.dir, env=self.product.env,
+                                   text=True, check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(completed.returncode, expect, completed.stderr)
+        return completed
+
+    def test_the_plural_script_clones_every_pin_and_prints_one_line(self) -> None:
+        """What the trial of 0.45.0 was missing.
+
+        The socle exports the root in the job it runs, and a job of the
+        product clones on its own runner where that path names nothing: six
+        jobs of maelys-egress failed on the product's own message because
+        nothing had given it to them.
+        """
+        destination = self.product.work / "deps"
+        completed = self.script(str(destination))
+        # One line and nothing else: stdout is appended to $GITHUB_ENV whole.
+        self.assertEqual(len(completed.stdout.splitlines()), 1, completed.stdout)
+        variable, _, printed = completed.stdout.strip().partition("=")
+        self.assertEqual(variable, "MAELYS_DEPENDENCIES_DIR")
+        self.assertEqual(pathlib.Path(printed).resolve(), destination.resolve())
+        self.assertTrue(pathlib.Path(printed).is_absolute(), printed)
+        self.assertEqual(self.product.git(destination / "maelys-system", "rev-parse", "HEAD"),
+                         self.product.pinned)
+        self.assertIn("maelys-system", completed.stderr, "the clones are reported, on stderr")
+
+    def test_the_destination_is_given_and_never_chosen(self) -> None:
+        """A script that picked one would be the ambient default, one level down."""
+        self.assertIn("DESTINATION", self.script(expect=1).stderr)
+
+    def test_an_occupied_destination_is_refused_and_not_replaced(self) -> None:
+        """The singular refuses to replace, and the plural inherits that.
+
+        The command is the tool for a machine that has state -- it refreshes,
+        and refuses a working copy. This clones into what is not there yet,
+        which is what a runner and a container offer.
+        """
+        destination = self.product.work / "deps"
+        self.script(str(destination))
+        again = self.script(str(destination), expect=1)
+        self.assertIn("refusing to replace", again.stderr)
+
+    def test_it_is_managed_and_not_a_stray_script(self) -> None:
+        """adopt writes it beside the singular, so the rule that refuses a
+        product's own checkout-*.sh has to know both names."""
+        files = {entry["path"]: entry for entry in self.product.json("adopt", self.dir)["data"]["files"]}
+        self.assertEqual(files["scripts/checkout-dependencies.sh"]["action"], "same")
+        self.assertTrue(os.access(self.product.dir / "scripts" / "checkout-dependencies.sh", os.X_OK))
+        self.assertTrue(self.product.json("check", self.dir)["data"]["conventions"]["valid"])
+
+    def test_the_release_workflow_gives_the_root_without_listing_the_pins(self) -> None:
+        """The script reads the pins when it runs, so a new pin needs no
+        file regenerated to be cloned everywhere."""
+        workflow = self.product.read(".github/workflows/release.yml")
+        self.assertIn('sh scripts/checkout-dependencies.sh "$RUNNER_TEMP/dependencies" >>"$GITHUB_ENV"',
+                      workflow)
+        self.assertNotIn("checkout-dependency.sh maelys-system", workflow)
+
+    def test_a_job_that_still_clones_beside_the_product_is_named(self) -> None:
+        """The failure of the trial, said before a push instead of by six red
+        jobs after it. A note: ci.yml is the product's file, and the job that
+        clones beside itself already fails on the build's own message."""
+        self.product.write(".github/workflows/ci.yml",
+                           self.product.read(".github/workflows/ci.yml")
+                           + "\n  own:\n    runs-on: ubuntu-26.04\n    steps:\n"
+                             "      - run: sh scripts/checkout-dependency.sh maelys-system\n")
+        data = self.product.json("check", self.dir)["data"]
+        # A note and not a warning: check counts a warning as a violation and
+        # exits 2 while adopt proceeds, which is a product adopting and going
+        # red. The job that clones beside itself already fails on its own.
+        self.assertTrue(data["conventions"]["valid"], data["conventions"]["violations"])
+        self.assertTrue(any(check["status"] == "note" and "clones beside the product" in check["message"]
+                            for check in data["checks"]), data["checks"])
+
     def test_the_workflow_is_told_which_layout_to_make(self) -> None:
         """Three places clone, and all three have to know.
 
@@ -2455,14 +2529,17 @@ class DependenciesApartTest(unittest.TestCase):
         self.assertEqual(check_product.count("steps.socle.outputs.apart == ''"), 3)
         self.assertEqual(check_product.count("steps.socle.outputs.apart != ''"), 3)
         source = CLI.read_text(encoding="utf-8")
-        self.assertIn('echo "MAELYS_DEPENDENCIES_DIR=$RUNNER_TEMP/dependencies" >>"$GITHUB_ENV"', source)
-        self.assertIn('DEPENDENCIES_APART', source)
+        self.assertEqual(check_product.count('sh scripts/checkout-dependencies.sh'
+                                            ' "$RUNNER_TEMP/dependencies" >>"$GITHUB_ENV"'), 3)
+        source = CLI.read_text(encoding="utf-8")
+        self.assertIn("DEPENDENCIES_APART", source)
+        self.assertIn("checkout-dependencies.sh /work/dependencies", source)
 
     def test_adopt_renders_the_layout_the_declaration_asks_for(self) -> None:
         self.product.write("maelys-release.conf", "[dependencies]\napart\n")
         self.product.run("adopt", self.dir, "--apply")
         workflow = self.product.read(".github/workflows/release.yml")
-        self.assertIn('"$RUNNER_TEMP/dependencies/maelys-system"', workflow)
+        self.assertIn('sh scripts/checkout-dependencies.sh "$RUNNER_TEMP/dependencies"', workflow)
         self.product.write("maelys-release.conf", "[targets]\nlinux-arm64\n")
         # Not conformant any more, so adopt refuses: the rendering above is
         # what a product gets only once it has said it reads the root.

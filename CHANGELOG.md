@@ -38,6 +38,28 @@
   contract string, the agreement between two pins, and they are the one
   defence against a declaration that is wrong. Proposing to delete them was
   the third error of the first draft.
+- **`scripts/checkout-dependencies.sh DESTINATION` is the second managed
+  clone script**, beside the singular it calls once per pin: every
+  `dependencies/*.pin` under that root, and one line on stdout,
+  `MAELYS_DEPENDENCIES_DIR=<absolute path>`, for a shell to take whole. A job
+  of the product that builds runs it in place of the one to three clone lines
+  it ran before — the `ci.yml` of maelys-egress went from **fifteen** clone
+  calls to **five**. The destination is given and never chosen: a script that
+  picked one would be the ambient default again, one level down.
+- **The trial found what the design was missing, and it was not small.** The
+  socle gave the root in its own three places and the six jobs maelys-egress
+  owns failed on the build's own message, because a variable in `$GITHUB_ENV`
+  reaches no other job: each runs on another machine, where a path of the
+  socle's runner names nothing. Zero lines in a product's jobs is not a
+  design choice that was rejected, it is impossible — the clones have to
+  happen on each runner. `check` now names a job that still clones beside the
+  product, so the next product reads it before pushing rather than from six
+  red jobs after.
+- That finding is a **note** and not a warning, and the difference is not
+  cosmetic: `check` counts a warning among its violations and exits 2 while
+  `adopt` proceeds — a product adopting and going red, which is the worst
+  pairing of the two. A second red would also say nothing new, since a job
+  that clones beside itself already fails on its own.
 - The rule is read after the declaration file and not beside the pins, which
   are read first. A rule placed there sees a declaration that has not been
   parsed yet — the same misplacement as the tap drift check of 0.42.0, twice
