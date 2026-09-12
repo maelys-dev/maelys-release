@@ -72,6 +72,8 @@ class Product:
         self.write("scripts/package-release.sh", "#!/bin/sh\nexit 0\n", executable=True)
         self.write("dependencies/maelys-system.pin", f"{PINNED_TAG}-1-g{self.pinned[:7]}\n{self.pinned}\n")
         self.write("dependencies/packages", "# build inputs\n[linux]\npkg-config\nlibjansson-dev\n\n[macos]\njansson\n")
+        # A conformant product with pins says where its build reads them.
+        self.write("maelys-release.conf", "[dependencies]\napart\n")
         self.write("packaging/homebrew/maelys-fixture.rb.in", "class MaelysFixture < Formula\nend\n")
         self.write("packaging/homebrew/libmaelys-fixture.rb.in", "class LibmaelysFixture < Formula\nend\n")
         self.write("AGENTS.md", "# Agent instructions\n\nKeep me.\n")
