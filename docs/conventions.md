@@ -992,6 +992,50 @@ the tag, and `cut` is that release carried out. `adopt` runs from a checkout of 
 without a tag is refused, `--allow-untagged` being the trial of a
 candidate before its tag.
 
+### The pins, apart from the working copies
+
+`scripts/checkout-dependency.sh NAME` clones next to the product and refuses
+an existing destination, and **next to the product is where the working
+copies of somebody who develops the dependencies too already live**. The
+step the conventions describe cannot work for them, by construction.
+maelys-egress counted four `make check` failures in one day with no file of
+the product at fault: a sibling carrying another session's uncommitted work,
+two siblings at another version than the pin, and a fourth failure from
+building a dependency's own targets in isolation.
+
+```sh
+maelys-release dependencies DIR --apply
+```
+
+Every `dependencies/*.pin` of the product, cloned or refreshed at its
+commit, in one flat directory —
+`~/.cache/maelys-release/dependencies/<product>/` unless `--directory` names
+another. Flat, so a dependency's own `../NAME` still resolves. Per product,
+because two products pin the same dependency at different commits and both
+are green: maelys-warden pins maelys-json `v0.1.0` where maelys-oci pins
+`v0.2.0`.
+
+What is detached and unmodified is refreshed, since a fetch and a checkout
+lose nothing there — local branches, stashes and the reflog all survive.
+Everything else is refused **before anything is written**: a branch, a
+tracked change, a symbolic link, a clone of another repository. The socle
+never deletes a checkout. Untracked files are left where they are and
+named, because they are most likely a build.
+
+Pointing the build at that directory is the product's half: its Makefile
+names `MAELYS_SYSTEM_DIR` and its kin, and `dependencies DIR --field
+directory` prints the path.
+
+**The product's pins, and nothing below them.** `check-product.yml` clones
+the pins of the product it builds and no dependency's, and so does this: a
+directory holding more would let a build pass here that CI refuses, hiding a
+missing pin exactly where CI shows it. When a build needs what a dependency
+itself pins, the product pins it — maelys-oci pins maelys-json for the
+maelys-cli it builds — and where two pins must agree, the product's own
+check says so. The command reads the pins of the checkouts it materialised
+and notes what the product does not pin, or pins elsewhere: a note, never a
+refusal, because the fleet disagrees today and is green.
+
 ### Protecting a default branch without typing its checks
 
 A branch protection requires a check **by its name**, and those names are the
