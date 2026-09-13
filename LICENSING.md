@@ -20,7 +20,7 @@ content a product writes outside it.
 
 ## Other installed templates: CC0-1.0
 
-The documents and script under `share/templates/` remain CC0-1.0
+The documents and scripts under `share/templates/` remain CC0-1.0
 ([`share/LICENSE`](share/LICENSE)). This exception does not cover
 `share/agents/` and does not change the source code's MPL-2.0 license.
 

@@ -2892,6 +2892,63 @@ class RepositoryChecksTest(unittest.TestCase):
             self.assertIn("repository_checks(decl)", caller, caller)
 
 
+class TapSecretsTest(unittest.TestCase):
+    """Whether the tap jobs will hold their credentials, before the tag.
+
+    The tap pushes only when tap_token reaches the job, and the socle has
+    always said so. What it did not say was beforehand: a product read two
+    green publish jobs of its own release, pushed nothing, and paid a full
+    replay on four macOS runners. The organisation secret was limited to
+    selected repositories, and the list still named the archived repository
+    it had been renamed from.
+    """
+
+    def secrets(self, own: list, org: list, state: str = "ok") -> dict:
+        return {"repos/maelys-dev/p/actions/secrets": (state, {"secrets": [{"name": n} for n in own]}),
+                "repos/maelys-dev/p/actions/organization-secrets":
+                    (state, {"secrets": [{"name": n} for n in org]})}
+
+    def read(self, contents: dict, formulas=("libmaelys-p",)):
+        saved = MODULE.github_read
+        MODULE.github_read = lambda path: contents.get(path, ("absent", None))
+        try:
+            return MODULE.tap_secrets("maelys-dev/p", list(formulas))
+        finally:
+            MODULE.github_read = saved
+
+    def test_a_repository_that_sees_both_is_told_it_will_push(self) -> None:
+        found = self.read(self.secrets([], ["HOMEBREW_TAP_TOKEN", "HOMEBREW_TAP_SIGNING_KEY"]))
+        self.assertEqual([status for status, _ in found], ["ok"])
+        self.assertIn("will push", found[0][1])
+
+    def test_a_missing_token_is_a_violation_and_says_what_to_do(self) -> None:
+        """The incident, seen from the end the job will be standing at."""
+        found = self.read(self.secrets([], ["HOMEBREW_TAP_SIGNING_KEY"]))
+        self.assertEqual(found[0][0], "fail")
+        self.assertIn("push nothing", found[0][1])
+        self.assertIn("limited to selected repositories has to name this one", found[0][1])
+
+    def test_a_missing_signing_key_is_a_note_and_not_a_violation(self) -> None:
+        """Without it the tap still publishes; the commit is unsigned."""
+        found = self.read(self.secrets([], ["HOMEBREW_TAP_TOKEN"]))
+        self.assertEqual([status for status, _ in found], ["ok", "note"])
+        self.assertIn("unsigned", found[1][1])
+
+    def test_a_secret_of_the_repository_counts_as_much(self) -> None:
+        """A product may hold its own rather than share the organisation's."""
+        found = self.read(self.secrets(["HOMEBREW_TAP_TOKEN", "HOMEBREW_TAP_SIGNING_KEY"], []))
+        self.assertEqual([status for status, _ in found], ["ok"])
+
+    def test_a_product_with_no_formula_is_not_asked(self) -> None:
+        self.assertEqual(self.read(self.secrets([], []), formulas=()), [])
+
+    def test_a_refusal_to_answer_is_not_an_absence(self) -> None:
+        """403 and 404 are different facts, here as everywhere else."""
+        found = self.read({})
+        self.assertEqual([status for status, _ in found], ["note"])
+        self.assertIn("could not be read", found[0][1])
+
+
 class TapDriftTest(unittest.TestCase):
     """What the tap serves for a repository, against what it declares.
 

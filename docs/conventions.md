@@ -1052,6 +1052,17 @@ library and fail far from the cause.
 
 ### The product's own jobs clone on their own runners
 
+**A second managed file costs a product one line, where its own policy names
+the first.** Four repositories of the fleet exempt
+`scripts/checkout-dependency.sh` by name from a source check of their own —
+an SPDX header they require of every script, which a socle-owned file does
+not carry. `scripts/checkout-dependencies.sh` is a second such file and is
+not in those lists, so the pull request that adopts adds it there, beside the
+Makefile change. The socle cannot write that line: the check belongs to the
+product, and the name it exempts is the product's decision. It was found by a
+trial, on the product whose check is strictest.
+
+
 The socle exports the root in the job it runs, and a variable in
 `$GITHUB_ENV` reaches no other job: **each runs on another machine**, where a
 path of the socle's runner names nothing. So a job of the product that builds
@@ -1200,6 +1211,32 @@ the fleet's: a pull request required, **no approving review** — a sole
 operator cannot approve their own, and requiring one would stop every
 release — the checks above, `enforce_admins`, and neither force-push nor
 deletion.
+
+### Whether the tap will hold its credentials, before the tag
+
+The tap pushes only when `tap_token` reaches the job. Without it the job
+renders, lints and reports, which this page has always said — and a run that
+does that is **green**. A product read two green publish jobs of its own
+release, pushed nothing, and paid a full replay on four macOS runners to find
+out; the organisation secret was limited to selected repositories, and the
+list still named the archived repository it had been renamed from.
+
+0.46.0 made the job say it afterwards, on the release page. `preflight` now
+says it **before there is a tag to say it about**: a repository that declares
+a formula and does not see `HOMEBREW_TAP_TOKEN` is a violation, and one that
+does not see `HOMEBREW_TAP_SIGNING_KEY` is a note, because the tap still
+publishes — with an unsigned commit.
+
+It is read from the repository's side and never the organisation's. Listing
+the repositories a secret is shared with needs an organisation
+administrator; listing the secrets *this repository can see* needs what
+`preflight` already has. The two answer the same question from opposite
+ends, and only one end is always available — which is also the end the job
+will be standing at. A repository that cannot see a secret is, from the only
+point of view that matters, a repository without it.
+
+No product on the socle's mechanism was exposed when this was written: it is
+written so the next rename does not cost what the last one did.
 
 ### What the tap serves and what a product declares
 

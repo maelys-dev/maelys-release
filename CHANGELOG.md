@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.47.0 — 2026-09-13
+
+- **`preflight` says whether the tap jobs will hold their credentials, before
+  there is a tag to say it about.** A repository that declares a formula and
+  does not see `HOMEBREW_TAP_TOKEN` is a violation — the tap would render,
+  lint and push nothing, on a green run; one that does not see
+  `HOMEBREW_TAP_SIGNING_KEY` is a note, since the tap still publishes, with
+  an unsigned commit. 0.46.0 made the job say it afterwards, on the release
+  page; this says it beforehand.
+- **Read from the repository's side and never the organisation's.** Listing
+  the repositories a secret is shared with needs an organisation
+  administrator; listing the secrets *this repository can see* needs what
+  `preflight` already has, and the two answer the same question from
+  opposite ends. Only one end is always available, and it is also the end
+  the job will be standing at: a repository that cannot see a secret is,
+  from the only point of view that matters, a repository without it. The
+  objection that this needed an admin token was mine, and it was wrong.
+- `LICENSING.md` said "the documents and **script** under
+  `share/templates/`", singular, because there was one. There are two since
+  0.45.0, and a document this repository engages publicly has to name what it
+  covers.
+- **A second managed file costs a product one line**, where its own source
+  policy names the first: four repositories exempt
+  `scripts/checkout-dependency.sh` by name from a check that requires an SPDX
+  header of every script, and a socle-owned file carries none.
+  `checkout-dependencies.sh` is not in those lists, so the pull request that
+  adopts adds it there. The socle cannot write that line — the check is the
+  product's — and `docs/conventions.md` now says so. Found by the trial of
+  this version, on the product whose check is strictest, which is the only
+  way it could have been found.
+- Reported by maelys-http, who paid a full replay on four macOS runners for
+  an organisation secret whose list of repositories still named the archived
+  one theirs had been renamed from. **No product on the socle's mechanism was
+  exposed when this was written**: it exists so the next rename does not cost
+  what the last one did.
+
 ## 0.46.1 — 2026-09-13
 
 - **The channel marker carries what the script recorded, and has not since
