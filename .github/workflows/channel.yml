@@ -68,6 +68,7 @@ jobs:
           gh release download "$TAG" --repo "${GITHUB_REPOSITORY}" --dir dist
           test -n "$(ls dist)"
       - name: Publish the channel
+        id: publish
         env:
           PUBLISH_COMMAND: ${{ inputs.publish_command }}
           TAG: ${{ inputs.tag }}
@@ -85,8 +86,17 @@ jobs:
           command="${PUBLISH_COMMAND//TAG/$TAG}"
           eval "${command//CHANNEL/$CHANNEL}"
           echo "::notice::$PRODUCT $TAG published on the $CHANNEL channel"
+          # The shell decides whether the script recorded anything, not
+          # hashFiles: that function only sees GITHUB_WORKSPACE, and
+          # runner.temp is outside it, so the condition it guarded was empty
+          # for every product since 0.32.0. The step below never ran, the
+          # marker was composed without a single recorded field, and
+          # `rehearse --channel` reported a disagreement on each of them --
+          # which is how this was found, by the one thing that compares the
+          # two markers.
+          if [ -s "$CHANNEL_RECORD" ]; then echo "recorded=true" >>"$GITHUB_OUTPUT"; fi
       - name: Keep what the script recorded
-        if: hashFiles(format('{0}/channel-record.json', runner.temp)) != ''
+        if: steps.publish.outputs.recorded == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: channel-record-${{ inputs.channel }}

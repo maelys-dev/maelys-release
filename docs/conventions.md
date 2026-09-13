@@ -1256,10 +1256,19 @@ on an already-published version is the contract, and a script honours it by
 returning early — so the rehearsal proves the path that does *not* publish
 and, on its own, can never reach the one that does. That is not a small gap:
 it widens exactly as a channel starts working. A script that reads the
-variable can take its real publishing path under the registry's own dry run
-(`npm publish --dry-run`, `twine --dry-run`) and exercise the half the
-contract hides. maelys-datalog found this the hard way, with a publish
-command that resolved `dist/x.tgz` as a GitHub shorthand and had never run.
+variable takes its real path up to the registry's write and stops there.
+maelys-datalog found the gap the hard way, with a publish command that
+resolved `dist/x.tgz` as a GitHub shorthand and had never run.
+
+**It may read the registry; it may not read success into a refusal.** This
+page recommended `npm publish --dry-run` until 0.46.1, and that is wrong for
+npm: the command checks the versions the registry already holds *before* it
+skips the write, so against a published tag — the only kind `rehearse
+--channel` accepts — it always refuses. A script that treats that refusal as
+a pass is deciding on the text of an error message, which is the thing the
+rehearsal exists to avoid. On npm the dry run is `npm pack` of the assembled
+tarball and `npm view` of what the registry holds. maelys-datalog read the
+refusal as a pass, and said so.
 
 It refuses before touching anything: a channel the product does not declare,
 a tag that is not one, a release that does not exist, a non-empty `dist/`

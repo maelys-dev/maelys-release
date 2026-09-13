@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.46.1 — 2026-09-13
+
+- **The channel marker carries what the script recorded, and has not since
+  0.32.0.** `channel.yml` guarded the step with
+  `hashFiles(format('{0}/channel-record.json', runner.temp))`, and `hashFiles`
+  only sees `GITHUB_WORKSPACE`: `runner.temp` is outside it, so the condition
+  was empty for every product, every time. The step never ran, the marker was
+  composed without a single recorded field, and the feature the 0.32.0 entry
+  describes never worked. The shell decides now. It was found by
+  `rehearse --channel`, which compares a composed marker with an attached one
+  and reported a disagreement on each recorded field — the one thing that
+  reads both, doing the only job it could do.
+- **`protect --apply` writes what it reported.** It wrote `seen`, the
+  intersection observed across recent pull requests, while the report showed
+  `proposed`, which is that plus the socle's computed legs. Right after an
+  adoption that renames a leg, `--apply` would have required the old name
+  still present in older pull requests: the lock 0.43.0 was written to
+  prevent, in the command written to prevent it. No test read the body that
+  was sent; one does now.
+- **`docs/conventions.md` recommended a dry run that cannot succeed.** Since
+  0.45.0 it told a publish script to take its real path under `npm publish
+  --dry-run`; npm checks the versions the registry already holds *before* it
+  skips the write, so against a published tag — the only kind `rehearse
+  --channel` accepts — it always refuses. A script that reads that refusal as
+  a pass decides on the text of an error message, which is what the rehearsal
+  exists to avoid. The page now says what the dry run may and may not do, and
+  names `npm pack` and `npm view` instead. Reported by maelys-datalog, whose
+  script was reading the refusal as a pass because this page told it to.
+
 ## 0.46.0 — 2026-09-13
 
 - **A tap that pushes nothing no longer looks like one that did.** Without
