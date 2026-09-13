@@ -13,6 +13,15 @@ release files only for a product the socle releases. `check` returns two
 verdicts, and a product the socle does not release passes it without ever
 hearing about workflows it owns.
 
+**A verdict names the lines, not the file.** `check` computes the diff of
+every file it would write and the JSON has always carried it; the text
+printed the action — `update`, `create` — and threw the rest. The order that
+produces a drift is the natural one: adopt, read what the socle advises,
+declare it — and a declaration changes what the generated files must hold,
+so the last step leaves a half-adoption whose report said only `FAIL` beside
+a path. The text now prints the diff under the file and names the command
+that writes it, as `adopt` has always done for its plan.
+
 A repository declares its mechanism by the workflow it carries:
 
 | `.github/workflows/release.yml` | Mechanism | What `adopt` writes |
@@ -1096,6 +1105,32 @@ names a job that still clones beside the product — a note, not a warning:
 proceeds, which is a product adopting and going red, and a job that clones
 beside itself already fails on its own. Naming the line is the whole value.
 
+**Every tracked file, and not `ci.yml` alone.** That first rule read one
+workflow, and a tree reaches next door in more places than its CI: an image
+that clones each pin to a path of its own and exports none of them, a script
+carrying `${VAR:-$root/../maelys-system}`, a comment telling a human to
+build with `--build-context maelys-system=../maelys-system`. maelys-egress
+paid three red CI rounds for four such files — the last of them for the line
+directly below the one it had just fixed. `check` searches the product's
+tracked files for `../NAME` of every pin, and for a call of the one-pin
+script, and names each line it finds.
+
+A file that names `MAELYS_DEPENDENCIES_DIR` anywhere has been through the
+migration, and what it still says about a sibling is prose about it: a
+Makefile explaining why the fallback went, a comment naming the neighbour it
+no longer reads. Those are exempt, with Markdown and the declaration file —
+and so is the one line that names **both**, because a fallback kept beside a
+root already read is the fallback nobody ever sees taken, which is the whole
+reason the ambient default went. Measured at both ends: on maelys-egress
+before its fixes, ten lines in four files and not one of those files named
+the variable; after them, nothing, and all four did. On maelys-http, migrated
+by a different hand, nothing — where the rule without that exemption would
+have carried two notes forever.
+
+The search reads tracked files, so outside a repository it says nothing. The
+alternative is walking whatever the directory holds, which on a built tree is
+the dependencies themselves.
+
 ### Saying it where it is read
 
 Three of these were the same defect wearing different clothes: the socle
@@ -1123,8 +1158,15 @@ Linux.** The socle's own path downloads the tag's archive from GitHub and
 hashes what a user will download, so it does not care. A command that
 rebuilds the archive hashes what that runner produced, and `git archive |
 gzip` is not byte for byte the same across platforms: the formula then names
-a digest no downloader can reproduce. `check` says so to any product that
-declares one.
+a digest no downloader can reproduce. `check` looks for the evidence before
+it says so: a renderer naming `archive/refs/tags` — the URL the socle's own
+tap downloads — hashes what a user gets, and gets an `ok` instead. The
+evidence can only silence the note, never raise a violation, and the note
+says what was looked for, so a renderer that downloads the archive another
+way reads "right and unrecognised" rather than a blanket warning. It was
+given unconditionally until 0.48.0, and the product it reached first was one
+that already did exactly what it advised, which went looking for what it had
+done wrong.
 
 ### The pins, apart from the working copies
 
