@@ -2652,6 +2652,48 @@ class SaidWhereItIsReadTest(unittest.TestCase):
         self.assertIn(MODULE.PUBLISHED_DOWNLOAD[0], tap)
 
 
+class ImpactLinesTest(unittest.TestCase):
+    """What a product must do, for the versions it has not taken.
+
+    A product reads a changelog to answer one question -- must I open a pull
+    request? -- and one of them read twenty-one entries by hand to find out.
+    """
+
+    def setUp(self) -> None:
+        self.product = Product()
+        self.dir = str(self.product.dir)
+        self.addCleanup(self.product.close)
+        self.product.run("adopt", self.dir, "--apply")
+        # A product left behind: its release.yml names an older socle.
+        workflow = self.product.dir / ".github" / "workflows" / "release.yml"
+        workflow.write_text(workflow.read_text().replace("# v9.9.9", "# v0.49.0"), encoding="utf-8")
+
+    def test_apply_says_it_too_and_not_the_plan_alone(self) -> None:
+        """The pin has to be read before anything is written.
+
+        `plan(..., apply)` rewrites release.yml, so reading the pin after it
+        gave the socle this very run installs: `impact` was empty in
+        --apply, which is the only mode the product that asked for this
+        uses. It shipped that way in 0.50.0.
+        """
+        data = self.product.json("adopt", self.dir, "--apply")["data"]
+        self.assertEqual(data["impactFrom"], "v0.49.0")
+        versions = [entry["version"] for entry in data["impact"]]
+        self.assertTrue(versions, data)
+        self.assertNotIn("0.49.0", versions, "the version a product already has says nothing to it")
+        self.assertEqual(versions, sorted(versions, key=MODULE.version_tuple), "oldest first")
+        for entry in data["impact"]:
+            self.assertTrue(entry["says"].strip(), entry)
+
+    def test_an_empty_list_says_which_kind_of_empty(self) -> None:
+        """Nothing to do, no pin, no tag on the pin and no changelog were
+        the same answer."""
+        workflow = self.product.dir / ".github" / "workflows" / "release.yml"
+        workflow.write_text(workflow.read_text().replace("# v0.49.0", "# untagged"), encoding="utf-8")
+        text = self.product.run("adopt", self.dir).stdout
+        self.assertIn("no pinned socle version to read from", text)
+
+
 class TagDeploymentsTest(unittest.TestCase):
     """What the run of a tag is waiting on, said where the tag was pushed.
 
@@ -2662,18 +2704,49 @@ class TagDeploymentsTest(unittest.TestCase):
     It read as an approval GitHub had lost.
     """
 
-    def read(self, answers: dict):
-        saved = MODULE.github_list
-        MODULE.github_list = lambda path: answers.get(path, [])
+    def read(self, runs: list, deployments: dict):
+        """The shapes GitHub actually sends, and not the ones I imagined.
+
+        `actions/runs` answers an OBJECT, `{total_count, workflow_runs}`;
+        `pending_deployments` answers an array. The first version of this
+        test stubbed both as arrays, so it passed while the command could
+        not name a single approval on any repository -- github_list hands
+        back [] for anything that is not a list, and the loop never ran.
+        """
+        saved_api, saved_list = MODULE.github_api, MODULE.github_list
+        MODULE.github_api = lambda path: {"total_count": len(runs), "workflow_runs": runs} \
+            if "actions/runs?" in path else None
+        MODULE.github_list = lambda path: deployments.get(path, [])
         try:
             return MODULE.tag_deployments("o/r", "v1.0.0")
         finally:
-            MODULE.github_list = saved
+            MODULE.github_api, MODULE.github_list = saved_api, saved_list
+
+    def test_the_runs_endpoint_is_read_as_an_object(self) -> None:
+        """The defect itself: which reader each endpoint goes through.
+
+        `actions/runs` answers `{total_count, workflow_runs}` and
+        `pending_deployments` answers an array. `github_list` hands back []
+        for anything that is not a list, so reading the first with it made
+        the command silently name nothing, on every repository, while the
+        changelog of 0.50.0 said it named the approval.
+        """
+        through = {}
+        saved_api, saved_list = MODULE.github_api, MODULE.github_list
+        MODULE.github_api = lambda path: through.setdefault(path, "object") and None
+        MODULE.github_list = lambda path: through.setdefault(path, "list") and []
+        try:
+            MODULE.tag_deployments("o/r", "v1.0.0")
+        finally:
+            MODULE.github_api, MODULE.github_list = saved_api, saved_list
+        runs = [path for path in through if "actions/runs?" in path]
+        self.assertEqual(len(runs), 1, through)
+        self.assertEqual(through[runs[0]], "object", through)
 
     def test_it_names_the_environment_and_hands_over_the_command(self) -> None:
-        waiting = self.read({
-            "repos/o/r/actions/runs?event=push&per_page=20": [{"id": 7, "head_branch": "v1.0.0"}],
-            "repos/o/r/actions/runs/7/pending_deployments":
+        waiting = self.read(
+            [{"id": 7, "head_branch": "v1.0.0"}],
+            {"repos/o/r/actions/runs/7/pending_deployments":
                 [{"environment": {"name": "release", "id": 42}, "current_user_can_approve": True}]})
         self.assertEqual(len(waiting), 1)
         self.assertEqual(waiting[0]["environment"], "release")
@@ -2682,16 +2755,16 @@ class TagDeploymentsTest(unittest.TestCase):
         self.assertIn("environment_ids[]=42", waiting[0]["approve"])
 
     def test_a_run_of_another_reference_is_not_this_tag(self) -> None:
-        self.assertEqual(self.read({
-            "repos/o/r/actions/runs?event=push&per_page=20": [{"id": 8, "head_branch": "main"}],
-            "repos/o/r/actions/runs/8/pending_deployments":
+        self.assertEqual(self.read(
+            [{"id": 8, "head_branch": "main"}],
+            {"repos/o/r/actions/runs/8/pending_deployments":
                 [{"environment": {"name": "release", "id": 1}, "current_user_can_approve": True}]}), [])
 
     def test_an_approval_this_operator_cannot_give_is_not_offered(self) -> None:
         """Handing over a command that will be refused is worse than silence."""
-        self.assertEqual(self.read({
-            "repos/o/r/actions/runs?event=push&per_page=20": [{"id": 7, "head_branch": "v1.0.0"}],
-            "repos/o/r/actions/runs/7/pending_deployments":
+        self.assertEqual(self.read(
+            [{"id": 7, "head_branch": "v1.0.0"}],
+            {"repos/o/r/actions/runs/7/pending_deployments":
                 [{"environment": {"name": "release", "id": 1}, "current_user_can_approve": False}]}), [])
 
     def test_none_pending_is_not_nothing_left_to_approve(self) -> None:

@@ -1389,7 +1389,8 @@ def render_cli_reference(decl: Declarations) -> tuple[str, str]:
         if completed.returncode != 0 or not markdown.is_file():
             decl.add("note", f"{CLI_REFERENCE}: the generator did not run here"
                      " (an unbuilt product, usually); the reference is left as it stands."
-                     f" [build] named {', '.join(named)}", "conventions")
+                     + (f" CLI_REFERENCE_BUILD named {named[0]}" if os.environ.get("CLI_REFERENCE_BUILD")
+                        else f" [build] named {', '.join(named)}"), "conventions")
             return existing()
         return markdown.read_text(encoding="utf-8"), contract.read_text(encoding="utf-8")
 
@@ -2257,12 +2258,17 @@ def handle_adopt(invocation: Invocation) -> tuple[dict, int]:
         described = git("describe", "--tags", "--always", cwd=socle_root(), check=False) or sha[:7]
         raise Failure("PRECONDITION_FAILED", f"This socle is {described}, not a release: a product pins tagged versions only.",
                       "Check out a tag of maelys-release, or pass --allow-untagged for a trial of a candidate.")
+    # Read before anything is written: `plan(..., apply)` rewrites
+    # release.yml, so reading the pin after it gave the socle this run is
+    # installing -- and `impact` was empty in --apply, the only mode the
+    # product that asked for it uses.
+    pinned = pinned_socle(project)
     files = plan(decl, stage(decl, sha, tag), apply)
     moved = move_declaration(project, apply)
     changed = moved != "" or any(entry["action"] != "same" for entry in files)
-    pinned = pinned_socle(project)
     data = {"mode": "apply" if apply else "plan", "product": product, "project": str(project),
             "mechanism": mechanism, "socle": socle_data(sha, tag), "changed": changed,
+            "impactFrom": (pinned or {}).get("tag", ""),
             "impact": [{"version": version, "says": says}
                        for version, says in socle_impact((pinned or {}).get("tag", ""))],
             "checks": decl.applicable(), "files": files}
@@ -3310,7 +3316,15 @@ def tag_deployments(repository: str, tag: str) -> list[dict]:
     GitHub had lost.
     """
     waiting = []
-    for run_data in github_list(f"repos/{repository}/actions/runs?event=push&per_page=20"):
+    # An object, not an array: this endpoint answers {total_count,
+    # workflow_runs}, and github_list hands back [] for anything that is not
+    # a list -- so this loop never ran once, on any repository, while the
+    # changelog of 0.50.0 said the command named the approval. The test was
+    # green because it stubbed the shape I had imagined; `cut` reads the
+    # same endpoint correctly ten lines above, which is where I should have
+    # looked.
+    runs = github_api(f"repos/{repository}/actions/runs?event=push&per_page=20") or {}
+    for run_data in runs.get("workflow_runs") or []:
         if not isinstance(run_data, dict) or run_data.get("head_branch") != tag:
             continue
         identifier = run_data.get("id")
@@ -4250,8 +4264,8 @@ def handle_rehearse(invocation: Invocation) -> tuple[dict, int]:
     if (project / ".git").is_file():
         raise Failure("PRECONDITION_FAILED",
                       f"{project} is a git worktree or a submodule checkout: its .git is a file naming a"
-                      " directory outside it, and rehearse copies the working tree into a container where"
-                      " that directory does not exist.",
+                      " directory outside it, and rehearse clones the tree inside a container where that"
+                      " directory does not exist.",
                       "Run the rehearsal from a full clone.")
     target = invocation.operands[1]
     if not shutil.which("docker"):
@@ -4478,6 +4492,13 @@ def text_adopt(data: dict) -> str:
             lines.extend("         " + line for line in entry["diff"].rstrip("\n").split("\n"))
     for entry in data.get("impact", []):
         lines.append(f"{entry['version']:<8} {entry['says']}")
+    # An empty list says four different things, and the useful one is rare.
+    # A product reading nothing here should know whether that means "nothing
+    # to do" or "the socle could not tell which versions you are missing".
+    if not data.get("impact") and not re.fullmatch(r"v?[0-9]+\.[0-9]+\.[0-9]+", data.get("impactFrom") or ""):
+        named = data.get("impactFrom") or "nothing"
+        lines.append(f"{'note':<8} no pinned socle version to read from ({named}), so nothing is said"
+                     " about what the versions since ask of this product")
     if data.get("moved"):
         verb = "moves" if data["mode"] == "plan" else "moved"
         lines.append(f"{verb:<8} {data['moved']} -> {DECLARATION_FILE} (git mv, its history follows)")

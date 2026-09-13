@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.50.1 — 2026-09-13
+
+- **`cut --tag` could never name an approval.** `actions/runs` answers an
+  object, `{total_count, workflow_runs}`, and the reader used hands back an
+  empty list for anything that is not a list — so the loop never ran, on any
+  repository, while the changelog of 0.50.0 said the command named the
+  pending deployment and the line that answers it. `cut` reads the same
+  endpoint correctly ten lines above. The test was green because it stubbed
+  the shape I had imagined; it now asserts which reader each endpoint goes
+  through, and the other test uses the shape GitHub sends.
+- **`adopt --apply` handed back no Impact line at all.** `plan(..., apply)`
+  rewrites `release.yml`, and the pin was read after it — so the socle this
+  run installs was compared with itself. The lines existed only in the plan,
+  which is not the mode the product that asked for them uses. The pin is now
+  read before anything is written.
+- **The entries from 0.34.0 on carry an Impact line**, written after the
+  fact. The rule began at 0.49.0, and the products behind were three to
+  seventeen versions back: the line that answers "must I open a pull
+  request?" answered nothing for exactly the people who had asked. A
+  repository pinning v0.33.0 now reads twenty-two lines instead of
+  seventy-six entries.
+- An empty list of Impact lines said four things at once — nothing to do, no
+  pin, a pin with no tag, no changelog — and now says which.
+- The note about an unbuilt reference credited `[build]` with a directory
+  `CLI_REFERENCE_BUILD` had named, and the worktree refusal still said the
+  rehearsal copies the working tree, which it stopped doing in 0.50.0.
+- The two defects are mine and were two hours old. Found by a reviewer
+  reading the diff of a version that had already been tagged, which is why
+  this is 0.50.1 and not a moved tag.
+- **Impact.** Nobody: a released tag is never moved, and nothing here
+  changes a managed file. Products wanting the Impact lines: they work in
+  `--apply` from this version, and they now cover every version since
+  0.34.0.
+
 ## 0.50.0 — 2026-09-13
 
 - **Naming the managed script is not calling it.** The sibling search of
@@ -184,6 +218,7 @@
 - All three reported by maelys-egress, from an adoption that cost them three
   rounds of CI and found four of their files. Their count was three: the
   search found the fourth.
+- **Impact.** Everyone with `[dependencies] apart`: a note per tracked line that still reads a sibling, at your next adoption. Nobody else.
 
 ## 0.47.0 — 2026-09-13
 
@@ -220,6 +255,7 @@
   one theirs had been renamed from. **No product on the socle's mechanism was
   exposed when this was written**: it exists so the next rename does not cost
   what the last one did.
+- **Impact.** Products declaring a Homebrew formula: `preflight` refuses if the repository cannot see `HOMEBREW_TAP_TOKEN`. Everyone adopting: add `scripts/checkout-dependencies.sh` to your source policy's exemptions if it names the singular by name.
 
 ## 0.46.1 — 2026-09-13
 
@@ -249,6 +285,7 @@
   exists to avoid. The page now says what the dry run may and may not do, and
   names `npm pack` and `npm view` instead. Reported by maelys-datalog, whose
   script was reading the refusal as a pass because this page told it to.
+- **Impact.** Products with a channel: re-adopt to get a marker that carries what your script records — it has carried nothing since 0.32.0. Everyone else: nothing.
 
 ## 0.46.0 — 2026-09-13
 
@@ -285,6 +322,7 @@
 - All four reported by maelys-http, from two releases that cost them a replay
   each. Three were the same defect in different clothes: the socle knew
   something and put it where nobody was looking.
+- **Impact.** Products with a tap or a custom `render_command`: re-adopt. Products wanting `commit_verification`: declare `[commit]`, now that it is reachable. Everyone else: nothing.
 
 ## 0.45.0 — 2026-09-13
 
@@ -350,6 +388,7 @@
   are read first. A rule placed there sees a declaration that has not been
   parsed yet — the same misplacement as the tap drift check of 0.42.0, twice
   in one day, and a test now holds the placement.
+- **Impact.** Everyone with pins: **required**. Declare `[dependencies] apart`, take the second managed script, and give your build the root — the ambient `?= ../NAME` is gone and a build that assumes a sibling now fails with your own message.
 
 ## 0.44.0 — 2026-09-12
 
@@ -397,6 +436,7 @@
 - `parse_pin` reads one pin for both `check` and this command, so a second
   reading cannot drift from the first. `cache_root` and `git_base` name the
   two conventions the socle already had in two places.
+- **Impact.** Nobody: a new command, `dependencies DIR --apply`, which materialises your pins apart from your working copies. Use it when you want it.
 
 ## 0.43.0 — 2026-09-12
 
@@ -429,6 +469,7 @@
 - Swept over the fleet: the derivation now agrees with what every protected
   repository's pull requests actually produce, on all eight products that
   call the socle's check job.
+- **Impact.** Nobody, and worth an hour: `protect DIR --apply` derives what your default branch should require instead of you typing it. Every repository that typed its contexts by hand should run it once.
 
 ## 0.42.0 — 2026-09-12
 
@@ -462,6 +503,7 @@
   absent marker is the honest record for a machine; this is the honest record
   for a person, written where they are looking. Replayed on the same tag it
   does not say it twice.
+- **Impact.** Products with a channel: re-adopt — a channel that fails now says so on the release page. Products with a formula: `preflight` reports one the tap still serves for you.
 
 ## 0.41.0 — 2026-09-12
 
@@ -496,6 +538,7 @@
   a pull request's code — and what it hardcoded is declared instead, which
   is what was asked of the socle for branch protection, CI triggers and
   runners alike.
+- **Impact.** Private repositories with a self-hosted macOS runner: declare `[runners] macos`. Everyone else: nothing — and no check name changed, which was the whole care of this version.
 
 ## 0.40.1 — 2026-09-12
 
@@ -530,6 +573,7 @@
   and deliberately not in the workflow, because no product needs it and a
   mechanism with no user is a mechanism nobody verifies. maelys-http made
   both points.
+- **Impact.** Nobody: `cut` stops refusing on a carrier that has stopped carrying the version.
 
 ## 0.40.0 — 2026-09-12
 
@@ -565,6 +609,7 @@
   `0.1.1.tar.gz`. A first anchor that refused a dash and a trailing dot lost
   two real carriers of maelys-egress, whose README installs the archive by
   name.
+- **Impact.** Nobody: `cut` audits its own write before it creates a branch.
 
 ## 0.39.0 — 2026-09-11
 
@@ -614,6 +659,7 @@
   carries is real for another reason: the build runner is the product's to
   declare, and a self-hosted one carries whichever digest tool it was built
   with.
+- **Impact.** Products publishing an SBOM: declare `[sbom]` and re-adopt; the document is attested against the file it names, never a guess. Everyone else: nothing.
 
 ## 0.38.1 — 2026-09-11
 
@@ -644,6 +690,7 @@
   `sha256sum` in `/sbin`, and the tag's own CI ran these five tests on
   `macos-15` as on Linux. The tag published with this sentence claiming the
   opposite; it was wrong, and the count of skipped tests said so.
+- **Impact.** Products building more than one target: nothing to do, but a release now refuses two targets that produce the same name with different bytes instead of publishing one of them.
 
 ## 0.38.0 — 2026-09-11
 
@@ -671,6 +718,7 @@
   operator's macOS: the same trap, in the one script that publishes
   irreversibly. A product regenerates the line at its next adoption.
 - Proposed by maelys-datalog: *« C'est le test que je n'ai pas pu faire. »*
+- **Impact.** Products with a channel: `rehearse --channel` lets you run your publish script against a published tag. Everyone else: nothing.
 
 ## 0.37.0 — 2026-09-11
 
@@ -709,6 +757,7 @@
   directory would need one file per section — seven of two lines for
   maelys-json, which needs one — and reads as a build output where two
   repositories already declare `build/release/bin`.
+- **Impact.** Everyone: **required**. The declarations move from `packaging/release` to `maelys-release.conf` at the root; `adopt --apply` moves the file with `git mv` and keeps its history.
 
 ## 0.36.0 — 2026-09-11
 
@@ -735,6 +784,7 @@
   fault. Corrected in the conventions, the managed instruction block and the
   seeded `RELEASING.md`. Reported by maelys-oci, who asked why the documented
   command had no `--ref`; the answer was worse than the question.
+- **Impact.** Everyone with a `verify-release.sh` or a `package-release.sh`: nothing to do, but both now run under `bash` — a bashism that passed on your machine and failed on the runner at the tag no longer can.
 
 ## 0.35.1 — 2026-09-11
 
@@ -755,6 +805,7 @@
   makes of a broken repository. The refusal comes before the search for
   `docker`, so it holds on a machine that has none — which is where the first
   shape of it was caught, by the macOS runner rather than by this laptop.
+- **Impact.** Nobody: `rehearse DIR linux-x86_64` works again on an Apple Silicon host.
 
 ## 0.35.0 — 2026-09-11
 
@@ -778,6 +829,7 @@
 - **`cut` names again the command that applies its plan.** 0.34.0 shipped a
   plan that printed `cut: ready` instead of the line to run next, and nothing
   caught it: a test now does. Found while cutting 0.34.0 itself.
+- **Impact.** Everyone: re-adopt for the managed blocks; `--field NAME` reads one member of a result without `jq`.
 
 ## 0.34.0 — 2026-09-11
 
@@ -860,6 +912,7 @@
   branch-naming setting and argued against a `WorktreeCreate` hook: a faulty
   hook does not misname a branch, it breaks session creation, and the trade
   is bad against a prefix.
+- **Impact.** Everyone: re-adopt for the managed blocks. `declarations` says what a repository runs, and when.
 
 ## 0.33.0 — 2026-09-11
 
