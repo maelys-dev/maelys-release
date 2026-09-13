@@ -1,5 +1,52 @@
 # Changelog
 
+## 0.49.0 — 2026-09-13
+
+- **The advice about a Homebrew renderer recognised two of the three
+  renderers that exist.** 0.48.0 made it conditional on the tag's source
+  archive; maelys-http publishes its own tarball as a release asset and
+  hashes that, so its script names `releases/download` and kept a note
+  saying the opposite of what it does. The socle now reads
+  `archive/refs/tags`, `releases/download` and `gh release download`. Two of
+  three recognised is not a recogniser.
+- **And the note says what it does not know instead of asserting.** It read
+  "renders on macOS while the release was built on Linux" — a fact about the
+  product, and false for all three: every renderer of the fleet downloads
+  before hashing. It was relayed to one of those products as a finding worth
+  more than a note, and that session corrected the relay. A check that
+  cannot know must not assert. Reported by maelys-platform, which is the
+  only session that can see the whole population.
+- **A channel marker says four things about a registry and nothing else**:
+  `registry`, `package`, `version`, `dist_tag`, as strings. Without a fixed
+  list `rehearse --channel` compares what the script chose to write with
+  what the release carries — a product compared with itself, which proves
+  nothing common; one product removed a field of its own to make its
+  rehearsal agree. Anything else is dropped and named in the run and in the
+  rehearsal, never refused: the publication has already happened when this
+  is read, and a refusal would leave a registry holding a version and a
+  release saying nothing about it.
+- **The socle's fields are composed last**, so they cannot be overwritten.
+  The jq expression put the record after them, and a record naming `tag`
+  rewrote the tag of the release it was attached to.
+- **`preflight` says which package a channel publishes into, and whether
+  anyone can install it.** A package's visibility is its own and does not
+  follow the repository's: it starts private and stays private when the
+  repository goes public. A product published eleven versions into one
+  nobody outside the organisation could install, with every job green — the
+  release says published, the registry holds it, and an install from outside
+  answers 404. A note, never a violation: a private package is a legitimate
+  choice, and what was missing is that nobody was told which one they had.
+- **Every entry of this changelog now ends with its impact on a product.**
+  Twenty-four versions in three days, and one product opened seven adoption
+  pull requests — each a CI run and a merge — for a mechanism it had used
+  twice, because nothing said in ten seconds which versions reached it. Half
+  of them rewrote prose and nothing else. The socle's own tests hold the
+  rule from this version on.
+- **Impact.** Products with a channel: re-adopt, then read `preflight` — the
+  marker of the next publication keeps four fields and drops the rest.
+  Products with a `scripts/render-homebrew-formula.sh`: nothing to do, a
+  note becomes an `ok`. Everyone else: nothing.
+
 ## 0.48.0 — 2026-09-13
 
 - **The search for a build that reaches next door reads every tracked file,

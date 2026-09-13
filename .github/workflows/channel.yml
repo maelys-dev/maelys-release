@@ -135,12 +135,35 @@ jobs:
         run: |
           set -euo pipefail
           published="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          # A marker says these four things about a registry and nothing
+          # else. Without the list every product invents its own field, and
+          # `rehearse --channel` then compares what the script chose to write
+          # with what the release carries -- a product compared with itself,
+          # which proves nothing common. A string value, because a marker is
+          # read by eye as often as by jq.
+          record="$(cat recorded/channel-record.json 2>/dev/null || echo '{}')"
+          jq -e 'type == "object"' >/dev/null 2>&1 <<<"$record" || {
+            echo "::warning::channel-record.json is not a JSON object; the marker carries the socle's fields alone"
+            record='{}'
+          }
+          extra="$(jq -r '[to_entries[] | select((.key | IN("registry","package","version","dist_tag") | not)
+                                                 or (.value | type != "string")) | .key] | join(" ")' <<<"$record")"
+          if [ -n "$extra" ]; then
+            # Dropped and not refused: the publication has already happened,
+            # so failing here would leave a registry holding a version and a
+            # release saying nothing about it.
+            echo "::warning::channel-record.json carries $extra, which a marker does not: it holds registry, package, version and dist_tag, as strings"
+          fi
+          kept="$(jq -c '[to_entries[] | select((.key | IN("registry","package","version","dist_tag"))
+                                                and (.value | type == "string"))] | from_entries' <<<"$record")"
+          # The socle's fields last: they cannot be overwritten by a record
+          # naming `tag`, which the former expression would have let through
+          # onto the release that tag names.
           jq -n --arg product "$PRODUCT" --arg tag "$TAG" --arg channel "$CHANNEL" \
-                --arg published "$published" --arg run "$RUN" \
-                --slurpfile recorded <(cat recorded/channel-record.json 2>/dev/null || echo '{}') \
-            '{product: $product, tag: $tag, channel: $channel, published: $published,
-              run: "https://github.com/\(env.GITHUB_REPOSITORY)/actions/runs/\($run)"}
-             + ($recorded[0] // {})' >"channel-$CHANNEL.json"
+                --arg published "$published" --arg run "$RUN" --argjson kept "$kept" \
+            '$kept + {product: $product, tag: $tag, channel: $channel, published: $published,
+                      run: "https://github.com/\(env.GITHUB_REPOSITORY)/actions/runs/\($run)"}' \
+            >"channel-$CHANNEL.json"
           gh release upload "$TAG" --repo "${GITHUB_REPOSITORY}" "channel-$CHANNEL.json"
           echo "::notice::$PRODUCT $TAG carries channel-$CHANNEL.json"
 
