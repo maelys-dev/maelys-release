@@ -2487,6 +2487,54 @@ def tap_drift(repository: str, formulas: list[str], tap: str = "") -> list[tuple
     return found
 
 
+TAP_SECRETS = ("HOMEBREW_TAP_TOKEN", "HOMEBREW_TAP_SIGNING_KEY")
+
+
+def tap_secrets(repository: str, formulas: list[str]) -> list[tuple[str, str]]:
+    """Whether the tap jobs of this repository will hold their credentials.
+
+    The tap pushes only when tap_token reaches the job, and the socle has
+    always said so -- `renders, lints and reports instead of failing`. What
+    it did not say was *before the tag*. A product read two green publish
+    jobs of its own release, pushed nothing, and paid a full replay on four
+    macOS runners to find out: the organisation secret was limited to
+    selected repositories, and the list still named the archived repository
+    it had been renamed from. 0.46.0 made the job say it afterwards, on the
+    release; this says it before there is a tag to say it about.
+
+    Read from the repository's side and never the organisation's. Listing
+    the repositories a secret is shared with needs an organisation
+    administrator; listing the secrets *this repository can see* needs what
+    preflight already has. The two answer the same question from opposite
+    ends, and only one end is always available -- which is also the end the
+    job will be standing at.
+    """
+    if not formulas:
+        return []
+    visible: set[str] = set()
+    answered = False
+    for path in ("actions/secrets", "actions/organization-secrets"):
+        state, body = github_read(f"repos/{repository}/{path}")
+        answered = answered or state == "ok"
+        if isinstance(body, dict):
+            visible.update(str(entry.get("name", "")) for entry in body.get("secrets") or [])
+    if not answered:
+        return [("note", f"the secrets {repository} can see could not be read: whether its tap jobs"
+                         f" will hold {TAP_SECRETS[0]} is not checked")]
+    found: list[tuple[str, str]] = []
+    if TAP_SECRETS[0] in visible:
+        found.append(("ok", f"{repository} sees {TAP_SECRETS[0]}: its tap jobs will push"))
+    else:
+        found.append(("fail", f"{repository} declares {' '.join(formulas)} and does not see"
+                              f" {TAP_SECRETS[0]}: the tap jobs would render, lint and push nothing,"
+                              " and the release would say so only afterwards. An organisation secret"
+                              " limited to selected repositories has to name this one"))
+    if TAP_SECRETS[1] not in visible:
+        found.append(("note", f"{repository} does not see {TAP_SECRETS[1]}: the tap commit would be"
+                              " pushed unsigned"))
+    return found
+
+
 def repository_checks(decl: Declarations) -> list[tuple[str, str]]:
     """What the release workflow needs of the GitHub repository behind origin.
 
@@ -2549,6 +2597,7 @@ def repository_checks(decl: Declarations) -> list[tuple[str, str]]:
     # preflight and not check: this reads one file per formula of the tap,
     # and check runs on every pull request of every product.
     found.extend(tap_drift(repository, decl_formulas))
+    found.extend(tap_secrets(repository, decl_formulas))
     branch = repository_data.get("default_branch") or "main"
     found.append(branch_protection(repository, branch,
                                    *github_read(f"repos/{repository}/branches/{branch}/protection")[:1],
