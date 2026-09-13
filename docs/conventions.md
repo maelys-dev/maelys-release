@@ -285,6 +285,15 @@ required: the ceremony by hand remains what it was.
   `check`, `preflight` and `rehearse` run as the pinned socle wherever they
   are started from, fetching it into the user's cache when the checkout at
   hand is another version.
+- **So the socle is not a dependency a product materialises**, and
+  `dependencies DIR --apply` does not clone it: whatever `../maelys-release`
+  happens to hold, the answer is the pinned socle's, and a product that
+  keeps a `MAELYS_RELEASE_DIR ?= ../maelys-release` for a `socle-check`
+  target is paying for a clone it has not needed since 0.8.0. Exporting that
+  root from `dependencies` was asked for and refused: the command runs on a
+  laptop and never in a job — CI runs `scripts/checkout-dependencies.sh` —
+  so the variable would be present in one place and absent in the other,
+  which is the ambient asymmetry 0.45.0 to 0.48.0 removed.
 
 ## Fuzzing
 
@@ -968,7 +977,17 @@ is the account, and a reader who needs only the decision reads one line.
 **`adopt` hands those lines back**, for the versions between the socle a
 product pins and the one running: nothing to build, nothing to guess from a
 diff of workflows, and no filter of the socle's invention — the line was
-written by hand, by whoever wrote the change.
+written by hand, by whoever wrote the change. In `--apply` as in the plan:
+the pin is read before anything is written, which it was not in 0.50.0, so
+the lines existed only in the mode the product that asked for them does not
+use.
+
+**The entries from 0.34.0 on carry one too, written after the fact** in
+0.50.1. The rule began at 0.49.0 and the products behind were three to
+seventeen versions back, so the line that answers "must I open a pull
+request?" answered nothing for exactly the people who had asked. Those
+nineteen say what each version asks of a product and no more; the entry
+above each is the account, and it is contemporary where the line is not.
 
 ## Moving a product's prose
 
