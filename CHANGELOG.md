@@ -1,5 +1,49 @@
 # Changelog
 
+## 0.48.0 — 2026-09-13
+
+- **The search for a build that reaches next door reads every tracked file,
+  not `ci.yml` alone.** 0.45.0 named the fifteen lines of one workflow to
+  maelys-egress and left four other files silent: an image cloning each pin
+  to a path of its own and exporting none of them, two scripts carrying
+  `${MAELYS_SYSTEM_DIR:-$root/../maelys-system}`, and a fourth found only
+  after a second red round — in the line directly below the one just fixed.
+  Three red CI rounds, the first on five jobs. `check` now searches the
+  product's tracked files for `../NAME` of every pin and for a call of the
+  one-pin script. Measured at both ends: ten lines in four files at the
+  commit before those fixes, nothing after them.
+- **A file that names `MAELYS_DEPENDENCIES_DIR` is left alone**, with
+  Markdown and the declaration file: it has been through the migration and
+  what it still says about a sibling is prose about it. The exception is the
+  line naming both, which is a fallback kept beside a root already read —
+  the fallback nobody ever sees taken, and the whole reason the ambient
+  default went. Without that exemption the rule would have carried two
+  permanent notes on maelys-http, which is migrated and correct; with it,
+  none. Notes throughout, never violations: a false positive failing a CI at
+  the adoption would cost more than this rule finds.
+- **`check`'s text says which lines drifted and which command writes them.**
+  The diff was computed either way and the JSON has carried it all along;
+  the text printed `update` and a path, and threw the rest. The order that
+  produces that state is the natural one — adopt, read what the socle
+  advises, declare it — and the declaration changes what the generated files
+  must hold, so it ends on a `FAIL` naming a file and nothing in it. Fourth
+  instance of the defect 0.46.0 corrected three times, this one on the path
+  everybody reads.
+- **The advice about a Homebrew renderer looks before it speaks.** It was
+  added the moment an executable `scripts/render-homebrew-formula.sh`
+  existed, without reading a line of it, and the product it reached first
+  downloads the tag's published archive and hashes that — exactly what it
+  recommends — and went looking for what it had done wrong. A renderer
+  naming `archive/refs/tags`, the URL the socle's own tap downloads, gets an
+  `ok`; otherwise the note now says what was looked for. The evidence can
+  only silence the note, never raise a violation.
+- The `ok` line for `[dependencies] apart` said "the build reads
+  $MAELYS_DEPENDENCIES_DIR". It said it two lines above the `release.yml`
+  that still cloned siblings, in the exact state above.
+- All three reported by maelys-egress, from an adoption that cost them three
+  rounds of CI and found four of their files. Their count was three: the
+  search found the fourth.
+
 ## 0.47.0 — 2026-09-13
 
 - **`preflight` says whether the tap jobs will hold their credentials, before

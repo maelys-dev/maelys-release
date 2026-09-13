@@ -49,6 +49,10 @@ DEFAULT_DOCUMENTS = "maelys-dev/maelys-docs"
 DEFAULT_IMAGE = "ubuntu:26.04"
 SOCLE_LINUX_PACKAGES = "build-essential dpkg-dev file rpm"  # the release.yml default
 SOCLE_MANIFEST_PATTERNS = "*.tar.gz *.deb *.rpm"  # the release.yml default
+# The URL tap.yml's own renderer downloads and hashes. A product's renderer
+# that names it hashes what a user will download; one that does not may be
+# hashing a local rebuild, which no downloader reproduces.
+TAG_ARCHIVE = "archive/refs/tags"
 # Registries a channel of the socle can serve. GitHub Packages publishes
 # with the run's own token; npmjs and PyPI would need trusted publishing,
 # which matches an OIDC claim naming this repository rather than the
@@ -620,9 +624,24 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
         # hashes what that runner produced, and `git archive | gzip` is not
         # byte for byte the same across platforms. A product paid this by
         # hand on a published formula.
-        decl.add("note", "scripts/render-homebrew-formula.sh renders on macOS while the release was built"
-                 " on Linux: hash the published archive and never a local rebuild, or the formula names a"
-                 " digest no downloader reproduces", "release")
+        # Said to a product that does the right thing too, until 0.48.0: the
+        # advice was added the moment an executable renderer existed, without
+        # reading a line of it, and maelys-egress -- whose script downloads
+        # the tag's archive and hashes that -- looked for what it had done
+        # wrong. The evidence can only silence the note, never raise a
+        # violation: the tag's own archive URL in the renderer says it hashes
+        # what a downloader gets, and its absence says the socle could not
+        # tell, which is not the same as a defect.
+        rendered = renderer.read_text(encoding="utf-8", errors="replace")
+        if TAG_ARCHIVE in rendered:
+            decl.add("ok", f"scripts/render-homebrew-formula.sh names {TAG_ARCHIVE}: it hashes the"
+                     " archive a user downloads, not the one this macOS runner would rebuild")
+        else:
+            decl.add("note", "scripts/render-homebrew-formula.sh renders on macOS while the release was built"
+                     " on Linux: hash the published archive and never a local rebuild, or the formula names a"
+                     f" digest no downloader reproduces. Nothing here names {TAG_ARCHIVE}, which is what"
+                     " the socle looks for; a renderer that downloads the tag's archive another way is"
+                     " right and unrecognised", "release")
         decl.add("ok", "scripts/render-homebrew-formula.sh renders the formula")
     # Dependencies: one dependencies/NAME.pin per Maelys repository, nearest
     # tag on line 1 for humans and the pinned commit on line 2. The managed
@@ -728,8 +747,13 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
                 decl.add("ok", f"{release.name} [commit] {decl.commit_verification}: the release asks"
                          " that of the commit the tag names, beyond the tag's own signature")
             if decl.dependencies_apart:
-                decl.add("ok", f"{release.name} [dependencies] apart: the build reads"
-                         f" ${DEPENDENCIES_VARIABLE}, and the socle materialises the pins there")
+                # What is said here is what the declaration asks and what the
+                # socle does with it, never what the build reads: release.yml
+                # may still hold the sibling checkouts of a former adoption,
+                # and this line stood as an "ok" two lines above the file that
+                # contradicted it. maelys-egress read that pair.
+                decl.add("ok", f"{release.name} [dependencies] apart: the pins are materialised under"
+                         f" ${DEPENDENCIES_VARIABLE}, never beside the product")
                 # What the trial of 0.45.0 found, reported before a push
                 # instead of by six red jobs after it: the socle exports the
                 # root in the job it runs, and a job of the product clones
@@ -742,14 +766,35 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
                 # second red would say nothing new: a job that clones beside
                 # itself already fails on the build's own message. Naming
                 # the line is the whole value.
-                ci_file = project / ".github" / "workflows" / "ci.yml"
-                for number, line in enumerate(ci_file.read_text(encoding="utf-8").splitlines(), 1) \
-                        if ci_file.is_file() else []:
-                    if BESIDE_CALL.search(line):
-                        decl.add("note", f".github/workflows/ci.yml line {number} clones beside the product,"
+                #
+                # Every tracked file, and not ci.yml alone: 0.45.0 named the
+                # fifteen lines of one workflow to maelys-egress and left
+                # four other files silent -- an image, two scripts with a
+                # hard-coded fallback, and a third they only found after a
+                # second red round, in the line below the one they had just
+                # fixed. Three red CI rounds for what one search names at
+                # once.
+                for path, number, name, text in sibling_readers(project, decl.dependencies):
+                    if name and DEPENDENCIES_VARIABLE in text:
+                        decl.add("note", f"{path} line {number} falls back to ../{name} when"
+                                 f" ${DEPENDENCIES_VARIABLE} is unset, which is the fallback nobody"
+                                 " ever sees taken: it reads whatever is next door, and the working"
+                                 " copy of someone who also develops that dependency is what sits"
+                                 f" there. Refuse instead: {text}", "conventions")
+                    elif name:
+                        decl.add("note", f"{path} line {number} reads ../{name}, and the pins are under"
+                                 f" ${DEPENDENCIES_VARIABLE} since this repository declares"
+                                 f" '[dependencies] apart': {text}", "conventions")
+                    elif BESIDE_CALL.search(text) and path.startswith(".github/workflows/"):
+                        decl.add("note", f"{path} line {number} clones beside the product,"
                                  " which the build no longer reads: one line gives it the root instead,"
                                  " 'sh scripts/checkout-dependencies.sh \"$RUNNER_TEMP/dependencies\""
                                  " >>\"$GITHUB_ENV\"'", "conventions")
+                    else:
+                        decl.add("note", f"{path} line {number} clones one pin on its own, and the root"
+                                 " is then nobody's: 'sh scripts/checkout-dependencies.sh DESTINATION'"
+                                 f" writes every pin there and prints ${DEPENDENCIES_VARIABLE} for the"
+                                 f" build to read: {text}", "conventions")
             elif decl.dependencies:
                 # Read after the declaration file and not with the pins: the
                 # pins are read first, so a rule placed there sees a
@@ -3530,6 +3575,69 @@ CHECKOUT_SCRIPTS = ("scripts/checkout-dependency.sh", "scripts/checkout-dependen
 # A call of the singular with no destination: it clones beside the product,
 # which a build that reads the root no longer looks at.
 BESIDE_CALL = re.compile(r"checkout-dependency\.sh\s+[a-z0-9-]+\s*(&&|$)")
+# Where a line naming ../NAME is prose about this very migration rather than
+# something that builds: the declaration file says why the fallback went, and
+# a changelog says when. Markdown goes with them -- a README telling a human
+# to clone next door is worth fixing, and not worth a note on every product
+# forever. Comments are not exempt: three of the lines this rule found were
+# comments of a Dockerfile, and their author changed all three.
+SIBLING_EXEMPT = (DECLARATION_FILE, FORMER_DECLARATION_FILE) + CHECKOUT_SCRIPTS
+
+
+def sibling_readers(project: pathlib.Path, names: list[str]) -> list[tuple[str, int, str, str]]:
+    """Tracked lines that still assume a checkout beside the product.
+
+    Yields (path, line number, dependency name, text); the name is empty
+    when the line calls the one-pin script instead of naming a sibling
+    path, which is the other way a tree reaches next door -- an image that
+    clones each pin to a place of its own and exports none of them.
+
+    Tracked files alone, which is the question: an untracked build tree
+    naming a sibling is nobody's contract. Outside a repository `git grep`
+    answers nothing and the rule stays quiet rather than walking whatever
+    the directory happens to hold.
+
+    A file that names the root variable somewhere has been through the
+    migration, and what it still says about a sibling is prose about it: a
+    Makefile explaining why the fallback went, a comment naming the
+    neighbour it no longer reads. Measured on two products -- before its
+    fixes maelys-egress had four such files and not one named the variable,
+    after them all four did, and maelys-http, migrated, named it in both
+    files this rule would otherwise have reported forever.
+
+    The one line that escapes that exemption is the one that names both:
+    a fallback kept beside a root that is already read is the prudent
+    fallback nobody ever sees taken, which is the whole reason the ambient
+    default went.
+    """
+    if not names:
+        return []
+    alternatives = "|".join(re.escape(name) for name in names)
+    # The name must end at the match: ../maelys-system and ../maelys-systemd
+    # are different neighbours, and only one of them is pinned here.
+    sibling = re.compile(r"\.\./(" + alternatives + r")(?![A-Za-z0-9._-])")
+    found = run(["git", "grep", "-n", "-I", "-E",
+                 "-e", r"\.\./(" + alternatives + ")",
+                 "-e", r"checkout-dependency\.sh"], cwd=project)
+    migrated: dict[str, bool] = {}
+    readers = []
+    for line in found.stdout.splitlines():
+        path, _, rest = line.partition(":")
+        number, _, text = rest.partition(":")
+        if not number.isdigit() or path.endswith(".md") or path in SIBLING_EXEMPT:
+            continue
+        if path not in migrated:
+            whole = project / path
+            migrated[path] = whole.is_file() and DEPENDENCIES_VARIABLE in \
+                whole.read_text(encoding="utf-8", errors="replace")
+        if migrated[path] and DEPENDENCIES_VARIABLE not in text:
+            continue
+        match = sibling.search(text)
+        if match:
+            readers.append((path, int(number), match.group(1), text.strip()))
+        elif "checkout-dependency.sh" in text:
+            readers.append((path, int(number), "", text.strip()))
+    return readers
 
 
 def dependencies_home(product: str) -> pathlib.Path:
@@ -4102,8 +4210,19 @@ def text_adopt(data: dict) -> str:
 
 
 def text_check(data: dict, with_checks: bool = True) -> str:
-    lines = [f"{entry['action']:<8} {entry['path']}" + (f" ({entry['reason']})" if "reason" in entry else "")
-             for entry in data["files"]]
+    lines = []
+    for entry in data["files"]:
+        lines.append(f"{entry['action']:<8} {entry['path']}" + (f" ({entry['reason']})" if "reason" in entry else ""))
+        # The diff, under the file that drifted. `check` computed it either
+        # way and the JSON has carried it all along; the text printed the
+        # word "update" and threw the rest, so a product that declared
+        # something without adopting again read a FAIL naming a file and
+        # nothing about the three lines in it. That is the defect 0.46.0
+        # corrected three times -- knowing, and putting it out of sight --
+        # on the path everybody reads. `adopt` has printed it since it had
+        # one; this is the same shape.
+        if entry.get("diff"):
+            lines.extend("         " + line for line in entry["diff"].rstrip("\n").split("\n"))
     conventions = "ok" if data["conventions"]["valid"] else "FAIL"
     release = ("ok" if data["release"]["valid"] else "FAIL") if data["release"]["applicable"] \
         else f"not applicable ({data['mechanism']} mechanism)"
@@ -4120,6 +4239,15 @@ def text_check(data: dict, with_checks: bool = True) -> str:
         shown.update(f"{entry['path']}: {entry['action']}" + (f" ({entry['reason']})" if "reason" in entry else "")
                      for entry in data["files"])
         lines.extend(f"drift    {violation}" for violation in data["violations"] if violation not in shown)
+        staged = [entry["path"] for entry in data["files"] if entry["action"] in ("create", "update")]
+        if staged:
+            # Naming the command, because the order that produces this state
+            # is the natural one: adopt, read what the socle advises,
+            # declare it -- and a declaration changes what the generated
+            # files must hold, so the last step leaves a half-adoption that
+            # said only "FAIL".
+            target = staged[0] if len(staged) == 1 else f"the {len(staged)} files above"
+            lines.append(f"write    'maelys-release adopt {data['project']} --apply' writes {target}")
         lines.append(f"check: {data['product']} drifts from maelys-release {data['socle']['tag']}")
     return (checks_text(data["checks"]) if with_checks else "") + "\n".join(lines) + "\n"
 

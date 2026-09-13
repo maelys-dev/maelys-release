@@ -1474,7 +1474,7 @@ class GoldenTest(unittest.TestCase):
         ok       pinned dependencies: maelys-system
         ok       .github/workflows/ci.yml calls check-product.yml of the socle
         ok       dependencies/packages: linux [pkg-config libjansson-dev] macos [jansson]
-        ok       maelys-release.conf [dependencies] apart: the build reads $MAELYS_DEPENDENCIES_DIR, and the socle materialises the pins there
+        ok       maelys-release.conf [dependencies] apart: the pins are materialised under $MAELYS_DEPENDENCIES_DIR, never beside the product
         """)
     FILES = textwrap.dedent("""\
         same     .github/workflows/release.yml
@@ -1502,14 +1502,55 @@ class GoldenTest(unittest.TestCase):
                          + "check: maelys-fixture is on maelys-release v9.9.9\n")
 
     def test_check_drifting(self) -> None:
+        """The whole answer, not the word "update".
+
+        `check` computes the diff either way and the JSON has always carried
+        it; the text printed the action and threw the rest, so a product
+        that declared something without adopting again read a FAIL naming a
+        file and nothing about the lines in it. maelys-egress read that.
+        """
         with (self.product.dir / ".github" / "workflows" / "release.yml").open("a") as workflow:
             workflow.write("\n# edited\n")
         completed = self.product.run("check", self.dir, expect=2)
         self.assertEqual(completed.stderr, "")
+        drifted = textwrap.dedent("""\
+            update   .github/workflows/release.yml
+                     --- .github/workflows/release.yml
+                     +++ .github/workflows/release.yml
+                     @@ -63,5 +63,3 @@
+                          secrets:
+                            tap_token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+                            tap_signing_key: ${{ secrets.HOMEBREW_TAP_SIGNING_KEY }}
+                     -
+                     -# edited
+            """)
         self.assertEqual(completed.stdout, self.CONTRACT
-                         + self.FILES.replace("same     .github/workflows/release.yml", "update   .github/workflows/release.yml")
+                         + self.FILES.replace("same     .github/workflows/release.yml\n", drifted)
                          + self.VERDICTS.replace("release mechanism: ok", "release mechanism: FAIL")
+                         + f"write    'maelys-release adopt {self.product.dir.resolve()} --apply'"
+                           " writes .github/workflows/release.yml\n"
                          + "check: maelys-fixture drifts from maelys-release v9.9.9\n")
+
+    def test_the_half_adoption_says_which_lines_and_which_command(self) -> None:
+        """Declare, then check: the order maelys-egress followed, and ours.
+
+        adopt, read what the socle advises, declare it -- and the
+        declaration changes what the generated files must hold, so the
+        natural order ends on a FAIL that named a file and no more. The
+        product had no way to see that its three sibling checkouts were
+        the thing to replace.
+        """
+        # The state the order leaves: release.yml was generated before the
+        # declaration, so it still clones a sibling per pin while the
+        # declaration says the build reads a root.
+        workflow = self.product.dir / ".github" / "workflows" / "release.yml"
+        workflow.write_text(workflow.read_text().replace(
+            '        sh scripts/checkout-dependencies.sh "$RUNNER_TEMP/dependencies" >>"$GITHUB_ENV"',
+            "        sh scripts/checkout-dependency.sh maelys-system"), encoding="utf-8")
+        completed = self.product.run("check", self.dir, expect=2)
+        self.assertIn("-        sh scripts/checkout-dependency.sh maelys-system", completed.stdout)
+        self.assertIn('+        sh scripts/checkout-dependencies.sh "$RUNNER_TEMP/dependencies"', completed.stdout)
+        self.assertIn(f"'maelys-release adopt {self.product.dir.resolve()} --apply'", completed.stdout)
 
     def test_check_pinned_elsewhere(self) -> None:
         workflow = self.product.dir / ".github" / "workflows" / "release.yml"
@@ -2472,8 +2513,34 @@ class SaidWhereItIsReadTest(unittest.TestCase):
         checks = self.product.json("check", self.dir)["data"]["checks"]
         self.assertTrue(any(check["status"] == "note" and "renders on macOS" in check["message"]
                             for check in checks), checks)
+        self.assertTrue(any(check["status"] == "note" and MODULE.TAG_ARCHIVE in check["message"]
+                            for check in checks), checks)
         tap = (ROOT / ".github" / "workflows" / "tap.yml").read_text(encoding="utf-8")
         self.assertIn("Hash the published archive", tap)
+
+    def test_a_render_that_downloads_the_tag_archive_is_told_it_is_right(self) -> None:
+        """The advice was given without reading a line of the script.
+
+        maelys-egress downloads the tag's own archive and hashes that --
+        exactly what the note recommends -- and went looking for what it had
+        done wrong. The evidence can only silence the note, never raise a
+        violation: its absence means the socle could not tell, which is not
+        a defect.
+        """
+        self.product.write("scripts/render-homebrew-formula.sh",
+                           "#!/bin/sh\nurl=\"https://github.com/$repository/archive/refs/tags/$tag.tar.gz\"\n"
+                           "curl -fsSL -o \"$work/source.tar.gz\" \"$url\"\n", executable=True)
+        self.product.run("adopt", self.dir, "--apply")
+        checks = self.product.json("check", self.dir)["data"]["checks"]
+        self.assertFalse([check for check in checks if "renders on macOS" in check["message"]], checks)
+        self.assertTrue(any(check["status"] == "ok" and "hashes the archive a user downloads" in check["message"]
+                            for check in checks), checks)
+
+    def test_the_url_the_socle_looks_for_is_the_one_its_own_tap_downloads(self) -> None:
+        """A recogniser that named something else would send every product
+        to rewrite a script that was right."""
+        tap = (ROOT / ".github" / "workflows" / "tap.yml").read_text(encoding="utf-8")
+        self.assertIn(MODULE.TAG_ARCHIVE, tap)
 
 
 class DependenciesApartTest(unittest.TestCase):
@@ -2613,6 +2680,11 @@ class DependenciesApartTest(unittest.TestCase):
                       workflow)
         self.assertNotIn("checkout-dependency.sh maelys-system", workflow)
 
+    def tracked(self) -> None:
+        """The search reads tracked files, so the fixture has to have some."""
+        self.product.git(self.product.dir, "init", "-q")
+        self.product.git(self.product.dir, "add", "-A")
+
     def test_a_job_that_still_clones_beside_the_product_is_named(self) -> None:
         """The failure of the trial, said before a push instead of by six red
         jobs after it. A note: ci.yml is the product's file, and the job that
@@ -2621,6 +2693,7 @@ class DependenciesApartTest(unittest.TestCase):
                            self.product.read(".github/workflows/ci.yml")
                            + "\n  own:\n    runs-on: ubuntu-26.04\n    steps:\n"
                              "      - run: sh scripts/checkout-dependency.sh maelys-system\n")
+        self.tracked()
         data = self.product.json("check", self.dir)["data"]
         # A note and not a warning: check counts a warning as a violation and
         # exits 2 while adopt proceeds, which is a product adopting and going
@@ -2628,6 +2701,102 @@ class DependenciesApartTest(unittest.TestCase):
         self.assertTrue(data["conventions"]["valid"], data["conventions"]["violations"])
         self.assertTrue(any(check["status"] == "note" and "clones beside the product" in check["message"]
                             for check in data["checks"]), data["checks"])
+
+    def test_every_tracked_file_is_searched_and_not_ci_yml_alone(self) -> None:
+        """The four shapes maelys-egress met, in one product.
+
+        0.45.0 named the fifteen lines of one workflow and left an image,
+        two scripts and a third file silent. Three red CI rounds, the last
+        of them for the line below the one they had just fixed.
+        """
+        self.product.write("docker/Dockerfile.test",
+                           "FROM debian\nRUN sh scripts/checkout-dependency.sh maelys-system /maelys-system\n"
+                           "CMD [\"make\", \"check\"]\n")
+        self.product.write("docker/Dockerfile.sidecar",
+                           "# docker build --build-context maelys-system=../maelys-system .\nFROM debian\n")
+        self.product.write("scripts/mutation-check.sh",
+                           "#!/bin/sh\nsystem_dir=${MAELYS_SYSTEM_DIR:-$root/../maelys-system}\n"
+                           "cli_dir=${MAELYS_CLI_DIR:-$root/../maelys-system}\n")
+        self.tracked()
+        data = self.product.json("check", self.dir)["data"]
+        # Notes, never violations: a false positive that fails a CI at the
+        # adoption would cost more than this rule finds.
+        self.assertTrue(data["conventions"]["valid"], data["conventions"]["violations"])
+        named = {message.split(" line ")[0] for message in
+                 [check["message"] for check in data["checks"] if check["status"] == "note"]
+                 if " line " in message}
+        self.assertEqual(named, {"docker/Dockerfile.test", "docker/Dockerfile.sidecar",
+                                 "scripts/mutation-check.sh"})
+        # Both lines of the file, and not the first alone.
+        lines = sorted(int(check["message"].split(" line ")[1].split()[0])
+                       for check in data["checks"]
+                       if check["status"] == "note" and check["message"].startswith("scripts/mutation-check.sh line "))
+        self.assertEqual(lines, [2, 3])
+
+    def test_a_file_that_reads_the_root_is_left_alone(self) -> None:
+        """Prose about the migration, in a file that went through it.
+
+        A Makefile explaining why the sibling went names it, and so does a
+        comment beside the root it now reads. Measured on maelys-http,
+        migrated, where this exemption is the difference between two
+        permanent notes and none.
+        """
+        self.product.write("Makefile",
+                           "# ../maelys-system could not be told from a working copy, so it went.\n"
+                           "MAELYS_DEPENDENCIES_DIR ?=\n"
+                           "SYSTEM_DIR ?= $(MAELYS_DEPENDENCIES_DIR)/maelys-system\n")
+        self.tracked()
+        data = self.product.json("check", self.dir)["data"]
+        self.assertFalse([check for check in data["checks"] if "Makefile line" in check["message"]],
+                         data["checks"])
+
+    def test_the_fallback_kept_beside_the_root_is_still_named(self) -> None:
+        """The one line the exemption above must not swallow.
+
+        A file that reads the root and falls back to the sibling anyway is
+        the prudent fallback nobody ever sees taken -- the whole reason the
+        ambient default went, written in a file that looks migrated.
+        """
+        self.product.write("Makefile",
+                           "SYSTEM_DIR ?= ${MAELYS_DEPENDENCIES_DIR:-..}/../maelys-system\n")
+        self.tracked()
+        notes = [check["message"] for check in self.product.json("check", self.dir)["data"]["checks"]
+                 if check["status"] == "note" and check["message"].startswith("Makefile line 1")]
+        self.assertEqual(len(notes), 1, notes)
+        self.assertIn("nobody ever sees taken", notes[0])
+
+    def test_prose_and_the_managed_scripts_are_exempt(self) -> None:
+        """What every product carries, and would carry a note for forever.
+
+        The two clone scripts are the socle's own, and the plural composes
+        the singular; a README telling a human to clone next door is worth
+        fixing and not worth a note on every check of every product.
+        """
+        self.product.write("README.md", "Clone ../maelys-system beside this repository.\n")
+        self.product.write("maelys-release.conf",
+                           self.product.read("maelys-release.conf") + "# ../maelys-system went in 0.45.0\n")
+        self.tracked()
+        data = self.product.json("check", self.dir)["data"]
+        self.assertFalse([check for check in data["checks"]
+                          if "README.md" in check["message"] or "maelys-release.conf line" in check["message"]
+                          or "checkout-dependency.sh line" in check["message"]], data["checks"])
+
+    def test_outside_a_repository_the_search_says_nothing(self) -> None:
+        """Tracked files are the question, and there are none here.
+
+        The alternative is walking whatever the directory holds, which on a
+        built tree is the dependencies themselves.
+        """
+        self.product.write("scripts/mutation-check.sh", "#!/bin/sh\ndir=$root/../maelys-system\n")
+        data = self.product.json("check", self.dir)["data"]
+        self.assertFalse([check for check in data["checks"] if " line " in check["message"]], data["checks"])
+
+    def test_a_neighbour_whose_name_only_starts_the_same_is_not_a_pin(self) -> None:
+        self.product.write("scripts/mutation-check.sh", "#!/bin/sh\ndir=$root/../maelys-systemd\n")
+        self.tracked()
+        data = self.product.json("check", self.dir)["data"]
+        self.assertFalse([check for check in data["checks"] if "mutation-check.sh line" in check["message"]],
+                         data["checks"])
 
     def test_the_workflow_is_told_which_layout_to_make(self) -> None:
         """Three places clone, and all three have to know.
