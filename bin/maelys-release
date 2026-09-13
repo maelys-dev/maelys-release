@@ -49,10 +49,13 @@ DEFAULT_DOCUMENTS = "maelys-dev/maelys-docs"
 DEFAULT_IMAGE = "ubuntu:26.04"
 SOCLE_LINUX_PACKAGES = "build-essential dpkg-dev file rpm"  # the release.yml default
 SOCLE_MANIFEST_PATTERNS = "*.tar.gz *.deb *.rpm"  # the release.yml default
-# The URL tap.yml's own renderer downloads and hashes. A product's renderer
-# that names it hashes what a user will download; one that does not may be
-# hashing a local rebuild, which no downloader reproduces.
-TAG_ARCHIVE = "archive/refs/tags"
+# What a renderer that hashes published bytes names: the tag's source archive,
+# which tap.yml's own path downloads; a release asset, which a product that
+# publishes its own tarball hashes instead; and the command that fetches one.
+# The first list held the source archive alone and left maelys-http -- which
+# hashes releases/download/$tag/... -- with a note saying the opposite of what
+# its script does. Two of three recognised is not a recogniser.
+PUBLISHED_DOWNLOAD = ("archive/refs/tags", "releases/download", "gh release download")
 # Registries a channel of the socle can serve. GitHub Packages publishes
 # with the run's own token; npmjs and PyPI would need trusted publishing,
 # which matches an OIDC claim naming this repository rather than the
@@ -633,15 +636,25 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
         # what a downloader gets, and its absence says the socle could not
         # tell, which is not the same as a defect.
         rendered = renderer.read_text(encoding="utf-8", errors="replace")
-        if TAG_ARCHIVE in rendered:
-            decl.add("ok", f"scripts/render-homebrew-formula.sh names {TAG_ARCHIVE}: it hashes the"
-                     " archive a user downloads, not the one this macOS runner would rebuild")
+        names = [shape for shape in PUBLISHED_DOWNLOAD if shape in rendered]
+        if names:
+            decl.add("ok", f"scripts/render-homebrew-formula.sh names {names[0]}: it hashes bytes it"
+                     " downloaded, not the archive this macOS runner would rebuild")
         else:
-            decl.add("note", "scripts/render-homebrew-formula.sh renders on macOS while the release was built"
-                     " on Linux: hash the published archive and never a local rebuild, or the formula names a"
-                     f" digest no downloader reproduces. Nothing here names {TAG_ARCHIVE}, which is what"
-                     " the socle looks for; a renderer that downloads the tag's archive another way is"
-                     " right and unrecognised", "release")
+            # What this says is what the socle knows, which is that it cannot
+            # tell. The note asserted a fact about the product instead -- "it
+            # renders on macOS while the release was built on Linux" -- and
+            # every product it has ever reached downloads before hashing. It
+            # was relayed to one of them as a finding worth more than a note,
+            # and their session corrected the relay; a check that cannot know
+            # must not assert.
+            decl.add("note", "the socle cannot tell from here whether"
+                     " scripts/render-homebrew-formula.sh hashes bytes it downloaded or an archive it"
+                     " rebuilt: the tap renders on macOS while the release was built on Linux, and"
+                     " 'git archive | gzip' is not byte for byte the same across platforms, so a formula"
+                     " naming the digest of a local rebuild fails every 'brew install'. Nothing here names"
+                     f" {' or '.join(PUBLISHED_DOWNLOAD)}, which is what the socle looks for -- a renderer"
+                     " that fetches the published bytes another way is right and unrecognised", "release")
         decl.add("ok", "scripts/render-homebrew-formula.sh renders the formula")
     # Dependencies: one dependencies/NAME.pin per Maelys repository, nearest
     # tag on line 1 for humans and the pinned commit on line 2. The managed
@@ -2580,6 +2593,50 @@ def tap_secrets(repository: str, formulas: list[str]) -> list[tuple[str, str]]:
     return found
 
 
+def channel_visibility(repository: str, channels: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """Whether a declared channel publishes into a package anyone can install.
+
+    GitHub gives a package its own visibility, which starts private and does
+    not follow the repository: a product whose repository went public kept
+    publishing into a package nobody outside the organisation could install,
+    for eleven versions, with every job green. The release says published,
+    the registry holds it, and `npm install` from outside answers 404 --
+    there is no red anywhere in that story.
+
+    A note and never a violation: a private package is a legitimate choice.
+    What was missing is that nobody was told which one they had.
+    """
+    owner = repository.split("/")[0]
+    found: list[tuple[str, str]] = []
+    for name, kind in channels:
+        if kind != "github-packages":
+            continue
+        state, body = github_read(f"orgs/{owner}/packages?package_type={name}&per_page=100")
+        if state != "ok" or not isinstance(body, list):
+            found.append(("note", f"the {name} packages of {owner} could not be read"
+                                  f" (a token without read:packages answers this too):"
+                                  f" whether the {name} channel publishes publicly is not checked"))
+            continue
+        mine = [entry for entry in body
+                if isinstance(entry, dict)
+                and (entry.get("repository") or {}).get("full_name") == repository]
+        if not mine:
+            found.append(("note", f"{owner} holds no {name} package for {repository} yet:"
+                                  " the first publication creates it, private, whatever this"
+                                  " repository is"))
+            continue
+        for entry in mine:
+            package, visibility = entry.get("name", "?"), entry.get("visibility", "?")
+            if visibility == "public":
+                found.append(("ok", f"the {name} channel publishes {package}, which is public"))
+            else:
+                found.append(("note", f"the {name} channel publishes {package}, which is {visibility}:"
+                                      " the release will say published and a consumer outside"
+                                      f" {owner} cannot install it. A package's visibility is its"
+                                      " own and does not follow the repository's"))
+    return found
+
+
 def repository_checks(decl: Declarations) -> list[tuple[str, str]]:
     """What the release workflow needs of the GitHub repository behind origin.
 
@@ -2643,6 +2700,7 @@ def repository_checks(decl: Declarations) -> list[tuple[str, str]]:
     # and check runs on every pull request of every product.
     found.extend(tap_drift(repository, decl_formulas))
     found.extend(tap_secrets(repository, decl_formulas))
+    found.extend(channel_visibility(repository, decl.channels))
     branch = repository_data.get("default_branch") or "main"
     found.append(branch_protection(repository, branch,
                                    *github_read(f"repos/{repository}/branches/{branch}/protection")[:1],
@@ -3319,17 +3377,42 @@ ls -l /dist
 PUBLISH_COMMAND = "bash scripts/publish-channel.sh TAG CHANNEL"
 
 
+# What a publication marker says about a registry, and nothing else. Without
+# a fixed list each product invents its own field, and `rehearse --channel`
+# then compares what the script chose to write with what the release carries
+# -- a comparison of a product with itself, which proves nothing common. One
+# product dropped a field of its own to make its rehearsal agree, which is
+# the shape of the problem: the product decides what is comparable.
+CHANNEL_RECORD_FIELDS = ("registry", "package", "version", "dist_tag")
+
+
+def kept_record(recorded: object) -> tuple[dict, list[str]]:
+    """The fields of a script's record the marker keeps, and the names it drops.
+
+    Dropped and not refused: the publication has already happened when this
+    is read, so failing here would leave a registry holding a version and a
+    release saying nothing. The names are reported instead, in the run and in
+    the rehearsal.
+    """
+    if not isinstance(recorded, dict):
+        return {}, []
+    kept = {name: recorded[name] for name in CHANNEL_RECORD_FIELDS
+            if isinstance(recorded.get(name), str)}
+    return kept, sorted(set(recorded) - set(kept))
+
+
 def channel_marker(product: str, tag: str, channel: str, recorded: dict, run: str) -> dict:
     """The marker channel.yml attaches, composed the way its jq expression does.
 
-    `{product, tag, channel, published, run} + ($recorded[0] // {})`: what the
-    script recorded wins, which is how a product puts its registry, its
-    package and its dist-tag in without the socle knowing them.
+    The socle's own fields first and the record's four after, which cannot
+    collide with them: the jq expression used to be `{socle} + ($recorded[0]
+    // {})`, where a record naming `tag` would have overwritten the tag of
+    the release it was attached to.
     """
     marker = {"product": product, "tag": tag, "channel": channel,
               "published": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
               "run": run}
-    marker.update(recorded)
+    marker.update(kept_record(recorded)[0])
     return marker
 
 
@@ -3392,7 +3475,7 @@ def rehearse_channel(invocation: Invocation, project: pathlib.Path, product: str
                       "A channel carries a release that exists; rehearse a tag that has one.")
     dist.mkdir(exist_ok=True)
     data: dict = {"product": product, "channel": channel, "tag": tag, "repository": repository,
-                  "command": "", "assets": [], "recorded": [], "matches": None}
+                  "command": "", "assets": [], "recorded": [], "dropped": [], "matches": None}
     try:
         downloaded = run(["gh", "release", "download", tag, "--repo", repository, "--dir", str(dist)], cwd=project)
         if downloaded.returncode != 0:
@@ -3416,7 +3499,9 @@ def rehearse_channel(invocation: Invocation, project: pathlib.Path, product: str
                               "channel.yml requires a publish command that succeeds without republishing:"
                               " a replay of this tag would fail the same way. Read the log above.")
             recorded = json.loads(record.read_text(encoding="utf-8")) if record.is_file() else {}
-        data["recorded"] = sorted(recorded)
+        kept, dropped = kept_record(recorded)
+        data["recorded"] = sorted(kept)
+        data["dropped"] = dropped
         marker = channel_marker(product, tag, channel, recorded, "(rehearsal)")
         attached_file = dist / f"channel-{channel}.json"
         attached = json.loads(attached_file.read_text(encoding="utf-8")) if attached_file.is_file() else None
@@ -4177,6 +4262,10 @@ def text_rehearse(data: dict) -> str:
              f"{'command':<10} {data['command']} (exited 0 without republishing)"]
     if data["recorded"]:
         lines.append(f"{'recorded':<10} " + " ".join(data["recorded"]))
+    if data.get("dropped"):
+        lines.append(f"{'dropped':<10} " + " ".join(data["dropped"])
+                     + f"; a marker carries {', '.join(CHANNEL_RECORD_FIELDS)} and nothing else,"
+                     " so what the release will hold is the line above")
     if data["matches"] is None:
         lines.append(f"{'marker':<10} {data['tag']} carries no channel-{data['channel']}.json to compare with")
     elif data["matches"]:

@@ -603,7 +603,30 @@ the channel published. One asset per channel, written once and never
 rewritten — a rewritten asset cannot be covered by `SHA256SUMS`, computed
 before it, and two channels publishing at once would lose one another's
 entry. A publish script with something to record writes a JSON object to
-`$CHANNEL_RECORD`, whose fields join the marker.
+`$CHANNEL_RECORD`.
+
+**A marker says four things about a registry and nothing else**:
+`registry`, `package`, `version` and `dist_tag`, as strings. Anything else a
+script writes is dropped, named in the run's log and in the rehearsal, and
+never refused — the publication has already happened when this is read, so a
+refusal would leave a registry holding a version and a release saying
+nothing about it. The list exists because without one the comparison proves
+nothing: `rehearse --channel` would compare what a script chose to write
+with what the release carries, which is a product compared with itself, and
+one product removed a field of its own to make its rehearsal agree. The
+socle's own fields — `product`, `tag`, `channel`, `published`, `run` — are
+composed last and cannot be overwritten; before 0.49.0 a record naming `tag`
+rewrote the tag of the release it was attached to.
+
+**`preflight` says which package a channel publishes into, and whether
+anyone can install it.** A package's visibility is its own and does not
+follow the repository's: it starts private and stays private when the
+repository goes public. A product published eleven versions into one nobody
+outside the organisation could install, with every job green — the release
+says published, the registry holds it, and an install from outside answers
+404. There is no red anywhere in that story. A note and never a violation: a
+private package is a legitimate choice, and what was missing is that nobody
+was told which one they had.
 
 **`github-packages` is the only registry the socle serves**, and that is
 measured rather than chosen. Trusted publishing on npmjs and PyPI matches an
@@ -884,6 +907,24 @@ in a product's plan at its next adoption and never as drift. Hence:
   the changelog says how to migrate.
 
 The 1.0 tag will make this rule a promise; until then it is the practice.
+
+**Every entry of the socle's changelog ends with its impact on a product**,
+since 0.49.0:
+
+```
+- **Impact.** Products with a channel: re-adopt. Others: nothing.
+```
+
+The rule it makes readable is the one above, and the reason it exists is a
+measurement: twenty-four versions in three days, and one product opened
+seven adoption pull requests — each a CI run and a merge — for a mechanism
+it had used twice, because nothing in a changelog entry said in ten seconds
+whether it had to. Half of those pull requests rewrote prose and nothing
+else. The line names an audience and an action; "nothing" is an answer, and
+the most useful one.
+
+It says what a product must do, never what the socle did: the entry above it
+is the account, and a reader who needs only the decision reads one line.
 
 ## Moving a product's prose
 

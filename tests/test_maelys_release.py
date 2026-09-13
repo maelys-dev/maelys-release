@@ -2513,10 +2513,48 @@ class SaidWhereItIsReadTest(unittest.TestCase):
         checks = self.product.json("check", self.dir)["data"]["checks"]
         self.assertTrue(any(check["status"] == "note" and "renders on macOS" in check["message"]
                             for check in checks), checks)
-        self.assertTrue(any(check["status"] == "note" and MODULE.TAG_ARCHIVE in check["message"]
+        self.assertTrue(any(check["status"] == "note" and MODULE.PUBLISHED_DOWNLOAD[0] in check["message"]
                             for check in checks), checks)
         tap = (ROOT / ".github" / "workflows" / "tap.yml").read_text(encoding="utf-8")
         self.assertIn("Hash the published archive", tap)
+
+    def test_a_render_that_hashes_a_release_asset_is_recognised_too(self) -> None:
+        """The second shape, and the one the first list missed.
+
+        maelys-http publishes its own tarball as a release asset and hashes
+        that, so its script names releases/download and not the tag's source
+        archive. Two of three recognised is not a recogniser: it carried the
+        note saying the opposite of what its script does.
+        """
+        self.product.write("scripts/render-homebrew-formula.sh",
+                           "#!/bin/sh\nurl=\"https://github.com/$repository/releases/download/"
+                           "$tag/p-$version.tar.gz\"\ncurl -fsSL -o \"$work/a.tar.gz\" \"$url\"\n",
+                           executable=True)
+        self.product.run("adopt", self.dir, "--apply")
+        checks = self.product.json("check", self.dir)["data"]["checks"]
+        self.assertFalse([check for check in checks if "cannot tell from here" in check["message"]], checks)
+        self.assertTrue(any(check["status"] == "ok" and "releases/download" in check["message"]
+                            for check in checks), checks)
+
+    def test_the_note_says_what_it_does_not_know_and_never_asserts(self) -> None:
+        """The wording, which is the finding and not the rule.
+
+        The note used to assert a fact about the product it had read --
+        "renders on macOS while the release was built on Linux" -- and every
+        product it ever reached downloads before hashing. It was relayed to
+        one of them as a finding worth more than a note, and that session
+        corrected the relay. A check that cannot know must not assert.
+        """
+        self.product.write("scripts/render-homebrew-formula.sh",
+                           "#!/bin/sh\nmake dist && shasum -a 256 dist/*.tar.gz\n", executable=True)
+        self.product.run("adopt", self.dir, "--apply")
+        checks = self.product.json("check", self.dir)["data"]["checks"]
+        note = [check for check in checks if check["status"] == "note"
+                and "render-homebrew-formula.sh" in check["message"]]
+        self.assertEqual(len(note), 1, checks)
+        self.assertTrue(note[0]["message"].startswith("the socle cannot tell from here"), note[0])
+        for shape in MODULE.PUBLISHED_DOWNLOAD:
+            self.assertIn(shape, note[0]["message"])
 
     def test_a_render_that_downloads_the_tag_archive_is_told_it_is_right(self) -> None:
         """The advice was given without reading a line of the script.
@@ -2532,15 +2570,15 @@ class SaidWhereItIsReadTest(unittest.TestCase):
                            "curl -fsSL -o \"$work/source.tar.gz\" \"$url\"\n", executable=True)
         self.product.run("adopt", self.dir, "--apply")
         checks = self.product.json("check", self.dir)["data"]["checks"]
-        self.assertFalse([check for check in checks if "renders on macOS" in check["message"]], checks)
-        self.assertTrue(any(check["status"] == "ok" and "hashes the archive a user downloads" in check["message"]
+        self.assertFalse([check for check in checks if "cannot tell from here" in check["message"]], checks)
+        self.assertTrue(any(check["status"] == "ok" and "hashes bytes it downloaded" in check["message"]
                             for check in checks), checks)
 
     def test_the_url_the_socle_looks_for_is_the_one_its_own_tap_downloads(self) -> None:
         """A recogniser that named something else would send every product
         to rewrite a script that was right."""
         tap = (ROOT / ".github" / "workflows" / "tap.yml").read_text(encoding="utf-8")
-        self.assertIn(MODULE.TAG_ARCHIVE, tap)
+        self.assertIn(MODULE.PUBLISHED_DOWNLOAD[0], tap)
 
 
 class DependenciesApartTest(unittest.TestCase):
@@ -3118,6 +3156,60 @@ class TapSecretsTest(unittest.TestCase):
         self.assertIn("could not be read", found[0][1])
 
 
+class ChannelVisibilityTest(unittest.TestCase):
+    """Which package a declared channel publishes into, and who can install it.
+
+    A package's visibility is its own and does not follow the repository's:
+    it starts private and stays private when the repository goes public. A
+    product published eleven versions into one nobody outside the
+    organisation could install, with every job green -- the release says
+    published, the registry holds it, and `npm install` from outside answers
+    404. There is no red anywhere in that story.
+    """
+
+    PATH = "orgs/maelys-dev/packages?package_type=npm&per_page=100"
+
+    def read(self, answer, channels=(("npm", "github-packages"),)):
+        saved = MODULE.github_read
+        MODULE.github_read = lambda path: answer if path == self.PATH else ("absent", None)
+        try:
+            return MODULE.channel_visibility("maelys-dev/p", list(channels))
+        finally:
+            MODULE.github_read = saved
+
+    def package(self, visibility: str, repository: str = "maelys-dev/p") -> dict:
+        return {"name": "@maelys/p", "visibility": visibility,
+                "repository": {"full_name": repository}}
+
+    def test_a_private_package_is_named_and_is_not_a_violation(self) -> None:
+        """A private package is a legitimate choice. What was missing is that
+        nobody was told which one they had."""
+        found = self.read(("ok", [self.package("private")]))
+        self.assertEqual([status for status, _ in found], ["note"])
+        self.assertIn("@maelys/p, which is private", found[0][1])
+        self.assertIn("cannot install it", found[0][1])
+
+    def test_a_public_package_is_said_so(self) -> None:
+        found = self.read(("ok", [self.package("public")]))
+        self.assertEqual([status for status, _ in found], ["ok"])
+        self.assertIn("which is public", found[0][1])
+
+    def test_a_package_of_another_repository_is_not_this_one(self) -> None:
+        """The organisation's packages of a type are listed together, and
+        every product of the fleet publishes npm."""
+        found = self.read(("ok", [self.package("public", "maelys-dev/other")]))
+        self.assertEqual([status for status, _ in found], ["note"])
+        self.assertIn("holds no npm package", found[0][1])
+
+    def test_a_refusal_to_answer_is_not_an_absence(self) -> None:
+        found = self.read(("unreadable", None))
+        self.assertEqual([status for status, _ in found], ["note"])
+        self.assertIn("could not be read", found[0][1])
+
+    def test_a_product_with_no_channel_is_not_asked(self) -> None:
+        self.assertEqual(self.read(("ok", []), channels=()), [])
+
+
 class TapDriftTest(unittest.TestCase):
     """What the tap serves for a repository, against what it declares.
 
@@ -3277,10 +3369,14 @@ class ChannelMarkerTest(unittest.TestCase):
     in Python, and these fix the two shapes to each other.
     """
 
-    def test_what_the_script_recorded_wins(self) -> None:
-        """`{product,tag,channel,published,run} + ($recorded[0] // {})`: a
-        product puts its registry and its package in without the socle
-        knowing them, and may correct a field the socle guessed."""
+    def test_the_record_says_these_four_things_about_a_registry(self) -> None:
+        """A fixed list, or the comparison proves nothing common.
+
+        Without one, `rehearse --channel` compares what the script chose to
+        write with what the release carries — a product compared with
+        itself. One product removed a field of its own to make its rehearsal
+        agree, which is the shape of the problem.
+        """
         marker = MODULE.channel_marker("maelys-datalog", "v0.2.0", "npm",
                                        {"registry": "npm.pkg.github.com", "package": "@maelys/datalog"},
                                        "(rehearsal)")
@@ -3288,8 +3384,38 @@ class ChannelMarkerTest(unittest.TestCase):
         self.assertEqual(marker["registry"], "npm.pkg.github.com")
         self.assertEqual(marker["run"], "(rehearsal)")
         self.assertRegex(marker["published"], r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
-        overridden = MODULE.channel_marker("p", "v1.0.0", "npm", {"channel": "npm-next"}, "r")
-        self.assertEqual(overridden["channel"], "npm-next")
+
+    def test_a_record_cannot_overwrite_what_the_release_says(self) -> None:
+        """The former expression put the record last, so a record naming
+        `tag` rewrote the tag of the release it was attached to."""
+        marker = MODULE.channel_marker("p", "v1.0.0", "npm",
+                                       {"channel": "npm-next", "tag": "v9.9.9", "registry": "r"}, "run")
+        self.assertEqual(marker["channel"], "npm")
+        self.assertEqual(marker["tag"], "v1.0.0")
+        self.assertEqual(marker["registry"], "r")
+
+    def test_what_a_marker_drops_is_named_and_not_refused(self) -> None:
+        """Dropped, because the publication has already happened when this is
+        read: a refusal here leaves a registry holding a version and a
+        release saying nothing about it."""
+        kept, dropped = MODULE.kept_record({"registry": "r", "already_published": True,
+                                            "version": "1.0.0", "count": 3})
+        self.assertEqual(kept, {"registry": "r", "version": "1.0.0"})
+        self.assertEqual(dropped, ["already_published", "count"])
+        # A known field of the wrong type is not a marker field either: a
+        # marker is read by eye as often as by jq.
+        self.assertEqual(MODULE.kept_record({"version": 1.0}), ({}, ["version"]))
+        self.assertEqual(MODULE.kept_record([1, 2]), ({}, []))
+
+    def test_the_workflow_keeps_the_same_four_fields(self) -> None:
+        """The parity that matters: the rehearsal composes in Python and the
+        release composes in jq, and a list kept in two places drifts."""
+        channel = (ROOT / ".github" / "workflows" / "channel.yml").read_text(encoding="utf-8")
+        listed = re.findall(r'IN\(([^)]*)\)', channel)
+        self.assertTrue(listed, channel)
+        for names in listed:
+            self.assertEqual([name.strip('"') for name in names.split(",")],
+                             list(MODULE.CHANNEL_RECORD_FIELDS))
 
     def test_what_counts_as_a_disagreement_with_the_attached_marker(self) -> None:
         """published and run differ by construction; anything else means the
@@ -3308,6 +3434,7 @@ class ChannelMarkerTest(unittest.TestCase):
         """The file is optional: the marker exists because the channel published."""
         marker = MODULE.channel_marker("p", "v1.0.0", "npm", {}, "r")
         self.assertEqual(sorted(marker), ["channel", "product", "published", "run", "tag"])
+        self.assertEqual(MODULE.kept_record({}), ({}, []))
 
 
 class RehearseChannelRefusalTest(unittest.TestCase):
@@ -3619,6 +3746,24 @@ class UnitTest(unittest.TestCase):
         self.assertIn(entries.index(version), (0, 1), f"{version} is not the newest entry nor the one after it")
         self.assertEqual(len(entries), len(set(entries)), "duplicate entries")
         self.assertEqual(entries, sorted(entries, key=MODULE.version_tuple, reverse=True), "entries out of order")
+
+    def test_every_changelog_entry_says_its_impact_on_a_product(self) -> None:
+        """One line that answers "must we open a pull request?" in ten seconds.
+
+        Twenty-four versions in three days, and one product opened seven
+        adoption pull requests -- each a CI run and a merge -- for a
+        mechanism it had used twice, because nothing said which ones reached
+        it. Half of them rewrote prose and nothing else. Held from 0.49.0
+        on: the entries before it were written without the rule.
+        """
+        changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+        entries = re.findall(r"^## ([0-9]+\.[0-9]+\.[0-9]+) [^\n]*\n(.*?)(?=^## |\Z)",
+                             changelog, re.MULTILINE | re.DOTALL)
+        held = [(version, body) for version, body in entries
+                if MODULE.version_tuple(version) >= (0, 49, 0)]
+        self.assertTrue(held, "no entry is under the rule yet")
+        for version, body in held:
+            self.assertIn("- **Impact.**", body, f"{version} does not say its impact on a product")
 
     def test_linux_baseline_is_ubuntu_26(self) -> None:
         self.assertEqual(MODULE.DEFAULT_IMAGE, "ubuntu:26.04")
