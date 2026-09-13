@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.45.0 — 2026-09-12
+## 0.45.0 — 2026-09-13
 
 - **A product says where its build reads its pinned dependencies, and the
   socle gives the path instead of the build assuming a sibling.**
