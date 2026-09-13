@@ -58,6 +58,11 @@ SOCLE_CHANNEL_KINDS = ("github-packages",)
 # What a product asks of its release environment. The socle verifies the
 # answer a repository gave; it does not give it in the repository's place.
 SOCLE_GATES = ("reviewer", "none")
+# What release.yml asks of the commit a tag names, beyond the tag's own
+# signature. The workflow has offered these since 0.21.0 and nothing rendered
+# the input, so `none` was the only value a product could reach while the
+# conventions described it as the one every product had chosen.
+SOCLE_COMMIT_VERIFICATIONS = ("signed", "signed-on-default-branch")
 # Where the fleet keeps its fuzz harnesses, preferred first. Five
 # repositories use tests/fuzz, four use fuzz; the socle reads either and
 # says which it found rather than refusing the second.
@@ -245,6 +250,9 @@ class Declarations:
         self.channels: list[tuple[str, str]] = []
         # The glob of the SBOM a build leaves in dist/, empty when none.
         self.sbom_pattern = ""
+        # "signed", "signed-on-default-branch", or "" for the workflow's
+        # default of none.
+        self.commit_verification = ""
         # Whether the build takes its dependencies from
         # MAELYS_DEPENDENCIES_DIR instead of assuming a sibling.
         self.dependencies_apart = False
@@ -349,14 +357,16 @@ def parse_pin(name: str, text: str) -> tuple[dict, list[str]]:
 
 
 def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[tuple[str, str]], str, str, str]:
-    """The declaration file: [targets], [manifest], [sbom], [runners], [dependencies], [channels], [gate] and [cut].
+    """The declaration file: [targets], [manifest], [sbom], [runners], [dependencies], [commit], [channels], [gate] and [cut].
 
     A target line naming no label keeps the runner release.yml holds for that
     target, which only exists for the three the socle builds; one label is a
     runner label, several are a label set. The [targets] section replaces the
     matrix rather than adding to it, so a product that adds one target names
     the others it keeps. [manifest] adds to the socle's archive kinds.
-    [dependencies] holds the single word 'apart': the build reads
+    [commit] holds what the release asks of the commit the tag names, beyond
+    the tag's own signature: 'signed', or 'signed-on-default-branch' which
+    also requires it to be an ancestor of the default branch. [dependencies] holds the single word 'apart': the build reads
     MAELYS_DEPENDENCIES_DIR and the socle materialises the pins there rather
     than beside the product. [runners] holds one 'macos LABEL...' line, the runner the socle's own
     macOS jobs use on a private repository. [sbom] holds one glob, the document a build leaves in dist/ beside the
@@ -373,6 +383,7 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
     sbom = ""
     macos_runner: list[str] = []
     apart = False
+    commit_verification = ""
     gate = ""
     after_version = ""
     unknown: list[str] = []
@@ -383,7 +394,7 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
             continue
         if line.startswith("["):
             if line in ("[targets]", "[manifest]", "[sbom]", "[runners]", "[dependencies]",
-                        "[channels]", "[gate]", "[cut]"):
+                        "[commit]", "[channels]", "[gate]", "[cut]"):
                 section = line[1:-1]
                 continue
             # A section this socle does not know is named and skipped, never
@@ -398,7 +409,8 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
             continue
         if not section:
             raise ValueError(f"line outside a [targets], [manifest], [sbom], [runners],"
-                             f" [dependencies], [channels], [gate] or [cut] section at line {number}")
+                             f" [dependencies], [commit], [channels], [gate] or [cut] section"
+                             f" at line {number}")
         if section == "cut":
             key, _, command = line.partition(" ")
             if key != "after-version":
@@ -415,6 +427,14 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
             if line not in SOCLE_GATES:
                 raise ValueError(f"[gate] is {' or '.join(SOCLE_GATES)}, not {line}, at line {number}")
             gate = line
+            continue
+        if section == "commit":
+            if commit_verification:
+                raise ValueError(f"[commit] holds one line, and line {number} is a second")
+            if line not in SOCLE_COMMIT_VERIFICATIONS:
+                raise ValueError(f"[commit] is {' or '.join(SOCLE_COMMIT_VERIFICATIONS)},"
+                                 f" not {line}, at line {number}")
+            commit_verification = line
             continue
         if section == "dependencies":
             # One word, not a variable per dependency. Every Makefile of the
@@ -491,9 +511,11 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
         runner: object = "" if not labels else (labels[0] if len(labels) == 1 else labels)
         targets.append((name, runner))
     if section and not unknown and not targets and not manifest and not channels \
-            and not gate and not after_version and not sbom and not macos_runner and not apart:
+            and not gate and not after_version and not sbom and not macos_runner and not apart \
+            and not commit_verification:
         raise ValueError(f"{DECLARATION_FILE} declares no target, archive kind, channel, gate or cut command")
-    return targets, manifest, channels, sbom, macos_runner, apart, gate, after_version, unknown
+    return (targets, manifest, channels, sbom, macos_runner, apart, commit_verification,
+            gate, after_version, unknown)
 
 
 def read_fuzz(decl: Declarations) -> None:
@@ -592,6 +614,15 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
     renderer = project / "scripts" / "render-homebrew-formula.sh"
     if renderer.is_file() and os.access(renderer, os.X_OK):
         decl.render_command = "sh scripts/render-homebrew-formula.sh TAG OUTPUT"
+        # The tap's render job runs on macOS and the release was built on
+        # Linux. The socle's own path downloads the tag's source archive and
+        # hashes what a user downloads; a command that rebuilds it locally
+        # hashes what that runner produced, and `git archive | gzip` is not
+        # byte for byte the same across platforms. A product paid this by
+        # hand on a published formula.
+        decl.add("note", "scripts/render-homebrew-formula.sh renders on macOS while the release was built"
+                 " on Linux: hash the published archive and never a local rebuild, or the formula names a"
+                 " digest no downloader reproduces", "release")
         decl.add("ok", "scripts/render-homebrew-formula.sh renders the formula")
     # Dependencies: one dependencies/NAME.pin per Maelys repository, nearest
     # tag on line 1 for humans and the pinned commit on line 2. The managed
@@ -666,8 +697,8 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
     if release.is_file():
         try:
             decl.targets, decl.manifest_patterns, decl.channels, decl.sbom_pattern, \
-                decl.macos_runner, decl.dependencies_apart, decl.gate, decl.after_version, unknown = \
-                parse_release(release.read_text(encoding="utf-8"))
+                decl.macos_runner, decl.dependencies_apart, decl.commit_verification, decl.gate, \
+                decl.after_version, unknown = parse_release(release.read_text(encoding="utf-8"))
             for section in unknown:
                 decl.add("missing", f"{release.name}: section {section} is not one this socle knows"
                                     " ([targets], [manifest], [channels], [gate], [cut]); what it declares"
@@ -693,6 +724,9 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
             if decl.sbom_pattern:
                 decl.add("ok", f"{release.name} sbom: {decl.sbom_pattern},"
                                " attested against the files it names")
+            if decl.commit_verification:
+                decl.add("ok", f"{release.name} [commit] {decl.commit_verification}: the release asks"
+                         " that of the commit the tag names, beyond the tag's own signature")
             if decl.dependencies_apart:
                 decl.add("ok", f"{release.name} [dependencies] apart: the build reads"
                          f" ${DEPENDENCIES_VARIABLE}, and the socle materialises the pins there")
@@ -1070,6 +1104,8 @@ def release_workflow(decl: Declarations, sha: str, tag: str, version: str) -> st
                      + " ".join(decl.manifest_patterns) + "'")
     if decl.sbom_pattern:
         lines.append(f"      sbom_pattern: '{decl.sbom_pattern}'")
+    if decl.commit_verification:
+        lines.append(f"      commit_verification: {decl.commit_verification}")
     for name, _kind in decl.channels:
         lines.extend([
             "",
@@ -2202,7 +2238,8 @@ def handle_declarations(invocation: Invocation) -> tuple[dict, int]:
                          "manifestPatterns": list(decl.manifest_patterns),
                          "sbomPattern": decl.sbom_pattern,
                          "macosRunner": list(decl.macos_runner),
-                         "dependenciesApart": decl.dependencies_apart},
+                         "dependenciesApart": decl.dependencies_apart,
+                         "commitVerification": decl.commit_verification},
             "pinned": pinned_socle(project),
             "managedBy": stamp.group(1) if stamp else "",
             "runners": read_runners(project),

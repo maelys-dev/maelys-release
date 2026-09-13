@@ -44,6 +44,14 @@ on:
           substituted; empty runs none. The release builds what the tag
           names, so a product that wants its tests replayed on that exact
           commit asks here.
+
+          **`cut` runs it too, on the default branch, before it writes
+          VERSION** -- the same command, at the moment nothing has been
+          written and no branch exists, so a failure costs nothing. The tag
+          of that release does not exist yet: a script that reads
+          GITHUB_REF_NAME, or asks git for the tag pointing at HEAD, sees a
+          previous release there and fails at the first cut. Write it to
+          verify the working tree it is given.
         required: false
         type: string
         default: ""

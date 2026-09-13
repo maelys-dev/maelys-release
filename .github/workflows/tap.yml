@@ -28,7 +28,18 @@ on:
         type: string
         default: ""
       render_command:
-        description: Command rendering the formula; TAG and OUTPUT are substituted
+        description: >-
+          Command rendering the formula; TAG and OUTPUT are substituted.
+
+          **It runs on macOS, and the release it describes was built on
+          Linux.** The default path does not care: it downloads the tag's own
+          source archive from GitHub and hashes what a user will download. A
+          command that rebuilds the archive locally instead hashes what this
+          runner produced, and a `git archive | gzip` is not byte for byte
+          the same across platforms and gzip versions -- so the formula names
+          a digest no downloader can reproduce, and every `brew install`
+          fails on a checksum. Hash the published archive, never a local
+          rebuild.
         required: false
         type: string
         default: ""
@@ -231,6 +242,7 @@ jobs:
           TAP_TOKEN: ${{ secrets.tap_token }}
           TAP_SIGNING_KEY: ${{ secrets.tap_signing_key }}
           ACTOR: ${{ github.actor }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           # Push HEAD of the clone DIR to BRANCH of the tap. A rejected push
@@ -275,8 +287,36 @@ jobs:
             exit 0
           fi
           if [ "$HAS_TAP_TOKEN" != "true" ]; then
-            echo "::notice::no tap credentials configured; the rendered formula is kept as an artifact"
+            # A warning and not a notice: a notice does not reach the run's
+            # summary, and the job is green either way. The release page is
+            # where a reader looks, and it said nothing -- the only trace was
+            # an environment variable in a log. A product read two green
+            # publish jobs of its own release, pushed nothing, and paid a
+            # full replay on four macOS runners to find out; the cause was an
+            # organisation secret scoped to selected repositories whose list
+            # still named its archived repository.
+            echo "::warning::no tap credentials: the formula was rendered and linted but NOT pushed to $TAP_REPOSITORY. The rendered formula is kept as an artifact"
             git -C "$tmp/tap" diff --cached --stat
+            # The warning above is the record that always exists. The line on
+            # the release is the one a reader will actually meet, so it is
+            # attempted and never required: outside Actions there is no
+            # release to edit, and a run that cannot reach the API must not
+            # fail a job whose work succeeded.
+            repository="${GITHUB_REPOSITORY:-}"
+            tag="${INPUT_TAG:-${GITHUB_REF_NAME:-}}"
+            if [ -n "$repository" ] && [ -n "$tag" ]; then
+              line="Tap \`$TAP_REPOSITORY\`: not updated for \`$PRODUCT\` (no credentials; run https://github.com/$repository/actions/runs/${GITHUB_RUN_ID:-0})."
+              body="$(gh release view "$tag" --repo "$repository" --json body --jq .body 2>/dev/null || true)"
+              case "$body" in
+                *"Tap \`$TAP_REPOSITORY\`: not updated for \`$PRODUCT\`"*)
+                  echo "::notice::the release of $tag already says the tap was not updated" ;;
+                *)
+                  printf '%s\n\n---\n\n%s\n' "$body" "$line" >"${RUNNER_TEMP:-/tmp}/tap-body.md"
+                  gh release edit "$tag" --repo "$repository" \
+                    --notes-file "${RUNNER_TEMP:-/tmp}/tap-body.md" \
+                    || echo "::warning::the release notes could not be updated; the warning above is the record" ;;
+              esac
+            fi
             exit 0
           fi
           # Identity and signing live in the clone's configuration, so the

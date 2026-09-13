@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.46.0 — 2026-09-13
+
+- **A tap that pushes nothing no longer looks like one that did.** Without
+  credentials the publish job renders, lints and reports — which the
+  conventions have always said — but it reported with a `::notice::`, which
+  does not reach a run's summary, and the release page said nothing at all.
+  A product read two green publish jobs of its own release, pushed nothing,
+  and paid a full replay on four macOS runners to find out; the cause was an
+  organisation secret scoped to selected repositories whose list still named
+  its archived repository. The job now warns, and writes on the release that
+  the tap was not updated, with the same rule against saying it twice as a
+  channel that does not publish. 0.42.0 built that mechanism for channels and
+  did not apply it here.
+- **`[commit]` makes `commit_verification` reachable.** The workflow had
+  offered the input since 0.21.0, `release_workflow()` never rendered it, and
+  no section declared it: `none` was the only value a product could reach
+  while `docs/conventions.md` described it as "what every product has today"
+  — true, and reading as a choice. The section takes `signed` or
+  `signed-on-default-branch`; absent, the release asks neither, so nothing
+  changes for a product that says nothing.
+- **`verify_command` says that `cut` replays it, on the default branch,
+  where the tag of that release does not exist yet.** The rule was written at
+  `cut`'s description and read at `verify_command`'s, four hundred lines
+  away, which said only that the workflow runs it before packaging. A script
+  that asks git for the tag pointing at HEAD finds a previous release and
+  fails at the first cut.
+- **A custom `render_command` is told it runs on macOS after a Linux build.**
+  The socle's own path downloads the tag's archive and hashes what a user
+  downloads; one that rebuilds it locally hashes what that runner produced,
+  and `git archive | gzip` is not byte for byte the same across platforms, so
+  the formula names a digest no downloader reproduces. Said beside the input
+  and by `check` to any product that declares one.
+- All four reported by maelys-http, from two releases that cost them a replay
+  each. Three were the same defect in different clothes: the socle knew
+  something and put it where nobody was looking.
+
 ## 0.45.0 — 2026-09-13
 
 - **A product says where its build reads its pinned dependencies, and the

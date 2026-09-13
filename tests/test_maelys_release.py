@@ -817,11 +817,11 @@ class ProductNeedsTest(unittest.TestCase):
         # Effective and declared are not the same answer: folding them makes a
         # fleet read "everyone targets these three" where nobody declared one.
         self.assertEqual(data["targets"], ["linux-x86_64", "linux-arm64", "macos-arm64"])
-        self.assertEqual(data["declared"], {"targets": [], "manifestPatterns": [], "sbomPattern": "", "macosRunner": [], "dependenciesApart": True})
+        self.assertEqual(data["declared"], {"targets": [], "manifestPatterns": [], "sbomPattern": "", "macosRunner": [], "dependenciesApart": True, "commitVerification": ""})
         self.product.write("maelys-release.conf", "[targets]\nlinux-arm64\n\n[manifest]\n*.wasm\n" + APART)
         data = self.product.json("declarations", self.dir)["data"]
         self.assertEqual(data["declared"], {"targets": ["linux-arm64"],
-                                            "manifestPatterns": ["*.wasm"], "sbomPattern": "", "macosRunner": [], "dependenciesApart": True})
+                                            "manifestPatterns": ["*.wasm"], "sbomPattern": "", "macosRunner": [], "dependenciesApart": True, "commitVerification": ""})
         self.assertEqual(data["manifestPatterns"], "*.tar.gz *.deb *.rpm *.wasm")
 
     def test_the_contract_carries_the_pin_its_file_and_the_stamp(self) -> None:
@@ -2379,6 +2379,71 @@ class RehearsalEnvironmentTest(unittest.TestCase):
         self.assertIn("already says", channel)
 
 
+class SaidWhereItIsReadTest(unittest.TestCase):
+    """Four things the socle knew and did not say where anyone looks."""
+
+    def setUp(self) -> None:
+        self.product = Product()
+        self.dir = str(self.product.dir)
+        self.addCleanup(self.product.close)
+        self.product.run("adopt", self.dir, "--apply")
+
+    def test_the_tap_says_on_the_release_that_it_pushed_nothing(self) -> None:
+        """Two green publish jobs, nothing pushed, and the only trace an
+        environment variable in a log. It cost a product a full replay on
+        four macOS runners."""
+        tap = (ROOT / ".github" / "workflows" / "tap.yml").read_text(encoding="utf-8")
+        self.assertIn("::warning::no tap credentials", tap)
+        self.assertIn("NOT pushed", tap)
+        self.assertIn("gh release edit", tap)
+        self.assertIn("already says the tap was not updated", tap, "a replay must not say it twice")
+        # Attempted, never required: outside Actions there is no release.
+        self.assertIn('repository="${GITHUB_REPOSITORY:-}"', tap)
+
+    def test_verify_command_says_that_cut_replays_it_on_the_branch(self) -> None:
+        """A script that asks git for the tag at HEAD sees a previous release
+        and fails at the first cut. The rule was written 440 lines away, at
+        cut's description."""
+        release = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+        head = release.split("verify_command:", 1)[1].split("required:", 1)[0]
+        self.assertIn("cut", head)
+        self.assertIn("default branch", head)
+        self.assertIn("does not exist yet", head)
+
+    def test_commit_verification_is_reachable_by_a_product(self) -> None:
+        """It was offered by the workflow, described by the conventions as
+        what every product had chosen, and rendered by nothing: `none` was
+        the only value anyone could reach."""
+        self.product.write("maelys-release.conf",
+                           "[dependencies]\napart\n\n[commit]\nsigned-on-default-branch\n")
+        self.product.run("adopt", self.dir, "--apply")
+        self.assertIn("      commit_verification: signed-on-default-branch",
+                      self.product.read(".github/workflows/release.yml"))
+        data = self.product.json("declarations", self.dir)["data"]
+        self.assertEqual(data["declared"]["commitVerification"], "signed-on-default-branch")
+
+    def test_the_commit_section_takes_what_the_workflow_accepts(self) -> None:
+        for text, expected in (("[commit]\nnone\n", "signed or signed-on-default-branch"),
+                               ("[commit]\nsigned\nsigned\n", "holds one line")):
+            with self.assertRaises(ValueError) as refusal:
+                MODULE.parse_release(text)
+            self.assertIn(expected, str(refusal.exception))
+
+    def test_a_custom_render_is_told_it_runs_on_another_platform(self) -> None:
+        """The tap renders on macOS and the release was built on Linux: a
+        command that rebuilds the archive hashes what that runner produced,
+        and `git archive | gzip` is not byte for byte the same across
+        platforms. A product paid it by hand on a published formula."""
+        self.product.write("scripts/render-homebrew-formula.sh", "#!/bin/sh\nexit 0\n", executable=True)
+        # Declaring it changes what adopt renders, so re-adopt before reading.
+        self.product.run("adopt", self.dir, "--apply")
+        checks = self.product.json("check", self.dir)["data"]["checks"]
+        self.assertTrue(any(check["status"] == "note" and "renders on macOS" in check["message"]
+                            for check in checks), checks)
+        tap = (ROOT / ".github" / "workflows" / "tap.yml").read_text(encoding="utf-8")
+        self.assertIn("Hash the published archive", tap)
+
+
 class DependenciesApartTest(unittest.TestCase):
     """Pins without a declaration of where the build reads them.
 
@@ -2860,7 +2925,7 @@ class RunnerDeclarationTest(unittest.TestCase):
         return MODULE.parse_release(textwrap.dedent(text))
 
     def test_labels_are_read(self) -> None:
-        *_, runner, _, _, _, unknown = self.parse("[runners]\nmacos self-hosted macOS ARM64\n")
+        *_, runner, _, _, _, _, unknown = self.parse("[runners]\nmacos self-hosted macOS ARM64\n")
         self.assertEqual(runner, ["self-hosted", "macOS", "ARM64"])
         self.assertEqual(unknown, [])
 
@@ -2918,7 +2983,7 @@ class SbomDeclarationTest(unittest.TestCase):
         return MODULE.parse_release(textwrap.dedent(text))
 
     def test_one_glob_is_read(self) -> None:
-        _, _, _, sbom, _, _, _, _, unknown = self.parse("""\
+        _, _, _, sbom, _, _, _, _, _, unknown = self.parse("""\
             [sbom]
             *.spdx.json
             """)
@@ -2932,7 +2997,7 @@ class SbomDeclarationTest(unittest.TestCase):
         self.assertIn("holds one glob", str(refusal.exception))
 
     def test_the_section_is_optional(self) -> None:
-        _, _, _, sbom, _, _, _, _, _ = self.parse("[manifest]\n*.wasm\n")
+        _, _, _, sbom, _, _, _, _, _, _ = self.parse("[manifest]\n*.wasm\n")
         self.assertEqual(sbom, "")
 
     def test_it_renders_into_the_workflow(self) -> None:
@@ -3149,23 +3214,23 @@ class UnitTest(unittest.TestCase):
 
     def test_parse_release(self) -> None:
         self.assertEqual(MODULE.parse_release("[targets]\nlinux-arm64\nwasm32 ubuntu-26.04\n"),
-                         ([("linux-arm64", ""), ("wasm32", "ubuntu-26.04")], [], [], "", [], False, "", "", []))
+                         ([("linux-arm64", ""), ("wasm32", "ubuntu-26.04")], [], [], "", [], False, "", "", "", []))
         self.assertEqual(MODULE.parse_release("[targets]\nmacos-arm64 self-hosted ARM64\n"),
-                         ([("macos-arm64", ["self-hosted", "ARM64"])], [], [], "", [], False, "", "", []))
-        self.assertEqual(MODULE.parse_release("[manifest]\n*.wasm\n"), ([], ["*.wasm"], [], "", [], False, "", "", []))
+                         ([("macos-arm64", ["self-hosted", "ARM64"])], [], [], "", [], False, "", "", "", []))
+        self.assertEqual(MODULE.parse_release("[manifest]\n*.wasm\n"), ([], ["*.wasm"], [], "", [], False, "", "", "", []))
         self.assertEqual(MODULE.parse_release("[channels]\nnpm github-packages\n"),
-                         ([], [], [("npm", "github-packages")], "", [], False, "", "", []))
-        self.assertEqual(MODULE.parse_release("[gate]\nnone\n"), ([], [], [], "", [], False, "none", "", []))
-        self.assertEqual(MODULE.parse_release("[gate]\nreviewer\n"), ([], [], [], "", [], False, "reviewer", "", []))
-        self.assertEqual(MODULE.parse_release("# nothing declared\n"), ([], [], [], "", [], False, "", "", []))
+                         ([], [], [("npm", "github-packages")], "", [], False, "", "", "", []))
+        self.assertEqual(MODULE.parse_release("[gate]\nnone\n"), ([], [], [], "", [], False, "", "none", "", []))
+        self.assertEqual(MODULE.parse_release("[gate]\nreviewer\n"), ([], [], [], "", [], False, "", "reviewer", "", []))
+        self.assertEqual(MODULE.parse_release("# nothing declared\n"), ([], [], [], "", [], False, "", "", "", []))
         # A section this socle does not know is named and skipped, never fatal:
         # a product pins the socle by commit, and losing its targets in
         # silence on an older socle is worse than an unapplied section.
         self.assertEqual(MODULE.parse_release("[targets]\nlinux-arm64\n[bsd]\nx\n"),
-                         ([("linux-arm64", "")], [], [], "", [], False, "", "", ["[bsd] at line 3"]))
+                         ([("linux-arm64", "")], [], [], "", [], False, "", "", "", ["[bsd] at line 3"]))
         # A version materialised twice: the command that regenerates the second.
         self.assertEqual(MODULE.parse_release("[cut]\nafter-version bash scripts/header.sh\n"),
-                         ([], [], [], "", [], False, "", "bash scripts/header.sh", []))
+                         ([], [], [], "", [], False, "", "", "bash scripts/header.sh", []))
         for text in ("linux-arm64\n",                      # outside a section
                      "[targets]\nwasm32\n",                # no runner and no default
                      "[targets]\nWASM\n",                  # not a target name
