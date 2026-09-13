@@ -103,12 +103,14 @@ CONVENTION_SEEDED = ("RELEASING.md", "LICENSING.md", "SECURITY.md")
 RELEASE_MANAGED = (
     ".github/workflows/release.yml",
     "scripts/checkout-dependency.sh",
+    "scripts/checkout-dependencies.sh",
     ".claude/skills/maelys-release/SKILL.md",
     ".github/workflows/ci.yml",
 )
 MANAGED = (
     ".github/workflows/release.yml",
     "scripts/checkout-dependency.sh",
+    "scripts/checkout-dependencies.sh",
     CLI_REFERENCE,
     CLI_CONTRACT,
     "AGENTS.md",
@@ -243,6 +245,9 @@ class Declarations:
         self.channels: list[tuple[str, str]] = []
         # The glob of the SBOM a build leaves in dist/, empty when none.
         self.sbom_pattern = ""
+        # Whether the build takes its dependencies from
+        # MAELYS_DEPENDENCIES_DIR instead of assuming a sibling.
+        self.dependencies_apart = False
         # Labels of the macOS runner for the socle's own jobs, empty for
         # the hosted default. Honoured on a private repository only.
         self.macos_runner: list[str] = []
@@ -344,14 +349,16 @@ def parse_pin(name: str, text: str) -> tuple[dict, list[str]]:
 
 
 def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[tuple[str, str]], str, str, str]:
-    """The declaration file: [targets], [manifest], [sbom], [runners], [channels], [gate] and [cut].
+    """The declaration file: [targets], [manifest], [sbom], [runners], [dependencies], [channels], [gate] and [cut].
 
     A target line naming no label keeps the runner release.yml holds for that
     target, which only exists for the three the socle builds; one label is a
     runner label, several are a label set. The [targets] section replaces the
     matrix rather than adding to it, so a product that adds one target names
     the others it keeps. [manifest] adds to the socle's archive kinds.
-    [runners] holds one 'macos LABEL...' line, the runner the socle's own
+    [dependencies] holds the single word 'apart': the build reads
+    MAELYS_DEPENDENCIES_DIR and the socle materialises the pins there rather
+    than beside the product. [runners] holds one 'macos LABEL...' line, the runner the socle's own
     macOS jobs use on a private repository. [sbom] holds one glob, the document a build leaves in dist/ beside the
     packages it describes; the release then attests that document against
     the files the document itself names. [channels] names one 'CHANNEL REGISTRY' per line, each rendered into a
@@ -365,6 +372,7 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
     channels: list[tuple[str, str]] = []
     sbom = ""
     macos_runner: list[str] = []
+    apart = False
     gate = ""
     after_version = ""
     unknown: list[str] = []
@@ -374,7 +382,8 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
         if not line or line.startswith("#"):
             continue
         if line.startswith("["):
-            if line in ("[targets]", "[manifest]", "[sbom]", "[runners]", "[channels]", "[gate]", "[cut]"):
+            if line in ("[targets]", "[manifest]", "[sbom]", "[runners]", "[dependencies]",
+                        "[channels]", "[gate]", "[cut]"):
                 section = line[1:-1]
                 continue
             # A section this socle does not know is named and skipped, never
@@ -389,7 +398,7 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
             continue
         if not section:
             raise ValueError(f"line outside a [targets], [manifest], [sbom], [runners],"
-                             f" [channels], [gate] or [cut] section at line {number}")
+                             f" [dependencies], [channels], [gate] or [cut] section at line {number}")
         if section == "cut":
             key, _, command = line.partition(" ")
             if key != "after-version":
@@ -406,6 +415,18 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
             if line not in SOCLE_GATES:
                 raise ValueError(f"[gate] is {' or '.join(SOCLE_GATES)}, not {line}, at line {number}")
             gate = line
+            continue
+        if section == "dependencies":
+            # One word, not a variable per dependency. Every Makefile of the
+            # fleet reads <root>/<name> and nothing else, and the names it
+            # uses for the roots differ -- SYSTEM_DIR here, MAELYS_SPEC_DIR
+            # there -- so a declaration naming them would be a second list
+            # to keep true, with nothing the root does not already give.
+            if line != "apart":
+                raise ValueError(f"[dependencies] holds the single word apart, not {line}, at line {number}")
+            if apart:
+                raise ValueError(f"[dependencies] holds one line, and line {number} is a second")
+            apart = True
             continue
         if section == "runners":
             key, *labels = line.split()
@@ -470,9 +491,9 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
         runner: object = "" if not labels else (labels[0] if len(labels) == 1 else labels)
         targets.append((name, runner))
     if section and not unknown and not targets and not manifest and not channels \
-            and not gate and not after_version and not sbom and not macos_runner:
+            and not gate and not after_version and not sbom and not macos_runner and not apart:
         raise ValueError(f"{DECLARATION_FILE} declares no target, archive kind, channel, gate or cut command")
-    return targets, manifest, channels, sbom, macos_runner, gate, after_version, unknown
+    return targets, manifest, channels, sbom, macos_runner, apart, gate, after_version, unknown
 
 
 def read_fuzz(decl: Declarations) -> None:
@@ -594,18 +615,21 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
                  " and adapter/PACKAGES dependencies/packages, then delete adapter/ and the Makefile lines that read it")
     if decl.dependencies:
         decl.add("ok", "pinned dependencies: " + " ".join(decl.dependencies), "conventions")
+
     for name, repository in sorted(decl.foreign.items()):
         decl.add("ok", f"dependencies/{name}.pin is cloned from {repository}, not maelys-dev", "conventions")
     for name, mode in sorted(decl.submodules.items()):
         decl.add("ok", f"dependencies/{name}.pin initialises its submodules"
                  + (" recursively" if mode else "") + ", from the URLs its .gitmodules names", "conventions")
     scripts = project / "scripts"
+    managed_names = {name.split("/")[-1] for name in CHECKOUT_SCRIPTS}
     stray = sorted(path.name for path in scripts.glob("checkout-*.sh")
-                   if path.name != "checkout-dependency.sh") if scripts.is_dir() else []
+                   if path.name not in managed_names) if scripts.is_dir() else []
     if stray:
         decl.add("refused", "scripts/" + " scripts/".join(stray)
                  + ": dependencies are cloned from dependencies/*.pin by the managed"
-                 " scripts/checkout-dependency.sh NAME; delete these")
+                 " scripts/checkout-dependency.sh NAME and"
+                 " scripts/checkout-dependencies.sh DESTINATION; delete these")
     ci = project / ".github" / "workflows" / "ci.yml"
     if ci.is_file():
         if CI_USES.search(ci.read_text(encoding="utf-8")):
@@ -642,7 +666,7 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
     if release.is_file():
         try:
             decl.targets, decl.manifest_patterns, decl.channels, decl.sbom_pattern, \
-                decl.macos_runner, decl.gate, decl.after_version, unknown = \
+                decl.macos_runner, decl.dependencies_apart, decl.gate, decl.after_version, unknown = \
                 parse_release(release.read_text(encoding="utf-8"))
             for section in unknown:
                 decl.add("missing", f"{release.name}: section {section} is not one this socle knows"
@@ -669,6 +693,41 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
             if decl.sbom_pattern:
                 decl.add("ok", f"{release.name} sbom: {decl.sbom_pattern},"
                                " attested against the files it names")
+            if decl.dependencies_apart:
+                decl.add("ok", f"{release.name} [dependencies] apart: the build reads"
+                         f" ${DEPENDENCIES_VARIABLE}, and the socle materialises the pins there")
+                # What the trial of 0.45.0 found, reported before a push
+                # instead of by six red jobs after it: the socle exports the
+                # root in the job it runs, and a job of the product clones
+                # on its own runner where that path names nothing.
+                #
+                # A note, and the status matters here. `check` collects
+                # everything that is not ok or note into its violations, so
+                # a warning makes it exit 2 while adopt still proceeds --
+                # the worst pairing, a product adopting and going red. And a
+                # second red would say nothing new: a job that clones beside
+                # itself already fails on the build's own message. Naming
+                # the line is the whole value.
+                ci_file = project / ".github" / "workflows" / "ci.yml"
+                for number, line in enumerate(ci_file.read_text(encoding="utf-8").splitlines(), 1) \
+                        if ci_file.is_file() else []:
+                    if BESIDE_CALL.search(line):
+                        decl.add("note", f".github/workflows/ci.yml line {number} clones beside the product,"
+                                 " which the build no longer reads: one line gives it the root instead,"
+                                 " 'sh scripts/checkout-dependencies.sh \"$RUNNER_TEMP/dependencies\""
+                                 " >>\"$GITHUB_ENV\"'", "conventions")
+            elif decl.dependencies:
+                # Read after the declaration file and not with the pins: the
+                # pins are read first, so a rule placed there sees a
+                # declaration that has not been parsed yet. That is the
+                # second time in a day; the fix is the placement, and the
+                # test below is what makes it stay fixed.
+                decl.add("missing", f"dependencies/ pins {' '.join(decl.dependencies)} and"
+                         f" {release.name} does not declare '[dependencies] apart': the build still"
+                         f" assumes a sibling, which is also where the working copies of whoever"
+                         f" develops those dependencies live. Read ${DEPENDENCIES_VARIABLE} for the"
+                         f" root -- '{PROGRAM} dependencies DIR --apply' writes the checkouts and"
+                         " prints the variable -- then declare it", "conventions")
             if decl.macos_runner:
                 decl.add("ok", f"{release.name} [runners] macos: " + " ".join(decl.macos_runner)
                                + " (honoured on a private repository only)")
@@ -981,7 +1040,21 @@ def release_workflow(decl: Declarations, sha: str, tag: str, version: str) -> st
     ]
     if decl.dependencies:
         lines.append("      dependency_checkout: |")
-        lines.extend(f"        sh scripts/checkout-dependency.sh {name}" for name in decl.dependencies)
+        if decl.dependencies_apart:
+            # release.yml never fetches the socle, so this cannot call the
+            # command; it uses the managed script's own DESTINATION, which
+            # is the unit maelys-egress said it had used by hand five times.
+            # The root is exported for the packaging command that follows,
+            # so a release and a `make check` read their dependencies from
+            # the same place -- and ../NAME names nothing here either.
+            # One line, and no list of pins: the script reads them when it
+            # runs, so a new pin is cloned without this file being
+            # regenerated. That is the lesson of 0.6.0, where the job
+            # started reading the product's declarations itself.
+            lines.append('        sh scripts/checkout-dependencies.sh'
+                         ' "$RUNNER_TEMP/dependencies" >>"$GITHUB_ENV"')
+        else:
+            lines.extend(f"        sh scripts/checkout-dependency.sh {name}" for name in decl.dependencies)
     if decl.verify_command:
         lines.append(f"      verify_command: {decl.verify_command}")
     if decl.linux_packages:
@@ -1106,8 +1179,8 @@ def stage(decl: Declarations, sha: str, tag: str) -> dict[str, tuple[str, bool]]
         staged[".claude/skills/maelys-release/SKILL.md"] = (
             render_text(share / "agents" / "claude-skill.md", mapping), False)
         if decl.dependencies:
-            staged["scripts/checkout-dependency.sh"] = (
-                render_text(share / "templates" / "checkout-dependency.sh", mapping), True)
+            for relative in CHECKOUT_SCRIPTS:
+                staged[relative] = (render_text(share / "templates" / relative.split("/")[-1], mapping), True)
     # The managed block states the rules that hold here: the socle's release
     # mechanism for a product it releases, the conventions alone otherwise.
     block_source = "instructions-block.md" if decl.releases_here else "conventions-block.md"
@@ -2128,7 +2201,8 @@ def handle_declarations(invocation: Invocation) -> tuple[dict, int]:
             "declared": {"targets": [name for name, _ in decl.targets],
                          "manifestPatterns": list(decl.manifest_patterns),
                          "sbomPattern": decl.sbom_pattern,
-                         "macosRunner": list(decl.macos_runner)},
+                         "macosRunner": list(decl.macos_runner),
+                         "dependenciesApart": decl.dependencies_apart},
             "pinned": pinned_socle(project),
             "managedBy": stamp.group(1) if stamp else "",
             "runners": read_runners(project),
@@ -3088,7 +3162,15 @@ cp -a /src/. /work/product/
 rm -rf /work/product/dist
 git config --global --add safe.directory "*"
 echo "== Pinned dependency checkouts"
-for name in $DEPENDENCIES; do sh scripts/checkout-dependency.sh "$name"; done
+# Beside the product, or apart and the root given: the third place the socle
+# clones, and the one that decides whether a rehearsal is the same object as
+# the run it rehearses.
+if [ -n "${DEPENDENCIES_APART:-}" ]; then
+    eval "$(sh scripts/checkout-dependencies.sh /work/dependencies)"
+    export MAELYS_DEPENDENCIES_DIR
+else
+    for name in $DEPENDENCIES; do sh scripts/checkout-dependency.sh "$name"; done
+fi
 if [ "$REHEARSE_MODE" = check ]; then
     echo "== Check: $CHECK_COMMAND"
     eval "$CHECK_COMMAND"
@@ -3356,6 +3438,14 @@ PROTECTION_SHAPE = {"enforce_admins": True, "restrictions": None,
 CLONE_FLAGS = ("--filter=blob:none", "--no-checkout")
 
 
+DEPENDENCIES_VARIABLE = "MAELYS_DEPENDENCIES_DIR"
+# The two managed clone scripts: one pin, or every pin into a given root.
+CHECKOUT_SCRIPTS = ("scripts/checkout-dependency.sh", "scripts/checkout-dependencies.sh")
+# A call of the singular with no destination: it clones beside the product,
+# which a build that reads the root no longer looks at.
+BESIDE_CALL = re.compile(r"checkout-dependency\.sh\s+[a-z0-9-]+\s*(&&|$)")
+
+
 def dependencies_home(product: str) -> pathlib.Path:
     """One flat directory per product for its pinned checkouts.
 
@@ -3522,7 +3612,9 @@ def handle_dependencies(invocation: Invocation) -> tuple[dict, int]:
         if entry["name"] not in decl.foreign:
             notes.extend(neighbour_pins(decl, entry["name"], path))
     data = {"mode": "apply" if apply else "plan", "product": product, "project": str(project),
-            "directory": str(directory), "dependencies": entries, "notes": notes, "blocked": bool(blocked)}
+            "directory": str(directory), "variable": DEPENDENCIES_VARIABLE,
+            "declared": decl.dependencies_apart,
+            "dependencies": entries, "notes": notes, "blocked": bool(blocked)}
     return data, EXIT_VIOLATIONS if blocked else EXIT_OK
 
 
@@ -3545,6 +3637,13 @@ def text_dependencies(data: dict) -> str:
     elif data["blocked"]:
         lines.append("dependencies: nothing written; free the blocked paths, or pass --directory")
     elif data["mode"] == "apply":
+        # Printed as an assignment so a shell can take it whole: the path is
+        # given to the build, and giving it by hand is where a typo lives.
+        lines.append(f"export   {data['variable']}={data['directory']}")
+        if not data.get("declared"):
+            lines.append(f"note     {data['product']} does not declare '[dependencies] apart' yet:"
+                         " its build still assumes a sibling, and reading the variable is what"
+                         " lets the declaration be true")
         lines.append(f"dependencies: {count} pinned checkout(s) in {data['directory']}")
     else:
         lines.append(f"dependencies: {count} pinned checkout(s) would be in {data['directory']}; add --apply")
@@ -3681,8 +3780,10 @@ def handle_rehearse(invocation: Invocation) -> tuple[dict, int]:
         raise Failure("NOT_FOUND", "docker is required to rehearse a Linux build.", "Install Docker and retry.")
     decl = read_declarations(project, product, mechanism)
     require_valid(decl, "rehearse")
-    if decl.dependencies and not os.access(project / "scripts" / "checkout-dependency.sh", os.X_OK):
-        raise Failure("PRECONDITION_FAILED", "scripts/checkout-dependency.sh is missing in the product.",
+    needed = CHECKOUT_SCRIPTS if decl.dependencies_apart else CHECKOUT_SCRIPTS[:1]
+    absent = [name for name in needed if not os.access(project / name, os.X_OK)] if decl.dependencies else []
+    if absent:
+        raise Failure("PRECONDITION_FAILED", " and ".join(absent) + " is missing in the product.",
                       f"Run '{PROGRAM} adopt {project} --apply' first.")
     (project / "dist").mkdir(exist_ok=True)
     image = str(invocation.option("--image", os.environ.get("REHEARSE_IMAGE", DEFAULT_IMAGE)))
@@ -3695,6 +3796,7 @@ def handle_rehearse(invocation: Invocation) -> tuple[dict, int]:
                "-e", f"TARGET={target}",
                "-e", f"LINUX_PACKAGES={SOCLE_LINUX_PACKAGES} {decl.linux_packages}".rstrip(),
                "-e", f"DEPENDENCIES={' '.join(decl.dependencies)}",
+               "-e", f"DEPENDENCIES_APART={'1' if decl.dependencies_apart else ''}",
                "-e", f"PACKAGE_COMMAND={package_command}",
                "-e", f"REHEARSE_MODE={mode}", "-e", f"CHECK_COMMAND={check_command}",
                image, "bash", "-c", REHEARSAL]
@@ -4312,12 +4414,13 @@ APP = cli.Program(PROGRAM, PRODUCT, socle_version(), [
                     "Materialise the product's pinned dependencies at their commits in one directory apart"
                     " from any working copy, refreshing what is already there; plan without --apply.",
                     handle_dependencies, operands=[DIR_OPERAND],
-                    options=[cli.option("--directory", "Where the checkouts go;"
+                    options=[SOCLE_OPTIONS[0],
+                             cli.option("--directory", "Where the checkouts go;"
                                         " ~/.cache/maelys-release/dependencies/PRODUCT by default.",
                                         cli.argument("DIR"))],
                     schema={"type": "object", "additionalProperties": False,
-                            "required": ["mode", "product", "project", "directory", "dependencies",
-                                         "notes", "blocked"],
+                            "required": ["mode", "product", "project", "directory", "variable",
+                                         "declared", "dependencies", "notes", "blocked"],
                             "properties": {"mode": {"enum": ["plan", "apply"]}, "product": {"type": "string"},
                                            "project": {"type": "string"}, "directory": {"type": "string"},
                                            "dependencies": {"type": "array", "items": {
@@ -4334,6 +4437,8 @@ APP = cli.Program(PROGRAM, PRODUCT, socle_version(), [
                                                               "submodules": {"enum": ["", "recursive"]},
                                                               "previous": {"type": "string"},
                                                               "reason": {"type": "string"}}}},
+                                           "variable": {"type": "string"},
+                                           "declared": {"type": "boolean"},
                                            "notes": STRINGS, "blocked": {"type": "boolean"}}}),
     cli.execute("protect", "protect",
                 "Report what the default branch should require, derived from the workflows and the runs it"
