@@ -300,3 +300,56 @@ class SbomSubjectTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MarkerOnAReplayTest(unittest.TestCase):
+    """A marker is written once, and a replay of the build does not move it.
+
+    `publish` redrafts the release and deletes every asset of a former
+    attempt before uploading again; the channel markers were among them, so
+    `record` of channel.yml wrote a second one carrying the date and the run
+    of the replay -- for a publication that had happened hours earlier and
+    that the replay did not repeat, since `publish_command` exits 0 without
+    republishing. `docs/conventions.md` promises a marker written once and
+    never rewritten. Found by Fable, reading for a defect that had been
+    reported as something else: a red `record` on a name already taken,
+    which cannot happen precisely because the deletion came first.
+    """
+
+    RELEASE = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+    CHANNEL = (ROOT / ".github" / "workflows" / "channel.yml").read_text(encoding="utf-8")
+
+    def test_the_release_spares_the_channel_markers_when_it_empties(self) -> None:
+        self.assertIn('select(.name | startswith("channel-") and endswith(".json") | not)', self.RELEASE)
+
+    @unittest.skipUnless(shutil.which("jq"), "jq is not installed")
+    def test_what_that_filter_keeps_and_what_it_deletes(self) -> None:
+        """A name that merely begins with the word is not a marker."""
+        assets = [{"name": "channel-npm.json", "id": 1}, {"name": "p-1.0.0.tar.gz", "id": 2},
+                  {"name": "SHA256SUMS", "id": 3}, {"name": "channelling.json", "id": 4},
+                  {"name": "channel-github-packages.json", "id": 5}]
+        expression = '.[] | select(.name | startswith("channel-") and endswith(".json") | not) | .id'
+        self.assertIn(expression, self.RELEASE, "the filter under test is not the one the workflow runs")
+        done = subprocess.run(["jq", "-r", expression], input=json.dumps(assets),
+                              capture_output=True, text=True, check=True)
+        self.assertEqual(done.stdout.split(), ["2", "3", "4"])
+
+    def test_record_leaves_a_marker_that_is_already_there(self) -> None:
+        """And never --clobber, which would overwrite the date in silence."""
+        record = self.CHANNEL.split("  record:", 1)[1].split("\n  said:", 1)[0]
+        self.assertIn('--jq \'.assets[].name\' | grep -qx "channel-$CHANNEL.json"', record)
+        self.assertIn("leaves it as it stands", record)
+        upload = [line for line in record.splitlines() if "gh release upload" in line]
+        self.assertEqual(len(upload), 1, record)
+        self.assertNotIn("--clobber", upload[0])
+
+    def test_said_covers_a_marker_that_failed_to_attach(self) -> None:
+        """A publication with no marker leaves the same silence on the page
+        as one that did not happen, and the reader cannot tell them apart
+        from there -- but the release must not say the wrong one of the two."""
+        said = self.CHANNEL.split("  said:", 1)[1]
+        self.assertIn("needs: [publish, record]", said)
+        self.assertIn("needs.record.result != 'success'", said)
+        self.assertIn('said="published, and the release carries no marker for it"', said)
+        self.assertIn('said="not published"', said)
+
