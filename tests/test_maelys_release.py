@@ -2470,8 +2470,18 @@ class DependenciesApartTest(unittest.TestCase):
         self.assertIn("maelys-system", completed.stderr, "the clones are reported, on stderr")
 
     def test_the_destination_is_given_and_never_chosen(self) -> None:
-        """A script that picked one would be the ambient default, one level down."""
-        self.assertIn("DESTINATION", self.script(expect=1).stderr)
+        """A script that picked one would be the ambient default, one level down.
+
+        The status is only required to be a failure: ${1:?…} exits 1 under
+        the sh of macOS and 2 under dash, and a test that named one of them
+        was green on a laptop and red on Linux.
+        """
+        completed = subprocess.run(["sh", str(self.product.dir / "scripts" / "checkout-dependencies.sh")],
+                                   cwd=self.product.dir, env=self.product.env, text=True, check=False,
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("DESTINATION", completed.stderr)
+        self.assertEqual(completed.stdout, "", "nothing on stdout: it would land in $GITHUB_ENV")
 
     def test_an_occupied_destination_is_refused_and_not_replaced(self) -> None:
         """The singular refuses to replace, and the plural inherits that.
@@ -2482,7 +2492,12 @@ class DependenciesApartTest(unittest.TestCase):
         """
         destination = self.product.work / "deps"
         self.script(str(destination))
-        again = self.script(str(destination), expect=1)
+        again = subprocess.run(["sh", str(self.product.dir / "scripts" / "checkout-dependencies.sh"),
+                                str(destination)], cwd=self.product.dir, env=self.product.env,
+                               text=True, check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        # A failure, never a number: the exit codes of a shell builtin differ
+        # between the sh of macOS and dash.
+        self.assertNotEqual(again.returncode, 0)
         self.assertIn("refusing to replace", again.stderr)
 
     def test_it_is_managed_and_not_a_stray_script(self) -> None:
