@@ -1,5 +1,77 @@
 # Changelog
 
+## 0.50.0 — 2026-09-13
+
+- **Naming the managed script is not calling it.** The sibling search of
+  0.48.0 matched the name anywhere, so maelys-oci's source policy — which
+  exempts `checkout-dependency.sh` by name, in a Python tuple — read as a
+  job cloning a pin. A call clones one, so what follows the script is now a
+  pin's name or a shell expansion. The first fix considered, "a separator
+  before and a word after", would have traded that line for a Makefile
+  comment in the same repository: found by measuring it before writing it.
+- **And naming the root is not reading it.** The exemption for a file that
+  has been through the migration was satisfied by any mention of
+  `MAELYS_DEPENDENCIES_DIR`, including a comment — one product's `ci.yml`
+  says what the variable means, and that sentence alone was exempting the
+  three real calls beneath it. A sigil, a bracket or an assignment is a use;
+  the bare word in prose is not. Measured on five trees: ten lines in four
+  files at the commit that had the defect, nothing anywhere else.
+- **An unprotected default branch is a violation when `[commit]
+  signed-on-default-branch` is declared**, and a note otherwise. That
+  declaration asks the release to check the commit landed on a branch whose
+  rules apply; on an open branch there are none, and the check proves what
+  the tag already proved. A refusal to say stays a note: GitHub declining to
+  answer is not an open branch.
+- **`[build]` of `docs/cli.reference` takes as many lines as the product has
+  trees**, and the socle uses the first that holds the programs — not the
+  first that exists, since a machine may carry a cross-compiled tree it
+  cannot run. A per-platform build tree made "the generator did not run
+  here" certain on every machine but one, which is a note that stops being
+  read. No pattern language: a glob would make the answer depend on what
+  happens to have been built. When none holds the programs, the note names
+  every directory it tried.
+- **`check` says when a product sanitizes twice.** `sanitizer_command` is
+  opt-out, so a call that leaves it alone turns the socle's job on beside
+  the product's own, and the same instrumented tree is built twice on every
+  pull request. A note: the product's job may cover more, or less. It finds
+  maelys-json's `make asan` and `make ubsan`, and is silent on the four
+  other products measured.
+- **`CC` and `CXX` are in the job's environment**, said beside
+  `sanitizer_command` and `fuzz_command`: every command of an `a && b` gets
+  clang, while the appended `CC=clang CXX=clang++` is a make override that
+  reaches only the last. Reading the YAML without measuring had declared two
+  green products broken.
+- **A rehearsal rehearses the tree CI would check out**: a clone plus the
+  uncommitted changes to tracked files, not the directory whole. `cp -a`
+  dragged `build/` and everything `.gitignore` excludes across the mount, so
+  the object rehearsed was not the object the build job builds. Untracked
+  files are left behind, as CI leaves them, and the log says how many.
+- **`cut --tag` names the approval the tag is waiting on**, with the `gh api`
+  line that answers it, and says that a channel asks for its own once the
+  release workflow has finished. Measured on one release: the release job
+  ran at 10:05 and the channel job at 14:04, four hours later on the same
+  tag — the gate doing its work, read as an approval GitHub had lost.
+- **`adopt` hands back the Impact lines** of the socle versions between the
+  one a product pins and the one running: no filter of the socle's
+  invention, the line was written by hand by whoever wrote the change.
+- **The conventions said a self-hosted runner is "never on `pull_request`"**
+  while 0.41.0 had put one there, on a private repository, two days earlier.
+  The guard is not the event but who can open a pull request.
+- Two smaller things found on the way: a channel's publish script was
+  handed the markers of the channels that published before it, in the
+  `dist/` it reads; and the reader of an input's default scanned a fixed
+  twelve lines, so a description that grew by a paragraph would have pushed
+  `default:` out of sight — silently, since "no default" and "did not look
+  far enough" were the same answer.
+- Reported by maelys-oci, maelys-platform and Fable, who read for one of
+  these and found three others.
+- **Impact.** Products with a `docs/cli.reference` and a per-platform build
+  tree: declare every directory. Products declaring `[commit]
+  signed-on-default-branch` on an unprotected branch: protect it, or declare
+  `[commit] signed` — `preflight` now refuses. Products with a sanitizers
+  job of their own: a note, and nothing to do unless you want the socle's
+  off. Everyone else: nothing.
+
 ## 0.49.1 — 2026-09-13
 
 - **A replay of a release moved the channel markers it should not have

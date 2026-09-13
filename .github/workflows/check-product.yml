@@ -20,7 +20,15 @@ on:
         type: string
         default: make check
       sanitizer_command:
-        description: Run on Linux x86_64 with clang; empty disables the job
+        description: >-
+          Run on Linux x86_64 with clang; empty disables the job.
+
+          **`CC` and `CXX` are in the job's environment**, so every command
+          of an `a && b` gets clang. The `CC=clang CXX=clang++` appended to
+          the line is a make override, and a make override reaches only the
+          command it is written on -- the last. The two say the same thing
+          for a Makefile that honours `CC`; they part company for one that
+          assigns it (`CC := gcc`), where only the last command is overridden.
         required: false
         type: string
         default: make asan-ubsan
@@ -32,6 +40,9 @@ on:
           one through sanitizer_command instead. The socle schedules
           nothing. Opt-in: the nine products that fuzz spell their targets
           differently.
+
+          `CC` and `CXX` reach every command of this line through the job's
+          environment, as above; the trailing override reaches the last.
         required: false
         type: string
         default: ""

@@ -1420,11 +1420,45 @@ class DocsContractTest(unittest.TestCase):
         self.assertIn("build=bin", self.product.read("docs/cli.md"))
         data = self.product.json("adopt", self.dir)["data"]
         self.assertTrue(any(entry["path"] == "docs/cli.md" for entry in data["files"]))
-        for bad in ("[build]\n/etc\n", "[build]\n../elsewhere\n", "[build]\nbuild/a\nbuild/b\n"):
+        for bad in ("[build]\n/etc\n", "[build]\n../elsewhere\n", "[build]\nbuild/a\nbuild/a\n"):
             self.product.write("docs/cli.reference", bad)
             refused = self.product.json("check", self.dir, expect=2)["data"]
             self.assertTrue(any("docs/cli.reference" in violation
                                 for violation in refused["conventions"]["violations"]), bad)
+
+    def test_a_build_tree_per_platform_names_every_one_of_them(self) -> None:
+        """One directory made the note certain on every machine but one.
+
+        maelys-oci declares build/linux-x86_64/release/bin; on a Mac the
+        socle printed "the generator did not run here" at every adopt and
+        every check, which is a note that stops being read. The first
+        directory holding the programs is used -- not the first that
+        exists, since a machine may carry a cross-compiled tree it cannot
+        run.
+        """
+        self.with_a_command_line(self.RECORDING_GENERATOR)
+        self.product.write("docs/cli.reference",
+                           "[build]\nbuild/linux-x86_64/release/bin\nbuild/macos-arm64/release/bin\n")
+        here = self.product.dir / "build" / "macos-arm64" / "release" / "bin"
+        here.mkdir(parents=True)
+        (here / "maelys-fixture").write_text("#!/bin/sh\nexit 0\n")
+        (here / "maelys-fixture").chmod(0o755)
+        # The cross-compiled tree exists and holds nothing runnable here.
+        (self.product.dir / "build" / "linux-x86_64" / "release" / "bin").mkdir(parents=True)
+        self.product.run("adopt", self.dir, "--apply")
+        self.assertIn("build=bin", self.product.read("docs/cli.md"))
+        data = self.product.json("check", self.dir)["data"]
+        self.assertTrue(data["conventions"]["valid"], data["conventions"]["violations"])
+
+    def test_the_note_says_which_directories_were_tried(self) -> None:
+        # A generator that refuses, which is what an unbuilt product's does.
+        self.with_a_command_line("import sys\nsys.exit(1)\n")
+        self.product.write("docs/cli.reference", "[build]\nbuild/a/bin\nbuild/b/bin\n")
+        self.product.run("adopt", self.dir, "--apply")
+        notes = [check["message"] for check in self.product.json("check", self.dir)["data"]["checks"]
+                 if check["status"] == "note" and "did not run here" in check["message"]]
+        self.assertEqual(len(notes), 1, notes)
+        self.assertIn("[build] named build/a/bin, build/b/bin", notes[0])
 
     def test_a_malformed_declaration_is_refused(self) -> None:
         self.with_a_command_line(self.RECORDING_GENERATOR)
@@ -2243,6 +2277,26 @@ class GitHubReadingTest(unittest.TestCase):
             self.assertIn("cannot read", message, (classic, ruled))
             self.assertNotIn("is not protected", message, (classic, ruled))
 
+    def test_an_open_branch_under_a_declaration_is_a_promise_unkept(self) -> None:
+        """`[commit] signed-on-default-branch` asks the release to check that
+        the commit landed on a branch whose rules apply. On an open branch
+        there are none, and the check proves what the tag already proved.
+        The pattern is `[gate] reviewer` against an environment that
+        requires nobody, which preflight already fails on."""
+        status, message = MODULE.branch_protection("o/r", "main", "absent", "ok", [],
+                                                   "signed-on-default-branch")
+        self.assertEqual(status, "fail")
+        self.assertIn("declares '[commit] signed-on-default-branch'", message)
+        self.assertIn("protect . --apply", message)
+        # `signed` promises nothing about the branch, so it stays a note.
+        self.assertEqual(MODULE.branch_protection("o/r", "main", "absent", "ok", [], "signed")[0], "note")
+        # And a refusal to say is never a violation, whatever was declared:
+        # GitHub declining to answer is not an open branch.
+        refused = MODULE.branch_protection("o/r", "main", "unreadable", "unreadable", [],
+                                           "signed-on-default-branch")
+        self.assertEqual(refused[0], "note")
+        self.assertIn("cannot read", refused[1])
+
 
 class RehearseRefusalTest(unittest.TestCase):
     """What rehearse refuses before it starts a container.
@@ -2276,17 +2330,34 @@ class RehearseRefusalTest(unittest.TestCase):
 
 
 class RehearsalCopyTest(unittest.TestCase):
-    """The rehearsal copies the working tree with cp, not with a tar pipe.
+    """What a rehearsal rehearses: the tree CI would check out.
 
-    GNU tar 1.35 extracting under an emulated linux/amd64 on an Apple Silicon
-    host fails every mkdir with ENOSYS, so `rehearse DIR linux-x86_64` was
-    unusable on the machines the fleet develops on. Measured, then fixed.
+    Never a tar pipe -- GNU tar 1.35 extracting under an emulated
+    linux/amd64 on an Apple Silicon host fails every mkdir with ENOSYS, so
+    `rehearse DIR linux-x86_64` was unusable on the machines the fleet
+    develops on. And no longer the whole working tree either: `cp -a` dragged
+    build/ and everything .gitignore excludes into the container, so the
+    object rehearsed was not the object the build job builds. maelys-oci
+    reported both, a release apart.
     """
 
-    def test_the_copy_uses_cp_and_still_excludes_dist(self) -> None:
-        self.assertIn("cp -a /src/. /work/product/", MODULE.REHEARSAL)
-        self.assertIn("rm -rf /work/product/dist", MODULE.REHEARSAL)
+    def test_it_clones_and_carries_the_uncommitted_changes(self) -> None:
+        self.assertIn("git clone -q --no-hardlinks /src /work/product", MODULE.REHEARSAL)
+        self.assertIn("git -C /src diff --binary HEAD", MODULE.REHEARSAL)
+        self.assertIn("git -C /work/product apply", MODULE.REHEARSAL)
         self.assertNotIn("tar -C /src", MODULE.REHEARSAL)
+
+    def test_it_says_what_it_left_behind(self) -> None:
+        """CI has no untracked file either, and a rehearsal that silently
+        added one would answer about a tree nobody else will build."""
+        self.assertIn("ls-files --others --exclude-standard", MODULE.REHEARSAL)
+        self.assertIn("left behind, as CI would", MODULE.REHEARSAL)
+
+    def test_a_directory_that_is_not_a_repository_still_rehearses(self) -> None:
+        """With a warning saying what it carries, which is everything."""
+        self.assertIn("cp -a /src/. /work/product/", MODULE.REHEARSAL)
+        self.assertIn("::warning::/src is not a git repository", MODULE.REHEARSAL)
+        self.assertIn("rm -rf /work/product/dist", MODULE.REHEARSAL)
 
 
 class DeclarationHomeTest(unittest.TestCase):
@@ -2581,6 +2652,98 @@ class SaidWhereItIsReadTest(unittest.TestCase):
         self.assertIn(MODULE.PUBLISHED_DOWNLOAD[0], tap)
 
 
+class TagDeploymentsTest(unittest.TestCase):
+    """What the run of a tag is waiting on, said where the tag was pushed.
+
+    A release under `[gate] reviewer` asks for one approval and a product
+    with a channel asks for another, which does not exist until the release
+    workflow has finished. Measured on one release: the release job ran at
+    10:05 and the channel job at 14:04, four hours apart on the same tag.
+    It read as an approval GitHub had lost.
+    """
+
+    def read(self, answers: dict):
+        saved = MODULE.github_list
+        MODULE.github_list = lambda path: answers.get(path, [])
+        try:
+            return MODULE.tag_deployments("o/r", "v1.0.0")
+        finally:
+            MODULE.github_list = saved
+
+    def test_it_names_the_environment_and_hands_over_the_command(self) -> None:
+        waiting = self.read({
+            "repos/o/r/actions/runs?event=push&per_page=20": [{"id": 7, "head_branch": "v1.0.0"}],
+            "repos/o/r/actions/runs/7/pending_deployments":
+                [{"environment": {"name": "release", "id": 42}, "current_user_can_approve": True}]})
+        self.assertEqual(len(waiting), 1)
+        self.assertEqual(waiting[0]["environment"], "release")
+        self.assertIn("actions/runs/7", waiting[0]["run"])
+        self.assertIn("-f state=approved", waiting[0]["approve"])
+        self.assertIn("environment_ids[]=42", waiting[0]["approve"])
+
+    def test_a_run_of_another_reference_is_not_this_tag(self) -> None:
+        self.assertEqual(self.read({
+            "repos/o/r/actions/runs?event=push&per_page=20": [{"id": 8, "head_branch": "main"}],
+            "repos/o/r/actions/runs/8/pending_deployments":
+                [{"environment": {"name": "release", "id": 1}, "current_user_can_approve": True}]}), [])
+
+    def test_an_approval_this_operator_cannot_give_is_not_offered(self) -> None:
+        """Handing over a command that will be refused is worse than silence."""
+        self.assertEqual(self.read({
+            "repos/o/r/actions/runs?event=push&per_page=20": [{"id": 7, "head_branch": "v1.0.0"}],
+            "repos/o/r/actions/runs/7/pending_deployments":
+                [{"environment": {"name": "release", "id": 1}, "current_user_can_approve": False}]}), [])
+
+    def test_none_pending_is_not_nothing_left_to_approve(self) -> None:
+        """The channel's deployment does not exist yet when the tag is pushed."""
+        text = MODULE.text_cut({"stage": "tag", "product": "p", "version": "1.0.0", "branch": "b",
+                                "base": "main", "repository": "o/r", "gate": [], "checks": [],
+                                "ready": True, "pushed": True, "deployments": [],
+                                "next": "v1.0.0 is published on abc1234"})
+        self.assertIn("a channel asks for its own approval", text)
+        self.assertIn("look again then", text)
+
+
+class SanitizersTwiceTest(unittest.TestCase):
+    """A product that sanitizes while the socle's job sanitizes too.
+
+    `sanitizer_command` is opt-out: a call that does not set it turns the
+    socle's job on, so a product with a sanitizers job of its own builds the
+    same instrumented tree twice on every pull request. Measured on the
+    fleet: maelys-json runs `make asan` and `make ubsan` beside the socle's
+    job; maelys-http passes `sanitizer_command` and is silent.
+    """
+
+    CALL = ("jobs:\n  socle:\n"
+            "    uses: maelys-dev/maelys-release/.github/workflows/check-product.yml@" + "a" * 40 + "\n"
+            "    with:\n      product: p\n")
+
+    def test_a_product_job_that_sanitizes_beside_the_socle_is_named(self) -> None:
+        lines = MODULE.sanitizers_twice(self.CALL + "  own:\n    steps:\n"
+                                        "      - run: make asan\n      - run: make ubsan\n")
+        self.assertEqual(lines, [8, 9])
+
+    def test_a_call_that_sets_the_input_is_the_product_having_chosen(self) -> None:
+        """maelys-egress passes an empty sanitizer_command and keeps its own
+        job. That is the choice the socle cannot make for a product, and
+        having made it is the end of the matter."""
+        text = self.CALL.replace("      product: p\n", '      product: p\n      sanitizer_command: ""\n')
+        self.assertEqual(MODULE.sanitizers_twice(text + "  own:\n    steps:\n      - run: make asan\n"), [])
+
+    def test_the_call_block_itself_is_not_a_second_job(self) -> None:
+        """Its `with:` names sanitizer_command, and a comment beside it says
+        what the socle's job runs."""
+        text = self.CALL.replace("    with:\n", "    # the socle's asan/ubsan job\n    with:\n")
+        self.assertEqual(MODULE.sanitizers_twice(text), [])
+
+    def test_a_comment_is_not_a_job(self) -> None:
+        """Unlike the sibling search, where a commented `docker build
+        --build-context …=../maelys-system` is an instruction a human
+        follows, nothing runs a YAML comment. maelys-json carries one naming
+        the socle's sanitizers, and it was the rule's only false line."""
+        self.assertEqual(MODULE.sanitizers_twice(self.CALL + "  own:\n    # sanitizers run here too\n"), [])
+
+
 class DependenciesApartTest(unittest.TestCase):
     """Pins without a declaration of where the build reads them.
 
@@ -2770,6 +2933,55 @@ class DependenciesApartTest(unittest.TestCase):
                        for check in data["checks"]
                        if check["status"] == "note" and check["message"].startswith("scripts/mutation-check.sh line "))
         self.assertEqual(lines, [2, 3])
+
+    def test_naming_the_script_is_not_calling_it(self) -> None:
+        """Two real lines, both of which my first fix would have reported.
+
+        maelys-oci exempts the managed script by name from its own source
+        policy, in a Python tuple, and explains in a Makefile comment what
+        it fetches. A call clones a pin, so what follows the script is a
+        pin's name or a shell expansion; neither of these is.
+        """
+        self.product.write("tests/check_source.py",
+                           "for path in paths:\n"
+                           "    if path.name in ('checkout-dependency.sh', 'checkout-dependencies.sh'):\n"
+                           "        continue\n")
+        self.product.write("Makefile.pins",
+                           "# scripts/checkout-dependency.sh fetches them in CI; the build verifies them here.\n")
+        self.product.write("docker/Dockerfile.test",
+                           "FROM debian\nRUN sh scripts/checkout-dependency.sh maelys-system /deps/maelys-system\n")
+        self.tracked()
+        data = self.product.json("check", self.dir)["data"]
+        named = sorted({message.split(" line ")[0] for message in
+                        [check["message"] for check in data["checks"] if check["status"] == "note"]
+                        if " line " in message})
+        self.assertEqual(named, ["docker/Dockerfile.test"], data["checks"])
+
+    def test_naming_the_root_is_not_reading_it(self) -> None:
+        """The exemption means the file went through the migration.
+
+        One product's ci.yml carries a comment saying what
+        MAELYS_DEPENDENCIES_DIR means, and that sentence alone was
+        exempting the three real calls below it. A sigil or an assignment is
+        a use; the bare word in prose is not.
+        """
+        self.product.write("docker/Dockerfile.test",
+                           "FROM debian\n"
+                           "# Under the root, which is what MAELYS_DEPENDENCIES_DIR means.\n"
+                           "RUN sh scripts/checkout-dependency.sh maelys-system /deps/maelys-system\n")
+        self.tracked()
+        notes = [check["message"] for check in self.product.json("check", self.dir)["data"]["checks"]
+                 if check["status"] == "note" and "Dockerfile.test line 3" in check["message"]]
+        self.assertEqual(len(notes), 1, notes)
+        # And the same file, once it actually reads the root, is exempt.
+        self.product.write("docker/Dockerfile.test",
+                           "FROM debian\n"
+                           "# Under the root, which is what MAELYS_DEPENDENCIES_DIR means.\n"
+                           "RUN sh scripts/checkout-dependency.sh maelys-system /deps/maelys-system\n"
+                           "ENV MAELYS_DEPENDENCIES_DIR=/deps\n")
+        self.tracked()
+        self.assertFalse([check for check in self.product.json("check", self.dir)["data"]["checks"]
+                          if "Dockerfile.test line" in check["message"]])
 
     def test_a_file_that_reads_the_root_is_left_alone(self) -> None:
         """Prose about the migration, in a file that went through it.
