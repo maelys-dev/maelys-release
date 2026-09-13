@@ -134,6 +134,17 @@ jobs:
         # claim anything about a registry.
         run: |
           set -euo pipefail
+          # A marker already attached is the record of when this channel
+          # published, and a replay does not publish again -- the contract
+          # of publish_command is to exit 0 without republishing. Writing a
+          # second one would move `published` and `run` onto a replay that
+          # did nothing, which is the one thing a marker must not do. No
+          # --clobber here for the same reason: it would overwrite silently.
+          if gh release view "$TAG" --repo "${GITHUB_REPOSITORY}" --json assets \
+               --jq '.assets[].name' | grep -qx "channel-$CHANNEL.json"; then
+            echo "::notice::$TAG already carries channel-$CHANNEL.json, written when $CHANNEL published; this run leaves it as it stands"
+            exit 0
+          fi
           published="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           # A marker says these four things about a registry and nothing
           # else. Without the list every product invents its own field, and
@@ -176,29 +187,41 @@ jobs:
     # the honest record for a person, written where they are looking.
     # maelys-datalog asked for it after its npm channel failed on a
     # publish command that had never run.
-    needs: publish
-    if: always() && needs.publish.result != 'success'
+    # record too, and not publish alone: a marker that fails to attach
+    # leaves the same silence on the release page as a publication that
+    # failed, and the reader cannot tell the two apart from there.
+    needs: [publish, record]
+    if: always() && (needs.publish.result != 'success' || needs.record.result != 'success')
     runs-on: ubuntu-26.04
     permissions:
       contents: write
     steps:
-      - name: Say on the release that this channel did not publish
+      - name: Say on the release what this channel left undone
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag }}
           CHANNEL: ${{ inputs.channel }}
           RUN: ${{ github.run_id }}
+          PUBLISHED: ${{ needs.publish.result }}
         shell: bash
         run: |
           set -euo pipefail
-          line="Channel \`$CHANNEL\`: not published (run https://github.com/${GITHUB_REPOSITORY}/actions/runs/$RUN)."
+          # Two different facts, and saying the first when the second
+          # happened would be a lie on a public page: a registry that holds
+          # this version, described as one that does not.
+          if [ "$PUBLISHED" = success ]; then
+            said="published, and the release carries no marker for it"
+          else
+            said="not published"
+          fi
+          line="Channel \`$CHANNEL\`: $said (run https://github.com/${GITHUB_REPOSITORY}/actions/runs/$RUN)."
           body="$(gh release view "$TAG" --repo "${GITHUB_REPOSITORY}" --json body --jq .body)"
           # Replayed on the same tag, this must not say it twice.
           case "$body" in
-            *"Channel \`$CHANNEL\`: not published"*)
-              echo "::notice::the release of $TAG already says $CHANNEL did not publish"
+            *"Channel \`$CHANNEL\`: $said"*)
+              echo "::notice::the release of $TAG already says $CHANNEL $said"
               exit 0 ;;
           esac
           printf '%s\n\n---\n\n%s\n' "$body" "$line" >"${RUNNER_TEMP}/body.md"
           gh release edit "$TAG" --repo "${GITHUB_REPOSITORY}" --notes-file "${RUNNER_TEMP}/body.md"
-          echo "::notice::the release of $TAG now says channel $CHANNEL did not publish"
+          echo "::notice::the release of $TAG now says channel $CHANNEL $said"

@@ -602,7 +602,16 @@ start unless the publication succeeded, so the asset exists if and only if
 the channel published. One asset per channel, written once and never
 rewritten — a rewritten asset cannot be covered by `SHA256SUMS`, computed
 before it, and two channels publishing at once would lose one another's
-entry. A publish script with something to record writes a JSON object to
+entry. **A replay of the release leaves it alone**: `publish` redrafts the
+release and deletes every asset of a former attempt, and the markers were
+among them, so `record` wrote a second one carrying the date and the run of
+the replay — for a publication that had happened hours earlier and that the
+replay did not repeat, since `publish_command` exits 0 without republishing.
+The deletion now spares `channel-*.json`, and `record` leaves a marker that
+is already there rather than overwriting it. `said` covers that job too: a
+publication whose marker failed to attach leaves the same silence on the
+page as one that never happened, and the release says which of the two it
+was. A publish script with something to record writes a JSON object to
 `$CHANNEL_RECORD`.
 
 **A marker says four things about a registry and nothing else**:

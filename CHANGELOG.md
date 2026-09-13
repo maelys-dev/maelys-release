@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.49.1 — 2026-09-13
+
+- **A replay of a release moved the channel markers it should not have
+  touched.** `publish` redrafts the release and deletes every asset of a
+  former attempt before uploading again, and `channel-*.json` was among
+  them; `record` then wrote a second marker carrying the date and the run of
+  the replay, for a publication that had happened hours earlier and that the
+  replay did not repeat — `publish_command` exits 0 without republishing.
+  The conventions have promised since 0.32.0 a marker written once and never
+  rewritten. The deletion now spares the markers, and `record` leaves one
+  that is already there instead of overwriting it — never with `--clobber`,
+  which would move the date in silence.
+- **`said` covers the marker job too**, and tells the two facts apart: a
+  channel that did not publish, and one that published without the release
+  carrying a marker for it. Saying the first when the second happened would
+  describe a registry that holds this version as one that does not, on a
+  public page.
+- Reported as a red `record` on a name already taken, which cannot happen —
+  the deletion comes first. Found by reading for that and meeting this.
+- **Impact.** Nobody: workflows only, and a product that stays on its pin
+  stays conformant. Products with a channel get it at their next adoption.
+
 ## 0.49.0 — 2026-09-13
 
 - **The advice about a Homebrew renderer recognised two of the three
