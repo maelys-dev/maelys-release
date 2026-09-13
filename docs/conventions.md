@@ -1085,6 +1085,36 @@ names a job that still clones beside the product — a note, not a warning:
 proceeds, which is a product adopting and going red, and a job that clones
 beside itself already fails on its own. Naming the line is the whole value.
 
+### Saying it where it is read
+
+Three of these were the same defect wearing different clothes: the socle
+knew something and put it where nobody was looking.
+
+**A tap that pushes nothing is green.** Without credentials the publish job
+renders, lints and reports, which the conventions have always said — but it
+reported with a `::notice::`, which does not reach a run's summary, and the
+release page said nothing at all. A product read two green publish jobs of
+its own release, pushed nothing, and paid a full replay on four macOS
+runners to find out; the cause was an organisation secret scoped to selected
+repositories whose list still named its archived repository. The job now
+warns, and writes on the release that the tap was not updated — the same
+place, and the same rule against saying it twice, as a channel that does not
+publish.
+
+**`verify_command` is replayed by `cut`, on the default branch.** That was
+written at `cut`'s description and read at `verify_command`'s, four hundred
+lines away, which said only that the workflow runs it before packaging. A
+script that asks git for the tag pointing at HEAD finds a previous release
+there and fails at the first cut. The sentence is now beside the input.
+
+**A custom `render_command` runs on macOS while the release was built on
+Linux.** The socle's own path downloads the tag's archive from GitHub and
+hashes what a user will download, so it does not care. A command that
+rebuilds the archive hashes what that runner produced, and `git archive |
+gzip` is not byte for byte the same across platforms: the formula then names
+a digest no downloader can reproduce. `check` says so to any product that
+declares one.
+
 ### The pins, apart from the working copies
 
 `scripts/checkout-dependency.sh NAME` clones next to the product and refuses

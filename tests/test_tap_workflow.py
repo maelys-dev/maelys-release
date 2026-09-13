@@ -255,7 +255,11 @@ class PublishStepTest(unittest.TestCase):
     def test_without_credentials_reports_and_succeeds(self) -> None:
         completed = self.step(token="")
         self.assertEqual(completed.returncode, 0, completed.stderr)
-        self.assertIn("::notice::no tap credentials configured", completed.stdout)
+        # A warning and not a notice: a notice does not reach the run's
+        # summary, and the job is green either way. A product read two green
+        # publish jobs, pushed nothing, and paid a full replay to find out.
+        self.assertIn("::warning::no tap credentials", completed.stdout)
+        self.assertIn("NOT pushed", completed.stdout)
         self.assertIn("Formula/maelys-fixture.rb", completed.stdout)
         self.assertEqual(self.tap.subjects(), ["init"])
 
