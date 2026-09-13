@@ -145,6 +145,17 @@ second program it documents. There is no fleet layout to assume here: the
 three products that generate a reference build into three different trees.
 `CLI_REFERENCE_BUILD` overrides the directory for a local run.
 
+**`[build]` takes as many lines as the product has trees**, and the socle
+uses the first that holds the programs — not the first that exists, since a
+machine may carry a cross-compiled tree it cannot run. One line was enough
+until a product's build tree became per-platform: `build/linux-x86_64/release/bin`
+is right in CI and absent on the maintainer's Mac, so `adopt` and `check`
+printed "the generator did not run here" on every machine but one, which is
+a note that stops being read. There is no pattern language here: a glob
+would make the answer depend on what happens to have been built, and this
+file is a declaration. When none of them holds the programs the note names
+every directory it tried.
+
 A reference that cannot be produced here (an unbuilt product, an
 unreachable maelys-cli) is left as it stands, with a note saying so, rather
 than reporting a drift the socle cannot substantiate. In CI the product is
@@ -665,7 +676,19 @@ artifacts against `.sha256` files that came from the same draft, uploaded by
 the same job, which proved consistency and not integrity.
 
 The human gate stands in front of `publish`, the only job that can change
-anything, so a release asks for one approval rather than two.
+anything, so the release itself asks for one approval rather than two.
+
+**A channel asks for its own, and it does not exist until the release has
+finished.** `channel.yml` runs its publish job under the same environment,
+so a product with one channel is approved twice and a product with two,
+three times — and the second deployment only becomes pending once the
+release workflow completes, which is why an operator who approved "the"
+deployment and walked away finds the channel still waiting. Measured on one
+release of maelys-datalog: `release / publish` ran at 10:05 and
+`channel-npm / publish` at 14:04, four hours later, on the same tag. That
+is the gate doing its work, not GitHub losing an approval — but nothing
+said so, and the second approval is the one that reaches a registry, where
+nothing can be withdrawn.
 
 ## What the release verifies, and what it does not
 
@@ -866,8 +889,15 @@ does not say where either came from.
 - Runner inputs are JSON: a label string or a label array.
 - Public repositories use GitHub-hosted runners only.
 - A self-hosted runner is reserved for hardware gates, registered per
-  repository, used only on signed tags or `workflow_dispatch`, behind the
-  `release` environment, never on `pull_request`.
+  repository, and used on signed tags or `workflow_dispatch` behind the
+  `release` environment — **and, since 0.41.0, on the pull requests of a
+  private repository**, through `macos_runner` of `check-product.yml`. That
+  line said "never on `pull_request`" until 0.50.0, which the same document
+  had contradicted for two days: the guard is not the event but who can open
+  a pull request. On a public repository anyone can, and their code would
+  run on the machine; on a private one the people who can open one are the
+  people who own it. A public repository therefore always gets the hosted
+  default, whatever it declares.
 
 ## Secrets
 
@@ -934,6 +964,11 @@ the most useful one.
 
 It says what a product must do, never what the socle did: the entry above it
 is the account, and a reader who needs only the decision reads one line.
+
+**`adopt` hands those lines back**, for the versions between the socle a
+product pins and the one running: nothing to build, nothing to guess from a
+diff of workflows, and no filter of the socle's invention — the line was
+written by hand, by whoever wrote the change.
 
 ## Moving a product's prose
 
@@ -1181,6 +1216,18 @@ The search reads tracked files, so outside a repository it says nothing. The
 alternative is walking whatever the directory holds, which on a built tree is
 the dependencies themselves.
 
+**Naming the script is not calling it, and naming the root is not reading
+it.** A call clones a pin, so what follows `checkout-dependency.sh` is a
+pin's name or a shell expansion; a source policy that exempts the script by
+name in a Python tuple, and a Makefile comment saying what it fetches, are
+neither. And the exemption above means a file that *reads* the root — a
+sigil, a bracket, an assignment — because one product's `ci.yml` carries a
+comment explaining what `MAELYS_DEPENDENCIES_DIR` means, and that sentence
+alone was exempting the three real calls beneath it. Both were measured on
+products that had nothing wrong with them: the first version of this rule
+reported two lines that were already right, and the fix for the first of
+them would have reported the second.
+
 ### Saying it where it is read
 
 Three of these were the same defect wearing different clothes: the socle
@@ -1284,7 +1331,14 @@ The two halves are found in different ways, and deliberately so:
   so a leg renamed by an adoption is known here before a single run exists.
   Each job's input decides it, defaults included: `sanitizer_command`
   defaults to a command and is opt-out, `fuzz_command` defaults to nothing
-  and is opt-in.
+  and is opt-in. **Opt-out is why `check` says when a product sanitizes
+  twice**: a call that leaves `sanitizer_command` alone turns the socle's
+  job on, so a product keeping a sanitizers job of its own builds the same
+  instrumented tree twice on every pull request. A note, never a violation —
+  the product's job may cover more than the socle's, or less, and that is
+  not the socle's to decide. maelys-egress passes an empty
+  `sanitizer_command` and keeps its own; maelys-json runs `make asan` and
+  `make ubsan` beside the socle's job.
 - **The product's own jobs are observed**, from the check runs of its recent
   merged pull requests, intersected. Nothing here can predict their names.
   The evidence is pull requests and never the tip of the default branch,
@@ -1359,6 +1413,28 @@ tap and `check` runs on every pull request of every product.
 
 maelys-datalog asked for it, after maelys-platform found that the tap had been
 serving its September archive for six versions.
+
+**A rehearsal rehearses the tree CI would check out.** It clones the working
+tree into the container and applies the uncommitted changes to tracked
+files, rather than copying the directory whole: `cp -a` dragged `build/`
+and everything `.gitignore` excludes across the mount, so the object
+rehearsed was not the object the build job builds — that job checks out a
+tag and inherits nothing. It is never a tar pipe either: GNU tar 1.35
+extracting under an emulated linux/amd64 on an Apple Silicon host fails
+every `mkdir` with ENOSYS, which made the x86_64 rehearsal unusable on the
+machines the fleet develops on. Untracked files are left behind, as CI
+leaves them, and the log says how many. A directory that is not a git
+repository is still rehearsed, copied whole, with a warning saying so.
+
+**A substitution the socle does not anchor.** `verify_command`,
+`package_command`, `render_command` and `publish_command` replace the words
+`TARGET`, `TAG` and `CHANNEL` anywhere they appear, including inside a
+longer word — `STAGE` holds `TAG`. Nothing in the fleet trips on it, and
+nothing can today: the socle renders those command strings itself, from
+fixed script names. It is written here rather than fixed because the fix
+would splice a value into a `sed` expression, which is a sharper edge than
+the one it removes. A product that names a script `verify-STAGE.sh` will
+find this paragraph.
 
 ### Rehearsing a channel
 

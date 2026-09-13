@@ -66,6 +66,12 @@ jobs:
           set -euo pipefail
           mkdir -p dist
           gh release download "$TAG" --repo "${GITHUB_REPOSITORY}" --dir dist
+          # Not the markers of the channels that published before this one.
+          # They are assets of the release like any other, so they landed in
+          # the directory a publish script reads, and a script that ships
+          # dist/* would push another channel's receipt to a registry. They
+          # have been there since 0.32.0 put them on the release.
+          rm -f dist/channel-*.json
           test -n "$(ls dist)"
       - name: Publish the channel
         id: publish

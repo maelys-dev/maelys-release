@@ -245,7 +245,7 @@ class Declarations:
         self.generates_reference = False
         self.cli_programs: list[str] = []
         self.cli_flags: list[str] = []
-        self.cli_build = ""
+        self.cli_build: list[str] = []
         self.verify_command = ""
         # (target, runner) of the declaration file; an empty runner keeps the
         # one release.yml holds for that target. Empty means the three the
@@ -695,8 +695,15 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
                  " scripts/checkout-dependencies.sh DESTINATION; delete these")
     ci = project / ".github" / "workflows" / "ci.yml"
     if ci.is_file():
-        if CI_USES.search(ci.read_text(encoding="utf-8")):
+        text = ci.read_text(encoding="utf-8")
+        if CI_USES.search(text):
             decl.add("ok", ".github/workflows/ci.yml calls check-product.yml of the socle")
+            for number in sanitizers_twice(text):
+                decl.add("note", f".github/workflows/ci.yml line {number} sanitizes, and the socle's own"
+                         " sanitizers job runs too: sanitizer_command is opt-out and this call does not"
+                         " set it, so the pull request builds the same instrumented tree twice."
+                         " maelys-egress passes 'sanitizer_command: \"\"' and keeps its own job, which is"
+                         " the choice the socle cannot make for a product", "conventions")
         else:
             decl.add("warn", ".github/workflows/ci.yml does not call the socle's check-product.yml: add a job"
                      f" 'uses: {SOCLE_REPOSITORY}/.github/workflows/check-product.yml@SHA # TAG'"
@@ -906,20 +913,26 @@ def parse_cli_declarations(text: str) -> tuple[list[str], list[str], str]:
             section = line[1:-1]
             continue
         if not section:
-            raise ValueError(f"line outside a [programs] or [flags] section at line {number}")
+            raise ValueError(f"line outside a [build], [programs] or [flags] section at line {number}")
         if section == "programs":
             if not re.fullmatch(r"[a-z0-9][a-z0-9._-]*", line):
                 raise ValueError(f"one program per line at line {number}: {raw}")
             sections["programs"].append(line)
         elif section == "build":
-            if sections["build"]:
-                raise ValueError(f"[build] holds one directory, a second at line {number}")
+            # Several lines, and not one: a product whose build tree is per
+            # platform has a directory per target, and the socle would
+            # otherwise print "the generator did not run here" on every
+            # machine but one -- a note that stops being read. No pattern
+            # language here: a glob would make the answer depend on what
+            # happens to have been built, and this file is a declaration.
             if line.startswith("/") or ".." in pathlib.PurePosixPath(line).parts:
                 raise ValueError(f"[build] is a path inside the product at line {number}: {raw}")
+            if line in sections["build"]:
+                raise ValueError(f"[build] names {line} twice, at line {number}")
             sections["build"].append(line)
         else:
             sections["flags"].extend(line.split())
-    return sections["programs"], sections["flags"], (sections["build"][0] if sections["build"] else "")
+    return sections["programs"], sections["flags"], sections["build"]
 
 
 def read_docs(decl: Declarations) -> None:
@@ -1357,7 +1370,16 @@ def render_cli_reference(decl: Declarations) -> tuple[str, str]:
     # Three products, three build layouts (build/release, build/<profile>,
     # a platform tree): the directory holding the programs is declared, not
     # guessed, with the commonest as the default.
-    build = decl.project / os.environ.get("CLI_REFERENCE_BUILD", decl.cli_build or "build/bin")
+    named = [os.environ["CLI_REFERENCE_BUILD"]] if os.environ.get("CLI_REFERENCE_BUILD") \
+        else (decl.cli_build or ["build/bin"])
+    # The first that holds the programs, and not the first that exists: a
+    # machine may carry a cross-compiled tree it cannot run, and choosing a
+    # directory by its name would hand the generator a binary that answers
+    # nothing.
+    candidates = [decl.project / where for where in named]
+    build = next((where for where in candidates
+                  if all(os.access(where / program, os.X_OK) for program in decl.cli_programs)),
+                 candidates[0])
     with tempfile.TemporaryDirectory(prefix="maelys-release-cli-reference.") as temp:
         markdown = pathlib.Path(temp) / "cli.md"
         contract = pathlib.Path(temp) / "cli-contract.json"
@@ -1366,9 +1388,36 @@ def render_cli_reference(decl: Declarations) -> tuple[str, str]:
                          *decl.cli_flags, *decl.cli_programs], cwd=decl.project)
         if completed.returncode != 0 or not markdown.is_file():
             decl.add("note", f"{CLI_REFERENCE}: the generator did not run here"
-                     " (an unbuilt product, usually); the reference is left as it stands", "conventions")
+                     " (an unbuilt product, usually); the reference is left as it stands."
+                     f" [build] named {', '.join(named)}", "conventions")
             return existing()
         return markdown.read_text(encoding="utf-8"), contract.read_text(encoding="utf-8")
+
+
+def socle_impact(pinned: str) -> list[tuple[str, str]]:
+    """The Impact line of every socle version between a product's pin and this one.
+
+    A product reads a changelog to answer one question -- must I open a pull
+    request? -- and the entries are essays. One product opened seven
+    adoption pull requests in four days for a mechanism it used twice,
+    reading the whole changelog by hand six times to find out. Since 0.49.0
+    every entry ends with a line saying who must do what; this hands back
+    only the ones the product has not taken.
+    """
+    path = socle_root() / "CHANGELOG.md"
+    if not path.is_file() or not re.fullmatch(r"v?[0-9]+\.[0-9]+\.[0-9]+", pinned or ""):
+        return []
+    since = version_tuple(pinned.lstrip("v"))
+    entries = re.findall(r"^## ([0-9]+\.[0-9]+\.[0-9]+) [^\n]*\n(.*?)(?=^## |\Z)",
+                         path.read_text(encoding="utf-8"), re.MULTILINE | re.DOTALL)
+    impacts = []
+    for version, body in entries:
+        if version_tuple(version) <= since:
+            continue
+        said = re.search(r"^- \*\*Impact\.\*\*(.*?)(?=^- |\Z)", body, re.MULTILINE | re.DOTALL)
+        if said:
+            impacts.append((version, " ".join(said.group(1).split())))
+    return list(reversed(impacts))
 
 
 def plan(decl: Declarations, staged: dict[str, tuple[str, bool]], apply: bool) -> list[dict]:
@@ -2211,8 +2260,11 @@ def handle_adopt(invocation: Invocation) -> tuple[dict, int]:
     files = plan(decl, stage(decl, sha, tag), apply)
     moved = move_declaration(project, apply)
     changed = moved != "" or any(entry["action"] != "same" for entry in files)
+    pinned = pinned_socle(project)
     data = {"mode": "apply" if apply else "plan", "product": product, "project": str(project),
             "mechanism": mechanism, "socle": socle_data(sha, tag), "changed": changed,
+            "impact": [{"version": version, "says": says}
+                       for version, says in socle_impact((pinned or {}).get("tag", ""))],
             "checks": decl.applicable(), "files": files}
     if moved:
         data["moved"] = moved
@@ -2464,13 +2516,22 @@ def tag_checks(project: pathlib.Path, version: str) -> list[tuple[str, str]]:
 
 
 def branch_protection(repository: str, branch: str, classic: str,
-                      ruled: str, rules: object) -> tuple[str, str]:
+                      ruled: str, rules: object, promised: str = "") -> tuple[str, str]:
     """What protects a default branch, told apart from what cannot be read.
 
     Two endpoints answer, and not for the same thing: the classic branch
     protection, and a ruleset. agent-cli-spec is protected by a ruleset
     alone, so reading the first alone reported it open — permanently, not
     only while the organization was locked.
+
+    `promised` is the product's `[commit]` declaration. An unprotected
+    branch is a note for a repository that promised nothing and a violation
+    for one that declared `signed-on-default-branch`: that declaration asks
+    the release to check the commit landed on a branch whose rules apply,
+    and on an open branch there are none. The pattern is `[gate] reviewer`
+    against an environment that requires nobody — a promise unkept, which
+    `preflight` already fails on. A refusal to say stays a note either way:
+    GitHub declining to answer is not an open branch.
     """
     protected = [name for name, state, present in (("branch protection", classic, True),
                                                    ("a ruleset", ruled, bool(rules)))
@@ -2481,6 +2542,12 @@ def branch_protection(repository: str, branch: str, classic: str,
         return "note", (f"the socle cannot read what protects {branch} of {repository}: GitHub refused to say,"
                         " which a private repository of a free plan does. That is not the same fact as an"
                         " unprotected branch, and the socle will not report it as one")
+    if promised == "signed-on-default-branch":
+        return "fail", (f"{DECLARATION_FILE} declares '[commit] {promised}' and the default branch {branch}"
+                        f" of {repository} is not protected: the release would check that the commit is an"
+                        " ancestor of a branch anyone who can push can move, which proves nothing it does"
+                        " not already prove. Protect the branch -- 'maelys-release protect . --apply'"
+                        " derives the contexts -- or declare '[commit] signed'")
     return "note", (f"the default branch {branch} of {repository} is not protected: anyone who can push can"
                     " move it, and a tag proves only what the tag proves")
 
@@ -2704,7 +2771,8 @@ def repository_checks(decl: Declarations) -> list[tuple[str, str]]:
     branch = repository_data.get("default_branch") or "main"
     found.append(branch_protection(repository, branch,
                                    *github_read(f"repos/{repository}/branches/{branch}/protection")[:1],
-                                   *github_read(f"repos/{repository}/rules/branches/{branch}")))
+                                   *github_read(f"repos/{repository}/rules/branches/{branch}"),
+                                   decl.commit_verification))
     return found
 
 
@@ -3230,6 +3298,34 @@ def cut_open(invocation: Invocation, decl: Declarations, data: dict, log, timeou
     return cut_report(data, await_checks(repository, data["commit"], timeout, poll, log))
 
 
+def tag_deployments(repository: str, tag: str) -> list[dict]:
+    """The approvals the run of this tag is waiting on, and how to answer them.
+
+    A release under `[gate] reviewer` asks for one approval, and a product
+    with a channel asks for another -- which does not exist until the
+    release workflow has finished, so an operator who approves "the"
+    deployment and walks away leaves the channel waiting. Measured on one
+    release: the release job ran at 10:05 and the channel job at 14:04, on
+    the same tag, four hours apart. Nothing said so; it read as an approval
+    GitHub had lost.
+    """
+    waiting = []
+    for run_data in github_list(f"repos/{repository}/actions/runs?event=push&per_page=20"):
+        if not isinstance(run_data, dict) or run_data.get("head_branch") != tag:
+            continue
+        identifier = run_data.get("id")
+        for deployment in github_list(f"repos/{repository}/actions/runs/{identifier}/pending_deployments"):
+            if not isinstance(deployment, dict) or not deployment.get("current_user_can_approve"):
+                continue
+            environment = (deployment.get("environment") or {}).get("name", "")
+            waiting.append({"run": f"https://github.com/{repository}/actions/runs/{identifier}",
+                            "environment": environment,
+                            "approve": f"gh api -X POST repos/{repository}/actions/runs/{identifier}"
+                                       f"/pending_deployments -f state=approved -f comment=''"
+                                       f" -F 'environment_ids[]={(deployment.get('environment') or {}).get('id', 0)}'"})
+    return waiting
+
+
 def cut_tag(invocation: Invocation, decl: Declarations, data: dict, log, timeout: int, poll: int) -> tuple[dict, int]:
     """Second stop: the tag, signed on the merge commit whose checks passed."""
     project, product, version = decl.project, decl.product, data["version"]
@@ -3309,6 +3405,17 @@ def cut_tag(invocation: Invocation, decl: Declarations, data: dict, log, timeout
     data["verified"] = bool(((annotated or {}).get("verification") or {}).get("verified"))
     data["next"] = (f"{tag} is published on {merge[:7]}" if data["verified"]
                     else f"{tag} is pushed, and GitHub does not report it verified: check the signing key on GitHub")
+    # Looked at once, not watched: a channel's approval appears only after
+    # the release workflow finishes, which is hours on some products, and a
+    # command that waited would hold a terminal for a decision it must not
+    # take. What it can do is say that the decision exists and hand over the
+    # line that answers it.
+    if decl.gate == "reviewer" or decl.channels:
+        for attempt in range(3):
+            data["deployments"] = tag_deployments(repository, tag)
+            if data["deployments"] or attempt == 2:
+                break
+            time.sleep(poll)
     return data, EXIT_OK
 
 
@@ -3341,15 +3448,37 @@ echo "== Install Linux packaging tools and declared packages"
 apt-get update -q >/dev/null
 # git and certificates are on the runner already; the image has neither.
 apt-get install -y -q --no-install-recommends git ca-certificates $LINUX_PACKAGES >/dev/null
-echo "== Copy the working tree (dist/ excluded)"
-mkdir -p /work/product && cd /work/product
-# cp rather than a tar pipe: GNU tar 1.35 extracting under an emulated
-# linux/amd64 on an Apple Silicon host fails every mkdir with ENOSYS,
-# "Function not implemented", so the x86_64 rehearsal was unusable on the
-# machines the fleet develops on. Reported by maelys-oci, reproduced here.
-cp -a /src/. /work/product/
-rm -rf /work/product/dist
+echo "== Take the tree CI would check out"
+mkdir -p /work/product
 git config --global --add safe.directory "*"
+# A clone, plus the uncommitted changes to tracked files. What .gitignore
+# excludes never travels, which is the point: a rehearsal replays the build
+# job of release.yml, and that job checks out a tag -- it does not inherit
+# build/ from the last twenty builds on this machine, nor a .git carrying
+# the host's hooks and signing configuration.
+#
+# Not a tar pipe: GNU tar 1.35 extracting under an emulated linux/amd64 on
+# an Apple Silicon host fails every mkdir with ENOSYS, "Function not
+# implemented", so the x86_64 rehearsal was unusable on the machines the
+# fleet develops on. Reported by maelys-oci, reproduced here. git runs under
+# the same emulation and the checkout steps below prove it.
+if git clone -q --no-hardlinks /src /work/product; then
+    git -C /src diff --binary HEAD >/work/uncommitted.patch || true
+    if [ -s /work/uncommitted.patch ]; then
+        git -C /work/product apply /work/uncommitted.patch
+    fi
+    modified="$(git -C /src diff --name-only HEAD | wc -l | tr -d ' ')"
+    # Said rather than carried: CI has no untracked file either, and a
+    # rehearsal that silently added one would answer about a tree nobody
+    # else will ever build.
+    untracked="$(git -C /src ls-files --others --exclude-standard | wc -l | tr -d ' ')"
+    echo "== Rehearsing $(git -C /src rev-parse --short HEAD) plus $modified modified file(s); $untracked untracked file(s) left behind, as CI would"
+else
+    echo "::warning::/src is not a git repository; copying it whole, build output included"
+    cp -a /src/. /work/product/
+fi
+cd /work/product
+rm -rf /work/product/dist
 echo "== Pinned dependency checkouts"
 # Beside the product, or apart and the root given: the third place the socle
 # clones, and the one that decides whether a rehearsal is the same object as
@@ -3564,6 +3693,45 @@ def socle_check_contexts(project: pathlib.Path) -> tuple[str, list[str]]:
     return caller, [f"{caller} / {name}" for name in names]
 
 
+# A job of the product that builds an instrumented tree. The name or the
+# command says so; nothing else can, since the socle does not read Makefiles.
+SANITIZING = re.compile(r"asan|ubsan|tsan|msan|sanitiz", re.IGNORECASE)
+
+
+def sanitizers_twice(text: str) -> list[int]:
+    """Lines of a product's ci.yml that sanitize while the socle's job does too.
+
+    `sanitizer_command` is opt-out: a call that does not set it turns the
+    socle's job on, so a product with a sanitizers job of its own pays for
+    two instrumented builds of the same tree on every pull request. The
+    socle cannot choose between them -- the product's job may cover more,
+    or less -- so it says the fact and names the line.
+    """
+    call = re.search(r"^\s+sanitizer_command:", text, re.MULTILINE)
+    if call:
+        return []
+    # Only what is outside the block that calls the socle: the `with:` of
+    # that call names sanitizer_command and fuzz_command, and a comment
+    # beside it saying what they sanitize is not a second job.
+    lines = text.splitlines()
+    inside = False
+    found = []
+    for number, line in enumerate(lines, 1):
+        if CI_USES.search(line):
+            inside = True
+            continue
+        if inside and re.match(r"^  [A-Za-z0-9_-]+:", line):
+            inside = False
+        # A YAML comment is not a job. Unlike the sibling search, where a
+        # commented `docker build --build-context …=../maelys-system` is an
+        # instruction a human follows, nothing here runs a comment: the one
+        # this dropped names the socle's own sanitizers in a sentence
+        # explaining what the call turns on.
+        if not inside and not line.lstrip().startswith("#") and SANITIZING.search(line):
+            found.append(number)
+    return found
+
+
 def check_product_legs() -> list[str]:
     """The legs of check-product.yml's matrix, from the workflow itself."""
     workflow = socle_root() / ".github" / "workflows" / "check-product.yml"
@@ -3585,11 +3753,16 @@ def check_product_default(name: str) -> str:
     lines = workflow.read_text(encoding="utf-8").splitlines()
     for index, line in enumerate(lines):
         if line.strip() == f"{name}:":
-            for following in lines[index + 1:index + 12]:
-                if following.strip().startswith("default:"):
-                    return following.split(":", 1)[1]
+            # To the next input, and not a fixed dozen lines: the window was
+            # twelve, and a description that grew by a paragraph pushed
+            # `default:` past it -- silently, since the reader returns "" for
+            # "no default" as well as for "did not look far enough", and the
+            # sanitizers job is chosen from that answer.
+            for following in lines[index + 1:]:
                 if re.match(r"^      [a-z_]+:", following):
                     break
+                if following.strip().startswith("default:"):
+                    return following.split(":", 1)[1]
             return ""
     return ""
 
@@ -3660,6 +3833,14 @@ CHECKOUT_SCRIPTS = ("scripts/checkout-dependency.sh", "scripts/checkout-dependen
 # A call of the singular with no destination: it clones beside the product,
 # which a build that reads the root no longer looks at.
 BESIDE_CALL = re.compile(r"checkout-dependency\.sh\s+[a-z0-9-]+\s*(&&|$)")
+# Evidence that a file READS the root, which is what the exemption below
+# means. Naming the variable is not reading it: a comment of one product's
+# ci.yml says what MAELYS_DEPENDENCIES_DIR means, and that sentence alone
+# was exempting the three real calls under it. A sigil, a bracket, a quote
+# or an assignment -- `$VAR`, `${VAR}`, `$(VAR)`, `VAR=`, `VAR ?=`, `ENV
+# VAR=` -- is a use; the bare word in prose is not.
+DEPENDENCIES_READ = re.compile(r"[$({\[\"']\s*" + DEPENDENCIES_VARIABLE
+                               + r"|" + DEPENDENCIES_VARIABLE + r"\s*[?:+]?=")
 # Where a line naming ../NAME is prose about this very migration rather than
 # something that builds: the declaration file says why the fallback went, and
 # a changelog says when. Markdown goes with them -- a README telling a human
@@ -3701,6 +3882,14 @@ def sibling_readers(project: pathlib.Path, names: list[str]) -> list[tuple[str, 
     # The name must end at the match: ../maelys-system and ../maelys-systemd
     # are different neighbours, and only one of them is pinned here.
     sibling = re.compile(r"\.\./(" + alternatives + r")(?![A-Za-z0-9._-])")
+    # A call clones a pin, so what follows the script is a pin's name or a
+    # shell expansion. Naming the script is not calling it: one product's
+    # source policy exempts it by name in a Python tuple, another's Makefile
+    # explains in a comment what it fetches, and both read as calls to
+    # anything looser. That is the shape of my own first fix, which would
+    # have traded one false line for another.
+    call = re.compile(r"checkout-dependency\.sh[\"']?\s+[\"']?"
+                      r"(?:\$|(?:" + alternatives + r")(?![A-Za-z0-9._-]))")
     found = run(["git", "grep", "-n", "-I", "-E",
                  "-e", r"\.\./(" + alternatives + ")",
                  "-e", r"checkout-dependency\.sh"], cwd=project)
@@ -3713,14 +3902,18 @@ def sibling_readers(project: pathlib.Path, names: list[str]) -> list[tuple[str, 
             continue
         if path not in migrated:
             whole = project / path
-            migrated[path] = whole.is_file() and DEPENDENCIES_VARIABLE in \
-                whole.read_text(encoding="utf-8", errors="replace")
+            migrated[path] = whole.is_file() and bool(DEPENDENCIES_READ.search(
+                whole.read_text(encoding="utf-8", errors="replace")))
+        # The limit of the exemption, stated rather than hidden: a file that
+        # reads the root and carries the fallback on ANOTHER line is silent
+        # here. No product of the fleet is in that state today; the
+        # one-line form, which is the one that has been written, is caught.
         if migrated[path] and DEPENDENCIES_VARIABLE not in text:
             continue
         match = sibling.search(text)
         if match:
             readers.append((path, int(number), match.group(1), text.strip()))
-        elif "checkout-dependency.sh" in text:
+        elif call.search(text):
             readers.append((path, int(number), "", text.strip()))
     return readers
 
@@ -4283,6 +4476,8 @@ def text_adopt(data: dict) -> str:
         lines.append(f"{entry['action']:<8} {entry['path']}" + (f" ({entry['reason']})" if "reason" in entry else ""))
         if data["mode"] == "plan" and entry.get("diff"):
             lines.extend("         " + line for line in entry["diff"].rstrip("\n").split("\n"))
+    for entry in data.get("impact", []):
+        lines.append(f"{entry['version']:<8} {entry['says']}")
     if data.get("moved"):
         verb = "moves" if data["mode"] == "plan" else "moved"
         lines.append(f"{verb:<8} {data['moved']} -> {DECLARATION_FILE} (git mv, its history follows)")
@@ -4355,6 +4550,15 @@ def text_cut(data: dict) -> str:
         lines.append(f"{'cut':<8} after-version also committed " + " ".join(data["regenerated"]))
     if data.get("commit"):
         lines.append(f"{'commit':<8} {data['commit']}")
+    for deployment in data.get("deployments") or []:
+        lines.append(f"{'approve':<8} {deployment['environment']} of {deployment['run']}")
+        lines.append(f"{'':<8} {deployment['approve']}")
+    if data.get("pushed") and "deployments" in data:
+        # Said whether or not one is waiting now: the channel's deployment
+        # does not exist until the release workflow has finished, so "none
+        # pending" at this moment is not "nothing left to approve".
+        lines.append(f"{'note':<8} a channel asks for its own approval, and it becomes pending only once"
+                     " the release workflow has finished: look again then")
     lines.append(f"cut: {data.get('next') or ('ready' if data['ready'] else 'not ready')}")
     return "\n".join(lines) + "\n"
 
