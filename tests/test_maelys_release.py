@@ -2379,6 +2379,38 @@ class RehearsalEnvironmentTest(unittest.TestCase):
         self.assertIn("already says", channel)
 
 
+class WhatTheScriptRecordedTest(unittest.TestCase):
+    """Two conditions that were never true, found by the things that read them."""
+
+    def test_the_marker_keeps_what_the_script_recorded(self) -> None:
+        """hashFiles only sees GITHUB_WORKSPACE, and runner.temp is outside it.
+
+        The condition was empty for every product since 0.32.0: the step
+        never ran, the marker was composed without a single recorded field,
+        and `rehearse --channel` reported a disagreement on each of them --
+        which is how it was found, by the one thing that compares the two.
+        """
+        channel = (ROOT / ".github" / "workflows" / "channel.yml").read_text(encoding="utf-8")
+        # runner.temp stays: it is where the script writes and where the
+        # artifact is read from. What had to go is hashFiles reaching for it.
+        self.assertNotIn("hashFiles(", channel,
+                         "hashFiles only sees GITHUB_WORKSPACE; the shell decides")
+        self.assertIn('if [ -s "$CHANNEL_RECORD" ]; then echo "recorded=true"', channel)
+        self.assertIn("steps.publish.outputs.recorded == 'true'", channel)
+
+    def test_protect_writes_what_it_reported(self) -> None:
+        """It wrote the observed intersection and reported the computed legs.
+
+        Right after an adoption that renames a leg, --apply required the old
+        name still present in older pull requests: the lock 0.43.0 was
+        written to prevent, in the command written to prevent it.
+        """
+        source = CLI.read_text(encoding="utf-8")
+        body = source.split("PROTECTION_SHAPE, \"required_status_checks\"", 1)[1].split("}", 1)[0]
+        self.assertIn("proposed", body)
+        self.assertNotIn('"contexts": seen', source)
+
+
 class SaidWhereItIsReadTest(unittest.TestCase):
     """Four things the socle knew and did not say where anyone looks."""
 

@@ -3748,7 +3748,13 @@ def handle_protect(invocation: Invocation) -> tuple[dict, int]:
                           f"no check run was seen on {branch} of {repository}.",
                           "A protection that requires nothing is not what this writes. Let the branch run"
                           " its checks once, then protect it.")
-        body = {**PROTECTION_SHAPE, "required_status_checks": {"strict": False, "contexts": seen}}
+        # What the report showed, never what was merely observed. `seen` is
+        # the intersection of recent pull requests; `proposed` is that plus
+        # the socle's computed legs. Writing `seen` meant that right after an
+        # adoption renaming a leg, --apply required the old name still
+        # present in older pull requests -- the very lock this command was
+        # written to prevent, in the command itself.
+        body = {**PROTECTION_SHAPE, "required_status_checks": {"strict": False, "contexts": proposed}}
         with tempfile.TemporaryDirectory(prefix="maelys-release-protect.") as temp:
             payload = pathlib.Path(temp) / "protection.json"
             payload.write_text(json.dumps(body), encoding="utf-8")
