@@ -271,6 +271,9 @@ class Declarations:
         # the hosted default. Honoured on a private repository only.
         self.macos_runner: list[str] = []
         self.runners: dict[str, list[str]] = {}
+        # Whether this product's ci.yml calls the socle's check job, which is
+        # what decides who a coming change to that workflow reaches.
+        self.calls_socle_ci = False
         # "reviewer", "none", or "" when this repository has not chosen.
         self.gate = ""
         # What cut runs between writing VERSION and the bump commit, for a
@@ -709,6 +712,7 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
     if ci.is_file():
         text = ci.read_text(encoding="utf-8")
         if CI_USES.search(text):
+            decl.calls_socle_ci = True
             decl.add("ok", ".github/workflows/ci.yml calls check-product.yml of the socle")
             for number in sanitizers_twice(text):
                 decl.add("note", f".github/workflows/ci.yml line {number} sanitizes, and the socle's own"
@@ -873,7 +877,41 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
                          " [channels]: nothing calls it, and no channel job is written")
     read_branch(decl)
     read_strategy(decl)
+    read_coming(decl)
     return decl
+
+
+# What a later version will refuse, said a version early. A rule that turns
+# into a violation without notice is the cadence complaint in its sharpest
+# form: a product adopts on Tuesday, conformant, and is in violation on
+# Wednesday for something nobody told it was coming. Each entry names the
+# version it bites in, what the product must do, and which products it
+# reaches; `check` says it as a note, and the test below refuses to let an
+# announcement outlive the version that was supposed to honour it -- so an
+# entry still here when that version ships fails the socle's own suite until
+# the rule is written or the date is moved, in the open.
+COMING: tuple[tuple[str, str, str], ...] = (
+    ("0.52.0", "socle",
+     "the matrix legs of check-product.yml are renamed -- 'check (ubuntu-26.04)',"
+     " 'check (ubuntu-26.04-arm)' and 'check (macos-15)' become 'check (linux)',"
+     " 'check (linux-arm64)' and 'check (macos)', so that a leg's name stops carrying"
+     " the version of a machine. Every branch protection naming the old contexts has"
+     " to be narrowed before that adoption and widened after it, in that order:"
+     " 'maelys-release adopt --apply' refuses if you skip the first half"),
+)
+
+
+def read_coming(decl: Declarations) -> None:
+    """Announce what a later version will refuse, to the products it reaches."""
+    here = version_tuple((socle_root() / "VERSION").read_text(encoding="utf-8").strip())
+    for version, reaches, says in COMING:
+        if version_tuple(version) <= here:
+            continue
+        if reaches == "socle" and not decl.calls_socle_ci:
+            continue
+        if reaches == "channels" and not decl.channels:
+            continue
+        decl.add("note", f"coming in maelys-release {version}: {says}", "conventions")
 
 
 def declared_mechanism(project: pathlib.Path, requested: str = "") -> str:

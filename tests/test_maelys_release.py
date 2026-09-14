@@ -2939,6 +2939,46 @@ class TagDeploymentsTest(unittest.TestCase):
         self.assertIn("look again then", text)
 
 
+class ComingRuleTest(unittest.TestCase):
+    """What a later version will refuse, said to the products it reaches."""
+
+    def setUp(self) -> None:
+        self.product = Product()
+        self.dir = str(self.product.dir)
+        self.addCleanup(self.product.close)
+        self.product.run("adopt", self.dir, "--apply")
+
+    def notes(self):
+        return [check["message"] for check in self.product.json("check", self.dir)["data"]["checks"]
+                if check["message"].startswith("coming in ")]
+
+    def test_a_product_on_the_shared_ci_is_told(self) -> None:
+        said = self.notes()
+        self.assertEqual(len(said), len(MODULE.COMING), said)
+        for message in said:
+            self.assertIn("coming in maelys-release", message)
+
+    def test_it_is_a_note_and_never_a_violation(self) -> None:
+        """Nothing has changed yet; being told is not being in breach."""
+        data = self.product.json("check", self.dir)["data"]
+        self.assertTrue(data["conventions"]["valid"], data["conventions"]["violations"])
+        self.assertFalse([violation for violation in data["violations"] if "coming in" in violation])
+
+    def test_a_repository_the_change_does_not_reach_is_not_told(self) -> None:
+        """`socle` reaches the products that call check-product.yml; one that
+        does not is told nothing about a change to that workflow."""
+        ci = self.product.dir / ".github" / "workflows" / "ci.yml"
+        ci.write_text("name: ci\n\njobs:\n  mine:\n    runs-on: ubuntu-26.04\n", encoding="utf-8")
+        said = [check["message"] for check
+                in self.product.json("check", self.dir, expect=2)["data"]["checks"]
+                if check["message"].startswith("coming in ")]
+        self.assertEqual(said, [])
+
+    def test_a_version_already_shipped_says_nothing(self) -> None:
+        here = MODULE.version_tuple((ROOT / "VERSION").read_text(encoding="utf-8").strip())
+        self.assertTrue(all(MODULE.version_tuple(version) > here for version, _, _ in MODULE.COMING))
+
+
 class SanitizersTwiceTest(unittest.TestCase):
     """A product that sanitizes while the socle's job sanitizes too.
 
@@ -4299,6 +4339,28 @@ class UnitTest(unittest.TestCase):
         self.assertTrue(held, "no entry is under the rule yet")
         for version, body in held:
             self.assertIn("- **Impact.**", body, f"{version} does not say its impact on a product")
+
+    def test_an_announcement_does_not_outlive_the_version_that_honours_it(self) -> None:
+        """The half of "announce a contract change early" that a test can hold.
+
+        A rule that turns into a violation without notice is the cadence
+        complaint at its sharpest: a product adopts on Tuesday, conformant,
+        and is in violation on Wednesday for something nobody told it was
+        coming. `COMING` says it a version early -- and this refuses to let
+        the announcement outlive the version that was supposed to honour it,
+        so an entry still here when that version ships fails the suite until
+        the rule is written or the date is moved, in the open.
+        """
+        here = MODULE.version_tuple((ROOT / "VERSION").read_text(encoding="utf-8").strip())
+        for version, reaches, says in MODULE.COMING:
+            self.assertRegex(version, r"^[0-9]+\.[0-9]+\.[0-9]+$")
+            self.assertGreater(MODULE.version_tuple(version), here,
+                               f"{version} is announced and has shipped: write the rule or move the date")
+            self.assertIn(reaches, ("socle", "channels", "all"))
+            self.assertTrue(says.strip(), version)
+            # It says what the product must do, not what the socle will feel
+            # like doing: the line is read by someone deciding whether to act.
+            self.assertGreater(len(says), 80, version)
 
     def test_linux_baseline_is_ubuntu_26(self) -> None:
         self.assertEqual(MODULE.DEFAULT_IMAGE, "ubuntu:26.04")
