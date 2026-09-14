@@ -3606,11 +3606,16 @@ class DependenciesApartTest(unittest.TestCase):
         CI -- which is the worst place to find out.
         """
         check_product = (ROOT / ".github" / "workflows" / "check-product.yml").read_text(encoding="utf-8")
-        self.assertEqual(check_product.count("steps.socle.outputs.apart == ''"), 3)
-        self.assertEqual(check_product.count("steps.socle.outputs.apart != ''"), 3)
+        # Every job that fetches the socle clones too, and each has to know
+        # the layout. Counted from the workflow rather than written down: the
+        # number was three, and the product-legs job of 0.55.0 made it four.
+        cloning = check_product.count("- name: Fetch the socle this workflow comes from")
+        self.assertEqual(cloning, 4)
+        self.assertEqual(check_product.count("steps.socle.outputs.apart == ''"), cloning)
+        self.assertEqual(check_product.count("steps.socle.outputs.apart != ''"), cloning)
         source = CLI.read_text(encoding="utf-8")
         self.assertEqual(check_product.count('sh scripts/checkout-dependencies.sh'
-                                            ' "$RUNNER_TEMP/dependencies" >>"$GITHUB_ENV"'), 3)
+                                            ' "$RUNNER_TEMP/dependencies" >>"$GITHUB_ENV"'), cloning)
         source = CLI.read_text(encoding="utf-8")
         self.assertIn("DEPENDENCIES_APART", source)
         self.assertIn("checkout-dependencies.sh /work/dependencies", source)
@@ -3858,9 +3863,9 @@ class PackageTargetsTest(unittest.TestCase):
 
     def test_the_section_names_targets_of_this_release(self) -> None:
         declared = "[targets]\nlinux-x86_64\nlinux-arm64\nmacos-arm64\n\n[package]\nlinux-x86_64\n"
-        self.assertEqual(MODULE.parse_release(declared)[-1], ["linux-x86_64"])
+        self.assertEqual(MODULE.parse_release(declared)[-2], ["linux-x86_64"])
         # Without [targets], the socle's three targets are the release's.
-        self.assertEqual(MODULE.parse_release("[package]\nmacos-arm64\n")[-1], ["macos-arm64"])
+        self.assertEqual(MODULE.parse_release("[package]\nmacos-arm64\n")[-2], ["macos-arm64"])
         for text, expected in (("[package]\nwasm32\n", "not a target of this release"),
                                ("[package]\nlinux-x86_64 linux-x86_64\n", "twice")):
             with self.assertRaises(ValueError) as refusal:
@@ -3895,6 +3900,134 @@ class PackageTargetsTest(unittest.TestCase):
         nothing = subprocess.run(["jq", "-e", guard], input='{"include":[{"target":"x","package":false}]}',
                                  capture_output=True, text=True)
         self.assertNotEqual(nothing.returncode, 0)
+
+
+class WidenAfterTheMergeTest(unittest.TestCase):
+    """Three findings of maelys-json, after adopting 0.54.0 as written.
+
+    The order said narrow, adopt, widen, and not "merged": widening before
+    the adoption's pull request merges requires names only that pull request
+    produces, and every other open pull request waits forever.
+    """
+
+    def protect(self, absent: list, apply: bool = True, allow: bool = False, open_pulls=()):
+        saved = (MODULE.github_api, MODULE.github_read, MODULE.socle_check_contexts, MODULE.github_repository,
+                 MODULE.observed_contexts, MODULE.shutil.which, MODULE.github_list)
+        MODULE.github_api = lambda path: {"default_branch": "main"}
+        MODULE.github_read = lambda path: ("ok", {"required_status_checks": {"contexts": []}}) \
+            if "/protection" in path else ("ok", [])
+        MODULE.socle_check_contexts = lambda project: ("check", ["check / check (linux)"])
+        MODULE.github_repository = lambda project: "o/r"
+        seen = [] if absent else ["check / check (linux)"]
+        MODULE.observed_contexts = lambda repository, branch, samples=3: (
+            seen, [], {"heads": 3, "ever": ["check / check (ubuntu-26.04)"] if absent else seen})
+        MODULE.shutil.which = lambda name: "/usr/bin/" + name
+        MODULE.github_list = lambda path: [{"number": number} for number in open_pulls]
+        flags = {"--apply": apply, "--allow-lock": allow}
+        invocation = type("I", (), {"operands": ["."], "flag": lambda self, name: flags.get(name, False),
+                                    "option": lambda self, name, default="": default, "format": "json"})()
+        try:
+            return MODULE.handle_protect(invocation)[0]
+        finally:
+            (MODULE.github_api, MODULE.github_read, MODULE.socle_check_contexts, MODULE.github_repository,
+             MODULE.observed_contexts, MODULE.shutil.which, MODULE.github_list) = saved
+
+    def test_widening_before_the_merge_is_refused_and_names_the_open_pulls(self) -> None:
+        with self.assertRaises(MODULE.Failure) as refusal:
+            self.protect(absent=True, open_pulls=(12, 15))
+        self.assertIn("no merged pull request", refusal.exception.message)
+        self.assertIn("Merge the adoption first", refusal.exception.hint)
+        self.assertIn("#12, #15", refusal.exception.hint)
+
+    def test_once_merged_it_widens(self) -> None:
+        written = []
+        saved = MODULE.run
+        MODULE.run = lambda command, cwd=None, env=None: written.append(command) or \
+            subprocess.CompletedProcess(command, 0, "", "")
+        try:
+            report = self.protect(absent=False)
+        finally:
+            MODULE.run = saved
+        self.assertTrue(report["applied"])
+
+    def test_a_job_gone_from_the_workflows_is_not_called_intermittent(self) -> None:
+        work = pathlib.Path(tempfile.mkdtemp(prefix="maelys-release-gone."))
+        self.addCleanup(shutil.rmtree, work, True)
+        (work / ".github" / "workflows").mkdir(parents=True)
+        (work / ".github" / "workflows" / "ci.yml").write_text("jobs:\n  mbedtls:\n    runs-on: x\n")
+        text = MODULE.text_protect({"branch": "main", "repository": "o/r", "protected": True, "caller": "check",
+                                    "socleContexts": [], "proposed": [], "required": [], "requiredButNeverRun": [],
+                                    "missingFromRuns": [], "fromTag": [], "applied": False, "pullRequests": 3,
+                                    "seenOnSome": {"fuzz": 1, "mbedtls (macos-15)": 2}, "gone": ["fuzz"]})
+        self.assertIn("fuzz is left out: no workflow of this repository defines it any more", text)
+        self.assertIn("mbedtls (macos-15) is left out: 2 of 3", text)
+
+    def test_preflight_between_two_releases_notes_the_release_instead_of_failing(self) -> None:
+        work = pathlib.Path(tempfile.mkdtemp(prefix="maelys-release-between."))
+        self.addCleanup(shutil.rmtree, work, True)
+        def git(*arguments):
+            subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid",
+                            "-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false", *arguments],
+                           cwd=work, check=True, capture_output=True)
+        git("init", "-q"); (work / "VERSION").write_text("0.2.0\n")
+        git("add", "-A"); git("commit", "-q", "-m", "0.2.0"); git("tag", "-a", "-m", "0.2.0", "v0.2.0")
+        between = [found for found in MODULE.tag_checks(work, "0.2.0", between_releases=True)
+                   if "v0.2.0" in found[1] and "annotated" not in found[1] and "signed" not in found[1]]
+        self.assertEqual([status for status, _ in between], ["note"])
+        # cut keeps the failure: there, an existing tag is a collision.
+        collision = [found for found in MODULE.tag_checks(work, "0.2.0")
+                     if "already exists" in found[1]]
+        self.assertEqual([status for status, _ in collision], ["fail"])
+
+
+class ProductLegsTest(unittest.TestCase):
+    """A leg of the product's own, run by the shared CI.
+
+    maelys-git-core tests with and without an agent enabled, on two
+    systems, and the shared matrix had no way to say so — so it kept a CI of
+    its own. A [check] leg is a name, a platform and a command, and runs as
+    `check (NAME)` beside the socle's three.
+    """
+
+    WORKFLOW = (ROOT / ".github" / "workflows" / "check-product.yml").read_text(encoding="utf-8")
+    CALL = ("jobs:\n  check:\n    uses: maelys-dev/maelys-release/.github/workflows/check-product.yml@"
+            + "a" * 40 + " # v9.9.9\n    with:\n      product: p\n")
+
+    def test_a_leg_cannot_take_a_name_the_socle_uses(self) -> None:
+        """A protection requires by name, and two jobs reporting one name are
+        a protection that cannot tell them apart."""
+        for reserved in MODULE.RESERVED_LEGS:
+            with self.assertRaises(ValueError):
+                MODULE.parse_release(f"[check]\n{reserved} linux make check\n")
+
+    def test_the_call_carries_the_legs_and_takes_them_away_again(self) -> None:
+        written = MODULE.ci_macos_runner(self.CALL, {}, [("agent-off", "linux", "make check AGENT='off'")])
+        self.assertIn("      legs: '", written)
+        self.assertIn("AGENT=''off''", written, "a quote is written twice in single-quoted YAML")
+        self.assertEqual(MODULE.ci_macos_runner(written, {}, []), self.CALL)
+
+    def test_protect_requires_them_by_the_name_they_run_as(self) -> None:
+        work = pathlib.Path(tempfile.mkdtemp(prefix="maelys-release-legs."))
+        self.addCleanup(shutil.rmtree, work, True)
+        (work / ".github" / "workflows").mkdir(parents=True)
+        (work / ".github" / "workflows" / "ci.yml").write_text(
+            MODULE.ci_macos_runner(self.CALL, {}, [("agent-off", "linux", "make check AGENT=off")]))
+        caller, contexts = MODULE.socle_check_contexts(work)
+        self.assertEqual(caller, "check")
+        self.assertIn("check / check (agent-off)", contexts)
+        self.assertIn("check / check (linux)", contexts)
+
+    def test_the_workflow_runs_them_with_the_same_setup_and_the_same_runner_rule(self) -> None:
+        legs = self.WORKFLOW.split("\n  legs:\n", 1)[1].split("\n  fuzz:\n", 1)[0]
+        self.assertIn("name: check (${{ matrix.name }})", legs)
+        self.assertIn("include: ${{ fromJSON(inputs.legs) }}", legs)
+        # A pull request reaches this job, so a public repository keeps the
+        # hosted runner whatever it declares.
+        self.assertEqual(legs.count("github.event.repository.private &&"), 3)
+        self.assertIn("Fetch the socle this workflow comes from", legs)
+        self.assertIn('LEG_COMMAND: ${{ matrix.command }}', legs)
+        # The drift check belongs to the socle's own linux leg alone.
+        self.assertNotIn("Release socle drift", legs)
 
 
 class MovedPinNamedTest(unittest.TestCase):
@@ -4299,7 +4432,7 @@ class RunnerDeclarationTest(unittest.TestCase):
         return MODULE.parse_release(textwrap.dedent(text))
 
     def test_labels_are_read(self) -> None:
-        *_, runner, runners, _, _, _, _, unknown, _ = self.parse("[runners]\nmacos self-hosted macOS ARM64\n")
+        *_, runner, runners, _, _, _, _, unknown, _, _ = self.parse("[runners]\nmacos self-hosted macOS ARM64\n")
         self.assertEqual(runner, ["self-hosted", "macOS", "ARM64"])
         self.assertEqual(runners, {"macos": ["self-hosted", "macOS", "ARM64"]})
         self.assertEqual(unknown, [])
@@ -4308,7 +4441,7 @@ class RunnerDeclarationTest(unittest.TestCase):
         """A private repository that forbids hosted runners could point the
         macOS leg elsewhere and not the two Linux ones, which are half its
         matrix and all of its fuzz and sanitizers jobs."""
-        *_, runners, _, _, _, _, unknown, _ = self.parse(
+        *_, runners, _, _, _, _, unknown, _, _ = self.parse(
             "[runners]\nlinux-x86_64 self-hosted Linux X64\nlinux-arm64 lima-arm64\n")
         self.assertEqual(runners, {"linux-x86_64": ["self-hosted", "Linux", "X64"],
                                    "linux-arm64": ["lima-arm64"]})
@@ -4380,7 +4513,7 @@ class SbomDeclarationTest(unittest.TestCase):
         return MODULE.parse_release(textwrap.dedent(text))
 
     def test_one_glob_is_read(self) -> None:
-        _, _, _, _, sbom, _, _, _, _, _, _, unknown, _ = self.parse("""\
+        _, _, _, _, sbom, _, _, _, _, _, _, unknown, _, _ = self.parse("""\
             [sbom]
             *.spdx.json
             """)
@@ -4394,7 +4527,7 @@ class SbomDeclarationTest(unittest.TestCase):
         self.assertIn("holds one glob", str(refusal.exception))
 
     def test_the_section_is_optional(self) -> None:
-        _, _, _, _, sbom, _, _, _, _, _, _, _, _ = self.parse("[manifest]\n*.wasm\n")
+        _, _, _, _, sbom, _, _, _, _, _, _, _, _, _ = self.parse("[manifest]\n*.wasm\n")
         self.assertEqual(sbom, "")
 
     def test_it_renders_into_the_workflow(self) -> None:
@@ -4646,23 +4779,23 @@ class UnitTest(unittest.TestCase):
 
     def test_parse_release(self) -> None:
         self.assertEqual(MODULE.parse_release("[targets]\nlinux-arm64\nwasm32 ubuntu-26.04\n"),
-                         ([("linux-arm64", ""), ("wasm32", "ubuntu-26.04")], [], [], {}, "", [], {}, False, "", "", "", [], []))
+                         ([("linux-arm64", ""), ("wasm32", "ubuntu-26.04")], [], [], {}, "", [], {}, False, "", "", "", [], [], []))
         self.assertEqual(MODULE.parse_release("[targets]\nmacos-arm64 self-hosted ARM64\n"),
-                         ([("macos-arm64", ["self-hosted", "ARM64"])], [], [], {}, "", [], {}, False, "", "", "", [], []))
-        self.assertEqual(MODULE.parse_release("[manifest]\n*.wasm\n"), ([], ["*.wasm"], [], {}, "", [], {}, False, "", "", "", [], []))
+                         ([("macos-arm64", ["self-hosted", "ARM64"])], [], [], {}, "", [], {}, False, "", "", "", [], [], []))
+        self.assertEqual(MODULE.parse_release("[manifest]\n*.wasm\n"), ([], ["*.wasm"], [], {}, "", [], {}, False, "", "", "", [], [], []))
         self.assertEqual(MODULE.parse_release("[channels]\nnpm github-packages\n"),
-                         ([], [], [("npm", "github-packages")], {}, "", [], {}, False, "", "", "", [], []))
-        self.assertEqual(MODULE.parse_release("[gate]\nnone\n"), ([], [], [], {}, "", [], {}, False, "", "none", "", [], []))
-        self.assertEqual(MODULE.parse_release("[gate]\nreviewer\n"), ([], [], [], {}, "", [], {}, False, "", "reviewer", "", [], []))
-        self.assertEqual(MODULE.parse_release("# nothing declared\n"), ([], [], [], {}, "", [], {}, False, "", "", "", [], []))
+                         ([], [], [("npm", "github-packages")], {}, "", [], {}, False, "", "", "", [], [], []))
+        self.assertEqual(MODULE.parse_release("[gate]\nnone\n"), ([], [], [], {}, "", [], {}, False, "", "none", "", [], [], []))
+        self.assertEqual(MODULE.parse_release("[gate]\nreviewer\n"), ([], [], [], {}, "", [], {}, False, "", "reviewer", "", [], [], []))
+        self.assertEqual(MODULE.parse_release("# nothing declared\n"), ([], [], [], {}, "", [], {}, False, "", "", "", [], [], []))
         # A section this socle does not know is named and skipped, never fatal:
         # a product pins the socle by commit, and losing its targets in
         # silence on an older socle is worse than an unapplied section.
         self.assertEqual(MODULE.parse_release("[targets]\nlinux-arm64\n[bsd]\nx\n"),
-                         ([("linux-arm64", "")], [], [], {}, "", [], {}, False, "", "", "", ["[bsd] at line 3"], []))
+                         ([("linux-arm64", "")], [], [], {}, "", [], {}, False, "", "", "", ["[bsd] at line 3"], [], []))
         # A version materialised twice: the command that regenerates the second.
         self.assertEqual(MODULE.parse_release("[cut]\nafter-version bash scripts/header.sh\n"),
-                         ([], [], [], {}, "", [], {}, False, "", "", "bash scripts/header.sh", [], []))
+                         ([], [], [], {}, "", [], {}, False, "", "", "bash scripts/header.sh", [], [], []))
         for text in ("linux-arm64\n",                      # outside a section
                      "[targets]\nwasm32\n",                # no runner and no default
                      "[targets]\nWASM\n",                  # not a target name

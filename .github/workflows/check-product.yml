@@ -68,6 +68,15 @@ on:
         type: boolean
         default: false
 
+      legs:
+        description: >-
+          The product's own legs, as JSON: [{"name", "platform", "command"}],
+          platform one of linux, linux-arm64, macos. Written by adopt from
+          [check] of maelys-release.conf; each runs as `check (NAME)`, the
+          name a branch protection requires.
+        required: false
+        type: string
+        default: "[]"
       linux_x86_64_runner:
         description: >-
           Runner for the ubuntu-26.04 leg, and for the fuzz and sanitizers
@@ -214,6 +223,108 @@ jobs:
         run: |
           ${{ steps.socle.outputs.dir }}/bin/maelys-release check . --product "${{ inputs.product }}" \
             ${{ inputs.docs_contract && '--docs-contract' || '' }}
+
+  legs:
+    # The product's own legs, declared in [check] of maelys-release.conf and
+    # written into this call by adopt: a name, the platform it runs on, and a
+    # command. maelys-git-core tests with and without an agent enabled, which
+    # this matrix had no way to say, so it kept a CI of its own. The setup is
+    # the check job's, copied as the fuzz and sanitizers jobs copy it; the
+    # runner follows the same rule, since a pull request reaches this job.
+    if: inputs.legs != '' && inputs.legs != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(inputs.legs) }}
+    name: check (${{ matrix.name }})
+    runs-on: >-
+      ${{ fromJSON(matrix.platform == 'macos'
+        && (github.event.repository.private && inputs.macos_runner || '"macos-15"')
+        || matrix.platform == 'linux-arm64'
+        && (github.event.repository.private && inputs.linux_arm64_runner || '"ubuntu-26.04-arm"')
+        || (github.event.repository.private && inputs.linux_x86_64_runner || '"ubuntu-26.04"')) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Fetch the socle this workflow comes from
+        id: socle
+        shell: bash
+        # The socle commit is read from the product's release.yml when the
+        # socle generated it, and otherwise from the ci.yml line that calls
+        # this very workflow: a product that keeps a release mechanism of
+        # its own still names the socle there, and can use this CI.
+        run: |
+          set -euo pipefail
+          sha="$(sed -n 's|.*maelys-release/.github/workflows/release.yml@\([0-9a-f]\{40\}\).*|\1|p' .github/workflows/release.yml 2>/dev/null || true)"
+          if [ -z "$sha" ]; then
+            sha="$(sed -n 's|.*maelys-release/.github/workflows/check-product\.yml@\([0-9a-f]\{40\}\).*|\1|p' .github/workflows/*.yml | head -n 1)"
+          fi
+          test -n "$sha" || { echo "no workflow of this repository names a maelys-release commit" >&2; exit 1; }
+          socle="$RUNNER_TEMP/maelys-release"
+          git init -q "$socle"
+          git -C "$socle" fetch -q --depth 1 https://github.com/maelys-dev/maelys-release.git "$sha"
+          git -C "$socle" checkout -q FETCH_HEAD
+          echo "dir=$socle" >>"$GITHUB_OUTPUT"
+          "$socle/bin/maelys-release" declarations . --product "${{ inputs.product }}" --format json --compact >"$RUNNER_TEMP/declarations.json"
+          python3 - "$RUNNER_TEMP/declarations.json" >>"$GITHUB_OUTPUT" <<'PY'
+          import json, sys
+          data = json.load(open(sys.argv[1]))["data"]
+          print("dependencies=" + " ".join(data["dependencies"]))
+          print("apart=" + ("1" if data.get("declared", {}).get("dependenciesApart") else ""))
+          print("linux_packages=" + data["linuxPackages"])
+          print("macos_packages=" + data["macosPackages"])
+          PY
+      - name: Pinned dependency checkouts, beside the product
+        # The layout a product has until it declares [dependencies] apart:
+        # the checkouts land next to it, which is what a `?= ../NAME`
+        # default reads -- and also where the working copies of whoever
+        # develops those dependencies live.
+        if: steps.socle.outputs.dependencies != '' && steps.socle.outputs.apart == ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in ${{ steps.socle.outputs.dependencies }}; do sh scripts/checkout-dependency.sh "$name"; done
+      - name: Pinned dependency checkouts, apart
+        # Declared: the socle materialises them away from the product and
+        # gives the root. ../NAME then names nothing here, so a build that
+        # still assumes a sibling fails with the product's own message
+        # rather than by silently reading whatever sits beside it. It is
+        # also what makes a build here and a build on a machine the same
+        # thing: both read the root.
+        if: steps.socle.outputs.dependencies != '' && steps.socle.outputs.apart != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The managed script, the same one the product's own jobs run, so
+          # there is one way of cloning and not two. The guard is because
+          # this step precedes the drift check: a product that declared
+          # without re-adopting would otherwise die on "No such file"
+          # instead of reading what check has to say.
+          test -f scripts/checkout-dependencies.sh || {
+            echo "::error::scripts/checkout-dependencies.sh is missing: run 'maelys-release adopt . --apply'" >&2
+            exit 1
+          }
+          sh scripts/checkout-dependencies.sh "$RUNNER_TEMP/dependencies" >>"$GITHUB_ENV"
+      - name: Install Linux packages
+        if: runner.os == 'Linux'
+        # The runner image carries third-party apt sources of its own; one of
+        # them breaking must not fail an install of Ubuntu archive packages.
+        # The update reports, the install decides.
+        run: |
+          sudo apt-get update || echo "::warning::apt-get update reported errors; the install decides"
+          sudo apt-get install -y build-essential clang ${{ steps.socle.outputs.linux_packages }}
+      - name: Install macOS packages
+        if: runner.os == 'macOS' && steps.socle.outputs.macos_packages != ''
+        run: brew install ${{ steps.socle.outputs.macos_packages }}
+      - name: Require Apple Silicon
+        if: runner.os == 'macOS'
+        run: test "$(uname -m)" = arm64
+      - name: Check
+        shell: bash
+        env:
+          LEG_COMMAND: ${{ matrix.command }}
+        run: eval "$LEG_COMMAND"
 
   fuzz:
     if: inputs.fuzz_command != ''

@@ -38,9 +38,11 @@ when it has what they name.
   protect DIR` computes them and `--apply` writes them, as a ruleset when a
   ruleset protects the branch. When a socle renames a required check,
   **narrow, adopt, widen**: `protect DIR --without-legs --apply`, then
-  `adopt DIR --apply`, then `protect DIR --apply`. `adopt --apply` refuses
-  if the first step was skipped, because a required check nothing produces
-  blocks every merge.
+  `adopt DIR --apply` and merge that adoption, then `protect DIR --apply`.
+  `adopt --apply` refuses if the first step was skipped, and `protect
+  --apply` refuses before the adoption is merged, because a required check
+  nothing produces blocks every merge. A pull request opened before the
+  adoption merges the default branch to report the new names.
 - `adopt DIR` without `--apply` prints the plan and, for every socle version
   between this repository's pin and the checkout, the line that says what
   that version asks of a product. Read those lines, not the changelog.

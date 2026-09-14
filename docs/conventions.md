@@ -1097,6 +1097,37 @@ request?" answered nothing for exactly the people who had asked. Those
 nineteen say what each version asks of a product and no more; the entry
 above each is the account, and it is contemporary where the line is not.
 
+## A product's own legs, and targets that only verify
+
+**`[check]` adds legs of the product's own to the shared CI.** One line per
+leg — a name, the platform it runs on (`linux`, `linux-arm64`, `macos`), and
+the command:
+
+```
+[check]
+agent-off linux make check AGENT=off
+```
+
+Each runs as `check (NAME)` beside the socle's three, with the same setup
+and the same runner rule, and `protect` requires it by that name. A name the
+socle's own jobs use is refused, since two jobs reporting one name are a
+protection that cannot tell them apart. maelys-git-core tests with and
+without an agent enabled, which the shared matrix had no way to say.
+
+**`[package]` names the targets that package; every target verifies.** A
+source archive is the same tree everywhere and not the same gzip bytes
+everywhere, so a product publishing one could not verify on three targets
+without three archives clashing at assembly — which the socle rightly
+refuses. maelys-http went down to one target and lost the replay of its
+tests at the tag on arm64 and macOS. A release that packages nowhere is
+refused.
+
+**A release that moves a pin names the dependency.** `cut` refuses an entry
+that does not name every dependency whose pin moved since the last tag. The
+socle does not judge the version number — the fleet does cross a series in
+a patch — it makes the move impossible to miss, in the entry and in the tag
+annotation that entry becomes.
+
 ## Blocks a repository does not write itself
 
 **A managed block belongs to the repository that writes it, and each
@@ -1495,12 +1526,19 @@ nothing produces blocks every merge:
 
 ```sh
 maelys-release protect DIR --without-legs --apply   # narrow: the old legs leave
-maelys-release adopt DIR --apply                    # the new names start reporting
+maelys-release adopt DIR --apply                    # then merge that pull request
 maelys-release protect DIR --apply                  # widen: the new legs are required
 ```
 
 Skip the first line and `adopt --apply` refuses, naming the contexts that
-would vanish. A branch protected by a ruleset is written as a ruleset —
+would vanish. **Widen only after the adoption is merged.** 0.54.0 printed
+this order without that word, and maelys-json followed it as written: between
+the widening and the merge, the default branch requires names that only the
+adoption's pull request produces, so every other open pull request waits for
+a check that never reports. Theirs had none open; a product with two would
+have locked. Since 0.55.0 `protect --apply` refuses while no merged pull
+request has run under the names it is about to require, and names the open
+pull requests that will have to merge the default branch to report them. A branch protected by a ruleset is written as a ruleset —
 `protect --apply` updates it in place, every other rule sent back as it was
 read — and never gets a classic protection beside it; a ruleset inherited
 from the organisation is refused before anything is sent, since a
