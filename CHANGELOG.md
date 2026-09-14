@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.56.0 — 2026-09-14
+
+- **`[check]` is back, as a workflow of its own.** A leg is a name, a
+  platform and a command; `adopt` writes a `legs` job into `ci.yml` calling
+  `check-legs.yml`, with the setup and the runner rule of the shared CI, and
+  each leg reports as `legs / NAME`. The 0.55.0 candidate put it inside
+  `check-product.yml` and was pulled: a skipped matrix job reports under its
+  unevaluated name, on every pull request of every product that declared
+  nothing. A workflow nobody calls reports nothing. `protect` and the
+  adoption guard read the legs from the declaration, so removing a leg from
+  `[check]` is refused on a branch that requires it, as a rename is.
+  Requested by maelys-git-core.
+- **`check` and `adopt` say what each change touches**: `mechanism`,
+  `pin` or `prose`, beside the path and in the JSON as `touches`, with a
+  count above the plan. maelys-oci read FAILs naming files, with no way short
+  of the diff to tell an editorial pass on a block from a fix to the release.
+- **Impact.** A product that declares `[check]`: adopt, merge, then
+  `protect --apply`. Everyone else: nothing; no managed text changes.
+
 ## 0.55.0 — 2026-09-14
 
 - **The order printed in 0.54.0 was missing a word: merged.** "Narrow,

@@ -30,6 +30,15 @@ so the last step leaves a half-adoption whose report said only `FAIL` beside
 a path. The text now prints the diff under the file and names the command
 that writes it, as `adopt` has always done for its plan.
 
+**A change says what it touches.** The file and its diff still left the
+reader to read the diff to learn whether an adoption rewrote a sentence or the
+release, which maelys-oci asked about sixty-eight tags into the fleet. Each
+file that would change carries one word, in the text beside its path and in
+the JSON as `touches`: `mechanism` when something that runs changes, `pin`
+when only the socle commit a workflow names moves (comments aside), `prose`
+when only text or comments do. A Markdown file is prose; a workflow or a
+script is judged on its lines with comments set apart.
+
 A repository declares its mechanism by the workflow it carries:
 
 | `.github/workflows/release.yml` | Mechanism | What `adopt` writes |
@@ -929,6 +938,10 @@ does not say where either came from.
   pinned socle, so `ci.yml` repeats nothing: same checkouts, same packages,
   `make check` on the three release targets, sanitizers with clang, socle
   drift. Its other jobs are the product's own.
+- A product's own legs, declared in `[check]`, run from a second job adopt
+  writes into `ci.yml`: `legs`, calling `check-legs.yml` at the same pin.
+  That job is the socle's from its name to the next job; the rest of the
+  file stays the product's.
 - Before the first tag of a product, and after any change to
   `dependencies/packages` or `package-release.sh`, `maelys-release rehearse DIR
   TARGET` replays the Linux build job in Docker.
@@ -1096,6 +1109,35 @@ seventeen versions back, so the line that answers "must I open a pull
 request?" answered nothing for exactly the people who had asked. Those
 nineteen say what each version asks of a product and no more; the entry
 above each is the account, and it is contemporary where the line is not.
+
+## A product's own legs
+
+**`[check]` adds legs of the product's own to the CI.** One line per leg — a
+name, the platform it runs on (`linux`, `linux-arm64`, `macos`), and the
+command:
+
+```
+[check]
+agent-off linux make check AGENT=off
+sanitized-cloud macos make check SANITIZERS=address,undefined CLOUD=ON
+```
+
+`adopt` writes a job named `legs` into `ci.yml`, calling `check-legs.yml` of
+the pinned socle with the same setup as `check-product.yml` — the pinned
+dependencies, the packages, Apple Silicon — and the same runner rule, since a
+pull request reaches it. Each leg reports as `legs / NAME`, and `protect`
+requires it by that name; a leg removed from `[check]` is a context that
+stops reporting, so the adoption guard refuses it exactly as it refuses a
+renamed socle leg. A job of the product's own already named `legs` is
+refused rather than overwritten. maelys-git-core tests with and without an
+agent enabled, with and without sanitizers, which the shared matrix had no
+way to say.
+
+**A separate workflow, and not a job of `check-product.yml`.** The first
+cut, in the 0.55.0 candidate, was a job gated on its input. GitHub reports a
+skipped matrix job under its unevaluated name, so every pull request of every
+product that declared nothing carried `check / check (${{ matrix.name }})`.
+A workflow that nobody calls reports nothing.
 
 ## Targets that only verify
 
