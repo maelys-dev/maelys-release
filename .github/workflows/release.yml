@@ -141,7 +141,13 @@ permissions:
 
 jobs:
   verify:
-    runs-on: ubuntu-26.04
+    # The declared Linux runner, unconditionally: this workflow starts on a
+    # signed tag or a workflow_dispatch, and both need write access to the
+    # repository. The guard `check-product.yml` carries is about who can open
+    # a pull request, which nobody can do here. And this job checks the
+    # product out before it verifies anything, so a repository that forbids
+    # hosted runners was blocked here, before its first build.
+    runs-on: ${{ fromJSON(inputs.linux_x86_64_runner) }}
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
       matrix: ${{ steps.matrix.outputs.matrix }}
@@ -438,7 +444,10 @@ jobs:
 
   publish:
     needs: [verify, build]
-    runs-on: ubuntu-26.04
+    # The same rule, and the one job holding a write token: a product that
+    # declares its runner puts that token on its own machine, which is its
+    # choice to make and the release environment still stands in front.
+    runs-on: ${{ fromJSON(inputs.linux_x86_64_runner) }}
     environment: ${{ inputs.release_environment }}
     permissions:
       contents: write

@@ -1,5 +1,68 @@
 # Changelog
 
+## 0.53.0 — 2026-09-14
+
+- **`migrate` switched off a signature the operator had asked for.** Two
+  commits passed `-c commit.gpgsign=false` and fell back to an address no
+  account stands behind, so on a default branch that requires signed commits
+  the branch a migration opens could not merge, by construction. It now
+  leaves the operator's identity alone — a clone inherits it — and names a
+  machine identity only where git has none.
+- **What the socle may move is what the socle put there.** A checkout it
+  clones carries a key in its own `.git/config`; without it, detached, clean
+  and from the right remote is indistinguishable from a working copy a build
+  script left detached for an afternoon — and one did, twice in two days, on
+  a repository three products pin. Under the socle's own root the location
+  is proof and the key is written in place, so nothing has to be deleted; a
+  root the operator chose needs the key. And `--directory` is refused when it
+  is the product's own parent, which is where the fleet's working copies live.
+- **One runner rule, where the socle had three.** A declared runner is
+  honoured wherever only a writer can start the workflow; where a pull
+  request can start it, a public repository gets the hosted value whatever
+  it declares. `check-product.yml` is the only file a pull request reaches.
+  This document said "public repositories use GitHub-hosted runners only",
+  which `[targets]` had contradicted since 0.24.0, and `tap.yml` carried the
+  pull-request guard on a workflow no pull request reaches.
+- **The five jobs that could not follow a declaration now do.** `verify` and
+  `publish` of `release.yml`, and the three jobs of `channel.yml`. `verify`
+  checks the product out *before* it verifies anything, so a private
+  repository that forbids hosted runners was stopped there, before its first
+  build — and `adopt` never wrote the runner inputs `release.yml` has
+  offered since 0.24.0, which made them unreachable. Reported by
+  maelys-warden.
+- **A pin is held to its tag.** Line 1 naming a tag that does not point at
+  line 2 is a violation — a published tag never moves, so one of the two is
+  wrong — and a commit carrying no tag at all is a note: a rewritten branch
+  takes it with it, and the pin then resolves nowhere. maelys-git-core has a
+  repository that no longer configures for exactly that reason. Read from
+  the checkout in hand, so it stays offline.
+- **Two series of one repository in one graph is a refusal.** A different
+  commit of the same series stays a note, as before; two series mean a build
+  links one while its own dependency was built against the other. The socle
+  knows the series, never the ABI, and says so.
+- **The socle is materialised like any other dependency**, under the same
+  root, from the `uses:` line — never a pin, and `dependencies/maelys-release.pin`
+  is refused. The neighbour search knows the name under its own variable. I
+  refused this proposal once, arguing an asymmetry that does not exist:
+  `check-product.yml` has cloned the socle at the pinned commit into
+  `$RUNNER_TEMP` since 0.41.0. Reported by maelys-oci, twice.
+- **Three sentences the conventions were missing.** An adoption does not
+  have to be published — one product made eight of its twenty-two releases
+  carry nothing else, then measured the cost and found it in its own
+  coupling rather than in the socle's cadence. A managed block belongs to
+  the repository that writes it, and each verifies its own. A product that
+  names programs runs the conformance kit inside its own check; maelys-egress
+  already does, in twenty lines of Makefile.
+- **The leg rename moves from 0.53.0 to 0.54.0**, in the open, because this
+  version carries five other things and two matrix changes in one release
+  would be two rounds of branch protection for every product.
+- **Impact.** Everyone: nothing to do, and one thing to know — the neighbour
+  search now names `../maelys-release`, so a Makefile that reads it gets a
+  note. Private repositories forbidding hosted runners: `[runners]` now
+  reaches every job of a release. Products with pinned dependencies: a pin
+  that is not a tag's commit gets a note, and two series of one repository
+  in your graph is now refused by `dependencies`.
+
 ## 0.52.0 — 2026-09-14
 
 - **A rule that will become a violation is announced a version early.** A

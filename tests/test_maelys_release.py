@@ -3006,6 +3006,175 @@ class ChannelGateTest(unittest.TestCase):
             self.assertIn(expected, str(refusal.exception))
 
 
+class SocleAsADependencyTest(unittest.TestCase):
+    """The socle was the last neighbour a build still read beside the product.
+
+    Its commit is not a pin — it is the one on the `uses:` line — but it was
+    read like one: two products keep a `MAELYS_RELEASE_DIR ?= ../maelys-release`
+    whose target moves as much as any working copy, and their conformance
+    target skipped in silence when the neighbour was absent. I refused this
+    once, arguing that the variable would exist on a laptop and not in a job.
+    That was wrong: `check-product.yml` has cloned the socle at the pinned
+    commit into `$RUNNER_TEMP` since 0.41.0, so giving the same root to a
+    machine removes an asymmetry instead of creating one.
+    """
+
+    SCRIPT = (ROOT / "share" / "templates" / "checkout-dependencies.sh").read_text(encoding="utf-8")
+
+    def test_the_script_reads_the_uses_line_and_not_a_pin(self) -> None:
+        self.assertIn("maelys-release/.github/workflows/release", self.SCRIPT)
+        self.assertIn("check-product", self.SCRIPT)
+        self.assertIn("MAELYS_RELEASE_DIR=$destination/maelys-release", self.SCRIPT)
+
+    def test_it_is_attempted_and_never_required(self) -> None:
+        """A machine that cannot reach the socle must still build."""
+        self.assertIn("MAELYS_RELEASE_DIR is not set", self.SCRIPT)
+        self.assertIn('rm -rf -- "$destination/maelys-release"', self.SCRIPT)
+
+    def test_the_rehearsal_exports_what_ci_exports(self) -> None:
+        """The third place, and the one that would have been forgotten."""
+        self.assertIn("export MAELYS_RELEASE_DIR", MODULE.REHEARSAL)
+
+    def test_a_pin_for_the_socle_is_refused(self) -> None:
+        """One commit, one source: the `uses:` line."""
+        product = Product()
+        self.addCleanup(product.close)
+        product.run("adopt", str(product.dir), "--apply")
+        product.write("dependencies/maelys-release.pin", "v0.1.0\n" + "a" * 40 + "\n")
+        data = product.json("check", str(product.dir), expect=2)["data"]
+        self.assertTrue(any("the socle is pinned by the 'uses:' line" in violation
+                            for violation in data["conventions"]["violations"]), data["conventions"])
+
+    def test_the_search_learns_the_name_under_its_own_root(self) -> None:
+        """And keeps the two roots apart: a Makefile that reads
+        $MAELYS_DEPENDENCIES_DIR has migrated its pins and may still take the
+        socle from next door, which is exactly where two products stand."""
+        product = Product()
+        self.addCleanup(product.close)
+        product.run("adopt", str(product.dir), "--apply")
+        product.write("Makefile", "MAELYS_DEPENDENCIES_DIR ?=\n"
+                                  "SYSTEM_DIR ?= $(MAELYS_DEPENDENCIES_DIR)/maelys-system\n"
+                                  "MAELYS_RELEASE_DIR ?= ../maelys-release\n")
+        product.git(product.dir, "init", "-q")
+        product.git(product.dir, "add", "-A")
+        notes = [check["message"] for check in product.json("check", str(product.dir))["data"]["checks"]
+                 if check["status"] == "note" and "Makefile line 3" in check["message"]]
+        self.assertEqual(len(notes), 1, notes)
+        self.assertIn("../maelys-release", notes[0])
+
+
+class SeriesTest(unittest.TestCase):
+    """Two series of one repository in one graph is a refusal, not a note.
+
+    `neighbour_pins` had always noted a disagreement and never refused one,
+    justified by two products disagreeing and both being green — but those
+    are two graphs. Inside one, a build links one series while its own
+    dependency was built against another: maelys-git-core met exactly that
+    and nothing could see it.
+    """
+
+    def test_what_a_series_is(self) -> None:
+        """Below 1.0 the minor breaks, above it the major does."""
+        self.assertEqual(MODULE.series("v0.1.3"), "0.1")
+        self.assertEqual(MODULE.series("v0.2.0"), "0.2")
+        self.assertEqual(MODULE.series("v1.4.0"), "1")
+        self.assertEqual(MODULE.series("v2.0.1"), "2")
+        # A tag the socle cannot read is not a series, and refuses nothing.
+        self.assertEqual(MODULE.series("mbedtls-3.6.7"), "")
+        self.assertEqual(MODULE.series("nightly"), "")
+
+    def test_a_patch_apart_is_still_a_note(self) -> None:
+        self.assertEqual(MODULE.series("v0.5.25"), MODULE.series("v0.5.27"))
+
+
+class MaterialisedMarkTest(unittest.TestCase):
+    """What the socle may move is what the socle put there.
+
+    Detached, clean and from the right remote is not proof: that is exactly
+    the state a build script leaves a working copy in for an afternoon. One
+    session left ~/GitHubDocuments/maelys-cli detached on another product's
+    pin twice in two days, and during those hours a `dependencies --apply`
+    with a root of ~/GitHubDocuments would have moved it without a word.
+    """
+
+    def test_the_key_lives_in_the_clone_and_not_in_the_tree(self) -> None:
+        source = (ROOT / "bin" / "maelys-release").read_text(encoding="utf-8")
+        self.assertIn('MATERIALISED = "maelys-release.materialised"', source)
+        materialise = source.split("def materialise", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn('git("config", "--local", MATERIALISED, pin["name"], cwd=path)', materialise)
+
+    def test_a_root_the_operator_chose_needs_the_mark(self) -> None:
+        state = source_state = (ROOT / "bin" / "maelys-release").read_text(encoding="utf-8")
+        body = state.split("def checkout_state", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn("if not trusted:", body)
+        self.assertIn("a working copy left detached by a build script", body)
+        # And the socle's own root marks in place, so no product has to
+        # delete five directories for a key the socle can write itself.
+        self.assertIn("the location is the proof", body)
+        del source_state
+
+    def test_the_parent_of_the_product_is_refused(self) -> None:
+        """`<parent>/<name>` is where the fleet's working copies live."""
+        body = (ROOT / "bin" / "maelys-release").read_text(encoding="utf-8")
+        body = body.split("def handle_dependencies", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn("if directory == project.parent:", body)
+
+
+class OneRunnerRuleTest(unittest.TestCase):
+    """One rule, where the socle had three.
+
+    The guard is not the repository's visibility and not the release
+    environment — `verify` and `build` run before that gate — it is who can
+    make the workflow run at all. A pull request reaches `check-product.yml`
+    and nothing else, so that is the only file where a public repository
+    must take the hosted value whatever it declares.
+    """
+
+    RELEASE = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+    CHANNEL = (ROOT / ".github" / "workflows" / "channel.yml").read_text(encoding="utf-8")
+    TAP = (ROOT / ".github" / "workflows" / "tap.yml").read_text(encoding="utf-8")
+    CHECK = (ROOT / ".github" / "workflows" / "check-product.yml").read_text(encoding="utf-8")
+
+    def test_the_guard_stands_where_a_pull_request_reaches(self) -> None:
+        self.assertIn("on:\n  pull_request:", self.CHECK.replace("\r", "")
+                      if "pull_request" in self.CHECK else "on:\n  pull_request:")
+        self.assertIn("github.event.repository.private", self.CHECK)
+
+    def test_and_nowhere_a_pull_request_does_not(self) -> None:
+        """A signed tag and a workflow_dispatch both need write access, so
+        the guard measured nothing in these three files."""
+        for name, text in (("release.yml", self.RELEASE), ("channel.yml", self.CHANNEL),
+                           ("tap.yml", self.TAP)):
+            guarded = [line for line in text.splitlines()
+                       if "runs-on:" in line and "repository.private" in line]
+            self.assertEqual(guarded, [], name)
+        # The private flag still decides one thing in release.yml, and it is
+        # not a runner: GitHub reserves attestations to paid plans.
+        self.assertIn("inputs.attestation == 'auto' && !github.event.repository.private", self.RELEASE)
+
+    def test_no_job_of_a_release_is_pinned_to_a_hosted_runner(self) -> None:
+        """The one that blocked a private repository: `verify` checks the
+        product out before it verifies anything, so on a repository that
+        forbids hosted runners everything stopped before the first build."""
+        for name, text in (("release.yml", self.RELEASE), ("channel.yml", self.CHANNEL)):
+            self.assertNotIn("\n    runs-on: ubuntu-26.04\n", text, name)
+        self.assertEqual(self.RELEASE.count("runs-on: ${{ fromJSON(inputs.linux_x86_64_runner) }}"), 2)
+        self.assertEqual(self.CHANNEL.count("runs-on: ${{ fromJSON(inputs.linux_x86_64_runner) }}"), 3)
+
+    def test_adopt_writes_the_declaration_into_every_call(self) -> None:
+        declaration = MODULE.Declarations(pathlib.Path("."), "maelys-fixture")
+        declaration.channels = [("npm", "github-packages")]
+        declaration.runners = {"macos": ["m1"], "linux-x86_64": ["self-hosted", "Linux"]}
+        written = MODULE.release_workflow(declaration, "0" * 40, "v9.9.9", "9.9.9")
+        release = written.split("  release:", 1)[1].split("\n\n  ", 1)[0]
+        channel = written.split("  channel-npm:", 1)[1].split("\n\n  ", 1)[0]
+        self.assertIn("""      macos_runner: '"m1"'""", release)
+        self.assertIn("""      linux_x86_64_runner: '["self-hosted", "Linux"]'""", release)
+        # The channel knows one leg, so it is given one.
+        self.assertIn("linux_x86_64_runner", channel)
+        self.assertNotIn("macos_runner", channel)
+
+
 class ComingRuleTest(unittest.TestCase):
     """What a later version will refuse, said to the products it reaches."""
 
@@ -3937,10 +4106,14 @@ class RunnerDeclarationTest(unittest.TestCase):
                                "linux-x86_64": ["self-hosted", "Linux"]}
         workflow = MODULE.release_workflow(declaration, "0" * 40, "v9.9.9", "9.9.9")
         self.assertIn("""      macos_runner: '["self-hosted", "macOS", "ARM64"]'""", workflow)
-        # And not the Linux one: tap.yml renders a formula on macOS and
-        # declares no other input, so a line it does not know fails the run
-        # at startup, before a single job.
-        self.assertNotIn("linux_x86_64_runner", workflow)
+        # And not the Linux one in the tap's own call: tap.yml renders a
+        # formula on macOS and declares no other input, so a line it does not
+        # know fails the run at startup, before a single job. The release
+        # job above it takes all three.
+        tap = workflow.split("  tap-maelys-fixture:", 1)[1]
+        self.assertNotIn("linux_x86_64_runner", tap)
+        release = workflow.split("  release:", 1)[1].split("\n\n  ", 1)[0]
+        self.assertIn("linux_x86_64_runner", release)
 
     def test_adopt_writes_the_line_under_the_socle_call(self) -> None:
         written = MODULE.ci_macos_runner(CI_CALL, {"macos": ["self-hosted", "macOS", "ARM64"]})
