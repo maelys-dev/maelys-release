@@ -2878,6 +2878,32 @@ class TagDeploymentsTest(unittest.TestCase):
             {"repos/o/r/actions/runs/7/pending_deployments":
                 [{"environment": {"name": "release", "id": 1}, "current_user_can_approve": False}]}), [])
 
+    def test_the_reader_runs_whatever_the_product_declares(self) -> None:
+        """The guard was "[gate] reviewer or a channel", and this repository
+        declares neither -- so the socle cutting its own releases never ran
+        this line, which is how a reader that could not work shipped and was
+        tagged. Nothing exercises `cut --tag` but a real release; the socle
+        makes one most days, and now it exercises this."""
+        source = (ROOT / "bin" / "maelys-release").read_text(encoding="utf-8")
+        body = source.split("def cut_tag", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn("data[\"deployments\"] = tag_deployments(repository, tag)", body)
+        self.assertNotIn('if decl.gate == "reviewer" or decl.channels:', body)
+
+    def test_cut_says_which_socle_is_doing_the_cutting(self) -> None:
+        """`cut` is the one command that does not relocate to the socle a
+        product pins: it runs on an operator's machine and never in a
+        workflow, so the pin governs what GitHub runs and nothing else. A
+        product asked whether a fix to `cut` could only reach it through an
+        adoption. It cannot."""
+        source = (ROOT / "bin" / "maelys-release").read_text(encoding="utf-8")
+        for handler in ("def handle_cut", "def cut_tag", "def cut_open"):
+            body = source.split(handler, 1)[1].split("\ndef ", 1)[0]
+            self.assertNotIn("run_pinned_socle", body, handler)
+        text = MODULE.text_cut({"stage": "open", "product": "p", "version": "1.0.0", "branch": "b",
+                                "base": "main", "repository": "o/r", "gate": [], "checks": [],
+                                "ready": False, "socle": {"tag": "v9.9.9", "sha": "f" * 40}})
+        self.assertIn("socle    v9.9.9 (fffffff), this checkout", text)
+
     def test_none_pending_is_not_nothing_left_to_approve(self) -> None:
         """The channel's deployment does not exist yet when the tag is pushed."""
         text = MODULE.text_cut({"stage": "tag", "product": "p", "version": "1.0.0", "branch": "b",

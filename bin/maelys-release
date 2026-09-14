@@ -3502,12 +3502,16 @@ def cut_tag(invocation: Invocation, decl: Declarations, data: dict, log, timeout
     # command that waited would hold a terminal for a decision it must not
     # take. What it can do is say that the decision exists and hand over the
     # line that answers it.
-    if decl.gate == "reviewer" or decl.channels:
-        for attempt in range(3):
-            data["deployments"] = tag_deployments(repository, tag)
-            if data["deployments"] or attempt == 2:
-                break
-            time.sleep(poll)
+    # Looked at whatever the product declares. The guard used to be "[gate]
+    # reviewer or a channel", and this repository declares neither -- so the
+    # socle cutting its own releases never ran this line, which is how a
+    # reader that could not work shipped and was tagged. A command that
+    # exercises itself on every release of the socle is worth one request.
+    for attempt in range(3):
+        data["deployments"] = tag_deployments(repository, tag)
+        if data["deployments"] or attempt == 2:
+            break
+        time.sleep(poll)
     return data, EXIT_OK
 
 
@@ -3525,6 +3529,15 @@ def handle_cut(invocation: Invocation) -> tuple[dict, int]:
                   "product": product, "project": str(project), "repository": repository,
                   "version": version, "tag": f"v{version}", "branch": f"release/v{version}",
                   "base": default_branch(project, repository),
+                  # Which socle is doing the cutting, said rather than
+                  # assumed. `cut` is the one command that does NOT relocate
+                  # to the socle a product pins -- it runs on an operator's
+                  # machine and never in a workflow, so the pin governs what
+                  # GitHub runs and nothing else. A product asked whether a
+                  # fix to `cut` could only reach it through an adoption; it
+                  # cannot, and now the command says so on its first line.
+                  "socle": socle_data(*socle_identity(str(invocation.option("--socle-sha", "")),
+                                                      str(invocation.option("--socle-tag", "")))),
                   "gate": [], "checks": [], "ready": False}
     log = sys.stderr if invocation.format != "text" else sys.stdout
     timeout = int(invocation.option("--timeout", 30)) * 60
@@ -4673,6 +4686,9 @@ def text_cut(data: dict) -> str:
     stage = "opening" if data["stage"] == "open" else "tagging"
     lines = [f"cut      {stage} {data['product']} {data['version']} on {data['branch']}"
              f" -> {data['base']} of {data['repository']}"]
+    if data.get("socle"):
+        lines.append(f"{'socle':<8} {data['socle']['tag']} ({data['socle']['sha'][:7]}), this checkout:"
+                     " cut is the one command that does not run as the socle a product pins")
     lines.extend(f"{LABELS.get(item['status'], item['status']):<8} {item['message']}" for item in data["gate"])
     for check in data["checks"]:
         state = check["conclusion"] or check["status"]

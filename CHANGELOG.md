@@ -36,6 +36,18 @@
   request — and waits anyway. The rule is the checks on that exact commit,
   and at equal trees the event, the signature and the ancestry still differ;
   what the equality buys is a reader who knows the wait is confirming.
+- **`cut` says which socle is doing the cutting.** It is the one command
+  that does not relocate to the socle a product pins: it runs on an
+  operator's machine and never in a workflow, so the pin governs what GitHub
+  runs and nothing else. A product asked whether a fix to `cut` could reach
+  it only through an adoption — it cannot, and the command now says so on
+  its first line instead of leaving it to be inferred.
+- **And `cut --tag` looks for a pending approval whatever the product
+  declares.** The guard was "`[gate] reviewer` or a channel", and this
+  repository declares neither — so the socle cutting its own releases never
+  ran that line, which is exactly how a reader that could not work shipped
+  and was tagged in 0.50.0. Nothing exercises `cut --tag` but a real
+  release; the socle makes one most days, and now it exercises this.
 - Reported by maelys-oci, maelys-warden and maelys-platform.
 - **Impact.** Private repositories with self-hosted Linux runners: declare
   `[runners] linux-x86_64` and `linux-arm64`. Everyone adopting: `adopt

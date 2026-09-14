@@ -292,7 +292,12 @@ required: the ceremony by hand remains what it was.
   SHA with the tag in a trailing comment. `adopt` writes the socle pin;
   `check`, `preflight` and `rehearse` run as the pinned socle wherever they
   are started from, fetching it into the user's cache when the checkout at
-  hand is another version.
+  hand is another version. **`cut`, `adopt`, `protect` and `dependencies` do
+  not**: they run as the checkout at hand, and `cut` says which on its first
+  line. The pin governs what GitHub runs; a command an operator types on
+  their own machine has no reason to be governed by it, and a fix to `cut`
+  that could only reach a product through an adoption pull request would be
+  a fix nobody applies.
 - **So the socle is not a dependency a product materialises**, and
   `dependencies DIR --apply` does not clone it: whatever `../maelys-release`
   happens to hold, the answer is the pinned socle's, and a product that
