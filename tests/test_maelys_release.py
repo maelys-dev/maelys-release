@@ -2705,6 +2705,31 @@ class VanishingContextTest(unittest.TestCase):
     def test_nothing_vanishes_when_the_names_agree(self) -> None:
         self.assertEqual(self.read(["check / check (macos-15)"], ["check / check (macos-15)"]), [])
 
+    def test_a_ruleset_protects_as_much_as_the_classic_endpoint(self) -> None:
+        """The mistake this socle corrected in 0.46.x, made again here.
+
+        A repository of the fleet is protected by a ruleset alone --
+        agent-cli-spec requires the three socle legs that way and has no
+        classic protection at all -- so reading one endpoint called it open
+        and would have let a rename lock it. Found while writing the plan
+        for that rename, by listing what each repository actually requires.
+        """
+        saved_api, saved_read, saved_contexts, saved_repo = (
+            MODULE.github_api, MODULE.github_read, MODULE.socle_check_contexts, MODULE.github_repository)
+        MODULE.github_api = lambda path: {"default_branch": "main"}
+        MODULE.github_read = lambda path: ("absent", None) if "/protection" in path else (
+            "ok", [{"type": "deletion"},
+                   {"type": "required_status_checks",
+                    "parameters": {"required_status_checks": [{"context": "check / check (ubuntu-26.04)"}]}}])
+        MODULE.socle_check_contexts = lambda project: ("check", ["check / check (linux)"])
+        MODULE.github_repository = lambda project: "o/r"
+        try:
+            self.assertEqual(MODULE.vanishing_contexts(pathlib.Path(".")),
+                             ["check / check (ubuntu-26.04)"])
+        finally:
+            (MODULE.github_api, MODULE.github_read, MODULE.socle_check_contexts,
+             MODULE.github_repository) = saved_api, saved_read, saved_contexts, saved_repo
+
     def test_a_refusal_to_answer_stops_the_check_and_not_the_adoption(self) -> None:
         """An adoption must not depend on the network to be possible."""
         saved_read, saved_contexts, saved_repo, saved_api = (
