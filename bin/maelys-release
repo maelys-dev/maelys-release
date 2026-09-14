@@ -4284,6 +4284,9 @@ def vanishing_contexts(project: pathlib.Path) -> list[str]:
     contexts, and an adoption must not depend on the network to be possible.
     """
     caller, produced = socle_check_contexts(project)
+    # An alias is produced too: the old name keeps reporting while the new
+    # one starts, and a branch that requires it loses nothing at adoption.
+    produced = produced + [f"{caller} / check ({old})" for old, _ in check_product_aliases()]
     repository = github_repository(project)
     if not caller or not repository or not shutil.which("gh"):
         return []
@@ -4325,6 +4328,20 @@ def check_product_legs() -> list[str]:
         if stripped.startswith("- leg:"):
             legs.append(stripped.split(":", 1)[1].strip())
     return legs
+
+
+def check_product_aliases() -> list[tuple[str, str]]:
+    """(old name, leg) for each alias check-product.yml keeps, from the workflow.
+
+    Read from its `# alias: OLD -> LEG` lines: an alias reports the legs under
+    a name they no longer carry, so a branch requiring it moves to the leg in
+    one write rather than through a narrowed protection.
+    """
+    workflow = socle_root() / ".github" / "workflows" / "check-product.yml"
+    if not workflow.is_file():
+        return []
+    return [(found.group(1), found.group(2)) for found in
+            re.finditer(r"^\s*# alias: (\S+) -> (\S+)\s*$", workflow.read_text(encoding="utf-8"), re.MULTILINE)]
 
 
 def check_product_default(name: str) -> str:
@@ -4900,7 +4917,15 @@ def handle_protect(invocation: Invocation) -> tuple[dict, int]:
     # as calling it intermittent.
     ever = partial.get("ever", [])
     absent = [name for name in derived if ever and name not in ever]
-    stale = [name for name in required if name not in proposed]
+    # A required alias whose leg this proposal requires is not stale: the
+    # write replaces one by the other, and the protection never holds less
+    # than both. Named pair by pair, so that what a reader -- or a guard --
+    # sees removed is a duplicate with its successor beside it.
+    replaced = [{"required": f"{caller} / check ({old})", "by": f"{caller} / check ({leg})"}
+                for old, leg in check_product_aliases()
+                if f"{caller} / check ({old})" in required and f"{caller} / check ({leg})" in proposed]
+    retiring = [pair["required"] for pair in replaced]
+    stale = [name for name in required if name not in proposed and name not in retiring]
     mechanisms = [name for name, present in (("branch protection", state == "ok"),
                                              ("a ruleset", bool(by_rule) or ruled == "ok" and bool(rules)))
                   if present]
@@ -4911,7 +4936,7 @@ def handle_protect(invocation: Invocation) -> tuple[dict, int]:
               "seenOnSome": {name: count for name, count in (partial.get("partial") or {}).items()
                              if name not in derived and not socle_owned(name, caller)},
               "pullRequests": partial.get("heads", 0),
-              "missingFromRuns": absent, "requiredButNeverRun": stale,
+              "missingFromRuns": absent, "requiredButNeverRun": stale, "replaced": replaced,
               "proposed": proposed, "applied": False}
     # A job seen on some pull requests is intermittent only if a workflow
     # still defines it. maelys-json removed `fuzz` from its ci.yml in 0.2.0,
@@ -5073,6 +5098,9 @@ def text_protect(data: dict) -> str:
     for name in data["proposed"]:
         mark = "ok" if name in data["required"] else "add"
         lines.append(f"{mark:<8} {name}")
+    for pair in data.get("replaced") or []:
+        lines.append(f"{'replace':<8} {pair['required']} -> {pair['by']}: the alias leaves in the same write"
+                     " that requires the leg it mirrored, so main never requires less")
     for name in data["requiredButNeverRun"]:
         lines.append(f"STALE    {name} is required and no run on {data['branch']} produces it:"
                      " a pull request would wait for it forever")
@@ -5871,6 +5899,10 @@ APP = cli.Program(PROGRAM, PRODUCT, socle_version(), [
                                        "ruleset": {"type": "array", "items": {"type": "string"}},
                                        "narrowing": {"type": "boolean"},
                                        "dropped": {"type": "array", "items": {"type": "string"}},
+                                       "replaced": {"type": "array", "items": {
+                                           "type": "object", "required": ["required", "by"],
+                                           "properties": {"required": {"type": "string"},
+                                                          "by": {"type": "string"}}}},
                                        "gone": {"type": "array", "items": {"type": "string"}}}}),
     cli.execute("rehearse", "rehearse",
                 "Replay the Linux build job of the release in a Docker container on a copy of the working"

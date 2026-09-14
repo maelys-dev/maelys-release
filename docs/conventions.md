@@ -1578,12 +1578,36 @@ and it is survivable only in one order, because a required context that
 nothing produces blocks every merge:
 
 ```sh
+maelys-release adopt DIR --apply     # then merge that pull request
+maelys-release protect DIR --apply   # each alias leaves in the write that requires its leg
+```
+
+**Since 0.57.0 the old names are aliases, and nothing is narrowed.**
+0.54.0 to 0.56.0 printed another order — narrow, adopt, merge, widen — and
+maelys-egress, who followed it, named its cost: main required less for a whole
+pull request, open to anyone who can push, and the order began with the one
+gesture an agent's guard refuses as a CI bypass, in texts written for agents.
+`check-product.yml` now also reports `check (ubuntu-26.04)`,
+`check (ubuntu-26.04-arm)` and `check (macos-15)`: three jobs of a few seconds
+that `needs` the matrix and fail unless it succeeded. A matrix job has one
+result for all its legs, so each alias reports all three — stricter than the
+name it stands for, never more lenient — and runs under `always()`, because a
+skipped job passes a required check. The adoption then removes nothing a
+branch requires, and `protect --apply` replaces each alias by its leg in the
+same write, pair by pair in its report. A later version removes the aliases,
+announced a version before, and the adoption guard refuses it on a branch that
+still requires one. `protect --without-legs` stays for a rename that comes
+without aliases.
+
+The narrowing order, kept for the record of why the rest exists:
+
+```sh
 maelys-release protect DIR --without-legs --apply   # narrow: the old legs leave
 maelys-release adopt DIR --apply                    # then merge that pull request
 maelys-release protect DIR --apply                  # widen: the new legs are required
 ```
 
-Skip the first line and `adopt --apply` refuses, naming the contexts that
+Skip the first line and `adopt --apply` refused, naming the contexts that
 would vanish. **Widen only after the adoption is merged.** 0.54.0 printed
 this order without that word, and maelys-json followed it as written: between
 the widening and the merge, the default branch requires names that only the

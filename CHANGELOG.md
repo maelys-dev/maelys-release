@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.57.0 — 2026-09-14
+
+- **A rename no longer narrows a protection.** `check-product.yml` reports
+  the legs' names before 0.54.0 again, as aliases: `check (ubuntu-26.04)`,
+  `check (ubuntu-26.04-arm)` and `check (macos-15)`, three jobs of seconds
+  that need the matrix and fail unless it succeeded. The order is now adopt,
+  merge, `protect --apply`: the adoption removes nothing a branch requires,
+  and `protect --apply` replaces each alias by its leg in one write, pair by
+  pair in its report. maelys-egress named what the order of 0.54.0 cost: a
+  pull request's worth of main requiring less, opened by the gesture an
+  agent's guard refuses as a CI bypass, in instructions written for agents.
+- An alias cannot follow one leg — a matrix job has one result — so each
+  reports all three: red when any leg is red, stricter than the name it
+  stands for and never more lenient. It runs under `always()`: a skipped job
+  passes a required check, and an alias that did not run would be a green
+  light on a cancelled run.
+- **Impact.** maelys-http, maelys-oci, agent-cli-spec, maelys-datalog,
+  maelys-system — still requiring the old names: adopt, merge, then
+  `protect . --apply`; do not narrow. Everyone else: three more short jobs on
+  each pull request until a later version removes them, announced before; the
+  managed block and skill change prose.
+
 ## 0.56.0 — 2026-09-14
 
 - **`[check]` is back, as a workflow of its own.** A leg is a name, a
