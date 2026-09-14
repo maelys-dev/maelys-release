@@ -1,5 +1,45 @@
 # Changelog
 
+## 0.52.0 — 2026-09-14
+
+- **A rule that will become a violation is announced a version early.** A
+  product adopts on Tuesday, conformant, and is in violation on Wednesday
+  for something nobody told it was coming: that is the cadence complaint at
+  its sharpest. `check` now carries a note for each announced change that
+  reaches this product, naming the version it bites in and what to do before
+  then. The socle's own tests refuse to let an announcement outlive the
+  version meant to honour it — an entry still standing when that version
+  ships fails the suite until the rule is written or the date is moved, in
+  the open. What a test cannot hold is whether the rule shipped *as*
+  announced; that half stays a matter of writing the line honestly, and is
+  said so rather than claimed.
+- **The first announcement is the leg rename.** `check (ubuntu-26.04)`,
+  `check (ubuntu-26.04-arm)` and `check (macos-15)` become `check (linux)`,
+  `check (linux-arm64)` and `check (macos)`, so that a leg's name stops
+  carrying the version of a machine. Every product on the shared CI is told
+  now, with the order its branch protection has to follow.
+- **The mechanism caught its author within the hour.** The announcement was
+  first written for 0.52.0 — this version — and the test refused it as soon
+  as `cut` would have written that number into `VERSION`: *0.52.0 is
+  announced and has shipped: write the rule or move the date*. The date
+  moved to 0.53.0, here, where anyone can see it move.
+- **A channel says whether it asks for an approval of its own**, as a third
+  word in its line: `npm github-packages none`. Absent, it is the release's
+  environment — which every channel had, and none had chosen. Measured on
+  one product's release: the release job at 10:05, the channel job at 14:04,
+  four hours later on the same tag, because a channel's deployment only
+  becomes pending once the release workflow has finished.
+- **And the empty environment was measured, not believed.** `channel.yml`
+  runs for a single product in the fleet, so a guess about what GitHub does
+  with an empty `environment:` would have been found out at somebody's
+  release. A throwaway workflow on a branch answered it: the job started at
+  once, left no pending deployment, and created no environment.
+- **Impact.** Products on the shared CI: read the coming note — the leg
+  rename changes every required context, and the order is narrow, adopt,
+  widen. Products with a channel: say `none` or `reviewer` in its line, and
+  the note becomes an `ok`; saying nothing keeps today's behaviour. Everyone
+  else: nothing.
+
 ## 0.51.2 — 2026-09-14
 
 - **`protect` read one protection mechanism of two, and it is the command

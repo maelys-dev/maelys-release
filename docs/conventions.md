@@ -710,6 +710,23 @@ the same job, which proved consistency and not integrity.
 The human gate stands in front of `publish`, the only job that can change
 anything, so the release itself asks for one approval rather than two.
 
+**A channel's gate is now a third word in its line**, `reviewer` or `none`:
+
+```
+[channels]
+npm github-packages none
+```
+
+Absent, it is the release's own environment, which is what every channel had
+before anything could be declared. `none` renders an empty environment, and
+an empty environment runs the job with no environment and no approval —
+measured on one run of this repository rather than believed, because
+`channel.yml` runs for a single product in the fleet and a guess would have
+been found out at somebody's release. `check` says which of the two a
+product has, and turns its note into an `ok` once the choice is written
+down: the point is not that one answer is right, it is that nobody had
+chosen.
+
 **A channel asks for its own, and it does not exist until the release has
 finished.** `channel.yml` runs its publish job under the same environment,
 so a product with one channel is approved twice and a product with two,
@@ -993,6 +1010,18 @@ in a product's plan at its next adoption and never as drift. Hence:
   the changelog says how to migrate.
 
 The 1.0 tag will make this rule a promise; until then it is the practice.
+
+**A rule that will become a violation is announced a version early.** A
+product adopts on Tuesday, conformant, and is in violation on Wednesday for
+something nobody told it was coming — that is the cadence complaint at its
+sharpest, and the socle can answer it. `check` carries a note for each
+announced change that reaches this product, naming the version it bites in
+and what to do before then; the socle's own tests refuse to let an
+announcement outlive the version that was supposed to honour it, so an entry
+still standing when that version ships fails the suite until the rule is
+written or the date is moved, in the open. What a test cannot hold is
+whether the rule shipped *as announced*; that half stays a matter of
+writing the line honestly.
 
 **Every entry of the socle's changelog ends with its impact on a product**,
 since 0.49.0:

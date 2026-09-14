@@ -271,6 +271,11 @@ class Declarations:
         # the hosted default. Honoured on a private repository only.
         self.macos_runner: list[str] = []
         self.runners: dict[str, list[str]] = {}
+        # Whether this product's ci.yml calls the socle's check job, which is
+        # what decides who a coming change to that workflow reaches.
+        self.calls_socle_ci = False
+        # channel name -> the gate it declares, when it declares one.
+        self.channel_gates: dict[str, str] = {}
         # "reviewer", "none", or "" when this repository has not chosen.
         self.gate = ""
         # What cut runs between writing VERSION and the bump commit, for a
@@ -392,6 +397,7 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
     targets: list[tuple[str, object]] = []
     manifest: list[str] = []
     channels: list[tuple[str, str]] = []
+    channel_gates: dict[str, str] = {}
     sbom = ""
     macos_runner: list[str] = []
     runners: dict[str, list[str]] = {}
@@ -495,8 +501,19 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
             name, *rest = line.split()
             if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", name):
                 raise ValueError(f"a channel is named [a-z0-9-] at line {number}: {name}")
+            # A third word is the gate this channel asks for. Absent, it is
+            # the release's own environment -- which is a second approval,
+            # measured four hours apart on one product's release, and was
+            # the behaviour before anything could be declared.
+            if len(rest) == 2:
+                if rest[1] not in SOCLE_GATES:
+                    raise ValueError(f"a channel's gate is {' or '.join(SOCLE_GATES)},"
+                                     f" not {rest[1]}, at line {number}")
+                channel_gates[name] = rest[1]
+                rest = rest[:1]
             if len(rest) != 1:
-                raise ValueError(f"a channel names one registry at line {number}: {raw}")
+                raise ValueError(f"a channel names one registry, and may add its gate,"
+                                 f" at line {number}: {raw}")
             if rest[0] not in SOCLE_CHANNEL_KINDS:
                 raise ValueError(f"the socle serves no {rest[0]} channel at line {number};"
                                  f" it serves {', '.join(SOCLE_CHANNEL_KINDS)}."
@@ -533,8 +550,8 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
             and not gate and not after_version and not sbom and not runners and not apart \
             and not commit_verification:
         raise ValueError(f"{DECLARATION_FILE} declares no target, archive kind, channel, gate or cut command")
-    return (targets, manifest, channels, sbom, macos_runner, runners, apart, commit_verification,
-            gate, after_version, unknown)
+    return (targets, manifest, channels, channel_gates, sbom, macos_runner, runners, apart,
+            commit_verification, gate, after_version, unknown)
 
 
 def read_fuzz(decl: Declarations) -> None:
@@ -709,6 +726,7 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
     if ci.is_file():
         text = ci.read_text(encoding="utf-8")
         if CI_USES.search(text):
+            decl.calls_socle_ci = True
             decl.add("ok", ".github/workflows/ci.yml calls check-product.yml of the socle")
             for number in sanitizers_twice(text):
                 decl.add("note", f".github/workflows/ci.yml line {number} sanitizes, and the socle's own"
@@ -747,9 +765,10 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
             release = former
     if release.is_file():
         try:
-            decl.targets, decl.manifest_patterns, decl.channels, decl.sbom_pattern, \
-                decl.macos_runner, decl.runners, decl.dependencies_apart, decl.commit_verification, \
-                decl.gate, decl.after_version, unknown = parse_release(release.read_text(encoding="utf-8"))
+            decl.targets, decl.manifest_patterns, decl.channels, decl.channel_gates, \
+                decl.sbom_pattern, decl.macos_runner, decl.runners, decl.dependencies_apart, \
+                decl.commit_verification, decl.gate, decl.after_version, unknown = \
+                parse_release(release.read_text(encoding="utf-8"))
             for section in unknown:
                 decl.add("missing", f"{release.name}: section {section} is not one this socle knows"
                                     " ([targets], [manifest], [channels], [gate], [cut]); what it declares"
@@ -868,12 +887,56 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
     elif decl.channels:
         decl.add("ok", f"{DECLARATION_FILE} channels: "
                        + " ".join(f"{name} ({kind})" for name, kind in decl.channels))
+        for name, _kind in decl.channels:
+            if decl.channel_gates.get(name) == "none":
+                decl.add("ok", f"[channels] {name} none: it publishes as soon as the release does,"
+                               " with no approval of its own", "release")
+            else:
+                decl.add("note", f"[channels] {name} asks for its own approval, under the release's"
+                                 " environment, and it becomes pending only once the release workflow"
+                                 " has finished — hours later on some products. Declare"
+                                 f" '{name} {_kind} none' to publish without one, or"
+                                 f" '{name} {_kind} reviewer' to say this is the choice", "release")
     elif publishes:
         decl.add("note", f"scripts/publish-channel.sh exists but {DECLARATION_FILE} declares no"
                          " [channels]: nothing calls it, and no channel job is written")
     read_branch(decl)
     read_strategy(decl)
+    read_coming(decl)
     return decl
+
+
+# What a later version will refuse, said a version early. A rule that turns
+# into a violation without notice is the cadence complaint in its sharpest
+# form: a product adopts on Tuesday, conformant, and is in violation on
+# Wednesday for something nobody told it was coming. Each entry names the
+# version it bites in, what the product must do, and which products it
+# reaches; `check` says it as a note, and the test below refuses to let an
+# announcement outlive the version that was supposed to honour it -- so an
+# entry still here when that version ships fails the socle's own suite until
+# the rule is written or the date is moved, in the open.
+COMING: tuple[tuple[str, str, str], ...] = (
+    ("0.53.0", "socle",
+     "the matrix legs of check-product.yml are renamed -- 'check (ubuntu-26.04)',"
+     " 'check (ubuntu-26.04-arm)' and 'check (macos-15)' become 'check (linux)',"
+     " 'check (linux-arm64)' and 'check (macos)', so that a leg's name stops carrying"
+     " the version of a machine. Every branch protection naming the old contexts has"
+     " to be narrowed before that adoption and widened after it, in that order:"
+     " 'maelys-release adopt --apply' refuses if you skip the first half"),
+)
+
+
+def read_coming(decl: Declarations) -> None:
+    """Announce what a later version will refuse, to the products it reaches."""
+    here = version_tuple((socle_root() / "VERSION").read_text(encoding="utf-8").strip())
+    for version, reaches, says in COMING:
+        if version_tuple(version) <= here:
+            continue
+        if reaches == "socle" and not decl.calls_socle_ci:
+            continue
+        if reaches == "channels" and not decl.channels:
+            continue
+        decl.add("note", f"coming in maelys-release {version}: {says}", "conventions")
 
 
 def declared_mechanism(project: pathlib.Path, requested: str = "") -> str:
@@ -1224,6 +1287,13 @@ def release_workflow(decl: Declarations, sha: str, tag: str, version: str) -> st
     if decl.commit_verification:
         lines.append(f"      commit_verification: {decl.commit_verification}")
     for name, _kind in decl.channels:
+        # An empty environment runs the job with no environment and no
+        # approval: measured on run 34817132441 of this repository, a job
+        # whose `environment:` expression was empty started at once, left no
+        # pending deployment and created no environment. channel.yml runs
+        # for one product in the fleet, so this was worth a probe rather
+        # than a belief.
+        gated = decl.channel_gates.get(name, "reviewer") != "none"
         lines.extend([
             "",
             f"  channel-{name}:",
@@ -1245,6 +1315,8 @@ def release_workflow(decl: Declarations, sha: str, tag: str, version: str) -> st
             # macOS, and 0.36.0 fixed only two of the three.
             "      publish_command: bash scripts/publish-channel.sh TAG CHANNEL",
         ])
+        if not gated:
+            lines.append("      release_environment: ''")
     for formula in decl.formulas:
         lines.extend([
             "",
