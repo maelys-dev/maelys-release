@@ -933,13 +933,8 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
 # entry still here when that version ships fails the socle's own suite until
 # the rule is written or the date is moved, in the open.
 COMING: tuple[tuple[str, str, str], ...] = (
-    ("0.54.0", "socle",
-     "the matrix legs of check-product.yml are renamed -- 'check (ubuntu-26.04)',"
-     " 'check (ubuntu-26.04-arm)' and 'check (macos-15)' become 'check (linux)',"
-     " 'check (linux-arm64)' and 'check (macos)', so that a leg's name stops carrying"
-     " the version of a machine. Every branch protection naming the old contexts has"
-     " to be narrowed before that adoption and widened after it, in that order:"
-     " 'maelys-release adopt --apply' refuses if you skip the first half"),
+    # 0.54.0 honoured the first announcement -- the leg rename -- after
+    # moving it once, from 0.53.0, in the open. Nothing is announced now.
 )
 
 
@@ -2431,9 +2426,10 @@ def handle_adopt(invocation: Invocation) -> tuple[dict, int]:
                           f"the default branch of {project.name} requires " + ", ".join(vanishing)
                           + ", which this socle's check-product.yml no longer produces: after this"
                             " adoption every pull request would wait for a check that never reports.",
-                          f"Run '{PROGRAM} protect {project} --apply' first -- it derives the contexts from"
-                          " this socle and the product's own jobs -- then adopt; or pass --allow-lock if"
-                          " the protection is being changed by hand in the same breath.")
+                          f"Narrow first: '{PROGRAM} protect {project} --without-legs --apply' removes the"
+                          " socle's legs from the required list and nothing else; adopt; then"
+                          f" '{PROGRAM} protect {project} --apply' requires the new names. Or pass"
+                          " --allow-lock if the protection is being changed by hand in the same breath.")
     files = plan(decl, stage(decl, sha, tag), apply)
     moved = move_declaration(project, apply)
     changed = moved != "" or any(entry["action"] != "same" for entry in files)
@@ -4610,14 +4606,34 @@ def handle_protect(invocation: Invocation) -> tuple[dict, int]:
     # contexts after the next rename. Reported by agent-cli-spec, who
     # worked it out from the output before running it.
     ours = [name for name in by_rule if name in derived or name.startswith(f"{caller} / ")]
-    if ours and invocation.flag("--apply"):
-        raise Failure("PRECONDITION_FAILED",
-                      f"{branch} of {repository} is protected by a ruleset that already requires "
-                      + ", ".join(sorted(ours)) + ", and this command writes the classic branch"
-                      " protection: applying it would leave two mechanisms to keep true, and the"
-                      " ruleset would still name the old contexts after the next rename.",
-                      "Align the ruleset with the proposed list by hand -- 'protect' without --apply"
-                      " computes it -- or move this branch to the classic protection the socle derives.")
+    # --without-legs: the first half of a rename. What the branch requires,
+    # minus every leg of the socle's matrix -- the jobs named `check (…)` under
+    # the calling job -- and nothing else. A required context that nothing
+    # produces blocks every merge, so a rename can only narrow ahead of the
+    # adoption and widen after it; this is the narrowing, and `--apply`
+    # without it is the widening.
+    legs = re.compile(re.escape(f"{caller} / ") + r"check \(")
+    narrowing = invocation.flag("--without-legs")
+    if narrowing:
+        report["proposed"] = proposed = [name for name in required if not legs.match(name)]
+        report["narrowing"] = True
+        # What a narrowing drops is dropped on purpose: reporting it as stale,
+        # or the new legs as not yet run, would describe the rename as a
+        # fault in the middle of doing it.
+        report["dropped"] = [name for name in required if legs.match(name)]
+        report["requiredButNeverRun"], report["missingFromRuns"] = [], []
+        absent, stale = [], []
+    if invocation.flag("--apply") and ours:
+        # The ruleset carries the socle's contexts, so the ruleset is what
+        # is written -- never a classic protection beside it, which would be
+        # two mechanisms to keep true. Until 0.54.0 this refused, and a
+        # repository protected by a ruleset alone had every step of a rename
+        # to do by hand.
+        report["applied"] = write_ruleset(repository, branch, rules, proposed)
+        return report, EXIT_OK
+    if invocation.flag("--apply") and narrowing and state != "ok":
+        raise Failure("PRECONDITION_FAILED", f"{branch} of {repository} has no protection to narrow.",
+                      "Nothing requires the legs, so the adoption will not lock anything: adopt first.")
     if invocation.flag("--apply"):
         if not proposed:
             raise Failure("PRECONDITION_FAILED",
@@ -4644,14 +4660,68 @@ def handle_protect(invocation: Invocation) -> tuple[dict, int]:
     return report, EXIT_OK if not (absent or stale) else EXIT_VIOLATIONS
 
 
+def write_ruleset(repository: str, branch: str, rules: object, contexts: list[str]) -> bool:
+    """Set the required checks of the ruleset that protects this branch.
+
+    Only a ruleset of this repository: one inherited from the organisation
+    cannot be written with a repository's permissions, and saying so is
+    better than a 403 halfway through a rename. Every other rule of the
+    ruleset is sent back as it was read, and each kept context keeps the
+    integration that was allowed to report it.
+    """
+    carrying = [rule for rule in (rules if isinstance(rules, list) else [])
+                if isinstance(rule, dict) and rule.get("type") == "required_status_checks"]
+    if not carrying:
+        raise Failure("PRECONDITION_FAILED", f"no ruleset of {repository} requires checks on {branch}.",
+                      "Nothing to write.")
+    if carrying[0].get("ruleset_source_type") not in (None, "Repository"):
+        raise Failure("PRECONDITION_FAILED",
+                      f"the checks {branch} of {repository} requires come from a ruleset of the"
+                      " organisation, which a repository cannot write.",
+                      "Change it in the organisation's settings, with the list 'protect' prints.")
+    identifier = carrying[0].get("ruleset_id")
+    state, ruleset = github_read(f"repos/{repository}/rulesets/{identifier}")
+    if state != "ok" or not isinstance(ruleset, dict):
+        raise Failure("PROCESS_FAILED", f"ruleset {identifier} of {repository} could not be read.",
+                      "Read it with 'gh api repos/OWNER/REPO/rulesets/ID' and retry.")
+    integration = {}
+    for rule in ruleset.get("rules") or []:
+        if rule.get("type") == "required_status_checks":
+            for check in (rule.get("parameters") or {}).get("required_status_checks") or []:
+                integration[check.get("context")] = check.get("integration_id")
+    known = [value for value in integration.values() if value]
+    default = max(set(known), key=known.count) if known else None
+    for rule in ruleset.get("rules") or []:
+        if rule.get("type") != "required_status_checks":
+            continue
+        rule["parameters"]["required_status_checks"] = [
+            {"context": name, **({"integration_id": integration.get(name) or default}
+                                 if (integration.get(name) or default) else {})}
+            for name in contexts]
+    body = {key: ruleset[key] for key in ("name", "target", "enforcement", "conditions", "rules",
+                                          "bypass_actors") if key in ruleset}
+    with tempfile.TemporaryDirectory(prefix="maelys-release-ruleset.") as temp:
+        payload = pathlib.Path(temp) / "ruleset.json"
+        payload.write_text(json.dumps(body), encoding="utf-8")
+        done = run(["gh", "api", "-X", "PUT", f"repos/{repository}/rulesets/{identifier}",
+                    "--input", str(payload)])
+    if done.returncode != 0:
+        raise Failure("PROCESS_FAILED", f"ruleset {identifier} of {repository} was refused: {done.stderr.strip()}",
+                      "Writing a ruleset needs administration of the repository.")
+    return True
+
+
 def text_protect(data: dict) -> str:
     lines = [f"branch   {data['branch']} of {data['repository']}"
              + (" is protected by " + " and ".join(data["protectedBy"]) if data.get("protectedBy")
                 else "" if data["protected"] else " is NOT protected")]
     if data.get("ruleset"):
         lines.append(f"ruleset  requires " + ", ".join(data["ruleset"])
-                     + " — this command writes the classic protection, so --apply is refused"
-                       " rather than superimposing a second mechanism")
+                     + " — --apply writes this ruleset, never a classic protection beside it")
+    if data.get("narrowing"):
+        lines.extend(f"{'drop':<8} {name}" for name in data.get("dropped", []))
+        lines.append(f"{'narrow':<8} the legs of the socle's matrix leave the required list; everything"
+                     " else stays. Adopt the socle that renames them, then 'protect --apply' again")
     if data.get("note"):
         lines.append(f"note     {data['note']}")
     if data["caller"]:
@@ -5425,7 +5495,9 @@ APP = cli.Program(PROGRAM, PRODUCT, socle_version(), [
                 " carries rather than typed by hand; --apply writes it.",
                 handle_protect,
                 operands=[DIR_OPERAND],
-                options=[cli.flag("--apply", "Write the protection instead of only reporting it.")],
+                options=[cli.flag("--apply", "Write the protection instead of only reporting it."),
+                         cli.flag("--without-legs", "Propose the required list minus the socle's matrix legs:"
+                                  " the narrowing that comes before an adoption renames them.")],
                 schema={"type": "object", "additionalProperties": False,
                         "required": ["repository", "branch", "proposed"],
                         "properties": {"repository": {"type": "string"}, "branch": {"type": "string"},
@@ -5439,7 +5511,11 @@ APP = cli.Program(PROGRAM, PRODUCT, socle_version(), [
                                        "proposed": {"type": "array", "items": {"type": "string"}},
                                        "seenOnSome": {"type": "object"},
                                        "pullRequests": {"type": "integer"},
-                                       "applied": {"type": "boolean"}, "note": {"type": "string"}}}),
+                                       "applied": {"type": "boolean"}, "note": {"type": "string"},
+                                       "protectedBy": {"type": "array", "items": {"type": "string"}},
+                                       "ruleset": {"type": "array", "items": {"type": "string"}},
+                                       "narrowing": {"type": "boolean"},
+                                       "dropped": {"type": "array", "items": {"type": "string"}}}}),
     cli.execute("rehearse", "rehearse",
                 "Replay the Linux build job of the release in a Docker container on a copy of the working"
                 " tree, make check with --check, or a channel's publish script against a published release"

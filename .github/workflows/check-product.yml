@@ -107,19 +107,22 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - leg: ubuntu-26.04
+          - leg: linux
             runner: ${{ github.event.repository.private && inputs.linux_x86_64_runner || '"ubuntu-26.04"' }}
-          - leg: ubuntu-26.04-arm
+          - leg: linux-arm64
             runner: ${{ github.event.repository.private && inputs.linux_arm64_runner || '"ubuntu-26.04-arm"' }}
-          - leg: macos-15
+          - leg: macos
             runner: ${{ github.event.repository.private && inputs.macos_runner || '"macos-15"' }}
-    # The name is the leg, never the machine. A matrix of two dimensions
-    # would otherwise name each job after both -- check (macos, "macos-15")
-    # where it used to read check (macos-15) -- and a check run's name is
-    # what a branch protection requires by. Renaming these would lock the
-    # default branch of every product that requires them, and a product
-    # that declares a runner of its own must not rename its own checks
-    # either: the leg it runs is the same leg.
+    # The name is the leg, never the machine. A check run's name is what a
+    # branch protection requires by, so a name that carries the version of
+    # an image -- check (ubuntu-26.04), check (macos-15), as these were until
+    # 0.54.0 -- turns every image upgrade into a fleet-wide lock: the day the
+    # runner moves, every product's required context names a job that no
+    # longer exists. The rename happened once, announced a version early,
+    # with `protect --without-legs` to narrow each branch before the adoption
+    # and `protect --apply` to widen it after; it does not happen again.
+    # The runner beside each leg is where the image lives now, and it can
+    # change without anyone's protection noticing.
     name: check (${{ matrix.leg }})
     runs-on: ${{ fromJSON(matrix.runner) }}
     steps:
@@ -203,7 +206,7 @@ jobs:
         shell: bash
         run: ${{ inputs.check_command }}
       - name: Release socle drift
-        if: matrix.leg == 'ubuntu-26.04'
+        if: matrix.leg == 'linux'
         shell: bash
         # The socle pinned by release.yml is the pin of record: check from
         # that checkout regenerates the managed files and fails on any drift,

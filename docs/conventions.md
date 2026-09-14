@@ -1477,11 +1477,34 @@ refusal, because the fleet disagrees today and is green.
 
 A branch protection requires a check **by its name**, and those names are the
 socle's jobs prefixed by the job that calls them —
-`check / check (macos-15)`, or `socle / check (macos-15)` where the product
-named its calling job `socle`. Typed by hand, a required context is a copy of
-what some pin produced on the day somebody looked. When the socle renames a
-leg, every context naming the old one waits for a run that never starts, and
-the branch locks with no warning until a pull request refuses to merge.
+`check / check (macos)`, or `socle / check (macos)` where the product named
+its calling job `socle`. Typed by hand, a required context is a copy of what
+some pin produced on the day somebody looked. When the socle renames a leg,
+every context naming the old one waits for a run that never starts, and the
+branch locks with no warning until a pull request refuses to merge.
+
+**The legs were renamed once, in 0.54.0, and will not be again.** Until then
+they carried the version of an image — `check (ubuntu-26.04)`,
+`check (ubuntu-26.04-arm)`, `check (macos-15)` — so every image upgrade
+would have been a fleet-wide lock. They are `check (linux)`,
+`check (linux-arm64)` and `check (macos)`; the image lives in each leg's
+runner, where it can change without anyone's protection noticing. The
+rename was announced a version early, moved once from 0.53.0 in the open,
+and it is survivable only in one order, because a required context that
+nothing produces blocks every merge:
+
+```sh
+maelys-release protect DIR --without-legs --apply   # narrow: the old legs leave
+maelys-release adopt DIR --apply                    # the new names start reporting
+maelys-release protect DIR --apply                  # widen: the new legs are required
+```
+
+Skip the first line and `adopt --apply` refuses, naming the contexts that
+would vanish. A branch protected by a ruleset is written as a ruleset —
+`protect --apply` updates it in place, every other rule sent back as it was
+read — and never gets a classic protection beside it; a ruleset inherited
+from the organisation is refused before anything is sent, since a
+repository's permissions cannot write it.
 
 ```sh
 maelys-release protect DIR            # what it should require, and why

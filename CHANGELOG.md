@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.54.0 — 2026-09-14
+
+- **The legs of `check-product.yml` are names, not machines.** `check
+  (ubuntu-26.04)`, `check (ubuntu-26.04-arm)` and `check (macos-15)` become
+  `check (linux)`, `check (linux-arm64)` and `check (macos)`. A check run's
+  name is what a branch protection requires by, so a name carrying an
+  image's version turned every image upgrade into a fleet-wide lock. The
+  image lives in each leg's runner now, where it can change unnoticed by
+  anyone's protection. Renamed once; announced in 0.52.0 for 0.53.0, moved
+  to 0.54.0 in the open, and honoured here.
+- **`protect --without-legs` narrows a branch before the adoption.** A
+  required context that nothing produces blocks every merge, so a rename is
+  survivable only in one order — narrow, adopt, widen — and until now the
+  first step was a hand-written API call. It removes the socle's legs from
+  the required list and nothing else; the product's own contexts stay.
+- **`protect --apply` writes a ruleset.** A branch protected by a ruleset
+  alone had every step of a rename to do by hand, and 0.51.2 refused rather
+  than superimpose a classic protection. The ruleset is now updated in
+  place, every other rule sent back as it was read, each kept context
+  keeping the integration allowed to report it. A ruleset inherited from the
+  organisation is refused before anything is sent.
+- **`adopt --apply` names the order when it refuses.** It still refuses to
+  make a required context disappear, and now says narrow, adopt, widen.
+- **Impact.** Every product on the shared CI, and it is the one version this
+  year that asks something of all of them: **before adopting, run `protect
+  . --without-legs --apply`; adopt; then `protect . --apply`.** Skip the
+  first and `adopt --apply` refuses. maelys-cli, whose ruleset requires only
+  `ci`, has nothing to narrow. A repository whose checks come from an
+  organisation ruleset changes it in the organisation's settings, with the
+  list `protect` prints.
+
 ## 0.53.0 — 2026-09-14
 
 - **`migrate` switched off a signature the operator had asked for.** Two
