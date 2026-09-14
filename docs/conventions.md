@@ -13,6 +13,14 @@ release files only for a product the socle releases. `check` returns two
 verdicts, and a product the socle does not release passes it without ever
 hearing about workflows it owns.
 
+**A product behind its socle is told what the upgrade would write.** The
+branch that reports a version mismatch used to answer one sentence and no
+file, so an editorial pass on a managed block and a fix to the release
+mechanism read identically — and the product had to adopt to find out which.
+The plan is now shown beside the verdict, with its diffs, counted as no
+violation: a product is conformant to the socle it pins, and what a newer
+one would write is information, not drift.
+
 **A verdict names the lines, not the file.** `check` computes the diff of
 every file it would write and the JSON has always carried it; the text
 printed the action — `update`, `create` — and threw the rest. The order that
@@ -284,7 +292,12 @@ required: the ceremony by hand remains what it was.
   SHA with the tag in a trailing comment. `adopt` writes the socle pin;
   `check`, `preflight` and `rehearse` run as the pinned socle wherever they
   are started from, fetching it into the user's cache when the checkout at
-  hand is another version.
+  hand is another version. **`cut`, `adopt`, `protect` and `dependencies` do
+  not**: they run as the checkout at hand, and `cut` says which on its first
+  line. The pin governs what GitHub runs; a command an operator types on
+  their own machine has no reason to be governed by it, and a fix to `cut`
+  that could only reach a product through an adoption pull request would be
+  a fix nobody applies.
 - **So the socle is not a dependency a product materialises**, and
   `dependencies DIR --apply` does not clone it: whatever `../maelys-release`
   happens to hold, the answer is the pinned socle's, and a product that
@@ -897,6 +910,21 @@ does not say where either came from.
 
 - Runner inputs are JSON: a label string or a label array.
 - Public repositories use GitHub-hosted runners only.
+- **`[runners]` names a leg per line**: `macos`, `linux-x86_64`,
+  `linux-arm64`. Each fills one input of `check-product.yml`, read only on a
+  private repository, and `adopt` writes the line into the `ci.yml` call.
+  `macos` keeps its bare word because ten repositories already declare it —
+  renaming a key of a file the socle reads would refuse all of them at once.
+  The two Linux keys arrived in 0.51.0: `macos_runner` alone left half a
+  matrix, and both the fuzz and sanitizers jobs, written into the workflow,
+  so a repository forbidding hosted runners could not adopt the shared CI at
+  all. No check name changes — the leg is still `ubuntu-26.04`, which is a
+  name and not a machine.
+- No product declares a Linux runner today, and none can be exercised: the
+  fleet has one self-hosted runner registered, it is macOS, and it is
+  offline. What ships is the shape, and it is behaviour-preserving by
+  construction — an undeclared leg and a public repository both resolve to
+  the hosted default the matrix held before.
 - A self-hosted runner is reserved for hardware gates, registered per
   repository, and used on signed tags or `workflow_dispatch` behind the
   `release` environment — **and, since 0.41.0, on the pull requests of a
@@ -973,6 +1001,16 @@ the most useful one.
 
 It says what a product must do, never what the socle did: the entry above it
 is the account, and a reader who needs only the decision reads one line.
+
+**`adopt` refuses to make a required check disappear.** A branch requires a
+check by name, the socle generates the workflow whose jobs carry those
+names, and it is the only thing in the chain that can see the two together:
+a leg renamed by an adoption leaves the branch waiting for a report that
+will never come, starting with the adoption's own pull request. `adopt
+--apply` reads the protection first and refuses, naming the contexts and
+pointing at `protect --apply`; `--allow-lock` proceeds anyway, for the
+operator changing the protection in the same breath. Silent when GitHub
+cannot be asked: an adoption must not depend on the network to be possible.
 
 **`adopt` hands those lines back**, for the versions between the socle a
 product pins and the one running: nothing to build, nothing to guess from a

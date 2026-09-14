@@ -1,5 +1,59 @@
 # Changelog
 
+## 0.51.0 — 2026-09-14
+
+- **`adopt` refuses to make a required check disappear.** A branch requires
+  a check by name, the socle generates the workflow whose jobs carry those
+  names, and nothing else in the chain sees the two together: a leg renamed
+  by an adoption leaves the branch waiting for a report that never comes,
+  the adoption's own pull request first. 0.41.0 came within one trial of
+  doing that to ten repositories. `--apply` reads the protection, names the
+  contexts that would vanish and points at `protect --apply`; `--allow-lock`
+  proceeds anyway. Silent when GitHub cannot be asked.
+- **A product behind its socle is told what the upgrade would write.** That
+  branch answered one sentence and no file, so an editorial pass on a
+  managed block and a fix to the release mechanism read identically. The
+  plan is shown beside the verdict with its diffs, counted as no violation —
+  a product is conformant to the socle it pins — and one line says how many
+  versions separate the two and which command explains them.
+- **`[runners]` takes `linux-x86_64` and `linux-arm64`**, beside `macos`.
+  `check-product.yml` had its two Linux legs written into the matrix, and
+  its fuzz and sanitizers jobs hard-wired to a hosted runner, so a private
+  repository whose maintainer forbids hosted runners could not adopt the
+  shared CI at all. No check name changes: the leg is `ubuntu-26.04`, which
+  is a name and not a machine. Nothing exercises the non-default path today
+  — the fleet has one self-hosted runner registered, macOS, offline — and
+  the change is behaviour-preserving by construction: an undeclared leg and
+  a public repository both resolve to the default the matrix held.
+- **The note that sends prose to `maelys-docs` says that the destination is
+  private.** A public product whose README links a document was being told
+  to move it where its readers cannot follow. 0.28.1 fixed what the socle
+  *writes* into a README; this fixes what it *advises*.
+- `check` counted "asan" inside "pleasant": the sanitizer names are matched
+  as words now. And a file that reads the root through `${{ env.VAR }}` or a
+  YAML `VAR:` was not counted as reading it.
+- `cut --tag` says when the merge commit holds the same tree as the pull
+  request — and waits anyway. The rule is the checks on that exact commit,
+  and at equal trees the event, the signature and the ancestry still differ;
+  what the equality buys is a reader who knows the wait is confirming.
+- **`cut` says which socle is doing the cutting.** It is the one command
+  that does not relocate to the socle a product pins: it runs on an
+  operator's machine and never in a workflow, so the pin governs what GitHub
+  runs and nothing else. A product asked whether a fix to `cut` could reach
+  it only through an adoption — it cannot, and the command now says so on
+  its first line instead of leaving it to be inferred.
+- **And `cut --tag` looks for a pending approval whatever the product
+  declares.** The guard was "`[gate] reviewer` or a channel", and this
+  repository declares neither — so the socle cutting its own releases never
+  ran that line, which is exactly how a reader that could not work shipped
+  and was tagged in 0.50.0. Nothing exercises `cut --tag` but a real
+  release; the socle makes one most days, and now it exercises this.
+- Reported by maelys-oci, maelys-warden and maelys-platform.
+- **Impact.** Private repositories with self-hosted Linux runners: declare
+  `[runners] linux-x86_64` and `linux-arm64`. Everyone adopting: `adopt
+  --apply` may now refuse, which means it found a lock — run `protect .
+  --apply` first. Everyone else: nothing.
+
 ## 0.50.1 — 2026-09-13
 
 - **`cut --tag` could never name an approval.** `actions/runs` answers an

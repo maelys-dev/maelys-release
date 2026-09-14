@@ -65,6 +65,10 @@ SOCLE_CHANNEL_KINDS = ("github-packages",)
 # What a product asks of its release environment. The socle verifies the
 # answer a repository gave; it does not give it in the repository's place.
 SOCLE_GATES = ("reviewer", "none")
+# The legs whose runner a private repository may declare, named as
+# check-product.yml's matrix names them -- except macos, which keeps the
+# bare word ten repositories already carry.
+SOCLE_RUNNER_KEYS = ("macos", "linux-x86_64", "linux-arm64")
 # What release.yml asks of the commit a tag names, beyond the tag's own
 # signature. The workflow has offered these since 0.21.0 and nothing rendered
 # the input, so `none` was the only value a product could reach while the
@@ -266,6 +270,7 @@ class Declarations:
         # Labels of the macOS runner for the socle's own jobs, empty for
         # the hosted default. Honoured on a private repository only.
         self.macos_runner: list[str] = []
+        self.runners: dict[str, list[str]] = {}
         # "reviewer", "none", or "" when this repository has not chosen.
         self.gate = ""
         # What cut runs between writing VERSION and the bump commit, for a
@@ -389,6 +394,7 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
     channels: list[tuple[str, str]] = []
     sbom = ""
     macos_runner: list[str] = []
+    runners: dict[str, list[str]] = {}
     apart = False
     commit_verification = ""
     gate = ""
@@ -457,16 +463,22 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
             continue
         if section == "runners":
             key, *labels = line.split()
-            if key != "macos":
-                raise ValueError(f"[runners] knows macos, not {key}, at line {number}")
-            if macos_runner:
-                raise ValueError(f"[runners] holds one macos line, and line {number} is a second")
+            # The three legs of check-product.yml's matrix, named as the
+            # workflow names them. macos keeps its bare word: it is what ten
+            # repositories already declare, and renaming a key of a file the
+            # socle reads would refuse every one of them at once.
+            if key not in SOCLE_RUNNER_KEYS:
+                raise ValueError(f"[runners] knows {', '.join(SOCLE_RUNNER_KEYS)}, not {key}, at line {number}")
+            if key in runners:
+                raise ValueError(f"[runners] holds one {key} line, and line {number} is a second")
             if not labels:
-                raise ValueError(f"[runners] macos names no label at line {number}")
+                raise ValueError(f"[runners] {key} names no label at line {number}")
             for label in labels:
                 if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", label):
                     raise ValueError(f"a runner label is [A-Za-z0-9._-] at line {number}: {label}")
-            macos_runner = labels
+            runners[key] = labels
+            if key == "macos":
+                macos_runner = labels
             continue
         if section == "sbom":
             # One document per target, because one attestation carries one
@@ -518,10 +530,10 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
         runner: object = "" if not labels else (labels[0] if len(labels) == 1 else labels)
         targets.append((name, runner))
     if section and not unknown and not targets and not manifest and not channels \
-            and not gate and not after_version and not sbom and not macos_runner and not apart \
+            and not gate and not after_version and not sbom and not runners and not apart \
             and not commit_verification:
         raise ValueError(f"{DECLARATION_FILE} declares no target, archive kind, channel, gate or cut command")
-    return (targets, manifest, channels, sbom, macos_runner, apart, commit_verification,
+    return (targets, manifest, channels, sbom, macos_runner, runners, apart, commit_verification,
             gate, after_version, unknown)
 
 
@@ -736,8 +748,8 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
     if release.is_file():
         try:
             decl.targets, decl.manifest_patterns, decl.channels, decl.sbom_pattern, \
-                decl.macos_runner, decl.dependencies_apart, decl.commit_verification, decl.gate, \
-                decl.after_version, unknown = parse_release(release.read_text(encoding="utf-8"))
+                decl.macos_runner, decl.runners, decl.dependencies_apart, decl.commit_verification, \
+                decl.gate, decl.after_version, unknown = parse_release(release.read_text(encoding="utf-8"))
             for section in unknown:
                 decl.add("missing", f"{release.name}: section {section} is not one this socle knows"
                                     " ([targets], [manifest], [channels], [gate], [cut]); what it declares"
@@ -827,8 +839,10 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
                          f" develops those dependencies live. Read ${DEPENDENCIES_VARIABLE} for the"
                          f" root -- '{PROGRAM} dependencies DIR --apply' writes the checkouts and"
                          " prints the variable -- then declare it", "conventions")
-            if decl.macos_runner:
-                decl.add("ok", f"{release.name} [runners] macos: " + " ".join(decl.macos_runner)
+            for key in SOCLE_RUNNER_KEYS:
+                if not decl.runners.get(key):
+                    continue
+                decl.add("ok", f"{release.name} [runners] {key}: " + " ".join(decl.runners[key])
                                + " (honoured on a private repository only)")
                 # ci.yml belongs to the product: adopt keeps its socle line
                 # current and writes nothing else there. A declared runner
@@ -836,8 +850,8 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
                 # here rather than written -- the socle reports drift in what
                 # it does not own instead of editing it.
                 ci_file = project / ".github" / "workflows" / "ci.yml"
-                if ci_file.is_file() and "macos_runner:" not in ci_file.read_text(encoding="utf-8"):
-                    decl.add("warn", f"[runners] macos declares {' '.join(decl.macos_runner)} and"
+                if ci_file.is_file() and f"{RUNNER_INPUTS[key]}:" not in ci_file.read_text(encoding="utf-8"):
+                    decl.add("warn", f"[runners] {key} declares {' '.join(decl.runners[key])} and"
                              " .github/workflows/ci.yml does not pass it to check-product.yml:"
                              f" '{PROGRAM} adopt DIR --apply' writes the line")
         except ValueError as error:
@@ -998,10 +1012,18 @@ def read_docs(decl: Declarations) -> None:
             continue
         decl.prose.append(relative)
     for relative in decl.prose:
+        # The destination is private, and `check` is offline by design, so it
+        # cannot tell whether this repository is public. A public product
+        # whose README links a document moves it into a repository its
+        # readers cannot open: the move is right for an agent and wrong for
+        # a stranger, and the socle says so rather than advising blind.
+        # `preflight`, which reads the API, answers it properly.
         decl.add("note", f"{relative}: prose belongs in maelys-docs/{decl.product}/"
                  f"{relative[len('docs/'):]}; move it with its history:"
                  f" 'maelys-platform docs --prose --only {decl.product} --format jsonl"
-                 f" | {PROGRAM} migrate . --product {decl.product} --documents -'", "conventions")
+                 f" | {PROGRAM} migrate . --product {decl.product} --documents -'."
+                 f" {DEFAULT_DOCUMENTS.split('/')[-1]} is private: a document a public README links to"
+                 " stays here until the destination is one its readers can open", "conventions")
 
 
 def pinned_product(project: pathlib.Path) -> str:
@@ -1057,15 +1079,36 @@ def runner_json(labels: list[str]) -> str:
     return json.dumps(labels[0] if len(labels) == 1 else labels)
 
 
+# The input each declared leg fills, in the order check-product.yml lists
+# them. A key here is a line under the call's `with:`, and nothing else.
+RUNNER_INPUTS = {"macos": "macos_runner", "linux-x86_64": "linux_x86_64_runner",
+                 "linux-arm64": "linux_arm64_runner"}
+
+
 def macos_runner_input(decl: Declarations) -> list[str]:
-    """The macos_runner line of a call, or nothing when none is declared."""
-    if not decl.macos_runner:
+    """The macos_runner line of the tap's call, or nothing.
+
+    tap.yml renders and lints a formula on macOS and knows no other leg, so
+    it takes this one alone: passing it a Linux input would be an input the
+    workflow does not declare, and the run would fail at startup.
+    """
+    if not decl.runners.get("macos"):
         return []
-    return [f"      macos_runner: '{runner_json(decl.macos_runner)}'"]
+    return [f"      macos_runner: '{runner_json(decl.runners['macos'])}'"]
 
 
-def ci_macos_runner(text: str, labels: list[str]) -> str:
-    """Set, replace or remove the macos_runner line of ci.yml's socle call.
+def runner_inputs(decl: Declarations) -> list[str]:
+    """The runner lines of the check call, one per declared leg."""
+    return [f"      {RUNNER_INPUTS[key]}: '{runner_json(decl.runners[key])}'"
+            for key in SOCLE_RUNNER_KEYS if decl.runners.get(key)]
+
+
+def ci_macos_runner(text: str, labels) -> str:
+    """Set, replace or remove the runner lines of ci.yml's socle call.
+
+    `labels` is the declaration's `[runners]` mapping; a bare list is read
+    as the macos one, which is what every caller passed before three legs
+    were declarable.
 
     ci.yml belongs to the product everywhere else, and the socle has always
     kept only the line naming itself current there. This adds one more line
@@ -1100,11 +1143,14 @@ def ci_macos_runner(text: str, labels: list[str]) -> str:
         if stripped and (len(lines[end]) - len(lines[end].lstrip())) < body:
             break
         end += 1
+    names = tuple(RUNNER_INPUTS.values())
     for index in reversed([i for i in range(with_at + 1, end)
-                           if lines[i].strip().startswith("macos_runner:")]):
+                           if lines[i].strip().startswith(names)]):
         del lines[index]
-    if labels:
-        lines.insert(with_at + 1, f"{' ' * body}macos_runner: '{runner_json(labels)}'\n")
+    for key in reversed(SOCLE_RUNNER_KEYS):
+        declared = labels.get(key) if isinstance(labels, dict) else (labels if key == "macos" else None)
+        if declared:
+            lines.insert(with_at + 1, f"{' ' * body}{RUNNER_INPUTS[key]}: '{runner_json(declared)}'\n")
     return "".join(lines)
 
 
@@ -1246,7 +1292,7 @@ def ci_workflow(decl: Declarations, sha: str, tag: str, version: str) -> str:
         f"    uses: {SOCLE_REPOSITORY}/.github/workflows/check-product.yml@{sha} # {tag}",
         "    with:",
         f"      product: {decl.product}",
-        *macos_runner_input(decl),
+        *runner_inputs(decl),
     ]
     return "\n".join(lines) + "\n"
 
@@ -1319,7 +1365,7 @@ def stage(decl: Declarations, sha: str, tag: str) -> dict[str, tuple[str, bool]]
         existing = ci.read_text(encoding="utf-8")
         if CI_USES.search(existing):
             updated = CI_USES.sub(rf"\g<1>{sha} # {tag}", existing)
-            staged[".github/workflows/ci.yml"] = (ci_macos_runner(updated, decl.macos_runner), False)
+            staged[".github/workflows/ci.yml"] = (ci_macos_runner(updated, decl.runners), False)
     return staged
 
 
@@ -2263,6 +2309,16 @@ def handle_adopt(invocation: Invocation) -> tuple[dict, int]:
     # installing -- and `impact` was empty in --apply, the only mode the
     # product that asked for it uses.
     pinned = pinned_socle(project)
+    if apply:
+        vanishing = vanishing_contexts(project)
+        if vanishing and not invocation.flag("--allow-lock"):
+            raise Failure("PRECONDITION_FAILED",
+                          f"the default branch of {project.name} requires " + ", ".join(vanishing)
+                          + ", which this socle's check-product.yml no longer produces: after this"
+                            " adoption every pull request would wait for a check that never reports.",
+                          f"Run '{PROGRAM} protect {project} --apply' first -- it derives the contexts from"
+                          " this socle and the product's own jobs -- then adopt; or pass --allow-lock if"
+                          " the protection is being changed by hand in the same breath.")
     files = plan(decl, stage(decl, sha, tag), apply)
     moved = move_declaration(project, apply)
     changed = moved != "" or any(entry["action"] != "same" for entry in files)
@@ -2303,6 +2359,16 @@ def check_data(invocation: Invocation) -> tuple[Declarations, dict]:
             release.append(
                 f"{product} pins maelys-release {data['pinned']['tag']} ({data['pinned']['sha'][:7]}) but this is"
                 f" {tag} ({sha[:7]}): run the pinned socle, or 'adopt {project} --apply' from this one to upgrade")
+            # And say what that upgrade would write. This branch used to
+            # return one sentence and no file: a product three versions
+            # behind read a FAIL naming a version number, with nothing about
+            # which generated file moved or what the change was, so an
+            # editorial pass on a managed block and a fix to the release
+            # mechanism read identically. The plan is not drift -- the
+            # product is conformant to the socle it pins -- so it is
+            # reported beside the verdict and never counted as a violation.
+            data["files"] = plan(decl, stage(decl, sha, tag), apply=False)
+            data["ahead"] = len(socle_impact(data["pinned"]["tag"]))
         else:
             data["files"] = plan(decl, stage(decl, sha, tag), apply=False)
             for entry in data["files"]:
@@ -3359,6 +3425,18 @@ def cut_tag(invocation: Invocation, decl: Declarations, data: dict, log, timeout
         raise Failure("PRECONDITION_FAILED", f"{pull['url']} is merged but names no merge commit.",
                       "Read the pull request on GitHub; nothing is tagged.")
     data["commit"] = merge
+    # The two commits usually hold the same tree: the pull request adds
+    # VERSION and a header, and if the base has not moved the merge commit
+    # carries exactly that. Said, and still waited on. The rule is "the
+    # checks pass on that exact commit", and a check may legitimately differ
+    # at equal trees -- the event is pull_request on one and push on the
+    # other, the commit's own signature and its ancestry are read by some,
+    # and the protection contexts are evaluated on the merge commit. What
+    # the equality buys is a reader who knows the second wait is confirming
+    # and not discovering.
+    head_tree = git("rev-parse", f"{pull.get('headRefOid') or ''}^{{tree}}", cwd=project, check=False)
+    merge_tree = git("rev-parse", f"{merge}^{{tree}}", cwd=project, check=False)
+    data["sameTree"] = bool(head_tree) and head_tree == merge_tree
     git("fetch", "-q", "origin", base, cwd=project)
     head = git("rev-parse", "FETCH_HEAD", cwd=project)
     if run(["git", "cat-file", "-e", f"{merge}^{{commit}}"], cwd=project).returncode != 0:
@@ -3424,12 +3502,16 @@ def cut_tag(invocation: Invocation, decl: Declarations, data: dict, log, timeout
     # command that waited would hold a terminal for a decision it must not
     # take. What it can do is say that the decision exists and hand over the
     # line that answers it.
-    if decl.gate == "reviewer" or decl.channels:
-        for attempt in range(3):
-            data["deployments"] = tag_deployments(repository, tag)
-            if data["deployments"] or attempt == 2:
-                break
-            time.sleep(poll)
+    # Looked at whatever the product declares. The guard used to be "[gate]
+    # reviewer or a channel", and this repository declares neither -- so the
+    # socle cutting its own releases never ran this line, which is how a
+    # reader that could not work shipped and was tagged. A command that
+    # exercises itself on every release of the socle is worth one request.
+    for attempt in range(3):
+        data["deployments"] = tag_deployments(repository, tag)
+        if data["deployments"] or attempt == 2:
+            break
+        time.sleep(poll)
     return data, EXIT_OK
 
 
@@ -3447,6 +3529,15 @@ def handle_cut(invocation: Invocation) -> tuple[dict, int]:
                   "product": product, "project": str(project), "repository": repository,
                   "version": version, "tag": f"v{version}", "branch": f"release/v{version}",
                   "base": default_branch(project, repository),
+                  # Which socle is doing the cutting, said rather than
+                  # assumed. `cut` is the one command that does NOT relocate
+                  # to the socle a product pins -- it runs on an operator's
+                  # machine and never in a workflow, so the pin governs what
+                  # GitHub runs and nothing else. A product asked whether a
+                  # fix to `cut` could only reach it through an adoption; it
+                  # cannot, and now the command says so on its first line.
+                  "socle": socle_data(*socle_identity(str(invocation.option("--socle-sha", "")),
+                                                      str(invocation.option("--socle-tag", "")))),
                   "gate": [], "checks": [], "ready": False}
     log = sys.stderr if invocation.format != "text" else sys.stdout
     timeout = int(invocation.option("--timeout", 30)) * 60
@@ -3709,7 +3800,9 @@ def socle_check_contexts(project: pathlib.Path) -> tuple[str, list[str]]:
 
 # A job of the product that builds an instrumented tree. The name or the
 # command says so; nothing else can, since the socle does not read Makefiles.
-SANITIZING = re.compile(r"asan|ubsan|tsan|msan|sanitiz", re.IGNORECASE)
+# Word boundaries, because a substring finds "asan" inside "pleasant" and
+# "please". The names are those the fleet's Makefiles use, plus the stem.
+SANITIZING = re.compile(r"\b(?:asan|ubsan|tsan|msan|lsan|sanitiz\w*)\b", re.IGNORECASE)
 
 
 def sanitizers_twice(text: str) -> list[int]:
@@ -3744,6 +3837,33 @@ def sanitizers_twice(text: str) -> list[int]:
         if not inside and not line.lstrip().startswith("#") and SANITIZING.search(line):
             found.append(number)
     return found
+
+
+def vanishing_contexts(project: pathlib.Path) -> list[str]:
+    """Required checks of the default branch that this socle would stop producing.
+
+    The socle generates the workflow whose jobs carry those names, so it is
+    the only thing that can see this coming: a leg renamed by an adoption
+    leaves a branch requiring a context nothing will ever report again, and
+    every pull request of that repository blocks -- the adoption's own
+    first. 0.41.0 came within one trial of doing it to ten repositories.
+
+    Silent when GitHub cannot be asked. A refusal to answer is not a list of
+    contexts, and an adoption must not depend on the network to be possible.
+    """
+    caller, produced = socle_check_contexts(project)
+    repository = github_repository(project)
+    if not caller or not repository or not shutil.which("gh"):
+        return []
+    branch = (github_api(f"repos/{repository}") or {}).get("default_branch") or "main"
+    state, body = github_read(f"repos/{repository}/branches/{branch}/protection")
+    if state != "ok" or not isinstance(body, dict):
+        return []
+    required = ((body.get("required_status_checks") or {}).get("contexts")) or []
+    # Only the socle's own contexts: what a product requires of its own jobs
+    # is the product's business, and this socle has no idea what produces it.
+    return sorted(name for name in required
+                  if isinstance(name, str) and name.startswith(f"{caller} / ") and name not in produced)
 
 
 def check_product_legs() -> list[str]:
@@ -3854,7 +3974,8 @@ BESIDE_CALL = re.compile(r"checkout-dependency\.sh\s+[a-z0-9-]+\s*(&&|$)")
 # or an assignment -- `$VAR`, `${VAR}`, `$(VAR)`, `VAR=`, `VAR ?=`, `ENV
 # VAR=` -- is a use; the bare word in prose is not.
 DEPENDENCIES_READ = re.compile(r"[$({\[\"']\s*" + DEPENDENCIES_VARIABLE
-                               + r"|" + DEPENDENCIES_VARIABLE + r"\s*[?:+]?=")
+                               + r"|" + DEPENDENCIES_VARIABLE + r"\s*[?:+]?[=:]"
+                               + r"|env\.\s*" + DEPENDENCIES_VARIABLE)
 # Where a line naming ../NAME is prose about this very migration rather than
 # something that builds: the declaration file says why the fallback went, and
 # a changelog says when. Markdown goes with them -- a README telling a human
@@ -4516,6 +4637,10 @@ def text_adopt(data: dict) -> str:
 
 def text_check(data: dict, with_checks: bool = True) -> str:
     lines = []
+    if data.get("ahead") is not None:
+        lines.append(f"{'note':<8} the plan below is what {data['socle']['tag']} would write, not a drift"
+                     f" against the socle this product pins; {data['ahead']} version(s) separate them and"
+                     f" '{PROGRAM} adopt {data['project']}' says what each asks of a product")
     for entry in data["files"]:
         lines.append(f"{entry['action']:<8} {entry['path']}" + (f" ({entry['reason']})" if "reason" in entry else ""))
         # The diff, under the file that drifted. `check` computed it either
@@ -4561,6 +4686,9 @@ def text_cut(data: dict) -> str:
     stage = "opening" if data["stage"] == "open" else "tagging"
     lines = [f"cut      {stage} {data['product']} {data['version']} on {data['branch']}"
              f" -> {data['base']} of {data['repository']}"]
+    if data.get("socle"):
+        lines.append(f"{'socle':<8} {data['socle']['tag']} ({data['socle']['sha'][:7]}), this checkout:"
+                     " cut is the one command that does not run as the socle a product pins")
     lines.extend(f"{LABELS.get(item['status'], item['status']):<8} {item['message']}" for item in data["gate"])
     for check in data["checks"]:
         state = check["conclusion"] or check["status"]
@@ -4571,6 +4699,9 @@ def text_cut(data: dict) -> str:
         lines.append(f"{'cut':<8} after-version also committed " + " ".join(data["regenerated"]))
     if data.get("commit"):
         lines.append(f"{'commit':<8} {data['commit']}")
+    if data.get("sameTree"):
+        lines.append(f"{'note':<8} the merge commit holds the same tree as the pull request:"
+                     " these checks confirm what ran there, on the commit the tag will name")
     for deployment in data.get("deployments") or []:
         lines.append(f"{'approve':<8} {deployment['environment']} of {deployment['run']}")
         lines.append(f"{'':<8} {deployment['approve']}")
@@ -4858,7 +4989,8 @@ APP = cli.Program(PROGRAM, PRODUCT, socle_version(), [
                     " through the socle; plan without --apply.",
                     handle_adopt, operands=[DIR_OPERAND],
                     options=[*SOCLE_OPTIONS, MECHANISM_OPTION,
-                             cli.flag("--allow-untagged", "Accept a socle commit without a tag (a trial of a candidate).")],
+                             cli.flag("--allow-untagged", "Accept a socle commit without a tag (a trial of a candidate)."),
+                             cli.flag("--allow-lock", "Adopt even when a required check would stop being produced.")],
                     schema={"type": "object", "additionalProperties": False,
                             "required": ["mode", "product", "project", "mechanism", "socle", "changed", "checks", "files"],
                             "properties": {"mode": {"enum": ["plan", "apply"]}, "product": {"type": "string"},

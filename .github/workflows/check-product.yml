@@ -68,6 +68,22 @@ on:
         type: boolean
         default: false
 
+      linux_x86_64_runner:
+        description: >-
+          Runner for the ubuntu-26.04 leg, and for the fuzz and sanitizers
+          jobs: a JSON label string or array. Read **only on a private
+          repository**, for the same reason as macos_runner below — the
+          guard is not the operating system but who can open a pull request.
+        required: false
+        type: string
+        default: '"ubuntu-26.04"'
+      linux_arm64_runner:
+        description: >-
+          Runner for the ubuntu-26.04-arm leg; a JSON label string or array.
+          Read only on a private repository.
+        required: false
+        type: string
+        default: '"ubuntu-26.04-arm"'
       macos_runner:
         description: >-
           JSON naming the runner of the macOS leg: a label string such as
@@ -92,9 +108,9 @@ jobs:
       matrix:
         include:
           - leg: ubuntu-26.04
-            runner: '"ubuntu-26.04"'
+            runner: ${{ github.event.repository.private && inputs.linux_x86_64_runner || '"ubuntu-26.04"' }}
           - leg: ubuntu-26.04-arm
-            runner: '"ubuntu-26.04-arm"'
+            runner: ${{ github.event.repository.private && inputs.linux_arm64_runner || '"ubuntu-26.04-arm"' }}
           - leg: macos-15
             runner: ${{ github.event.repository.private && inputs.macos_runner || '"macos-15"' }}
     # The name is the leg, never the machine. A matrix of two dimensions
@@ -198,7 +214,7 @@ jobs:
 
   fuzz:
     if: inputs.fuzz_command != ''
-    runs-on: ubuntu-26.04
+    runs-on: ${{ fromJSON(github.event.repository.private && inputs.linux_x86_64_runner || '"ubuntu-26.04"') }}
     env:
       CC: clang
       CXX: clang++
@@ -281,7 +297,7 @@ jobs:
 
   sanitizers:
     if: inputs.sanitizer_command != ''
-    runs-on: ubuntu-26.04
+    runs-on: ${{ fromJSON(github.event.repository.private && inputs.linux_x86_64_runner || '"ubuntu-26.04"') }}
     env:
       CC: clang
       CXX: clang++
