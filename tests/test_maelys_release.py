@@ -1338,6 +1338,45 @@ class DocsContractTest(unittest.TestCase):
         self.product.run("adopt", self.dir, "--apply")
         self.assertEqual([note for note in self.notes() if "maelys-docs" in note], [])
 
+    def test_a_verified_reference_stays(self) -> None:
+        """maelys-platform's sixth category, on its own condition: a reference
+        a check of the repository reads against the code, which a private
+        maelys-docs would take out of reach of that check."""
+        self.product.write("docs/api-reference.md", "<!-- VERIFIED by make api-doc-check against the public API;"
+                                                    " edit with the code. -->\n# API\n")
+        # Naming a check without asking to be edited with the code is not the mark.
+        self.product.write("docs/testing.md", "# Testing\n\nVerified by make check against every target.\n")
+        self.product.run("adopt", self.dir, "--apply")
+        data = self.product.json("check", self.dir)["data"]
+        self.assertEqual([note.split(":")[0] for note in self.notes() if "maelys-docs" in note], ["docs/testing.md"])
+        self.assertIn("docs/api-reference.md is a reference make api-doc-check verifies against the code: it stays",
+                      [check["message"] for check in data["checks"]])
+
+    def test_prose_a_readme_links_is_named_and_never_refused(self) -> None:
+        """check is offline: it sees the link, not the visibility nor a site,
+        so the note says the rule and the strict contract asserts nothing."""
+        for name in ("linked", "under", "mentioned", "absolute", "free"):
+            self.product.write(f"docs/{'guides/' if name == 'under' else ''}{name}.md", f"# {name}\n")
+        self.product.write("README.md", "# Fixture\n\n[Linked](./docs/linked.md#top) and [guides](docs/guides/).\n"
+                           "Also `docs/mentioned.md`, in a sentence.\n\n"
+                           "[abs]: https://github.com/maelys-dev/maelys-fixture/blob/main/docs/absolute.md\n")
+        self.product.run("adopt", self.dir, "--apply")
+        self.product.git(self.product.dir, "init", "-q")
+        self.product.git(self.product.dir, "remote", "add", "origin", "https://github.com/maelys-dev/maelys-fixture.git")
+        held = sorted(note.split(":")[0] for note in self.notes() if "README.md links it" in note)
+        self.assertEqual(held, ["docs/absolute.md", "docs/guides/under.md", "docs/linked.md"])
+        strict = self.product.json("check", self.dir, "--docs-contract", expect=2)["data"]["conventions"]["violations"]
+        self.assertEqual(sorted(violation.split(":")[0] for violation in strict if "maelys-docs" in violation),
+                         ["docs/free.md", "docs/mentioned.md"])
+
+    def test_the_conditions_are_maelys_platforms(self) -> None:
+        platform = ROOT.parent / "maelys-platform" / "bin" / "maelys-platform"
+        if not platform.is_file():
+            self.skipTest("maelys-platform is not checked out beside this repository")
+        text = platform.read_text(encoding="utf-8")
+        self.assertIn(MODULE.VERIFIED_MARK.pattern, text)
+        self.assertIn(MODULE.README_LINK.pattern, text)
+
     def test_prose_is_a_note_by_default_and_a_violation_on_demand(self) -> None:
         self.product.write("docs/architecture.md", "# Architecture\n\nProse.\n")
         self.product.run("adopt", self.dir, "--apply")

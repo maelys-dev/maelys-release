@@ -31,6 +31,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.parse
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import maelys_cli as cli  # noqa: E402
@@ -109,6 +110,49 @@ LEGACY_CLI_REFERENCES = ("docs/cli-reference.md", "docs/generated/cli-reference.
 GENERATED_HEAD_LINES = 10
 GENERATED_MARK = re.compile(r"generated", re.IGNORECASE)
 GENERATED_REFUSAL = re.compile(r"do not edit|don't edit|ne pas .diter", re.IGNORECASE)
+
+
+# A reference a check of the repository holds against the code, written by
+# hand: "<!-- VERIFIED by make api-doc-check against the public API; edit with
+# the code. -->". maelys-platform's condition, character for character, so that
+# `check` and `maelys-platform docs --prose` never sort one file two ways. It
+# stays for the reason docs/cli.md does: the check that holds it must read it
+# in the checkout it verifies.
+VERIFIED_MARK = re.compile(r"verified by\s+(?P<check>\S.{0,120}?)\s+against\b.{0,200}?edit with the code",
+                           re.I | re.S)
+# A link a README makes to a page of docs/: inline, by reference, in HTML, or
+# through the repository's own GitHub URL. maelys-platform's, as above.
+README_LINK = re.compile(r"""(?:\]\(\s*<?|^\s{0,3}\[[^\]]+\]:\s*<?|\bhref\s*=\s*["'])(?P<target>[^\s)"'>]+)""",
+                         re.I | re.M)
+
+
+def readme_links(readme: str, repository: str) -> set[str]:
+    """The paths of docs/ a README points at, files or directories.
+
+    maelys-platform's `readme_links`, kept identical: a document is linked
+    when the README names it or a directory holding it, and a plain mention
+    of a path in a sentence is not a link.
+    """
+    own = re.compile(rf"^https?://github\.com/{re.escape(repository)}/(?:blob|tree)/[^/]+/", re.I) \
+        if repository else None
+    found = set()
+    for match in README_LINK.finditer(readme or ""):
+        target = urllib.parse.unquote(match.group("target").split("#", 1)[0].split("?", 1)[0])
+        if own:
+            target = own.sub("", target)
+        while target.startswith("./"):
+            target = target[2:]
+        target = target.rstrip("/")
+        if target == "docs" or target.startswith("docs/"):
+            found.add(target)
+    return found
+
+
+def verified_by(text: str) -> str:
+    """The check a verified reference names in its head, or ''."""
+    head = "\n".join(text.lstrip().splitlines()[:GENERATED_HEAD_LINES])
+    found = VERIFIED_MARK.search(head)
+    return " ".join(found.group("check").split()) if found else ""
 
 
 def is_generated(text: str) -> bool:
@@ -305,6 +349,8 @@ class Declarations:
         # Files of docs/ that are neither generated, engaged by LICENSING.md
         # nor data: they belong in maelys-docs/<product>/.
         self.prose: list[str] = []
+        # Prose README.md links: a public README holds it until a site exists.
+        self.readme_held: list[str] = []
         self.checks: list[dict] = []
 
     @property
@@ -1172,10 +1218,28 @@ def read_docs(decl: Declarations) -> None:
             continue
         if path.suffix.lower() != ".md":
             continue  # data, never prose
-        if is_generated(path.read_text(encoding="utf-8")):
+        text = path.read_text(encoding="utf-8")
+        if is_generated(text):
+            continue
+        check = verified_by(text)
+        if check:
+            decl.add("ok", f"{relative} is a reference {check} verifies against the code: it stays", "conventions")
             continue
         decl.prose.append(relative)
+    readme = decl.project / "README.md"
+    links = readme_links(readme.read_text(encoding="utf-8", errors="replace") if readme.is_file() else "",
+                         github_repository(decl.project))
     for relative in decl.prose:
+        if any(relative == link or relative.startswith(link + "/") for link in links):
+            # `check` is offline: it sees the link, not whether a stranger can
+            # follow it nor whether a site documents the product. So it says
+            # the rule and asserts nothing; maelys-platform, which reads both,
+            # decides `movable`.
+            decl.readme_held.append(relative)
+            decl.add("note", f"{relative}: prose, and README.md links it. If this repository is public and no"
+                     " site documents the product, it stays: maelys-docs is private and the link would break"
+                     " for every reader. 'maelys-platform docs' says which", "conventions")
+            continue
         # The destination is private, and `check` is offline by design, so it
         # cannot tell whether this repository is public. A public product
         # whose README links a document moves it into a repository its
@@ -2682,7 +2746,7 @@ def check_data(invocation: Invocation) -> tuple[Declarations, dict]:
     if invocation.flag("--docs-contract"):
         conventions.extend(f"{relative}: prose belongs in maelys-docs/{product}/{relative[len('docs/'):]};"
                            f" move it with '{PROGRAM} migrate'"
-                           for relative in decl.prose)
+                           for relative in decl.prose if relative not in decl.readme_held)
         conventions.extend(f"{name}: the generated CLI reference is {CLI_REFERENCE} for every product"
                            for name in LEGACY_CLI_REFERENCES if (project / name).is_file())
     # The seeded notes are added while planning, so the checks are taken last.
