@@ -5,9 +5,12 @@
 - **`migrate` switched off a signature the operator had asked for.** Two
   commits passed `-c commit.gpgsign=false` and fell back to an address no
   account stands behind, so on a default branch that requires signed commits
-  the branch a migration opens could not merge, by construction. It now
-  leaves the operator's identity alone — a clone inherits it — and names a
-  machine identity only where git has none.
+  the branch a migration opens could not merge, by construction. And `tap
+  --apply` forced the same kind of identity, so a tap commit went out signed
+  and was never verified. All three sites now leave the operator's identity
+  alone — a clone inherits it — and name a machine identity only where git
+  has none. The first cut of this fix found two of the three; a test now
+  holds that a machine identity is written in one place.
 - **What the socle may move is what the socle put there.** A checkout it
   clones carries a key in its own `.git/config`; without it, detached, clean
   and from the right remote is indistinguishable from a working copy a build

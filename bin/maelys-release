@@ -4819,9 +4819,12 @@ def handle_tap(invocation: Invocation) -> tuple[dict, int]:
         if not apply:
             return data, EXIT_OK
         # Identity and signing live in the clone's configuration, so the
-        # commit and any rebase of it are signed alike.
-        git("config", "user.name", os.environ.get("GIT_AUTHOR_NAME", PROGRAM), cwd=tap)
-        git("config", "user.email", os.environ.get("GIT_AUTHOR_EMAIL", f"{PROGRAM}@users.noreply.github.com"), cwd=tap)
+        # commit and any rebase of it are signed alike. The identity is the
+        # operator's, as in `migrate`: forcing a machine name here put a tap
+        # commit under an address no account stands behind, signed and still
+        # never verified -- the third of the three sites maelys-http named,
+        # and the one 0.53.0 first left out.
+        author_identity(tap)
         key = os.environ.get("TAP_SIGNING_KEY", "")
         if key:
             key_file = pathlib.Path(temp) / "signing-key"

@@ -3006,6 +3006,37 @@ class ChannelGateTest(unittest.TestCase):
             self.assertIn(expected, str(refusal.exception))
 
 
+class OperatorIdentityTest(unittest.TestCase):
+    """A commit the socle makes carries the operator's identity and signature.
+
+    Three sites forced a machine identity -- `migrate` twice, `tap --apply`
+    once -- and `migrate` also passed `commit.gpgsign=false`, switching off a
+    signature the operator had asked for. On a default branch that requires
+    signed commits, the branch a migration opened could not merge; and a tap
+    commit went out signed under an address no account stands behind, so
+    GitHub never verified it. The first version of this fix found two of the
+    three sites; this test is what holds the third.
+    """
+
+    SOURCE = (ROOT / "bin" / "maelys-release").read_text(encoding="utf-8")
+
+    def test_no_commit_switches_a_signature_off(self) -> None:
+        self.assertNotIn('"commit.gpgsign=false"', self.SOURCE)
+
+    def test_a_machine_identity_is_written_in_one_place_only(self) -> None:
+        """The floor inside `author_identity`, for a runner with no user, and
+        nowhere else."""
+        writes = [number for number, line in enumerate(self.SOURCE.splitlines(), 1)
+                  if 'git("config", "user.name"' in line or 'git("config", "user.email"' in line]
+        floor = self.SOURCE.split("def author_identity", 1)[1].split("\ndef ", 1)[0]
+        self.assertEqual(len(writes), 2, writes)
+        self.assertEqual(floor.count('git("config", "user.'), 2)
+
+    def test_every_site_goes_through_the_helper(self) -> None:
+        for where in ("author_identity(documents)", "author_identity(product_clone)", "author_identity(tap)"):
+            self.assertIn(where, self.SOURCE)
+
+
 class SocleAsADependencyTest(unittest.TestCase):
     """The socle was the last neighbour a build still read beside the product.
 
