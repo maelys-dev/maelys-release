@@ -96,5 +96,6 @@ the first Linux build of the product.
   declare them in `dependencies/packages`;
 - put credentials in the repository; the tap secrets are
   `HOMEBREW_TAP_TOKEN` and `HOMEBREW_TAP_SIGNING_KEY`;
-- adopt a socle that renames a required check before narrowing the
-  protection: `protect . --without-legs --apply`, adopt, `protect . --apply`.
+- narrow a protection to get an adoption through: the legs renamed in 0.54.0
+  keep reporting their old names as aliases, so adopt, merge, then
+  `protect . --apply` replaces each alias by its leg in one write.

@@ -375,3 +375,52 @@ jobs:
       - name: Sanitizers with clang
         shell: bash
         run: ${{ inputs.sanitizer_command }} CC=clang CXX=clang++
+
+  # The names the legs carried until 0.54.0, kept as aliases for a transition.
+  # A required context that nothing produces blocks every merge, so the rename
+  # was survivable only by narrowing a protection before the adoption and
+  # widening it after -- a window of a whole pull request in which main
+  # required less, opened by the one gesture an agent's guard refuses as a CI
+  # bypass. maelys-egress described the way out: keep producing the old names
+  # while the new ones start, and the protection moves from one set to the
+  # other in a single write, never through less.
+  #
+  # An alias cannot follow one leg: GitHub gives a matrix job one result, for
+  # all its legs. Each alias therefore reports the whole matrix -- red when
+  # any leg is red, which is stricter than the name it stands for and never
+  # more lenient. `always()` and not `!cancelled()`: a skipped job counts as
+  # passing for a required check, so an alias that did not run would be a
+  # green light on a cancelled run. It runs, reads the result, and fails
+  # unless the legs succeeded.
+  #
+  # `protect` reads these lines: an alias is required only until its leg is,
+  # and `protect --apply` swaps one for the other in one write. A later
+  # version removes them, announced beforehand, and the adoption guard
+  # refuses it on any branch that still requires one.
+  # alias: ubuntu-26.04 -> linux
+  alias-linux:
+    needs: check
+    if: always()
+    name: check (ubuntu-26.04)
+    runs-on: ${{ fromJSON(github.event.repository.private && inputs.linux_x86_64_runner || '"ubuntu-26.04"') }}
+    steps:
+      - name: The legs of check, under the name linux carried until 0.54.0
+        run: test "${{ needs.check.result }}" = success
+  # alias: ubuntu-26.04-arm -> linux-arm64
+  alias-linux-arm64:
+    needs: check
+    if: always()
+    name: check (ubuntu-26.04-arm)
+    runs-on: ${{ fromJSON(github.event.repository.private && inputs.linux_x86_64_runner || '"ubuntu-26.04"') }}
+    steps:
+      - name: The legs of check, under the name linux-arm64 carried until 0.54.0
+        run: test "${{ needs.check.result }}" = success
+  # alias: macos-15 -> macos
+  alias-macos:
+    needs: check
+    if: always()
+    name: check (macos-15)
+    runs-on: ${{ fromJSON(github.event.repository.private && inputs.linux_x86_64_runner || '"ubuntu-26.04"') }}
+    steps:
+      - name: The legs of check, under the name macos carried until 0.54.0
+        run: test "${{ needs.check.result }}" = success

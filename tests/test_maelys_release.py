@@ -2749,9 +2749,11 @@ class VanishingContextTest(unittest.TestCase):
              MODULE.github_repository) = saved_api, saved_read, saved_contexts, saved_repo
 
     def test_a_required_leg_this_socle_no_longer_produces(self) -> None:
-        self.assertEqual(self.read(["check / check (ubuntu-26.04)", "check / fuzz"],
+        # A name no alias covers: the 0.54.0 names are aliases since 0.57.0,
+        # so the guard is exercised on one this socle never kept.
+        self.assertEqual(self.read(["check / check (ubuntu-24.04)", "check / fuzz"],
                                    ["check / check (linux)", "check / fuzz"]),
-                         ["check / check (ubuntu-26.04)"])
+                         ["check / check (ubuntu-24.04)"])
 
     def test_what_the_product_requires_of_its_own_jobs_is_not_ours(self) -> None:
         """The socle has no idea what produces `mbedtls (macos-15)`."""
@@ -2775,12 +2777,12 @@ class VanishingContextTest(unittest.TestCase):
         MODULE.github_read = lambda path: ("absent", None) if "/protection" in path else (
             "ok", [{"type": "deletion"},
                    {"type": "required_status_checks",
-                    "parameters": {"required_status_checks": [{"context": "check / check (ubuntu-26.04)"}]}}])
+                    "parameters": {"required_status_checks": [{"context": "check / check (ubuntu-24.04)"}]}}])
         MODULE.socle_check_contexts = lambda project: ("check", ["check / check (linux)"])
         MODULE.github_repository = lambda project: "o/r"
         try:
             self.assertEqual(MODULE.vanishing_contexts(pathlib.Path(".")),
-                             ["check / check (ubuntu-26.04)"])
+                             ["check / check (ubuntu-24.04)"])
         finally:
             (MODULE.github_api, MODULE.github_read, MODULE.socle_check_contexts,
              MODULE.github_repository) = saved_api, saved_read, saved_contexts, saved_repo
@@ -2838,7 +2840,7 @@ class LinuxRunnersTest(unittest.TestCase):
         runners still could not adopt."""
         self.assertEqual(self.WORKFLOW.count(
             "runs-on: ${{ fromJSON(github.event.repository.private && inputs.linux_x86_64_runner"
-            " || '\"ubuntu-26.04\"') }}"), 2)
+            " || '\"ubuntu-26.04\"') }}"), 5)  # fuzz, sanitizers and the three aliases
         self.assertNotIn("\n    runs-on: ubuntu-26.04\n", self.WORKFLOW)
 
     def test_adopt_writes_one_line_per_declared_leg(self) -> None:
@@ -4193,14 +4195,16 @@ class ManagedTextsSayTheTruthTest(unittest.TestCase):
             self.assertNotIn("it runs as the pinned one", text, name)
 
     def test_the_block_says_the_order_a_rename_takes(self) -> None:
-        self.assertIn("**narrow, adopt, widen**", self.BLOCK)
-        self.assertIn("protect DIR --without-legs --apply", self.BLOCK)
+        # Since 0.57.0: no narrowing, the old names are aliases.
+        self.assertIn("**adopt, merge, then", self.BLOCK)
+        self.assertIn("Never narrow a protection", self.BLOCK)
+        self.assertNotIn("narrow, adopt, widen", self.BLOCK)
 
     def test_the_universal_rules_come_before_the_conditional_ones(self) -> None:
         """An agent in a repository with no pin and no formula can stop at
         the first 'If this repository'."""
         first = self.BLOCK.index("- If this repository")
-        for universal in ("A release is a signed, annotated tag", "narrow, adopt, widen", "Never commit a secret"):
+        for universal in ("A release is a signed, annotated tag", "adopt, merge, then", "Never commit a secret"):
             self.assertLess(self.BLOCK.index(universal), first, universal)
 
 
@@ -4273,6 +4277,89 @@ class LegRenameTest(unittest.TestCase):
         here = MODULE.version_tuple((ROOT / "VERSION").read_text(encoding="utf-8").strip())
         self.assertFalse([entry for entry in MODULE.COMING if "renamed" in entry[2]
                           and MODULE.version_tuple(entry[0]) <= here])
+
+
+class LegAliasTest(unittest.TestCase):
+    """The old names, kept as aliases, so a rename never narrows a protection.
+
+    maelys-egress: narrow, adopt, merge, widen leaves main requiring less for
+    a whole pull request, and begins with the gesture an agent's guard
+    refuses. With the old names still reported, the adoption loses nothing
+    and one write moves the protection from each alias to its leg.
+    """
+
+    WORKFLOW = (ROOT / ".github" / "workflows" / "check-product.yml").read_text(encoding="utf-8")
+
+    def test_one_alias_per_leg_and_each_fails_unless_the_legs_succeeded(self) -> None:
+        aliases = MODULE.check_product_aliases()
+        self.assertEqual(aliases, [("ubuntu-26.04", "linux"), ("ubuntu-26.04-arm", "linux-arm64"),
+                                   ("macos-15", "macos")])
+        self.assertEqual([leg for _, leg in aliases], MODULE.check_product_legs())
+        for old, leg in aliases:
+            job = self.WORKFLOW.split(f"\n  alias-{leg}:\n", 1)[1].split("\n  # alias:", 1)[0]
+            self.assertIn(f"name: check ({old})", job)
+            self.assertIn("needs: check", job)
+            # Not !cancelled(): a skipped job passes a required check.
+            self.assertIn("if: always()", job)
+            self.assertIn('run: test "${{ needs.check.result }}" = success', job)
+
+    def protect(self, required, seen, apply=False):
+        saved = (MODULE.github_api, MODULE.github_read, MODULE.socle_check_contexts, MODULE.github_repository,
+                 MODULE.observed_contexts, MODULE.shutil.which, MODULE.github_list, MODULE.run)
+        written = []
+        MODULE.github_api = lambda path: {"default_branch": "main"}
+        MODULE.github_read = lambda path: ("ok", {"required_status_checks": {"contexts": list(required)}}) \
+            if "/protection" in path else ("ok", [])
+        MODULE.socle_check_contexts = lambda project: ("check", ["check / check (linux)", "check / check (macos)"])
+        MODULE.github_repository = lambda project: "o/r"
+        MODULE.observed_contexts = lambda repository, branch, samples=3: (seen, [], {"heads": 3, "ever": seen})
+        MODULE.shutil.which = lambda name: "/usr/bin/" + name
+        MODULE.github_list = lambda path: []
+        MODULE.run = lambda command, cwd=None, env=None: written.append(
+            json.loads(pathlib.Path(command[-1]).read_text())) or subprocess.CompletedProcess(command, 0, "", "")
+        flags = {"--apply": apply}
+        invocation = type("I", (), {"operands": ["."], "flag": lambda self, name: flags.get(name, False),
+                                    "option": lambda self, name, default="": default, "format": "json"})()
+        try:
+            return MODULE.handle_protect(invocation), written
+        finally:
+            (MODULE.github_api, MODULE.github_read, MODULE.socle_check_contexts, MODULE.github_repository,
+             MODULE.observed_contexts, MODULE.shutil.which, MODULE.github_list, MODULE.run) = saved
+
+    def test_protect_swaps_each_alias_for_its_leg_in_one_write(self) -> None:
+        old = ["check / check (ubuntu-26.04)", "check / check (macos-15)", "mine"]
+        seen = ["check / check (linux)", "check / check (macos)", "check / check (ubuntu-26.04)",
+                "check / check (macos-15)", "mine"]
+        (report, code), written = self.protect(old, seen, apply=True)
+        self.assertEqual(report["replaced"], [{"required": "check / check (ubuntu-26.04)", "by": "check / check (linux)"},
+                                              {"required": "check / check (macos-15)", "by": "check / check (macos)"}])
+        self.assertEqual(report["requiredButNeverRun"], [], "an alias with its successor is not stale")
+        self.assertEqual(code, MODULE.EXIT_OK)
+        self.assertEqual(len(written), 1, "one write, never a narrowed protection in between")
+        self.assertEqual(sorted(written[0]["required_status_checks"]["contexts"]),
+                         ["check / check (linux)", "check / check (macos)", "mine"])
+        text = MODULE.text_protect(report)
+        self.assertIn("replace  check / check (macos-15) -> check / check (macos)", text)
+
+    def test_before_the_adoption_merges_the_swap_is_still_refused(self) -> None:
+        with self.assertRaises(MODULE.Failure):
+            self.protect(["check / check (ubuntu-26.04)"], ["check / check (ubuntu-26.04)"], apply=True)
+
+    def test_an_adoption_does_not_refuse_a_branch_requiring_the_old_names(self) -> None:
+        saved = (MODULE.socle_check_contexts, MODULE.github_repository, MODULE.shutil.which,
+                 MODULE.github_api, MODULE.github_read)
+        MODULE.socle_check_contexts = lambda project: ("check", ["check / check (linux)"])
+        MODULE.github_repository = lambda project: "o/r"
+        MODULE.shutil.which = lambda name: "/usr/bin/" + name
+        MODULE.github_api = lambda path: {"default_branch": "main"}
+        MODULE.github_read = lambda path: ("ok", {"required_status_checks": {"contexts": [
+            "check / check (ubuntu-26.04)", "check / check (ubuntu-26.04-arm)", "check / check (macos-15)",
+            "check / check (gone)"]}}) if "/protection" in path else ("ok", [])
+        try:
+            self.assertEqual(MODULE.vanishing_contexts(pathlib.Path(".")), ["check / check (gone)"])
+        finally:
+            (MODULE.socle_check_contexts, MODULE.github_repository, MODULE.shutil.which,
+             MODULE.github_api, MODULE.github_read) = saved
 
 
 class ProtectionContextsTest(unittest.TestCase):

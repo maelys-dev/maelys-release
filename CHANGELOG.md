@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.57.0 — 2026-09-14
+
+- **A rename no longer narrows a protection.** `check-product.yml` reports
+  the legs' names before 0.54.0 again, as aliases: `check (ubuntu-26.04)`,
+  `check (ubuntu-26.04-arm)` and `check (macos-15)`, three jobs of seconds
+  that need the matrix and fail unless it succeeded. The order is now adopt,
+  merge, `protect --apply`: the adoption removes nothing a branch requires,
+  and `protect --apply` replaces each alias by its leg in one write, pair by
+  pair in its report. maelys-egress named what the order of 0.54.0 cost: a
+  pull request's worth of main requiring less, opened by the gesture an
+  agent's guard refuses as a CI bypass, in instructions written for agents.
+- An alias cannot follow one leg — a matrix job has one result — so each
+  reports all three: red when any leg is red, stricter than the name it
+  stands for and never more lenient. It runs under `always()`: a skipped job
+  passes a required check, and an alias that did not run would be a green
+  light on a cancelled run.
+- **Impact.** maelys-http, maelys-oci, agent-cli-spec, maelys-datalog,
+  maelys-system — still requiring the old names: adopt, merge, then
+  `protect . --apply`; do not narrow. Everyone else: three more short jobs on
+  each pull request until a later version removes them, announced before; the
+  managed block and skill change prose.
+
 ## 0.56.0 — 2026-09-14
 
 - **`[check]` is back, as a workflow of its own.** A leg is a name, a
@@ -76,7 +98,7 @@
   runner lines in another order than the writer that regenerates it, which
   would have drifted any product that declared a runner against its own new
   file. Both paths now go through one writer.
-- **Impact.** Everyone mid-rename: widen only after the adoption is merged —
+- **Impact.** **Superseded by 0.57.0 for the rename: adopt, merge, `protect . --apply`; never narrow.** Everyone mid-rename: widen only after the adoption is merged —
   `protect --apply` now enforces it. maelys-http: `[package]` lets you verify
   on three targets again. Everyone else: nothing, and the managed blocks
   change prose only.
@@ -104,7 +126,7 @@
   organisation is refused before anything is sent.
 - **`adopt --apply` names the order when it refuses.** It still refuses to
   make a required context disappear, and now says narrow, adopt, widen.
-- **Impact.** Every product on the shared CI, and it is the one version this
+- **Impact.** **Superseded by 0.57.0 for the rename: adopt, merge, `protect . --apply`; never narrow.** Every product on the shared CI, and it is the one version this
   year that asks something of all of them: **before adopting, run `protect
   . --without-legs --apply`; adopt; then `protect . --apply`.** Skip the
   first and `adopt --apply` refuses. maelys-cli, whose ruleset requires only
@@ -212,7 +234,7 @@
   with an empty `environment:` would have been found out at somebody's
   release. A throwaway workflow on a branch answered it: the job started at
   once, left no pending deployment, and created no environment.
-- **Impact.** Products on the shared CI: read the coming note — the leg
+- **Impact.** **Superseded by 0.57.0 for the rename: adopt, merge, `protect . --apply`; never narrow.** Products on the shared CI: read the coming note — the leg
   rename changes every required context, and the order is narrow, adopt,
   widen. Products with a channel: say `none` or `reviewer` in its line, and
   the note becomes an `ok`; saying nothing keeps today's behaviour. Everyone

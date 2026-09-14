@@ -36,13 +36,14 @@ when it has what they name.
   does not have to be published**: it travels in the next release.
 - The checks `main` requires are derived, never typed: `maelys-release
   protect DIR` computes them and `--apply` writes them, as a ruleset when a
-  ruleset protects the branch. When a socle renames a required check,
-  **narrow, adopt, widen**: `protect DIR --without-legs --apply`, then
-  `adopt DIR --apply` and merge that adoption, then `protect DIR --apply`.
-  `adopt --apply` refuses if the first step was skipped, and `protect
-  --apply` refuses before the adoption is merged, because a required check
-  nothing produces blocks every merge. A pull request opened before the
-  adoption merges the default branch to report the new names.
+  ruleset protects the branch. When this repository still requires the
+  legs under their names before 0.54.0 (`check (ubuntu-26.04)`,
+  `check (ubuntu-26.04-arm)`, `check (macos-15)`): **adopt, merge, then
+  `protect DIR --apply`**. The socle keeps reporting those names as aliases,
+  so the adoption loses nothing, and `protect --apply` replaces each alias by
+  its leg in one write: the branch never requires less. It refuses before
+  the adoption is merged. Never narrow a protection to get an adoption
+  through; `--without-legs` exists for a rename that comes without aliases.
 - `adopt DIR` without `--apply` prints the plan and, for every socle version
   between this repository's pin and the checkout, the line that says what
   that version asks of a product. Read those lines, not the changelog.
