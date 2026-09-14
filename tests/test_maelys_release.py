@@ -817,11 +817,11 @@ class ProductNeedsTest(unittest.TestCase):
         # Effective and declared are not the same answer: folding them makes a
         # fleet read "everyone targets these three" where nobody declared one.
         self.assertEqual(data["targets"], ["linux-x86_64", "linux-arm64", "macos-arm64"])
-        self.assertEqual(data["declared"], {"targets": [], "manifestPatterns": [], "sbomPattern": "", "macosRunner": [], "dependenciesApart": True, "commitVerification": ""})
+        self.assertEqual(data["declared"], {"targets": [], "manifestPatterns": [], "sbomPattern": "", "macosRunner": [], "dependenciesApart": True, "commitVerification": "", "legs": []})
         self.product.write("maelys-release.conf", "[targets]\nlinux-arm64\n\n[manifest]\n*.wasm\n" + APART)
         data = self.product.json("declarations", self.dir)["data"]
         self.assertEqual(data["declared"], {"targets": ["linux-arm64"],
-                                            "manifestPatterns": ["*.wasm"], "sbomPattern": "", "macosRunner": [], "dependenciesApart": True, "commitVerification": ""})
+                                            "manifestPatterns": ["*.wasm"], "sbomPattern": "", "macosRunner": [], "dependenciesApart": True, "commitVerification": "", "legs": []})
         self.assertEqual(data["manifestPatterns"], "*.tar.gz *.deb *.rpm *.wasm")
 
     def test_the_contract_carries_the_pin_its_file_and_the_stamp(self) -> None:
@@ -1338,6 +1338,45 @@ class DocsContractTest(unittest.TestCase):
         self.product.run("adopt", self.dir, "--apply")
         self.assertEqual([note for note in self.notes() if "maelys-docs" in note], [])
 
+    def test_a_verified_reference_stays(self) -> None:
+        """maelys-platform's sixth category, on its own condition: a reference
+        a check of the repository reads against the code, which a private
+        maelys-docs would take out of reach of that check."""
+        self.product.write("docs/api-reference.md", "<!-- VERIFIED by make api-doc-check against the public API;"
+                                                    " edit with the code. -->\n# API\n")
+        # Naming a check without asking to be edited with the code is not the mark.
+        self.product.write("docs/testing.md", "# Testing\n\nVerified by make check against every target.\n")
+        self.product.run("adopt", self.dir, "--apply")
+        data = self.product.json("check", self.dir)["data"]
+        self.assertEqual([note.split(":")[0] for note in self.notes() if "maelys-docs" in note], ["docs/testing.md"])
+        self.assertIn("docs/api-reference.md is a reference make api-doc-check verifies against the code: it stays",
+                      [check["message"] for check in data["checks"]])
+
+    def test_prose_a_readme_links_is_named_and_never_refused(self) -> None:
+        """check is offline: it sees the link, not the visibility nor a site,
+        so the note says the rule and the strict contract asserts nothing."""
+        for name in ("linked", "under", "mentioned", "absolute", "free"):
+            self.product.write(f"docs/{'guides/' if name == 'under' else ''}{name}.md", f"# {name}\n")
+        self.product.write("README.md", "# Fixture\n\n[Linked](./docs/linked.md#top) and [guides](docs/guides/).\n"
+                           "Also `docs/mentioned.md`, in a sentence.\n\n"
+                           "[abs]: https://github.com/maelys-dev/maelys-fixture/blob/main/docs/absolute.md\n")
+        self.product.run("adopt", self.dir, "--apply")
+        self.product.git(self.product.dir, "init", "-q")
+        self.product.git(self.product.dir, "remote", "add", "origin", "https://github.com/maelys-dev/maelys-fixture.git")
+        held = sorted(note.split(":")[0] for note in self.notes() if "README.md links it" in note)
+        self.assertEqual(held, ["docs/absolute.md", "docs/guides/under.md", "docs/linked.md"])
+        strict = self.product.json("check", self.dir, "--docs-contract", expect=2)["data"]["conventions"]["violations"]
+        self.assertEqual(sorted(violation.split(":")[0] for violation in strict if "maelys-docs" in violation),
+                         ["docs/free.md", "docs/mentioned.md"])
+
+    def test_the_conditions_are_maelys_platforms(self) -> None:
+        platform = ROOT.parent / "maelys-platform" / "bin" / "maelys-platform"
+        if not platform.is_file():
+            self.skipTest("maelys-platform is not checked out beside this repository")
+        text = platform.read_text(encoding="utf-8")
+        self.assertIn(MODULE.VERIFIED_MARK.pattern, text)
+        self.assertIn(MODULE.README_LINK.pattern, text)
+
     def test_prose_is_a_note_by_default_and_a_violation_on_demand(self) -> None:
         self.product.write("docs/architecture.md", "# Architecture\n\nProse.\n")
         self.product.run("adopt", self.dir, "--apply")
@@ -1558,7 +1597,7 @@ class GoldenTest(unittest.TestCase):
         completed = self.product.run("check", self.dir, expect=2)
         self.assertEqual(completed.stderr, "")
         drifted = textwrap.dedent("""\
-            update   .github/workflows/release.yml
+            update   .github/workflows/release.yml [prose]
                      --- .github/workflows/release.yml
                      +++ .github/workflows/release.yml
                      @@ -63,5 +63,3 @@
@@ -1570,6 +1609,9 @@ class GoldenTest(unittest.TestCase):
             """)
         self.assertEqual(completed.stdout, self.CONTRACT
                          + self.FILES.replace("same     .github/workflows/release.yml\n", drifted)
+                         # Only a comment moved, and the line above the verdict says so.
+                         + "touches  1 prose: 'mechanism' changes what runs, 'pin' only the socle commit a"
+                           " workflow names, 'prose' only text and comments\n"
                          + self.VERDICTS.replace("release mechanism: ok", "release mechanism: FAIL")
                          + f"write    'maelys-release adopt {self.product.dir.resolve()} --apply'"
                            " writes .github/workflows/release.yml\n"
@@ -1610,7 +1652,10 @@ class GoldenTest(unittest.TestCase):
                                                          "release.yml@" + "0" * 40 + " # v0.0.0"))
         completed = self.product.run("check", self.dir, expect=2)
         self.assertIn("not a drift against the socle this product pins", completed.stdout)
-        self.assertIn("update   .github/workflows/release.yml", completed.stdout)
+        # Only the commit it names moved: a pin, which a reader knows
+        # without reading the diff below.
+        self.assertIn("update   .github/workflows/release.yml [pin]", completed.stdout)
+        self.assertIn("touches  1 pin:", completed.stdout)
         self.assertIn("-    uses: maelys-dev/maelys-release/.github/workflows/release.yml@" + "0" * 40,
                       completed.stdout)
         self.assertIn("+    uses: maelys-dev/maelys-release/.github/workflows/release.yml@" + "f" * 40,
@@ -3862,9 +3907,9 @@ class PackageTargetsTest(unittest.TestCase):
 
     def test_the_section_names_targets_of_this_release(self) -> None:
         declared = "[targets]\nlinux-x86_64\nlinux-arm64\nmacos-arm64\n\n[package]\nlinux-x86_64\n"
-        self.assertEqual(MODULE.parse_release(declared)[-1], ["linux-x86_64"])
+        self.assertEqual(MODULE.parse_release(declared)[-2], ["linux-x86_64"])
         # Without [targets], the socle's three targets are the release's.
-        self.assertEqual(MODULE.parse_release("[package]\nmacos-arm64\n")[-1], ["macos-arm64"])
+        self.assertEqual(MODULE.parse_release("[package]\nmacos-arm64\n")[-2], ["macos-arm64"])
         for text, expected in (("[package]\nwasm32\n", "not a target of this release"),
                                ("[package]\nlinux-x86_64 linux-x86_64\n", "twice")):
             with self.assertRaises(ValueError) as refusal:
@@ -3977,6 +4022,119 @@ class WidenAfterTheMergeTest(unittest.TestCase):
         collision = [found for found in MODULE.tag_checks(work, "0.2.0")
                      if "already exists" in found[1]]
         self.assertEqual([status for status, _ in collision], ["fail"])
+
+
+class ProductLegsTest(unittest.TestCase):
+    """A leg of the product's own, run by a workflow of the socle.
+
+    maelys-git-core tests with and without an agent enabled, on two
+    systems, and the shared matrix had no way to say so -- so it kept a CI of
+    its own. A [check] leg is a name, a platform and a command, and runs as
+    `legs / NAME` from a job adopt writes into ci.yml. Not a job of
+    check-product.yml: the 0.55.0 candidate was, and a skipped matrix job
+    reported `check / check (${{ matrix.name }})` on every pull request of
+    every product that declared nothing.
+    """
+
+    WORKFLOW = (ROOT / ".github" / "workflows" / "check-legs.yml").read_text(encoding="utf-8")
+    CALL = ("name: ci\n\njobs:\n  check:\n    uses: maelys-dev/maelys-release/.github/workflows/check-product.yml@"
+            + "a" * 40 + " # v9.9.9\n    with:\n      product: p\n\n  # the other compiler\n  clang:\n"
+            "    runs-on: ubuntu-26.04\n")
+
+    def declarations(self, legs, runners=None):
+        decl = MODULE.Declarations(pathlib.Path("/nonexistent"), "p")
+        decl.legs = legs
+        decl.runners = runners or {}
+        return decl
+
+    def test_names_are_one_each_on_a_known_platform(self) -> None:
+        self.assertEqual(MODULE.parse_release("[check]\nagent-off linux make check AGENT=off\n")[-1],
+                         [("agent-off", "linux", "make check AGENT=off")])
+        for text in ("[check]\nAgent linux true\n", "[check]\nx windows true\n", "[check]\nx linux\n",
+                     "[check]\nx linux true\nx macos true\n"):
+            with self.assertRaises(ValueError):
+                MODULE.parse_release(text)
+
+    def test_the_job_is_written_replaced_and_taken_away(self) -> None:
+        legs = [("agent-off", "linux", "make check AGENT='off'")]
+        written = MODULE.ci_legs(self.CALL, self.declarations(legs), "b" * 40, "v1.0.0")
+        self.assertTrue(written.startswith(self.CALL), "the product's jobs are left byte for byte")
+        self.assertIn("  legs:\n", written)
+        self.assertIn("check-legs.yml@" + "b" * 40 + " # v1.0.0", written)
+        self.assertIn("AGENT=''off''", written, "a quote is written twice in single-quoted YAML")
+        self.assertEqual(MODULE.ci_legs(written, self.declarations(legs), "b" * 40, "v1.0.0"), written)
+        moved = MODULE.ci_legs(written, self.declarations(legs), "c" * 40, "v2.0.0")
+        self.assertNotIn("b" * 40, moved)
+        self.assertEqual(MODULE.ci_legs(written, self.declarations([]), "b" * 40, "v1.0.0"), self.CALL)
+
+    def test_a_job_of_the_products_own_named_legs_is_left_alone(self) -> None:
+        own = self.CALL + "\n  legs:\n    runs-on: ubuntu-26.04\n"
+        self.assertEqual(MODULE.ci_legs(own, self.declarations([("x", "linux", "true")]), "b" * 40, "v1"), own)
+
+    def test_runners_follow_the_declaration(self) -> None:
+        written = MODULE.ci_legs(self.CALL, self.declarations([("x", "macos", "true")],
+                                                              {"macos": ["self-hosted", "macOS"]}), "b" * 40, "v1")
+        self.assertIn("      macos_runner: '[\"self-hosted\", \"macOS\"]'", written.split("  legs:", 1)[1])
+
+    def test_protect_and_the_adoption_guard_read_them_from_the_declaration(self) -> None:
+        """A leg removed from [check] is still in ci.yml when adopt asks what
+        the adoption will stop producing; the declaration already says."""
+        work = pathlib.Path(tempfile.mkdtemp(prefix="maelys-release-legs."))
+        self.addCleanup(shutil.rmtree, work, True)
+        (work / ".github" / "workflows").mkdir(parents=True)
+        (work / ".github" / "workflows" / "ci.yml").write_text(self.CALL)
+        (work / "maelys-release.conf").write_text("[check]\nagent-off linux make check AGENT=off\n")
+        caller, contexts = MODULE.socle_check_contexts(work)
+        self.assertEqual(caller, "check")
+        self.assertIn("legs / agent-off", contexts)
+        self.assertIn("check / check (linux)", contexts)
+        self.assertTrue(MODULE.socle_owned("legs / agent-on", caller))
+        self.assertFalse(MODULE.socle_owned("clang (ubuntu-26.04)", caller))
+
+    def test_the_workflow_runs_them_with_the_same_setup_and_the_same_runner_rule(self) -> None:
+        self.assertIn("name: ${{ matrix.name }}", self.WORKFLOW)
+        self.assertIn("include: ${{ fromJSON(inputs.legs) }}", self.WORKFLOW)
+        # Nothing gates the job: a skipped matrix job is what reported an
+        # unevaluated name, and a product that declares nothing never calls.
+        self.assertNotIn("\n    if:", self.WORKFLOW)
+        # A pull request reaches this workflow, so a public repository keeps
+        # the hosted runner whatever it declares.
+        self.assertEqual(self.WORKFLOW.count("github.event.repository.private &&"), 3)
+        self.assertIn('LEG_COMMAND: ${{ matrix.command }}', self.WORKFLOW)
+        # BSD sed on a macos leg knows no \| in a basic expression.
+        self.assertNotIn("\\|", self.WORKFLOW)
+        check_product = (ROOT / ".github" / "workflows" / "check-product.yml").read_text(encoding="utf-8")
+        self.assertNotIn("inputs.legs", check_product)
+
+
+class TouchesTest(unittest.TestCase):
+    """Whether a managed file's change is its mechanism, its pin or its prose.
+
+    maelys-oci: check named the file that moved and not whether the
+    difference touched the mechanism or the prose, and an editorial pass on
+    a managed block read like a fix to the release.
+    """
+
+    WORKFLOW = ("name: release\n# Managed by maelys-release v1.0.0 (1.0.0).\njobs:\n  release:\n"
+                "    uses: maelys-dev/maelys-release/.github/workflows/release.yml@" + "a" * 40 + " # v1.0.0\n"
+                "    # Why the job is here.\n    with:\n      product: p\n")
+
+    def test_text_is_prose(self) -> None:
+        self.assertEqual(MODULE.touches("AGENTS.md", "a\n", "b\n"), "prose")
+
+    def test_a_comment_is_prose(self) -> None:
+        self.assertEqual(MODULE.touches("x.yml", self.WORKFLOW,
+                                        self.WORKFLOW.replace("Why the job is here.", "Why it is.")), "prose")
+
+    def test_the_commit_a_workflow_names_is_a_pin(self) -> None:
+        moved = self.WORKFLOW.replace("a" * 40 + " # v1.0.0", "b" * 40 + " # v1.1.0") \
+            .replace("v1.0.0 (1.0.0)", "v1.1.0 (1.1.0)").replace("Why the job is here.", "Why it is.")
+        self.assertEqual(MODULE.touches("x.yml", self.WORKFLOW, moved), "pin")
+
+    def test_anything_that_runs_is_mechanism(self) -> None:
+        self.assertEqual(MODULE.touches("x.yml", self.WORKFLOW, self.WORKFLOW + "      sbom: true\n"), "mechanism")
+        self.assertEqual(MODULE.touches("scripts/checkout-dependency.sh", "set -eu\n# a\n", "set -euo\n# a\n"),
+                         "mechanism")
 
 
 class MovedPinNamedTest(unittest.TestCase):
@@ -4381,7 +4539,7 @@ class RunnerDeclarationTest(unittest.TestCase):
         return MODULE.parse_release(textwrap.dedent(text))
 
     def test_labels_are_read(self) -> None:
-        *_, runner, runners, _, _, _, _, unknown, _ = self.parse("[runners]\nmacos self-hosted macOS ARM64\n")
+        *_, runner, runners, _, _, _, _, unknown, _, _ = self.parse("[runners]\nmacos self-hosted macOS ARM64\n")
         self.assertEqual(runner, ["self-hosted", "macOS", "ARM64"])
         self.assertEqual(runners, {"macos": ["self-hosted", "macOS", "ARM64"]})
         self.assertEqual(unknown, [])
@@ -4390,7 +4548,7 @@ class RunnerDeclarationTest(unittest.TestCase):
         """A private repository that forbids hosted runners could point the
         macOS leg elsewhere and not the two Linux ones, which are half its
         matrix and all of its fuzz and sanitizers jobs."""
-        *_, runners, _, _, _, _, unknown, _ = self.parse(
+        *_, runners, _, _, _, _, unknown, _, _ = self.parse(
             "[runners]\nlinux-x86_64 self-hosted Linux X64\nlinux-arm64 lima-arm64\n")
         self.assertEqual(runners, {"linux-x86_64": ["self-hosted", "Linux", "X64"],
                                    "linux-arm64": ["lima-arm64"]})
@@ -4462,7 +4620,7 @@ class SbomDeclarationTest(unittest.TestCase):
         return MODULE.parse_release(textwrap.dedent(text))
 
     def test_one_glob_is_read(self) -> None:
-        _, _, _, _, sbom, _, _, _, _, _, _, unknown, _ = self.parse("""\
+        _, _, _, _, sbom, _, _, _, _, _, _, unknown, _, _ = self.parse("""\
             [sbom]
             *.spdx.json
             """)
@@ -4476,7 +4634,7 @@ class SbomDeclarationTest(unittest.TestCase):
         self.assertIn("holds one glob", str(refusal.exception))
 
     def test_the_section_is_optional(self) -> None:
-        _, _, _, _, sbom, _, _, _, _, _, _, _, _ = self.parse("[manifest]\n*.wasm\n")
+        _, _, _, _, sbom, _, _, _, _, _, _, _, _, _ = self.parse("[manifest]\n*.wasm\n")
         self.assertEqual(sbom, "")
 
     def test_it_renders_into_the_workflow(self) -> None:
@@ -4728,23 +4886,23 @@ class UnitTest(unittest.TestCase):
 
     def test_parse_release(self) -> None:
         self.assertEqual(MODULE.parse_release("[targets]\nlinux-arm64\nwasm32 ubuntu-26.04\n"),
-                         ([("linux-arm64", ""), ("wasm32", "ubuntu-26.04")], [], [], {}, "", [], {}, False, "", "", "", [], []))
+                         ([("linux-arm64", ""), ("wasm32", "ubuntu-26.04")], [], [], {}, "", [], {}, False, "", "", "", [], [], []))
         self.assertEqual(MODULE.parse_release("[targets]\nmacos-arm64 self-hosted ARM64\n"),
-                         ([("macos-arm64", ["self-hosted", "ARM64"])], [], [], {}, "", [], {}, False, "", "", "", [], []))
-        self.assertEqual(MODULE.parse_release("[manifest]\n*.wasm\n"), ([], ["*.wasm"], [], {}, "", [], {}, False, "", "", "", [], []))
+                         ([("macos-arm64", ["self-hosted", "ARM64"])], [], [], {}, "", [], {}, False, "", "", "", [], [], []))
+        self.assertEqual(MODULE.parse_release("[manifest]\n*.wasm\n"), ([], ["*.wasm"], [], {}, "", [], {}, False, "", "", "", [], [], []))
         self.assertEqual(MODULE.parse_release("[channels]\nnpm github-packages\n"),
-                         ([], [], [("npm", "github-packages")], {}, "", [], {}, False, "", "", "", [], []))
-        self.assertEqual(MODULE.parse_release("[gate]\nnone\n"), ([], [], [], {}, "", [], {}, False, "", "none", "", [], []))
-        self.assertEqual(MODULE.parse_release("[gate]\nreviewer\n"), ([], [], [], {}, "", [], {}, False, "", "reviewer", "", [], []))
-        self.assertEqual(MODULE.parse_release("# nothing declared\n"), ([], [], [], {}, "", [], {}, False, "", "", "", [], []))
+                         ([], [], [("npm", "github-packages")], {}, "", [], {}, False, "", "", "", [], [], []))
+        self.assertEqual(MODULE.parse_release("[gate]\nnone\n"), ([], [], [], {}, "", [], {}, False, "", "none", "", [], [], []))
+        self.assertEqual(MODULE.parse_release("[gate]\nreviewer\n"), ([], [], [], {}, "", [], {}, False, "", "reviewer", "", [], [], []))
+        self.assertEqual(MODULE.parse_release("# nothing declared\n"), ([], [], [], {}, "", [], {}, False, "", "", "", [], [], []))
         # A section this socle does not know is named and skipped, never fatal:
         # a product pins the socle by commit, and losing its targets in
         # silence on an older socle is worse than an unapplied section.
         self.assertEqual(MODULE.parse_release("[targets]\nlinux-arm64\n[bsd]\nx\n"),
-                         ([("linux-arm64", "")], [], [], {}, "", [], {}, False, "", "", "", ["[bsd] at line 3"], []))
+                         ([("linux-arm64", "")], [], [], {}, "", [], {}, False, "", "", "", ["[bsd] at line 3"], [], []))
         # A version materialised twice: the command that regenerates the second.
         self.assertEqual(MODULE.parse_release("[cut]\nafter-version bash scripts/header.sh\n"),
-                         ([], [], [], {}, "", [], {}, False, "", "", "bash scripts/header.sh", [], []))
+                         ([], [], [], {}, "", [], {}, False, "", "", "bash scripts/header.sh", [], [], []))
         for text in ("linux-arm64\n",                      # outside a section
                      "[targets]\nwasm32\n",                # no runner and no default
                      "[targets]\nWASM\n",                  # not a target name

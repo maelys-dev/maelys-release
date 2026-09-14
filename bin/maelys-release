@@ -31,6 +31,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.parse
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import maelys_cli as cli  # noqa: E402
@@ -69,6 +70,12 @@ SOCLE_GATES = ("reviewer", "none")
 # check-product.yml's matrix names them -- except macos, which keeps the
 # bare word ten repositories already carry.
 SOCLE_RUNNER_KEYS = ("macos", "linux-x86_64", "linux-arm64")
+# Where a leg of [check] runs, named as the socle's own legs are.
+CHECK_PLATFORMS = ("linux", "linux-arm64", "macos")
+# The job of ci.yml that calls check-legs.yml. Fixed, because it is the first
+# half of every context a leg reports -- `legs / NAME` -- and a protection
+# requires by that name.
+LEGS_JOB = "legs"
 # What release.yml asks of the commit a tag names, beyond the tag's own
 # signature. The workflow has offered these since 0.21.0 and nothing rendered
 # the input, so `none` was the only value a product could reach while the
@@ -103,6 +110,49 @@ LEGACY_CLI_REFERENCES = ("docs/cli-reference.md", "docs/generated/cli-reference.
 GENERATED_HEAD_LINES = 10
 GENERATED_MARK = re.compile(r"generated", re.IGNORECASE)
 GENERATED_REFUSAL = re.compile(r"do not edit|don't edit|ne pas .diter", re.IGNORECASE)
+
+
+# A reference a check of the repository holds against the code, written by
+# hand: "<!-- VERIFIED by make api-doc-check against the public API; edit with
+# the code. -->". maelys-platform's condition, character for character, so that
+# `check` and `maelys-platform docs --prose` never sort one file two ways. It
+# stays for the reason docs/cli.md does: the check that holds it must read it
+# in the checkout it verifies.
+VERIFIED_MARK = re.compile(r"verified by\s+(?P<check>\S.{0,120}?)\s+against\b.{0,200}?edit with the code",
+                           re.I | re.S)
+# A link a README makes to a page of docs/: inline, by reference, in HTML, or
+# through the repository's own GitHub URL. maelys-platform's, as above.
+README_LINK = re.compile(r"""(?:\]\(\s*<?|^\s{0,3}\[[^\]]+\]:\s*<?|\bhref\s*=\s*["'])(?P<target>[^\s)"'>]+)""",
+                         re.I | re.M)
+
+
+def readme_links(readme: str, repository: str) -> set[str]:
+    """The paths of docs/ a README points at, files or directories.
+
+    maelys-platform's `readme_links`, kept identical: a document is linked
+    when the README names it or a directory holding it, and a plain mention
+    of a path in a sentence is not a link.
+    """
+    own = re.compile(rf"^https?://github\.com/{re.escape(repository)}/(?:blob|tree)/[^/]+/", re.I) \
+        if repository else None
+    found = set()
+    for match in README_LINK.finditer(readme or ""):
+        target = urllib.parse.unquote(match.group("target").split("#", 1)[0].split("?", 1)[0])
+        if own:
+            target = own.sub("", target)
+        while target.startswith("./"):
+            target = target[2:]
+        target = target.rstrip("/")
+        if target == "docs" or target.startswith("docs/"):
+            found.add(target)
+    return found
+
+
+def verified_by(text: str) -> str:
+    """The check a verified reference names in its head, or ''."""
+    head = "\n".join(text.lstrip().splitlines()[:GENERATED_HEAD_LINES])
+    found = VERIFIED_MARK.search(head)
+    return " ".join(found.group("check").split()) if found else ""
 
 
 def is_generated(text: str) -> bool:
@@ -156,6 +206,7 @@ SOCLE_MECHANISM = "maelys-release"
 MECHANISMS = (SOCLE_MECHANISM, "custom", "none")
 RELEASE_USES = re.compile(rf"{re.escape(SOCLE_REPOSITORY)}/\.github/workflows/release\.yml@[0-9a-f]{{40}}")
 CI_USES = re.compile(rf"({re.escape(SOCLE_REPOSITORY)}/\.github/workflows/check-product\.yml@)[0-9a-f]{{40}} # \S+")
+LEGS_USES = re.compile(rf"({re.escape(SOCLE_REPOSITORY)}/\.github/workflows/check-legs\.yml@)[0-9a-f]{{40}} # \S+")
 BEGIN = "<!-- maelys-release:begin -->"
 END = "<!-- maelys-release:end -->"
 
@@ -278,6 +329,11 @@ class Declarations:
         self.channel_gates: dict[str, str] = {}
         # The targets that package, when [package] says; empty means all.
         self.package: list[str] = []
+        # The product's own legs of the shared CI: (name, platform, command).
+        # Not `checks`, which is where this class keeps its diagnostics: the
+        # first cut used that name, and the report looping over it appended
+        # to the very list it walked until the self-test was killed.
+        self.legs: list[tuple[str, str, str]] = []
         # "reviewer", "none", or "" when this repository has not chosen.
         self.gate = ""
         # What cut runs between writing VERSION and the bump commit, for a
@@ -293,6 +349,8 @@ class Declarations:
         # Files of docs/ that are neither generated, engaged by LICENSING.md
         # nor data: they belong in maelys-docs/<product>/.
         self.prose: list[str] = []
+        # Prose README.md links: a public README holds it until a site exists.
+        self.readme_held: list[str] = []
         self.checks: list[dict] = []
 
     @property
@@ -408,6 +466,7 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
     gate = ""
     after_version = ""
     package: list[str] = []
+    checks: list[tuple[str, str, str]] = []
     unknown: list[str] = []
     section = ""
     for number, raw in enumerate(text.splitlines(), 1):
@@ -416,7 +475,7 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
             continue
         if line.startswith("["):
             if line in ("[targets]", "[manifest]", "[sbom]", "[runners]", "[dependencies]",
-                        "[commit]", "[channels]", "[gate]", "[cut]", "[package]"):
+                        "[commit]", "[channels]", "[gate]", "[cut]", "[package]", "[check]"):
                 section = line[1:-1]
                 continue
             # A section this socle does not know is named and skipped, never
@@ -442,6 +501,24 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
             if not command.strip():
                 raise ValueError(f"[cut] after-version names no command at line {number}")
             after_version = command.strip()
+            continue
+        if section == "check":
+            # A leg of the product's own, run by the shared CI beside the
+            # socle's three: a name, the platform it runs on, and the command.
+            # maelys-git-core tests with and without an agent enabled, which
+            # the shared matrix had no way to say, so it kept a CI of its own.
+            name, _, rest = line.partition(" ")
+            platform, _, command = rest.strip().partition(" ")
+            if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", name):
+                raise ValueError(f"a [check] leg is named [a-z0-9-] at line {number}: {name}")
+            if any(name == known for known, _, _ in checks):
+                raise ValueError(f"[check] names the leg {name} twice, at line {number}")
+            if platform not in CHECK_PLATFORMS:
+                raise ValueError(f"a [check] leg runs on {' or '.join(CHECK_PLATFORMS)}, not {platform or 'nothing'},"
+                                 f" at line {number}")
+            if not command.strip():
+                raise ValueError(f"the [check] leg {name} names no command at line {number}")
+            checks.append((name, platform, command.strip()))
             continue
         if section == "package":
             # The targets that package; every target of [targets] verifies.
@@ -561,7 +638,7 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
         targets.append((name, runner))
     if section and not unknown and not targets and not manifest and not channels \
             and not gate and not after_version and not sbom and not runners and not apart \
-            and not commit_verification and not package:
+            and not commit_verification and not package and not checks:
         raise ValueError(f"{DECLARATION_FILE} declares no target, archive kind, channel, gate or cut command")
     known = [name for name, _ in targets] or list(SOCLE_TARGETS)
     for name in package:
@@ -569,7 +646,7 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
             raise ValueError(f"[package] names {name}, which is not a target of this release"
                              f" ({', '.join(known)})")
     return (targets, manifest, channels, channel_gates, sbom, macos_runner, runners, apart,
-            commit_verification, gate, after_version, unknown, package)
+            commit_verification, gate, after_version, unknown, package, checks)
 
 
 def read_fuzz(decl: Declarations) -> None:
@@ -792,7 +869,8 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
         try:
             decl.targets, decl.manifest_patterns, decl.channels, decl.channel_gates, \
                 decl.sbom_pattern, decl.macos_runner, decl.runners, decl.dependencies_apart, \
-                decl.commit_verification, decl.gate, decl.after_version, unknown, decl.package = \
+                decl.commit_verification, decl.gate, decl.after_version, unknown, decl.package, \
+                decl.legs = \
                 parse_release(release.read_text(encoding="utf-8"))
             for section in unknown:
                 decl.add("missing", f"{release.name}: section {section} is not one this socle knows"
@@ -813,6 +891,19 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
             if decl.targets:
                 decl.add("ok", f"{release.name} targets: "
                                + " ".join(name for name, _ in decl.targets))
+            for name, platform, command in decl.legs:
+                decl.add("ok", f"{release.name} [check] {name} on {platform}: {command} — runs as"
+                               f" '{LEGS_JOB} / {name}', from the job of ci.yml adopt writes", "conventions")
+            ci_text = ci.read_text(encoding="utf-8") if decl.legs and ci.is_file() else ""
+            if decl.legs and ci_text and not decl.calls_socle_ci:
+                decl.add("missing", f"{release.name} [check] declares legs, and .github/workflows/ci.yml does"
+                                    " not call check-product.yml: adopt writes the legs job beside that call"
+                                    " and nowhere else", "conventions")
+            elif decl.legs and re.search(rf"^  {LEGS_JOB}:\s*$", ci_text, re.MULTILINE) \
+                    and not LEGS_USES.search(ci_text):
+                decl.add("refused", f".github/workflows/ci.yml has a job of its own named {LEGS_JOB}, the name"
+                                    f" adopt writes [check] under: rename that job, or its contexts and the"
+                                    " legs' would be one prefix", "conventions")
             if decl.package:
                 verifying = [name for name, _ in decl.targets] or list(SOCLE_TARGETS)
                 decl.add("ok", f"{release.name} [package] {' '.join(decl.package)}: every target of the"
@@ -1127,10 +1218,28 @@ def read_docs(decl: Declarations) -> None:
             continue
         if path.suffix.lower() != ".md":
             continue  # data, never prose
-        if is_generated(path.read_text(encoding="utf-8")):
+        text = path.read_text(encoding="utf-8")
+        if is_generated(text):
+            continue
+        check = verified_by(text)
+        if check:
+            decl.add("ok", f"{relative} is a reference {check} verifies against the code: it stays", "conventions")
             continue
         decl.prose.append(relative)
+    readme = decl.project / "README.md"
+    links = readme_links(readme.read_text(encoding="utf-8", errors="replace") if readme.is_file() else "",
+                         github_repository(decl.project))
     for relative in decl.prose:
+        if any(relative == link or relative.startswith(link + "/") for link in links):
+            # `check` is offline: it sees the link, not whether a stranger can
+            # follow it nor whether a site documents the product. So it says
+            # the rule and asserts nothing; maelys-platform, which reads both,
+            # decides `movable`.
+            decl.readme_held.append(relative)
+            decl.add("note", f"{relative}: prose, and README.md links it. If this repository is public and no"
+                     " site documents the product, it stays: maelys-docs is private and the link would break"
+                     " for every reader. 'maelys-platform docs' says which", "conventions")
+            continue
         # The destination is private, and `check` is offline by design, so it
         # cannot tell whether this repository is public. A public product
         # whose README links a document moves it into a repository its
@@ -1202,6 +1311,71 @@ def runner_json(labels: list[str]) -> str:
 # them. A key here is a line under the call's `with:`, and nothing else.
 RUNNER_INPUTS = {"macos": "macos_runner", "linux-x86_64": "linux_x86_64_runner",
                  "linux-arm64": "linux_arm64_runner"}
+
+
+def legs_job(decl: "Declarations", sha: str, tag: str) -> list[str]:
+    """The job of ci.yml that calls check-legs.yml, or nothing when [check] is empty.
+
+    The legs are single-quoted YAML, where a quote is written twice: a
+    command is the product's shell and may well contain one. Runners follow
+    [runners] as the check call's do, and check-legs.yml reads them on a
+    private repository only.
+    """
+    if not decl.legs:
+        return []
+    value = json.dumps([{"name": name, "platform": platform, "command": command}
+                        for name, platform, command in decl.legs])
+    return [
+        f"  {LEGS_JOB}:",
+        f"    # Written by maelys-release adopt from [check] of {DECLARATION_FILE}; each leg",
+        f"    # reports as '{LEGS_JOB} / NAME'. Declare there, never here.",
+        f"    uses: {SOCLE_REPOSITORY}/.github/workflows/check-legs.yml@{sha} # {tag}",
+        "    with:",
+        f"      product: {decl.product}",
+        f"      legs: '{value.replace(chr(39), chr(39) * 2)}'",
+        *runner_inputs(decl),
+    ]
+
+
+def ci_legs(text: str, decl: "Declarations", sha: str, tag: str) -> str:
+    """Set, replace or remove the legs job of ci.yml.
+
+    The job is the socle's from its name to the next job: replaced where it
+    stands, appended after the last job when it is new, and taken away with
+    the blank line before it when [check] is emptied. Everything else of the
+    file is left byte for byte. A job of the product's own that happens to be
+    named `legs` is never touched: the declarations refuse that pairing.
+    """
+    lines = text.splitlines(keepends=True)
+    start = next((index for index, line in enumerate(lines) if line.rstrip() == f"  {LEGS_JOB}:"), None)
+    end = None
+    if start is not None:
+        end = start + 1
+        while end < len(lines) and not CI_JOB.match(lines[end]) \
+                and not (lines[end].strip() and not lines[end].startswith(" ")):
+            end += 1
+        if not any(LEGS_USES.search(line) for line in lines[start:end]):
+            return text
+        # Trailing blank lines and comments belong to what follows.
+        while end > start + 1 and (not lines[end - 1].strip() or lines[end - 1].lstrip().startswith("#")) \
+                and not LEGS_USES.search(lines[end - 1]):
+            end -= 1
+    block = [line + "\n" for line in legs_job(decl, sha, tag)]
+    if start is not None:
+        if not block:
+            if start > 0 and not lines[start - 1].strip():
+                start -= 1
+            del lines[start:end]
+            return "".join(lines)
+        lines[start:end] = block
+        return "".join(lines)
+    if not block:
+        return text
+    if lines and not lines[-1].endswith("\n"):
+        lines[-1] += "\n"
+    while lines and not lines[-1].strip():
+        lines.pop()
+    return "".join(lines) + "\n" + "".join(block)
 
 
 def macos_runner_input(decl: Declarations) -> list[str]:
@@ -1433,7 +1607,7 @@ def ci_workflow(decl: Declarations, sha: str, tag: str, version: str) -> str:
     # text. They were not: this rendered the runner lines after `product:`
     # and the writer inserts them first, so a product that declared a runner
     # would have drifted against its own freshly created ci.yml.
-    return ci_macos_runner("\n".join(lines) + "\n", decl.runners)
+    return ci_legs(ci_macos_runner("\n".join(lines) + "\n", decl.runners), decl, sha, tag)
 
 
 def managed_block(existing: str | None, block: str) -> str:
@@ -1504,7 +1678,8 @@ def stage(decl: Declarations, sha: str, tag: str) -> dict[str, tuple[str, bool]]
         existing = ci.read_text(encoding="utf-8")
         if CI_USES.search(existing):
             updated = CI_USES.sub(rf"\g<1>{sha} # {tag}", existing)
-            staged[".github/workflows/ci.yml"] = (ci_macos_runner(updated, decl.runners), False)
+            staged[".github/workflows/ci.yml"] = (ci_legs(ci_macos_runner(updated, decl.runners), decl, sha, tag),
+                                                  False)
     return staged
 
 
@@ -1606,6 +1781,45 @@ def socle_impact(pinned: str) -> list[tuple[str, str]]:
     return list(reversed(impacts))
 
 
+# What a line naming the socle looks like once its commit and tag are taken
+# out: a pin that moves and nothing else is a third kind of change, neither
+# the mechanism nor its prose.
+PIN_SPELLINGS = (re.compile(r"@[0-9a-f]{40} # \S+"), re.compile(r"(maelys-release) v?[0-9][0-9.]*\S* \([0-9.]+\)"))
+
+
+def touches(relative: str, current: str, content: str) -> str:
+    """What a change to a managed file touches: prose, pin or mechanism.
+
+    Asked by maelys-oci, sixty-eight tags into the fleet: check named the
+    file that moved and the diff, and a reader still had to read the diff to
+    learn whether an adoption rewrote a sentence or the release. A text file
+    is prose. A workflow or a script is prose when only its comments moved,
+    pin when only the commit it names moved (comments aside), and mechanism
+    otherwise -- the only kind that changes what runs.
+    """
+    if relative.endswith(".md"):
+        return "prose"
+
+    def normalised(text: str, comments: bool) -> list[str]:
+        out = []
+        for line in text.splitlines():
+            for spelling in PIN_SPELLINGS:
+                line = spelling.sub("PIN", line)
+            if not comments and (not line.strip() or line.lstrip().startswith("#")):
+                continue
+            out.append(line)
+        return out
+
+    def uncommented(text: str) -> list[str]:
+        return [line for line in text.splitlines() if line.strip() and not line.lstrip().startswith("#")]
+
+    if normalised(current, False) != normalised(content, False):
+        return "mechanism"
+    if uncommented(current) != uncommented(content):
+        return "pin"
+    return "prose"
+
+
 def plan(decl: Declarations, staged: dict[str, tuple[str, bool]], apply: bool) -> list[dict]:
     """One entry per managed file: create, update or same; written when applying."""
     files: list[dict] = []
@@ -1628,9 +1842,11 @@ def plan(decl: Declarations, staged: dict[str, tuple[str, bool]], apply: bool) -
                 entry["action"] = "update"
                 entry["diff"] = "".join(difflib.unified_diff(
                     current.splitlines(keepends=True), content.splitlines(keepends=True), relative, relative))
+                entry["touches"] = touches(relative, current, content)
             elif executable and not os.access(path, os.X_OK):
                 entry["action"] = "update"
                 entry["reason"] = "not executable"
+                entry["touches"] = "mechanism"
             else:
                 entry["action"] = "same"
         if apply and entry["action"] != "same":
@@ -2530,7 +2746,7 @@ def check_data(invocation: Invocation) -> tuple[Declarations, dict]:
     if invocation.flag("--docs-contract"):
         conventions.extend(f"{relative}: prose belongs in maelys-docs/{product}/{relative[len('docs/'):]};"
                            f" move it with '{PROGRAM} migrate'"
-                           for relative in decl.prose)
+                           for relative in decl.prose if relative not in decl.readme_held)
         conventions.extend(f"{name}: the generated CLI reference is {CLI_REFERENCE} for every product"
                            for name in LEGACY_CLI_REFERENCES if (project / name).is_file())
     # The seeded notes are added while planning, so the checks are taken last.
@@ -2564,7 +2780,9 @@ def handle_declarations(invocation: Invocation) -> tuple[dict, int]:
                          "sbomPattern": decl.sbom_pattern,
                          "macosRunner": list(decl.macos_runner),
                          "dependenciesApart": decl.dependencies_apart,
-                         "commitVerification": decl.commit_verification},
+                         "commitVerification": decl.commit_verification,
+                         "legs": [{"name": name, "platform": platform, "command": command}
+                                  for name, platform, command in decl.legs]},
             "pinned": pinned_socle(project),
             "managedBy": stamp.group(1) if stamp else "",
             "runners": read_runners(project),
@@ -3988,7 +4206,28 @@ def socle_check_contexts(project: pathlib.Path) -> tuple[str, list[str]]:
         # never runs, when it runs and passes on every pull request they have.
         if value in ("|", "|-", ">", ">-") or value.strip("'\"") != "":
             names.append(job)
-    return caller, [f"{caller} / {name}" for name in names]
+    # And the product's own legs, which report under the legs job adopt
+    # writes. Read from the declaration and not from ci.yml: what the guard
+    # of adopt must compare a protection with is what the adoption is about
+    # to produce, and a leg removed from [check] is still in ci.yml then.
+    return caller, [f"{caller} / {name}" for name in names] + [f"{LEGS_JOB} / {name}"
+                                                               for name in declared_legs(project)]
+
+
+def declared_legs(project: pathlib.Path) -> list[str]:
+    """The names of the legs [check] declares, or none when nothing parses."""
+    release = project / DECLARATION_FILE
+    if not release.is_file():
+        return []
+    try:
+        return [name for name, _, _ in parse_release(release.read_text(encoding="utf-8"))[-1]]
+    except ValueError:
+        return []
+
+
+def socle_owned(name: str, caller: str) -> bool:
+    """Whether a context is one the socle's workflows report, by its prefix."""
+    return name.startswith((f"{caller} / ", f"{LEGS_JOB} / "))
 
 
 # A job of the product that builds an instrumented tree. The name or the
@@ -4072,7 +4311,7 @@ def vanishing_contexts(project: pathlib.Path) -> list[str]:
     # Only the socle's own contexts: what a product requires of its own jobs
     # is the product's business, and this socle has no idea what produces it.
     return sorted(name for name in required
-                  if isinstance(name, str) and name.startswith(f"{caller} / ") and name not in produced)
+                  if isinstance(name, str) and socle_owned(name, caller) and name not in produced)
 
 
 def check_product_legs() -> list[str]:
@@ -4653,7 +4892,7 @@ def handle_protect(invocation: Invocation) -> tuple[dict, int]:
     # confused the two: right after an adoption the older pull requests
     # still carry the previous names, and an intersection would have called
     # a renamed leg intermittent and dropped it.
-    others = [name for name in seen if name not in derived and not name.startswith(f"{caller} / ")]
+    others = [name for name in seen if name not in derived and not socle_owned(name, caller)]
     proposed = derived + others
     # "never seen" is judged on every pull request sampled, not on their
     # intersection: a leg renamed by a recent adoption runs on the newest
@@ -4670,7 +4909,7 @@ def handle_protect(invocation: Invocation) -> tuple[dict, int]:
               "caller": caller, "socleContexts": derived, "observed": seen,
               "fromTag": from_tag, "required": sorted(required),
               "seenOnSome": {name: count for name, count in (partial.get("partial") or {}).items()
-                             if name not in derived and not name.startswith(f"{caller} / ")},
+                             if name not in derived and not socle_owned(name, caller)},
               "pullRequests": partial.get("heads", 0),
               "missingFromRuns": absent, "requiredButNeverRun": stale,
               "proposed": proposed, "applied": False}
@@ -4692,7 +4931,7 @@ def handle_protect(invocation: Invocation) -> tuple[dict, int]:
     # first, two places to keep true, and the ruleset still naming the old
     # contexts after the next rename. Reported by agent-cli-spec, who
     # worked it out from the output before running it.
-    ours = [name for name in by_rule if name in derived or name.startswith(f"{caller} / ")]
+    ours = [name for name in by_rule if name in derived or socle_owned(name, caller)]
     # --without-legs: the first half of a rename. What the branch requires,
     # minus every leg of the socle's matrix -- the jobs named `check (…)` under
     # the calling job -- and nothing else. A required context that nothing
@@ -5099,7 +5338,8 @@ def text_rehearse(data: dict) -> str:
 def text_adopt(data: dict) -> str:
     lines = []
     for entry in data["files"]:
-        lines.append(f"{entry['action']:<8} {entry['path']}" + (f" ({entry['reason']})" if "reason" in entry else ""))
+        lines.append(f"{entry['action']:<8} {entry['path']}" + (f" ({entry['reason']})" if "reason" in entry else "")
+                     + (f" [{entry['touches']}]" if "touches" in entry else ""))
         if data["mode"] == "plan" and entry.get("diff"):
             lines.extend("         " + line for line in entry["diff"].rstrip("\n").split("\n"))
     for entry in data.get("impact", []):
@@ -5133,7 +5373,8 @@ def text_check(data: dict, with_checks: bool = True) -> str:
                      f" against the socle this product pins; {data['ahead']} version(s) separate them and"
                      f" '{PROGRAM} adopt {data['project']}' says what each asks of a product")
     for entry in data["files"]:
-        lines.append(f"{entry['action']:<8} {entry['path']}" + (f" ({entry['reason']})" if "reason" in entry else ""))
+        lines.append(f"{entry['action']:<8} {entry['path']}" + (f" ({entry['reason']})" if "reason" in entry else "")
+                     + (f" [{entry['touches']}]" if "touches" in entry else ""))
         # The diff, under the file that drifted. `check` computed it either
         # way and the JSON has carried it all along; the text printed the
         # word "update" and threw the rest, so a product that declared
@@ -5144,6 +5385,11 @@ def text_check(data: dict, with_checks: bool = True) -> str:
         # one; this is the same shape.
         if entry.get("diff"):
             lines.extend("         " + line for line in entry["diff"].rstrip("\n").split("\n"))
+    kinds = [entry["touches"] for entry in data["files"] if "touches" in entry]
+    if kinds:
+        counted = ", ".join(f"{kinds.count(kind)} {kind}" for kind in ("mechanism", "pin", "prose") if kind in kinds)
+        lines.append(f"{'touches':<8} {counted}: 'mechanism' changes what runs, 'pin' only the socle commit"
+                     " a workflow names, 'prose' only text and comments")
     conventions = "ok" if data["conventions"]["valid"] else "FAIL"
     release = ("ok" if data["release"]["valid"] else "FAIL") if data["release"]["applicable"] \
         else f"not applicable ({data['mechanism']} mechanism)"
@@ -5356,7 +5602,8 @@ FILES_SCHEMA = {"type": "array", "items": {"type": "object", "required": ["path"
                                                          "action": {"enum": ["create", "update", "same"]},
                                                          "scope": {"enum": ["conventions", "release"]},
                                                          "seeded": {"type": "boolean"},
-                                                         "diff": {"type": "string"}, "reason": {"type": "string"}}}}
+                                                         "diff": {"type": "string"}, "reason": {"type": "string"},
+                                                         "touches": {"enum": ["prose", "pin", "mechanism"]}}}}
 MECHANISM_SCHEMA = {"enum": list(MECHANISMS)}
 VERDICT_SCHEMA = {"type": "object", "required": ["valid", "violations"],
                   "properties": {"valid": {"type": "boolean"}, "violations": {"type": "array",
