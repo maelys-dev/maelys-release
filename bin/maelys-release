@@ -844,6 +844,11 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
                                  " ever sees taken: it reads whatever is next door, and the working"
                                  " copy of someone who also develops that dependency is what sits"
                                  f" there. Refuse instead: {text}", "conventions")
+                    elif name == SOCLE_NAME:
+                        decl.add("note", f"{path} line {number} reads ../{name}, a working copy that moves"
+                                 f" as much as any other. ${SOCLE_VARIABLE} names the socle this"
+                                 " repository pins, written by 'dependencies DIR --apply' and by"
+                                 f" scripts/checkout-dependencies.sh in a job: {text}", "conventions")
                     elif name:
                         decl.add("note", f"{path} line {number} reads ../{name}, and the pins are under"
                                  f" ${DEPENDENCIES_VARIABLE} since this repository declares"
