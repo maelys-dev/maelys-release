@@ -16,11 +16,19 @@
   stands for and never more lenient. It runs under `always()`: a skipped job
   passes a required check, and an alias that did not run would be a green
   light on a cancelled run.
+- **`dependencies/maelys-release.pin` is refused only where a workflow
+  names the socle.** The rule assumed the `uses:` line without reading it:
+  maelys-platform calls the socle from no workflow and pins it to choose the
+  socle its program runs across the fleet, and `declarations` told it to
+  delete the only source. Without a `uses:` line the pin is a dependency like
+  any other. maelys-platform is the one repository of the fleet carrying such
+  a pin.
 - **Impact.** maelys-http, maelys-oci, agent-cli-spec, maelys-datalog,
   maelys-system — still requiring the old names: adopt, merge, then
   `protect . --apply`; do not narrow. Everyone else: three more short jobs on
   each pull request until a later version removes them, announced before; the
-  managed block and skill change prose.
+  managed block and skill change prose. maelys-platform: its socle pin is an
+  `ok` again.
 
 ## 0.56.0 — 2026-09-14
 

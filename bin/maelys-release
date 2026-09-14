@@ -791,13 +791,22 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
         decl.pin_problems.extend(problems)
         if not pin:
             continue
-        if pin["name"] == SOCLE_NAME:
+        # Two pins for one commit only where a workflow already names the
+        # socle. maelys-platform names it nowhere -- its one workflow runs its
+        # own tests -- and pins it to choose the socle that runs `declarations`
+        # across the fleet: a consumer of the program, whose pin is the only
+        # source. The rule assumed the `uses:` line without reading it, and told
+        # that repository to delete what it runs on.
+        if pin["name"] == SOCLE_NAME and pinned_socle(project):
             decl.add("missing", f"dependencies/{SOCLE_NAME}.pin: the socle is pinned by the 'uses:' line"
                                 " of the generated workflows, which is the one source; a second would be"
                                 " two pins for one commit. Delete it -- 'dependencies DIR --apply'"
                                 f" materialises the socle under the same root and prints {SOCLE_VARIABLE}",
                      "conventions")
             continue
+        if pin["name"] == SOCLE_NAME:
+            decl.add("ok", f"dependencies/{SOCLE_NAME}.pin: no workflow of this repository names the socle,"
+                           " so this pin is the one source, a dependency like any other", "conventions")
         decl.dependencies.append(pin["name"])
         decl.pins[pin["name"]] = pin
         if pin["repository"]:
