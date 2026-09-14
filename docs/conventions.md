@@ -1097,22 +1097,7 @@ request?" answered nothing for exactly the people who had asked. Those
 nineteen say what each version asks of a product and no more; the entry
 above each is the account, and it is contemporary where the line is not.
 
-## A product's own legs, and targets that only verify
-
-**`[check]` adds legs of the product's own to the shared CI.** One line per
-leg — a name, the platform it runs on (`linux`, `linux-arm64`, `macos`), and
-the command:
-
-```
-[check]
-agent-off linux make check AGENT=off
-```
-
-Each runs as `check (NAME)` beside the socle's three, with the same setup
-and the same runner rule, and `protect` requires it by that name. A name the
-socle's own jobs use is refused, since two jobs reporting one name are a
-protection that cannot tell them apart. maelys-git-core tests with and
-without an agent enabled, which the shared matrix had no way to say.
+## Targets that only verify
 
 **`[package]` names the targets that package; every target verifies.** A
 source archive is the same tree everywhere and not the same gzip bytes

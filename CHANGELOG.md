@@ -19,10 +19,14 @@
   target of `[targets]` still runs `verify_command`; packaging, SBOM,
   attestation and upload run only where declared, and a release that
   packages nowhere is refused.
-- **`[check]` adds legs of a product's own to the shared CI**, as `check
-  (NAME)`, with the same setup and the same runner rule; `protect` requires
-  them by that name. maelys-git-core tests with and without an agent
-  enabled, which the matrix could not say.
+- **`[check]` — legs of a product's own in the shared CI — was written,
+  trialled, and pulled before the tag.** A job skipped for want of legs is
+  reported by GitHub under its unevaluated name, so every pull request of
+  every product that declares none would have carried a skipped check named
+  `check / check (${{ matrix.name }})` — harmless to protection, which
+  ignores it, and indistinguishable from a breakage to anyone reading it. No
+  construction inside that job avoids it. It comes back as a separate
+  workflow that only a product declaring `[check]` calls.
 - **`cut` refuses an entry that does not name a dependency whose pin moved**
   since the last tag. A patch of maelys-cli moved maelys-json across an ABI
   and a consumer found out by linking; the name now reaches the entry and
@@ -40,12 +44,10 @@
   on the tag `VERSION` already names — it is the one command that reads the
   environment, the gate and the tap credentials, and it is run as a health
   check. `cut` keeps the failure, where an existing tag is a collision.
-- Two defects of my own, found before any tag: the `[check]` attribute first
-  took the name of the list where declarations keep their diagnostics, so the
-  report looped over the list it was appending to until the self-test was
-  killed; and a created `ci.yml` wrote its runner lines in another order than
-  the writer that regenerates it, which would have drifted any product that
-  declared a runner. Both paths now go through one writer.
+- A defect of my own, found before any tag: a created `ci.yml` wrote its
+  runner lines in another order than the writer that regenerates it, which
+  would have drifted any product that declared a runner against its own new
+  file. Both paths now go through one writer.
 - **Impact.** Everyone mid-rename: widen only after the adoption is merged —
   `protect --apply` now enforces it. maelys-http: `[package]` lets you verify
   on three targets again. Everyone else: nothing, and the managed blocks
