@@ -3856,10 +3856,26 @@ def vanishing_contexts(project: pathlib.Path) -> list[str]:
     if not caller or not repository or not shutil.which("gh"):
         return []
     branch = (github_api(f"repos/{repository}") or {}).get("default_branch") or "main"
+    # Both endpoints, as `branch_protection` reads them: a repository of the
+    # fleet is protected by a ruleset alone, and reading the classic
+    # protection by itself called it open -- the very mistake this socle
+    # corrected in 0.46.x and which I made again here, in the guard written
+    # to keep a rename from locking a branch. agent-cli-spec requires the
+    # three socle legs through a ruleset and nothing else.
+    required: list[str] = []
     state, body = github_read(f"repos/{repository}/branches/{branch}/protection")
-    if state != "ok" or not isinstance(body, dict):
+    if state == "ok" and isinstance(body, dict):
+        required += ((body.get("required_status_checks") or {}).get("contexts")) or []
+    ruled, rules = github_read(f"repos/{repository}/rules/branches/{branch}")
+    if ruled == "ok" and isinstance(rules, list):
+        for rule in rules:
+            if not isinstance(rule, dict) or rule.get("type") != "required_status_checks":
+                continue
+            for check in (rule.get("parameters") or {}).get("required_status_checks") or []:
+                if isinstance(check, dict) and check.get("context"):
+                    required.append(str(check["context"]))
+    if not required:
         return []
-    required = ((body.get("required_status_checks") or {}).get("contexts")) or []
     # Only the socle's own contexts: what a product requires of its own jobs
     # is the product's business, and this socle has no idea what produces it.
     return sorted(name for name in required

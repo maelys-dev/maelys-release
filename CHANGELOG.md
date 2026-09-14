@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.51.1 — 2026-09-14
+
+- **The guard that keeps a rename from locking a branch read one endpoint of
+  two.** A repository is protected by the classic branch protection, by a
+  ruleset, or by both, and `vanishing_contexts` read only the first — so
+  agent-cli-spec, which requires the three socle legs through a ruleset and
+  has no classic protection at all, looked unprotected and would have been
+  locked by the very adoption this guard exists to refuse. `branch_protection`
+  has read both since it told seventeen repositories they were open; the
+  guard written yesterday made the same mistake in a new place.
+- Found while listing what each repository of the fleet actually requires,
+  for the plan of that rename. The plan's first measurement was the bug.
+- **Impact.** Nobody: `adopt` refuses in one more case than it did, which is
+  a case where it should always have refused.
+
 ## 0.51.0 — 2026-09-14
 
 - **`adopt` refuses to make a required check disappear.** A branch requires
