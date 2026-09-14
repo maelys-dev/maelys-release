@@ -35,6 +35,16 @@ on:
           without republishing when the registry already holds the version.
         required: true
         type: string
+      linux_x86_64_runner:
+        description: >-
+          Runner for every job of this workflow; a JSON label string or
+          array. Honoured unconditionally: this workflow is reached only
+          through a release of a signed tag, which needs write access to the
+          repository. Its publish job checks the product out and runs its
+          script.
+        required: false
+        type: string
+        default: '"ubuntu-26.04"'
       release_environment:
         description: Environment holding the human gate; the same one release.yml uses
         required: false
@@ -46,7 +56,7 @@ permissions:
 
 jobs:
   publish:
-    runs-on: ubuntu-26.04
+    runs-on: ${{ fromJSON(inputs.linux_x86_64_runner) }}
     environment: ${{ inputs.release_environment }}
     permissions:
       contents: read
@@ -117,7 +127,7 @@ jobs:
   # parallel would lose one another's entry on the clobber.
   record:
     needs: publish
-    runs-on: ubuntu-26.04
+    runs-on: ${{ fromJSON(inputs.linux_x86_64_runner) }}
     permissions:
       contents: write
     steps:
@@ -198,7 +208,7 @@ jobs:
     # failed, and the reader cannot tell the two apart from there.
     needs: [publish, record]
     if: always() && (needs.publish.result != 'success' || needs.record.result != 'success')
-    runs-on: ubuntu-26.04
+    runs-on: ${{ fromJSON(inputs.linux_x86_64_runner) }}
     permissions:
       contents: write
     steps:

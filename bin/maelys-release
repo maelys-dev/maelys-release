@@ -696,6 +696,13 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
         decl.pin_problems.extend(problems)
         if not pin:
             continue
+        if pin["name"] == SOCLE_NAME:
+            decl.add("missing", f"dependencies/{SOCLE_NAME}.pin: the socle is pinned by the 'uses:' line"
+                                " of the generated workflows, which is the one source; a second would be"
+                                " two pins for one commit. Delete it -- 'dependencies DIR --apply'"
+                                f" materialises the socle under the same root and prints {SOCLE_VARIABLE}",
+                     "conventions")
+            continue
         decl.dependencies.append(pin["name"])
         decl.pins[pin["name"]] = pin
         if pin["repository"]:
@@ -825,13 +832,23 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
                 # second red round, in the line below the one they had just
                 # fixed. Three red CI rounds for what one search names at
                 # once.
-                for path, number, name, text in sibling_readers(project, decl.dependencies):
+                # The socle is the last neighbour a build still read: it is
+                # not a pin, so the search could not see it, and two products
+                # keep a `MAELYS_RELEASE_DIR ?= ../maelys-release` whose
+                # target moves as much as any working copy.
+                for path, number, name, text in sibling_readers(
+                        project, decl.dependencies + ([SOCLE_NAME] if pinned_socle(project) else [])):
                     if name and DEPENDENCIES_VARIABLE in text:
                         decl.add("note", f"{path} line {number} falls back to ../{name} when"
                                  f" ${DEPENDENCIES_VARIABLE} is unset, which is the fallback nobody"
                                  " ever sees taken: it reads whatever is next door, and the working"
                                  " copy of someone who also develops that dependency is what sits"
                                  f" there. Refuse instead: {text}", "conventions")
+                    elif name == SOCLE_NAME:
+                        decl.add("note", f"{path} line {number} reads ../{name}, a working copy that moves"
+                                 f" as much as any other. ${SOCLE_VARIABLE} names the socle this"
+                                 " repository pins, written by 'dependencies DIR --apply' and by"
+                                 f" scripts/checkout-dependencies.sh in a job: {text}", "conventions")
                     elif name:
                         decl.add("note", f"{path} line {number} reads ../{name}, and the pins are under"
                                  f" ${DEPENDENCIES_VARIABLE} since this repository declares"
@@ -916,7 +933,7 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
 # entry still here when that version ships fails the socle's own suite until
 # the rule is written or the date is moved, in the open.
 COMING: tuple[tuple[str, str, str], ...] = (
-    ("0.53.0", "socle",
+    ("0.54.0", "socle",
      "the matrix legs of check-product.yml are renamed -- 'check (ubuntu-26.04)',"
      " 'check (ubuntu-26.04-arm)' and 'check (macos-15)' become 'check (linux)',"
      " 'check (linux-arm64)' and 'check (macos)', so that a leg's name stops carrying"
@@ -937,6 +954,28 @@ def read_coming(decl: Declarations) -> None:
         if reaches == "channels" and not decl.channels:
             continue
         decl.add("note", f"coming in maelys-release {version}: {says}", "conventions")
+
+
+def author_identity(path: pathlib.Path) -> None:
+    """Leave the operator's identity alone, and name one only if git has none.
+
+    A clone inherits the global configuration, which is the identity the
+    operator commits and signs with. Setting a machine name and address over
+    it produced commits nobody's account stands behind -- one of them reached
+    the tap and was never verified -- and the branch a migration opens could
+    not merge into a default branch that requires signed commits.
+
+    The machine identity stays as a floor: a CI runner with no configured
+    user must still be able to commit.
+    """
+    if os.environ.get("GIT_AUTHOR_NAME") or os.environ.get("GIT_AUTHOR_EMAIL"):
+        # git reads these itself; writing them into the clone's config would
+        # only shadow what the operator asked for.
+        return
+    if run(["git", "var", "GIT_AUTHOR_IDENT"], cwd=path).returncode == 0:
+        return
+    git("config", "user.name", PROGRAM, cwd=path)
+    git("config", "user.email", f"{PROGRAM}@users.noreply.github.com", cwd=path)
 
 
 def declared_mechanism(project: pathlib.Path, requested: str = "") -> str:
@@ -1251,6 +1290,7 @@ def release_workflow(decl: Declarations, sha: str, tag: str, version: str) -> st
         "    with:",
         f"      product: {decl.product}",
         "      tag: ${{ inputs.tag || github.ref_name }}",
+        *runner_inputs(decl),
     ]
     if decl.dependencies:
         lines.append("      dependency_checkout: |")
@@ -1314,6 +1354,7 @@ def release_workflow(decl: Declarations, sha: str, tag: str, version: str) -> st
             # the Ubuntu runner and bash in POSIX mode on the operator's
             # macOS, and 0.36.0 fixed only two of the three.
             "      publish_command: bash scripts/publish-channel.sh TAG CHANNEL",
+            *[line for line in runner_inputs(decl) if "linux_x86_64_runner" in line],
         ])
         if not gated:
             lines.append("      release_environment: ''")
@@ -2229,8 +2270,7 @@ def handle_migrate(invocation: Invocation) -> tuple[dict, int]:
                           "Check that git-filter-repo is installed and that the documents are tracked.")
         documents = work / "documents"
         git("clone", "-q", f"{base}/{data['repository'].split('/')[-1]}.git", str(documents))
-        git("config", "user.name", os.environ.get("GIT_AUTHOR_NAME", PROGRAM), cwd=documents)
-        git("config", "user.email", os.environ.get("GIT_AUTHOR_EMAIL", f"{PROGRAM}@maelys.dev"), cwd=documents)
+        author_identity(documents)
         git("checkout", "-q", "-B", branch, cwd=documents)
         git("remote", "add", "source", str(source), cwd=documents)
         git("fetch", "-q", "source", cwd=documents)
@@ -2250,7 +2290,11 @@ def handle_migrate(invocation: Invocation) -> tuple[dict, int]:
                           f"{data['repository']} already carries this prose of {product}: nothing to add.",
                           "The documents have been migrated already; re-run maelys-platform's list to see"
                           " what is left, or migrate another product.")
-        git("-c", "commit.gpgsign=false", "commit", "-q", "-m",
+        # No commit.gpgsign=false: it did not merely skip a signature, it
+        # switched off one the operator had asked for -- so on a default
+        # branch that requires signed commits, a migration opened a branch
+        # that could not merge, by construction.
+        git("commit", "-q", "-m",
             f"{product}: the prose of {data['tag'] or data['commit'][:7]}, with its history", cwd=documents)
         data["documentsBranch"] = branch
         data["documentsCommit"] = git("rev-parse", "HEAD", cwd=documents)
@@ -2260,8 +2304,7 @@ def handle_migrate(invocation: Invocation) -> tuple[dict, int]:
         # never as a write into the operator's checkout.
         product_clone = work / "product"
         git("clone", "-q", str(project), str(product_clone))
-        git("config", "user.name", os.environ.get("GIT_AUTHOR_NAME", PROGRAM), cwd=product_clone)
-        git("config", "user.email", os.environ.get("GIT_AUTHOR_EMAIL", f"{PROGRAM}@maelys.dev"), cwd=product_clone)
+        author_identity(product_clone)
         git("checkout", "-q", "-B", branch, cwd=product_clone)
         for entry in data["moving"]:
             git("rm", "-q", "--", entry["path"], cwd=product_clone)
@@ -2269,7 +2312,7 @@ def handle_migrate(invocation: Invocation) -> tuple[dict, int]:
         data["rewritten"] = rewrite_markdown(product_clone, product, data)
         data["remaining"], data["globs"] = surviving_references(product_clone, data)
         git("add", "-A", cwd=product_clone)
-        git("-c", "commit.gpgsign=false", "commit", "-q", "-m",
+        git("commit", "-q", "-m",
             f"docs: the prose moves to {data['repository']}/{product}/\n\n"
             f"{data['documents']} documents, with their history, are now in {data['repository']}."
             " This side removes them, points the README there and rewrites the Markdown that"
@@ -3663,6 +3706,10 @@ echo "== Pinned dependency checkouts"
 if [ -n "${DEPENDENCIES_APART:-}" ]; then
     eval "$(sh scripts/checkout-dependencies.sh /work/dependencies)"
     export MAELYS_DEPENDENCIES_DIR
+    # The third place, and the one that would have been forgotten: a
+    # rehearsal that did not export what CI exports answers about a tree
+    # nobody else builds. That is the class 0.45.0 to 0.48.0 chased out.
+    [ -z "${MAELYS_RELEASE_DIR:-}" ] || export MAELYS_RELEASE_DIR
 else
     for name in $DEPENDENCIES; do sh scripts/checkout-dependency.sh "$name"; done
 fi
@@ -4050,6 +4097,17 @@ CLONE_FLAGS = ("--filter=blob:none", "--no-checkout")
 
 
 DEPENDENCIES_VARIABLE = "MAELYS_DEPENDENCIES_DIR"
+# The key a materialised checkout carries in its own .git/config, so that the
+# socle can tell what it cloned from what somebody works in.
+MATERIALISED = "maelys-release.materialised"
+# The socle under a dependency root, which is not a pin: its commit is the
+# one on the `uses:` line, and a dependencies/maelys-release.pin would be a
+# second source for one commit.
+SOCLE_NAME = SOCLE_REPOSITORY.split("/")[-1]
+SOCLE_VARIABLE = "MAELYS_RELEASE_DIR"
+# The prefix a note carries when it is not a note: `dependencies` collects
+# these in one list, and this is what turns one line of it into a violation.
+REFUSED = "REFUSED"
 # The two managed clone scripts: one pin, or every pin into a given root.
 CHECKOUT_SCRIPTS = ("scripts/checkout-dependency.sh", "scripts/checkout-dependencies.sh")
 # A call of the singular with no destination: it clones beside the product,
@@ -4125,15 +4183,23 @@ def sibling_readers(project: pathlib.Path, names: list[str]) -> list[tuple[str, 
             continue
         if path not in migrated:
             whole = project / path
-            migrated[path] = whole.is_file() and bool(DEPENDENCIES_READ.search(
-                whole.read_text(encoding="utf-8", errors="replace")))
+            text_of = whole.read_text(encoding="utf-8", errors="replace") if whole.is_file() else ""
+            # One exemption per root, not one per file: a Makefile that reads
+            # $MAELYS_DEPENDENCIES_DIR has migrated its pins and may still
+            # take the socle from ../maelys-release, which is exactly where
+            # two products stand. The socle's root is its own variable.
+            migrated[path] = (bool(DEPENDENCIES_READ.search(text_of)),
+                              bool(re.search(r"[$({\[\"']\s*" + SOCLE_VARIABLE
+                                             + r"|" + SOCLE_VARIABLE + r"\s*[?:+]?[=:]", text_of)))
         # The limit of the exemption, stated rather than hidden: a file that
         # reads the root and carries the fallback on ANOTHER line is silent
         # here. No product of the fleet is in that state today; the
         # one-line form, which is the one that has been written, is caught.
-        if migrated[path] and DEPENDENCIES_VARIABLE not in text:
-            continue
         match = sibling.search(text)
+        root, variable = (migrated[path][1], SOCLE_VARIABLE) if match and match.group(1) == SOCLE_NAME \
+            else (migrated[path][0], DEPENDENCIES_VARIABLE)
+        if root and variable not in text:
+            continue
         if match:
             readers.append((path, int(number), match.group(1), text.strip()))
         elif call.search(text):
@@ -4157,7 +4223,8 @@ def dependency_repository(pin: dict) -> str:
     return pin["repository"] or f"{git_base()}/{pin['name']}.git"
 
 
-def checkout_state(path: pathlib.Path, pin: dict, repository: str) -> tuple[str, str, str]:
+def checkout_state(path: pathlib.Path, pin: dict, repository: str,
+                   trusted: bool = False) -> tuple[str, str, str]:
     """(action, reason, head) for what sits at `path`: clone, same, refresh or blocked.
 
     Blocked is anything the socle did not put there, or that somebody has
@@ -4188,6 +4255,21 @@ def checkout_state(path: pathlib.Path, pin: dict, repository: str) -> tuple[str,
     if origin != repository:
         return "blocked", (f"{path} was cloned from {origin or 'no remote'} and the pin names {repository};"
                            " move it aside by hand"), ""
+    # Detached, clean and from the right remote is not proof the socle put it
+    # there: a working copy left detached by a build script is all three, for
+    # as long as nobody notices. The mark is what the socle wrote when it
+    # cloned, and a checkout made before 0.53.0 carries none -- so it is
+    # blocked once, with the one command that settles it.
+    if git("config", "--local", "--get", MATERIALISED, cwd=path, check=False) != pin["name"]:
+        if not trusted:
+            return "blocked", (f"{path} is detached and clean, and the socle did not clone it: a working"
+                               " copy left detached by a build script is all three for as long as nobody"
+                               f" notices. Pass a --directory the socle owns, or move {path} aside"), ""
+        # Under the socle's own root, the location is the proof: nothing else
+        # writes there. Marking it in place is what keeps every checkout made
+        # before 0.53.0 working instead of asking the fleet to delete five
+        # directories per product for a key it can write itself.
+        git("config", "--local", MATERIALISED, pin["name"], cwd=path)
     head = git("rev-parse", "HEAD", cwd=path, check=False)
     return ("same" if head == pin["commit"] else "refresh"), "", head
 
@@ -4205,6 +4287,14 @@ def materialise(path: pathlib.Path, pin: dict, repository: str, action: str) -> 
     if action == "clone":
         path.parent.mkdir(parents=True, exist_ok=True)
         git("clone", "--quiet", *CLONE_FLAGS, repository, str(path))
+        # A mark in .git/config, invisible to the tree and surviving every
+        # checkout: what the socle may move is what the socle put there.
+        # Without it, a working copy that happens to be detached and clean
+        # -- the state a build script leaves behind for an afternoon -- is
+        # indistinguishable from a pinned checkout, and the next
+        # 'dependencies --apply' would move it to another product's pin
+        # without a word.
+        git("config", "--local", MATERIALISED, pin["name"], cwd=path)
     if action in ("clone", "refresh"):
         # By commit first, from origin by name so a partial clone keeps its
         # promisor. A server that will not serve a bare commit is asked for
@@ -4223,20 +4313,40 @@ def materialise(path: pathlib.Path, pin: dict, repository: str, action: str) -> 
             git(*arguments, cwd=path)
 
 
+def series(tag: str) -> str:
+    """The compatibility series a tag belongs to: 0.Y below 1.0, X above.
+
+    The socle does not know an ABI; it knows what the fleet's versions
+    promise. Below 1.0 the minor is the break, above it the major is.
+    """
+    parts = tag.lstrip("v").split(".")
+    if len(parts) < 2 or not parts[0].isdigit() or not parts[1].isdigit():
+        return ""
+    return f"0.{parts[1]}" if parts[0] == "0" else parts[0]
+
+
 def neighbour_pins(decl: Declarations, name: str, path: pathlib.Path) -> list[str]:
-    """What a materialised dependency pins itself, held against the product's; notes only.
+    """What a materialised dependency pins itself, held against the product's.
 
     Not materialised, and deliberately: check-product.yml clones the pins of
     the product it builds and nothing below them, so a directory that held
     more would let a build pass here that CI refuses -- hiding a missing pin
     exactly where CI shows it. When a product's build needs what a
     dependency pins, the product pins it: maelys-oci pins maelys-json for
-    the maelys-cli it builds. Whether two pins must agree is the product's
-    rule as well, and maelys-egress has one. Never a refusal: the fleet
-    disagrees today, maelys-warden pinning maelys-json v0.1.0 where
-    maelys-oci pins v0.2.0, and both are green.
+    the maelys-cli it builds.
+
+    A different commit of the same series stays a note: the fleet disagrees
+    today, maelys-warden pinning maelys-json v0.1.0 where maelys-oci pins
+    v0.2.0, and both are green -- but those are two products, not one graph.
+    Two series of one repository inside one graph is a refusal: a build links
+    one and its own dependency was built against the other, which is the case
+    maelys-git-core met and could not see. The socle knows the series, never
+    the ABI, so a product ahead of what its dependency pins is caught too; no
+    product of the fleet is in that state, and an escape hatch waits for one
+    that is.
     """
     notes: list[str] = []
+    refusals: list[str] = []
     pins_dir = path / "dependencies"
     for pin_file in sorted(pins_dir.glob("*.pin")) if pins_dir.is_dir() else []:
         pin, _problems = parse_pin(pin_file.name[: -len(".pin")], pin_file.read_text(encoding="utf-8"))
@@ -4247,9 +4357,16 @@ def neighbour_pins(decl: Declarations, name: str, path: pathlib.Path) -> list[st
             notes.append(f"{name} pins {pin['name']} {pin['tag']} ({pin['commit'][:7]}), which {decl.product}"
                          f" does not: not materialised, as in CI; a build that needs it pins it here")
         elif mine["commit"] != pin["commit"]:
-            notes.append(f"{name} pins {pin['name']} at {pin['tag']} ({pin['commit'][:7]}); {decl.product}"
-                         f" pins {mine['tag']} ({mine['commit'][:7]}), which is what is here, as in CI")
-    return notes
+            theirs, ours = series(pin["tag"]), series(mine["tag"])
+            if theirs and ours and theirs != ours:
+                refusals.append(f"{name} pins {pin['name']} {pin['tag']} and {decl.product} pins"
+                                f" {mine['tag']}: two series of one repository in one graph. What is"
+                                f" materialised here is {mine['tag']}, so {name} is linked against"
+                                " something it was not built for. Re-pin one of the two")
+            else:
+                notes.append(f"{name} pins {pin['name']} at {pin['tag']} ({pin['commit'][:7]}); {decl.product}"
+                             f" pins {mine['tag']} ({mine['commit'][:7]}), which is what is here, as in CI")
+    return notes + [f"{REFUSED} {message}" for message in refusals]
 
 
 def handle_dependencies(invocation: Invocation) -> tuple[dict, int]:
@@ -4265,13 +4382,26 @@ def handle_dependencies(invocation: Invocation) -> tuple[dict, int]:
     if directory == project or project in directory.parents:
         raise Failure("VALIDATION_FAILED", f"{directory} is the product or inside it.",
                       "The pinned checkouts live apart from the product; pass another --directory, or none.")
+    # And not beside it either. <parent>/<name> is where the fleet's working
+    # copies live -- ~/GitHubDocuments/maelys-cli is one of them -- and a
+    # root there points every pin at somebody's checkout. This is the layout
+    # 0.44.0 existed to leave behind; naming it explicitly costs one line.
+    if directory == project.parent:
+        raise Failure("VALIDATION_FAILED",
+                      f"{directory} is where {project.name} itself sits, and where the working copies of"
+                      " the repositories it pins sit too.",
+                      "That is the layout these checkouts exist to replace; pass another --directory, or none.")
     entries: list[dict] = []
     blocked: list[str] = []
+    # The socle's own root, where nothing but the socle writes: there the
+    # location is proof enough and a checkout made before the mark existed is
+    # marked in place. A root the operator chose gets no such benefit.
+    trusted = directory == dependencies_home(product)
     for name in decl.dependencies:
         pin = decl.pins[name]
         repository = dependency_repository(pin)
         path = directory / name
-        action, reason, head = checkout_state(path, pin, repository)
+        action, reason, head = checkout_state(path, pin, repository, trusted)
         entry = {"name": name, "tag": pin["tag"], "commit": pin["commit"], "repository": repository,
                  "path": str(path), "action": action}
         if pin["submodules"] is not None:
@@ -4306,11 +4436,59 @@ def handle_dependencies(invocation: Invocation) -> tuple[dict, int]:
                          f" {untracked[0]} first")
         if entry["name"] not in decl.foreign:
             notes.extend(neighbour_pins(decl, entry["name"], path))
+    refused: list[str] = []
+    # A pin that names a tag it does not point at, and a pin on no tag at
+    # all. Read from the checkout in hand, so this stays offline: a partial
+    # clone still carries every ref. maelys-git-core pinned an untagged
+    # commit of a branch, the branch was rewritten, the commit is gone from
+    # everywhere, and the repository no longer configures -- nothing had ever
+    # told it that its pin was not a tag.
+    for entry in entries:
+        pin = decl.pins.get(entry["name"])
+        path = directory / entry["name"]
+        if not pin or entry["action"] == "blocked" or not (path / ".git").exists():
+            continue
+        named = git("rev-list", "-n", "1", pin["tag"], cwd=path, check=False)
+        if named and named != pin["commit"]:
+            refused.append(f"{entry['name']}: line 1 names {pin['tag']}, which is {named[:7]}, and line 2"
+                           f" is {pin['commit'][:7]}. A published tag never moves, so one of the two is"
+                           " wrong; re-pin on the tag's own commit")
+        elif not named and not git("tag", "--points-at", pin["commit"], cwd=path, check=False):
+            notes.append(f"{entry['name']}: {pin['commit'][:7]} carries no tag. A rewritten branch takes"
+                         " an untagged commit with it, and a pin on one stops resolving everywhere at"
+                         " once -- for the socle, for CI, and for whoever clones next")
+    # And the socle itself, under the same root. Its commit is not a pin: it
+    # is the one on the `uses:` line, which `pinned_socle` reads. CI has
+    # cloned it at that commit into $RUNNER_TEMP since 0.41.0, so giving the
+    # same root to a machine removes an asymmetry rather than creating one --
+    # which is the objection I made when maelys-oci first asked, and it was
+    # wrong.
+    pinned = pinned_socle(project)
+    if pinned:
+        socle_pin = {"name": SOCLE_NAME, "tag": pinned["tag"], "commit": pinned["sha"],
+                     "repository": "", "submodules": None}
+        socle_path = directory / SOCLE_NAME
+        action, reason, head = checkout_state(socle_path, socle_pin,
+                                              f"{git_base()}/{SOCLE_NAME}.git", trusted)
+        entries.append({"name": SOCLE_NAME, "tag": pinned["tag"], "commit": pinned["sha"],
+                        "repository": f"{git_base()}/{SOCLE_NAME}.git", "path": str(socle_path),
+                        "action": action, "reason": reason} if action == "blocked"
+                       else {"name": SOCLE_NAME, "tag": pinned["tag"], "commit": pinned["sha"],
+                             "repository": f"{git_base()}/{SOCLE_NAME}.git",
+                             "path": str(socle_path), "action": action})
+        if action == "blocked":
+            blocked.append(socle_path.name)
+        elif apply:
+            materialise(socle_path, socle_pin, f"{git_base()}/{SOCLE_NAME}.git", action)
+    notes.extend(f"{REFUSED} {message}" for message in refused)
+    caught = [note for note in notes if note.startswith(f"{REFUSED} ")]
     data = {"mode": "apply" if apply else "plan", "product": product, "project": str(project),
             "directory": str(directory), "variable": DEPENDENCIES_VARIABLE,
-            "declared": decl.dependencies_apart,
-            "dependencies": entries, "notes": notes, "blocked": bool(blocked)}
-    return data, EXIT_VIOLATIONS if blocked else EXIT_OK
+            "declared": decl.dependencies_apart, "refused": [note[len(REFUSED) + 1:] for note in caught],
+            "socle": str(directory / SOCLE_NAME) if pinned else "",
+            "dependencies": entries, "notes": [note for note in notes if note not in caught],
+            "blocked": bool(blocked)}
+    return data, EXIT_VIOLATIONS if blocked or caught else EXIT_OK
 
 
 def text_dependencies(data: dict) -> str:
@@ -4325,6 +4503,7 @@ def text_dependencies(data: dict) -> str:
             lines.append(f"{'BLOCKED':<8} {entry['name']}: {entry['reason']}")
         else:
             lines.append(f"{'same':<8} {head}")
+    lines.extend(f"{'REFUSED':<8} {message}" for message in data.get("refused", []))
     lines.extend(f"{'note':<8} {note}" for note in data["notes"])
     count = len(data["dependencies"])
     if not count:
@@ -4335,6 +4514,8 @@ def text_dependencies(data: dict) -> str:
         # Printed as an assignment so a shell can take it whole: the path is
         # given to the build, and giving it by hand is where a typo lives.
         lines.append(f"export   {data['variable']}={data['directory']}")
+        if data.get("socle"):
+            lines.append(f"export   {SOCLE_VARIABLE}={data['socle']}")
         if not data.get("declared"):
             lines.append(f"note     {data['product']} does not declare '[dependencies] apart' yet:"
                          " its build still assumes a sibling, and reading the variable is what"
@@ -4638,9 +4819,12 @@ def handle_tap(invocation: Invocation) -> tuple[dict, int]:
         if not apply:
             return data, EXIT_OK
         # Identity and signing live in the clone's configuration, so the
-        # commit and any rebase of it are signed alike.
-        git("config", "user.name", os.environ.get("GIT_AUTHOR_NAME", PROGRAM), cwd=tap)
-        git("config", "user.email", os.environ.get("GIT_AUTHOR_EMAIL", f"{PROGRAM}@users.noreply.github.com"), cwd=tap)
+        # commit and any rebase of it are signed alike. The identity is the
+        # operator's, as in `migrate`: forcing a machine name here put a tap
+        # commit under an address no account stands behind, signed and still
+        # never verified -- the third of the three sites maelys-http named,
+        # and the one 0.53.0 first left out.
+        author_identity(tap)
         key = os.environ.get("TAP_SIGNING_KEY", "")
         if key:
             key_file = pathlib.Path(temp) / "signing-key"

@@ -936,10 +936,31 @@ does not say where either came from.
 ## Runners
 
 - Runner inputs are JSON: a label string or a label array.
-- Public repositories use GitHub-hosted runners only.
+- **A declared runner is honoured wherever only a writer can start the
+  workflow; where a pull request can start it, a public repository gets the
+  hosted value whatever it declares.** That is one rule, and it replaces
+  three. The guard is not the repository's visibility and not the release
+  environment — `verify` and `build` run before that gate — it is *who can
+  make the workflow run at all*. On a public repository anyone can open a
+  pull request, and their code would execute on the declared machine;
+  `release.yml`, `channel.yml` and `tap.yml` are reached only through a
+  signed tag or a `workflow_dispatch`, both of which need write access.
+  Until 0.53.0 this document said "public repositories use GitHub-hosted
+  runners only", which `[targets]` had contradicted since 0.24.0, and
+  `tap.yml` carried the pull-request guard on a workflow no pull request
+  reaches.
 - **`[runners]` names a leg per line**: `macos`, `linux-x86_64`,
-  `linux-arm64`. Each fills one input of `check-product.yml`, read only on a
-  private repository, and `adopt` writes the line into the `ci.yml` call.
+  `linux-arm64`. `adopt` writes them into the `ci.yml` call, into the
+  `release.yml` call, and the Linux one into each channel call.
+  `check-product.yml` reads them on a private repository only; `release.yml`,
+  `channel.yml` and `tap.yml` read them always.
+- **`[runners] linux-x86_64` is also where the write token goes.** `publish`
+  of a release, the marker job of a channel and the channel's own publish
+  job hold `contents: write` or `packages: write`, and a product that
+  declares its runner puts that token on its own machine. `[targets]` only
+  ever moved `build`, which holds none. It is the product's choice, the
+  release environment still stands in front of `publish`, and this line
+  exists so that the choice is made knowingly.
   `macos` keeps its bare word because ten repositories already declare it —
   renaming a key of a file the socle reads would refuse all of them at once.
   The two Linux keys arrived in 0.51.0: `macos_runner` alone left half a
@@ -1011,6 +1032,16 @@ in a product's plan at its next adoption and never as drift. Hence:
 
 The 1.0 tag will make this rule a promise; until then it is the practice.
 
+**An adoption does not have to be published.** `adopt`, `preflight` and
+`cut` read as a chain, and one product followed it for ten adoptions: eight
+of its twenty-two releases carried nothing but a socle adoption. Nothing
+asked for that. An adoption is a commit on the default branch like any
+other; it travels in the next release, whenever that is, and a default
+branch several commits ahead of its last tag is the normal state of a
+repository. The product that worked this out came close to sending a
+complaint about the socle's cadence, measured the cost, and found it in its
+own coupling — which is worth more than the complaint would have been.
+
 **A rule that will become a violation is announced a version early.** A
 product adopts on Tuesday, conformant, and is in violation on Wednesday for
 something nobody told it was coming — that is the cadence complaint at its
@@ -1065,6 +1096,26 @@ seventeen versions back, so the line that answers "must I open a pull
 request?" answered nothing for exactly the people who had asked. Those
 nineteen say what each version asks of a product and no more; the entry
 above each is the account, and it is contemporary where the line is not.
+
+## Blocks a repository does not write itself
+
+**A managed block belongs to the repository that writes it, and each
+verifies its own.** The socle owns the block between its markers in
+`AGENTS.md` and `CLAUDE.md`, and `check` holds it; maelys-cli installs
+another through `maelys agents install`, and `maelys agents status` is what
+holds that one — a product calls it from its own `make check`, as
+maelys-egress and maelys-oci do. The socle will not become the fleet's only
+installer: it would be carrying another repository's text at whatever
+version it happened to pin, and stale in a new way.
+
+**A product that names programs runs the conformance kit in its own check.**
+`docs/cli.reference` `[programs]` says a repository ships a command line
+built on maelys-cli, and the contract those commands implement belongs to
+agent-cli-spec. Pin it at the version the pinned maelys-cli names, and run
+its kit inside the command `check_command` already invokes — maelys-egress
+does exactly that, in twenty lines of Makefile. The socle does not add a leg
+for it: it cannot build the binaries, and the kit is another repository's
+contract.
 
 ## Moving a product's prose
 
@@ -1311,6 +1362,23 @@ have carried two notes forever.
 The search reads tracked files, so outside a repository it says nothing. The
 alternative is walking whatever the directory holds, which on a built tree is
 the dependencies themselves.
+
+**The socle is materialised like any other dependency, under the same
+root.** Its commit is not a pin — it is the one on the `uses:` line of the
+generated workflows, the single source — so `dependencies/maelys-release.pin`
+is refused. `dependencies DIR --apply` clones it there and prints
+`MAELYS_RELEASE_DIR` beside the other variable, the managed script does the
+same in a job, and the rehearsal exports both. It was refused once, on the
+argument that the variable would exist on a laptop and not in a job; that
+was wrong, and measurably so — `check-product.yml` has cloned the socle at
+the pinned commit into `$RUNNER_TEMP` since 0.41.0, so giving a machine the
+same root removes an asymmetry rather than creating one. The clone is
+attempted and never required: a machine that cannot reach the socle still
+builds, and says so on stderr.
+
+The search below knows the name, under its own variable: a file that reads
+`$MAELYS_DEPENDENCIES_DIR` has migrated its pins and may still take the
+socle from `../maelys-release`, which is where two products stand today.
 
 **Naming the script is not calling it, and naming the root is not reading
 it.** A call clones a pin, so what follows `checkout-dependency.sh` is a
