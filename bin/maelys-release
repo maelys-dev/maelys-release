@@ -276,6 +276,8 @@ class Declarations:
         self.calls_socle_ci = False
         # channel name -> the gate it declares, when it declares one.
         self.channel_gates: dict[str, str] = {}
+        # The targets that package, when [package] says; empty means all.
+        self.package: list[str] = []
         # "reviewer", "none", or "" when this repository has not chosen.
         self.gate = ""
         # What cut runs between writing VERSION and the bump commit, for a
@@ -405,6 +407,7 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
     commit_verification = ""
     gate = ""
     after_version = ""
+    package: list[str] = []
     unknown: list[str] = []
     section = ""
     for number, raw in enumerate(text.splitlines(), 1):
@@ -413,7 +416,7 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
             continue
         if line.startswith("["):
             if line in ("[targets]", "[manifest]", "[sbom]", "[runners]", "[dependencies]",
-                        "[commit]", "[channels]", "[gate]", "[cut]"):
+                        "[commit]", "[channels]", "[gate]", "[cut]", "[package]"):
                 section = line[1:-1]
                 continue
             # A section this socle does not know is named and skipped, never
@@ -439,6 +442,16 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
             if not command.strip():
                 raise ValueError(f"[cut] after-version names no command at line {number}")
             after_version = command.strip()
+            continue
+        if section == "package":
+            # The targets that package; every target of [targets] verifies.
+            # A source archive is the same tree everywhere and not the same
+            # gzip bytes everywhere, so a product publishing one could not
+            # verify on three targets without three archives clashing.
+            for name in line.split():
+                if name in package:
+                    raise ValueError(f"[package] names {name} twice, at line {number}")
+                package.append(name)
             continue
         if section == "gate":
             if gate:
@@ -548,10 +561,15 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
         targets.append((name, runner))
     if section and not unknown and not targets and not manifest and not channels \
             and not gate and not after_version and not sbom and not runners and not apart \
-            and not commit_verification:
+            and not commit_verification and not package:
         raise ValueError(f"{DECLARATION_FILE} declares no target, archive kind, channel, gate or cut command")
+    known = [name for name, _ in targets] or list(SOCLE_TARGETS)
+    for name in package:
+        if name not in known:
+            raise ValueError(f"[package] names {name}, which is not a target of this release"
+                             f" ({', '.join(known)})")
     return (targets, manifest, channels, channel_gates, sbom, macos_runner, runners, apart,
-            commit_verification, gate, after_version, unknown)
+            commit_verification, gate, after_version, unknown, package)
 
 
 def read_fuzz(decl: Declarations) -> None:
@@ -774,7 +792,7 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
         try:
             decl.targets, decl.manifest_patterns, decl.channels, decl.channel_gates, \
                 decl.sbom_pattern, decl.macos_runner, decl.runners, decl.dependencies_apart, \
-                decl.commit_verification, decl.gate, decl.after_version, unknown = \
+                decl.commit_verification, decl.gate, decl.after_version, unknown, decl.package = \
                 parse_release(release.read_text(encoding="utf-8"))
             for section in unknown:
                 decl.add("missing", f"{release.name}: section {section} is not one this socle knows"
@@ -795,6 +813,10 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
             if decl.targets:
                 decl.add("ok", f"{release.name} targets: "
                                + " ".join(name for name, _ in decl.targets))
+            if decl.package:
+                verifying = [name for name, _ in decl.targets] or list(SOCLE_TARGETS)
+                decl.add("ok", f"{release.name} [package] {' '.join(decl.package)}: every target of the"
+                               f" release verifies ({', '.join(verifying)}), and these alone package")
             if decl.manifest_patterns:
                 decl.add("ok", f"{release.name} manifest: " + SOCLE_MANIFEST_PATTERNS
                                + " " + " ".join(decl.manifest_patterns))
@@ -1310,9 +1332,14 @@ def release_workflow(decl: Declarations, sha: str, tag: str, version: str) -> st
         lines.append(f"      linux_packages: {SOCLE_LINUX_PACKAGES} {decl.linux_packages}")
     if decl.macos_packages:
         lines.append(f"      macos_packages: {decl.macos_packages}")
-    if decl.targets:
-        entries = [{"target": name} if runner == "" else {"target": name, "runner": runner}
-                   for name, runner in decl.targets]
+    if decl.targets or decl.package:
+        declared = decl.targets or [(name, "") for name in SOCLE_TARGETS]
+        entries = []
+        for name, runner in declared:
+            entry: dict = {"target": name} if runner == "" else {"target": name, "runner": runner}
+            if decl.package and name not in decl.package:
+                entry["package"] = False
+            entries.append(entry)
         lines.append(f"      targets: '{json.dumps(entries)}'")
     if decl.manifest_patterns:
         lines.append(f"      manifest_patterns: '{SOCLE_MANIFEST_PATTERNS} "
@@ -3327,6 +3354,34 @@ def cut_resume(invocation: Invocation, decl: Declarations, data: dict, log, time
     return cut_report(data, check_runs(repository, head) or [])
 
 
+def moved_pins_named(project: pathlib.Path, entry: str) -> list[tuple[str, str]]:
+    """Every pin this release moves, named in the entry that describes it.
+
+    A patch of maelys-cli moved maelys-json across an ABI, and a consumer
+    found out by linking. The socle will not judge a product's versioning --
+    `bump_audit` refuses to, on principle, and the fleet does cross a series
+    in a patch -- but it can make the move impossible to miss: an entry that
+    does not name the dependency it re-pins is refused, and since the tag's
+    annotation is that entry, the name reaches the tag too.
+    """
+    last = git("describe", "--tags", "--abbrev=0", "--match", "v[0-9]*", cwd=project, check=False)
+    if not last:
+        return []
+    moved = [line for line in git("diff", "--name-only", f"{last}..HEAD", "--", "dependencies",
+                                  cwd=project, check=False).splitlines()
+             if line.startswith("dependencies/") and line.endswith(".pin")]
+    found = []
+    for path in moved:
+        name = path[len("dependencies/"):-len(".pin")]
+        if re.search(rf"(?<![A-Za-z0-9._-]){re.escape(name)}(?![A-Za-z0-9._-])", entry):
+            found.append(("ok", f"{path} moved since {last}, and the entry names {name}"))
+        else:
+            found.append(("fail", f"{path} moved since {last} and the entry of this version does not name"
+                                  f" {name}: a consumer of this release links against the new pin, and"
+                                  " the only place it can learn so is the entry and the tag it becomes"))
+    return found
+
+
 def cut_open(invocation: Invocation, decl: Declarations, data: dict, log, timeout: int, poll: int) -> tuple[dict, int]:
     """First stop: the signed bump commit, its pull request, and the wait."""
     project, product, version = decl.project, decl.product, data["version"]
@@ -3370,7 +3425,7 @@ def cut_open(invocation: Invocation, decl: Declarations, data: dict, log, timeou
         raise Failure("PRECONDITION_FAILED",
                       f"{base} is {ahead} ahead and {behind} behind origin/{base}.",
                       f"Bring the two together before cutting: the pull request is opened against origin/{base}.")
-    gate = cut_gate(decl, version)
+    gate = cut_gate(decl, version) + moved_pins_named(project, body)
     data["gate"] = [{"status": status, "message": message} for status, message in gate]
     refused = [message for status, message in gate if status == "fail"]
     data["ready"] = not refused

@@ -214,9 +214,9 @@ jobs:
           set -euo pipefail
           if [ -z "$TARGETS" ]; then
             matrix="$(jq -nc --arg x "$LINUX_X86_64_RUNNER" --arg a "$LINUX_ARM64_RUNNER" --arg m "$MACOS_RUNNER" \
-              '{include: [{target: "linux-x86_64", runner: $x},
-                          {target: "linux-arm64", runner: $a},
-                          {target: "macos-arm64", runner: $m}]}')"
+              '{include: [{target: "linux-x86_64", runner: $x, package: true},
+                          {target: "linux-arm64", runner: $a, package: true},
+                          {target: "macos-arm64", runner: $m, package: true}]}')"
           else
             jq -e 'type == "array" and length > 0' <<<"$TARGETS" >/dev/null \
               || { echo "targets must be a non-empty JSON array" >&2; exit 1; }
@@ -227,8 +227,12 @@ jobs:
                 {"linux-x86_64": $x, "linux-arm64": $a, "macos-arm64": $m}[.]
                 // error("the target \(.) names no runner and the socle has no default for it");
               {include: [.[] | {target: .target,
-                                runner: (if has("runner") then (.runner | tojson) else (.target | inherited) end)}]}
+                                runner: (if has("runner") then (.runner | tojson) else (.target | inherited) end),
+                                package: (if has("package") then .package else true end)}]}
             ' <<<"$TARGETS")"
+            # Verifying somewhere and packaging nowhere is a release of nothing.
+            jq -e '[.include[] | select(.package)] | length > 0' <<<"$matrix" >/dev/null \
+              || { echo "no target packages: [package] must name at least one of [targets]" >&2; exit 1; }
           fi
           echo "matrix=$matrix" >>"$GITHUB_OUTPUT"
           echo "::notice::building $(jq -r '.include | map(.target) | join(", ")' <<<"$matrix")"
@@ -283,6 +287,13 @@ jobs:
           set -euo pipefail
           eval "${VERIFY_COMMAND//TARGET/$TARGET}"
       - name: Package
+        # A target that verifies without packaging stops here. A source
+        # archive is the same tree everywhere but `gzip` is not the same
+        # bytes everywhere, so three targets packaging it produce the clash
+        # the assembly rightly refuses -- and maelys-http went down to one
+        # target to avoid it, losing the replay at the tag on arm64 and macOS.
+        # `[package]` names who packages; everyone in `[targets]` verifies.
+        if: matrix.package
         shell: bash
         env:
           PACKAGE_COMMAND: ${{ inputs.package_command }}
@@ -296,7 +307,7 @@ jobs:
         # disagrees with the archive beside it is wrong on a private
         # repository too, and there the check is the only thing left.
         id: sbom
-        if: inputs.sbom_pattern != ''
+        if: matrix.package && inputs.sbom_pattern != ''
         shell: bash
         env:
           SBOM_PATTERN: ${{ inputs.sbom_pattern }}
@@ -390,13 +401,13 @@ jobs:
           } >>"$GITHUB_OUTPUT"
       - name: Provenance attestation
         id: provenance
-        if: inputs.attestation == 'always' || (inputs.attestation == 'auto' && !github.event.repository.private)
+        if: matrix.package && (inputs.attestation == 'always' || (inputs.attestation == 'auto' && !github.event.repository.private))
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: dist/*
       - name: SBOM attestation
         id: sbom-attestation
-        if: steps.sbom.outputs.document != '' && steps.provenance.outcome == 'success'
+        if: matrix.package && steps.sbom.outputs.document != '' && steps.provenance.outcome == 'success'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: ${{ steps.sbom.outputs.subjects }}
@@ -407,7 +418,7 @@ jobs:
         # alone does not bind the SBOM to the archive, and the SBOM predicate
         # alone does not say where either came from. The names carry the
         # target, because publish assembles every target into one directory.
-        if: steps.provenance.outcome == 'success'
+        if: matrix.package && steps.provenance.outcome == 'success'
         shell: bash
         env:
           PRODUCT: ${{ inputs.product }}
@@ -421,7 +432,7 @@ jobs:
             cp "$SBOM_BUNDLE" "dist/${PRODUCT}-${TARGET}.sbom.intoto.jsonl"
           fi
       - name: No provenance attestation
-        if: inputs.attestation == 'never' || (inputs.attestation == 'auto' && github.event.repository.private)
+        if: matrix.package && (inputs.attestation == 'never' || (inputs.attestation == 'auto' && github.event.repository.private))
         env:
           ATTESTATION: ${{ inputs.attestation }}
           SBOM_DOCUMENT: ${{ steps.sbom.outputs.document }}
@@ -433,6 +444,7 @@ jobs:
             echo "::notice::the SBOM is published but not attested ($reason): it names the file it describes and the socle checked that digest, but nothing signs that link. A consumer has the document, not a proof it belongs to this archive"
           fi
       - name: Hand the artifacts to publish
+        if: matrix.package
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: dist-${{ matrix.target }}
