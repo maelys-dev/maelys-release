@@ -1,5 +1,58 @@
 # Changelog
 
+## 0.55.0 — 2026-09-14
+
+- **The order printed in 0.54.0 was missing a word: merged.** "Narrow,
+  adopt, widen" let a product widen before its adoption's pull request
+  merged, and between the two the default branch requires names only that
+  pull request produces — every other open pull request waits for a check
+  that never reports. maelys-json followed the order as written, had nothing
+  else open, and said so. `protect --apply` now refuses while no merged pull
+  request has run under the names it is about to require, and names the open
+  pull requests that will have to merge the default branch. The same order,
+  with the merge in it, is in every place that prints it — and in the eight
+  fleet threads that received the incomplete version.
+- **Verify on every target, package where `[package]` says.** A source
+  archive is the same tree everywhere and not the same gzip bytes, so three
+  targets packaging it clash at assembly; maelys-http went down to one target
+  and lost the replay of its tests at the tag on arm64 and macOS. Every
+  target of `[targets]` still runs `verify_command`; packaging, SBOM,
+  attestation and upload run only where declared, and a release that
+  packages nowhere is refused.
+- **`[check]` — legs of a product's own in the shared CI — was written,
+  trialled, and pulled before the tag.** A job skipped for want of legs is
+  reported by GitHub under its unevaluated name, so every pull request of
+  every product that declares none would have carried a skipped check named
+  `check / check (${{ matrix.name }})` — harmless to protection, which
+  ignores it, and indistinguishable from a breakage to anyone reading it. No
+  construction inside that job avoids it. It comes back as a separate
+  workflow that only a product declaring `[check]` calls.
+- **`cut` refuses an entry that does not name a dependency whose pin moved**
+  since the last tag. A patch of maelys-cli moved maelys-json across an ABI
+  and a consumer found out by linking; the name now reaches the entry and
+  the tag annotation.
+- **The managed block and skill carried three false statements**, in the
+  texts agents actually read: "public repositories use GitHub-hosted runners
+  only" (false since 0.53.0), `cut` "runs as the pinned one" (false always,
+  and the sentence that led maelys-oci to conclude a fix to `cut` needed an
+  adoption), and nothing at all about the rename order 0.54.0 asks of every
+  product. The block now gives the universal rules first, and a product with
+  no pin and no formula can stop reading at the first "If this repository".
+- **`protect` no longer calls a removed job intermittent**: a context no
+  workflow defines any more is "gone", not "1 of 3 pull requests".
+- **`preflight` between two releases notes the release instead of failing**
+  on the tag `VERSION` already names — it is the one command that reads the
+  environment, the gate and the tap credentials, and it is run as a health
+  check. `cut` keeps the failure, where an existing tag is a collision.
+- A defect of my own, found before any tag: a created `ci.yml` wrote its
+  runner lines in another order than the writer that regenerates it, which
+  would have drifted any product that declared a runner against its own new
+  file. Both paths now go through one writer.
+- **Impact.** Everyone mid-rename: widen only after the adoption is merged —
+  `protect --apply` now enforces it. maelys-http: `[package]` lets you verify
+  on three targets again. Everyone else: nothing, and the managed blocks
+  change prose only.
+
 ## 0.54.0 — 2026-09-14
 
 - **The legs of `check-product.yml` are names, not machines.** `check

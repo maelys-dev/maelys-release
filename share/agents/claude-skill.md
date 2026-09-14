@@ -24,7 +24,9 @@ there is normative).
    `VERSION` is written by `cut`, whose commit carries the bump and
    nothing else.
 2. Run `bin/maelys-release cut . X.Y.Z --apply` from a maelys-release
-   checkout at (any version: it runs as the pinned one). It exits 2 on
+   checkout at the version you want cutting it: `cut` runs as that
+   checkout, not as the socle this repository pins, and its first line
+   says which. It exits 2 on
    anything the workflow would refuse (signing configuration, previous
    tag, existing `vX.Y.Z`, `release` environment not limited to tags
    `v*`) before writing anything, then commits `VERSION` signed on
@@ -94,4 +96,5 @@ the first Linux build of the product.
   declare them in `dependencies/packages`;
 - put credentials in the repository; the tap secrets are
   `HOMEBREW_TAP_TOKEN` and `HOMEBREW_TAP_SIGNING_KEY`;
-- run release jobs on a self-hosted runner from a public repository.
+- adopt a socle that renames a required check before narrowing the
+  protection: `protect . --without-legs --apply`, adopt, `protect . --apply`.

@@ -276,6 +276,8 @@ class Declarations:
         self.calls_socle_ci = False
         # channel name -> the gate it declares, when it declares one.
         self.channel_gates: dict[str, str] = {}
+        # The targets that package, when [package] says; empty means all.
+        self.package: list[str] = []
         # "reviewer", "none", or "" when this repository has not chosen.
         self.gate = ""
         # What cut runs between writing VERSION and the bump commit, for a
@@ -405,6 +407,7 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
     commit_verification = ""
     gate = ""
     after_version = ""
+    package: list[str] = []
     unknown: list[str] = []
     section = ""
     for number, raw in enumerate(text.splitlines(), 1):
@@ -413,7 +416,7 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
             continue
         if line.startswith("["):
             if line in ("[targets]", "[manifest]", "[sbom]", "[runners]", "[dependencies]",
-                        "[commit]", "[channels]", "[gate]", "[cut]"):
+                        "[commit]", "[channels]", "[gate]", "[cut]", "[package]"):
                 section = line[1:-1]
                 continue
             # A section this socle does not know is named and skipped, never
@@ -439,6 +442,16 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
             if not command.strip():
                 raise ValueError(f"[cut] after-version names no command at line {number}")
             after_version = command.strip()
+            continue
+        if section == "package":
+            # The targets that package; every target of [targets] verifies.
+            # A source archive is the same tree everywhere and not the same
+            # gzip bytes everywhere, so a product publishing one could not
+            # verify on three targets without three archives clashing.
+            for name in line.split():
+                if name in package:
+                    raise ValueError(f"[package] names {name} twice, at line {number}")
+                package.append(name)
             continue
         if section == "gate":
             if gate:
@@ -548,10 +561,15 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
         targets.append((name, runner))
     if section and not unknown and not targets and not manifest and not channels \
             and not gate and not after_version and not sbom and not runners and not apart \
-            and not commit_verification:
+            and not commit_verification and not package:
         raise ValueError(f"{DECLARATION_FILE} declares no target, archive kind, channel, gate or cut command")
+    known = [name for name, _ in targets] or list(SOCLE_TARGETS)
+    for name in package:
+        if name not in known:
+            raise ValueError(f"[package] names {name}, which is not a target of this release"
+                             f" ({', '.join(known)})")
     return (targets, manifest, channels, channel_gates, sbom, macos_runner, runners, apart,
-            commit_verification, gate, after_version, unknown)
+            commit_verification, gate, after_version, unknown, package)
 
 
 def read_fuzz(decl: Declarations) -> None:
@@ -774,7 +792,7 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
         try:
             decl.targets, decl.manifest_patterns, decl.channels, decl.channel_gates, \
                 decl.sbom_pattern, decl.macos_runner, decl.runners, decl.dependencies_apart, \
-                decl.commit_verification, decl.gate, decl.after_version, unknown = \
+                decl.commit_verification, decl.gate, decl.after_version, unknown, decl.package = \
                 parse_release(release.read_text(encoding="utf-8"))
             for section in unknown:
                 decl.add("missing", f"{release.name}: section {section} is not one this socle knows"
@@ -795,6 +813,10 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
             if decl.targets:
                 decl.add("ok", f"{release.name} targets: "
                                + " ".join(name for name, _ in decl.targets))
+            if decl.package:
+                verifying = [name for name, _ in decl.targets] or list(SOCLE_TARGETS)
+                decl.add("ok", f"{release.name} [package] {' '.join(decl.package)}: every target of the"
+                               f" release verifies ({', '.join(verifying)}), and these alone package")
             if decl.manifest_patterns:
                 decl.add("ok", f"{release.name} manifest: " + SOCLE_MANIFEST_PATTERNS
                                + " " + " ".join(decl.manifest_patterns))
@@ -1240,7 +1262,7 @@ def ci_macos_runner(text: str, labels) -> str:
         if stripped and (len(lines[end]) - len(lines[end].lstrip())) < body:
             break
         end += 1
-    names = tuple(RUNNER_INPUTS.values())
+    names = tuple(f"{name}:" for name in RUNNER_INPUTS.values())
     for index in reversed([i for i in range(with_at + 1, end)
                            if lines[i].strip().startswith(names)]):
         del lines[index]
@@ -1310,9 +1332,14 @@ def release_workflow(decl: Declarations, sha: str, tag: str, version: str) -> st
         lines.append(f"      linux_packages: {SOCLE_LINUX_PACKAGES} {decl.linux_packages}")
     if decl.macos_packages:
         lines.append(f"      macos_packages: {decl.macos_packages}")
-    if decl.targets:
-        entries = [{"target": name} if runner == "" else {"target": name, "runner": runner}
-                   for name, runner in decl.targets]
+    if decl.targets or decl.package:
+        declared = decl.targets or [(name, "") for name in SOCLE_TARGETS]
+        entries = []
+        for name, runner in declared:
+            entry: dict = {"target": name} if runner == "" else {"target": name, "runner": runner}
+            if decl.package and name not in decl.package:
+                entry["package"] = False
+            entries.append(entry)
         lines.append(f"      targets: '{json.dumps(entries)}'")
     if decl.manifest_patterns:
         lines.append(f"      manifest_patterns: '{SOCLE_MANIFEST_PATTERNS} "
@@ -1400,9 +1427,13 @@ def ci_workflow(decl: Declarations, sha: str, tag: str, version: str) -> str:
         f"    uses: {SOCLE_REPOSITORY}/.github/workflows/check-product.yml@{sha} # {tag}",
         "    with:",
         f"      product: {decl.product}",
-        *runner_inputs(decl),
     ]
-    return "\n".join(lines) + "\n"
+    # Through the same writer adopt applies to an existing file, so a file
+    # created here and the same file regenerated later are byte for byte one
+    # text. They were not: this rendered the runner lines after `product:`
+    # and the writer inserts them first, so a product that declared a runner
+    # would have drifted against its own freshly created ci.yml.
+    return ci_macos_runner("\n".join(lines) + "\n", decl.runners)
 
 
 def managed_block(existing: str | None, block: str) -> str:
@@ -2427,8 +2458,9 @@ def handle_adopt(invocation: Invocation) -> tuple[dict, int]:
                           + ", which this socle's check-product.yml no longer produces: after this"
                             " adoption every pull request would wait for a check that never reports.",
                           f"Narrow first: '{PROGRAM} protect {project} --without-legs --apply' removes the"
-                          " socle's legs from the required list and nothing else; adopt; then"
-                          f" '{PROGRAM} protect {project} --apply' requires the new names. Or pass"
+                          " socle's legs from the required list and nothing else; adopt, and merge the"
+                          f" adoption; then '{PROGRAM} protect {project} --apply' requires the new names."
+                          " Or pass"
                           " --allow-lock if the protection is being changed by hand in the same breath.")
     files = plan(decl, stage(decl, sha, tag), apply)
     moved = move_declaration(project, apply)
@@ -2656,7 +2688,7 @@ def github_repository(project: pathlib.Path) -> str:
     return match.group(1) if match else ""
 
 
-def tag_checks(project: pathlib.Path, version: str) -> list[tuple[str, str]]:
+def tag_checks(project: pathlib.Path, version: str, between_releases: bool = False) -> list[tuple[str, str]]:
     """What the signed tag vVERSION needs of this checkout, whatever publishes it.
 
     These hold for every Maelys repository, the ones the socle does not
@@ -2692,7 +2724,25 @@ def tag_checks(project: pathlib.Path, version: str) -> list[tuple[str, str]]:
             else:
                 found.append(("ok", f"{last} is annotated and signed"))
     if git("rev-parse", "-q", "--verify", f"refs/tags/v{version}", cwd=project, check=False):
-        found.append(("fail", f"tag v{version} already exists; a published tag is never moved or recreated"))
+        latest = (git("tag", "--list", "v*", "--sort=-v:refname", cwd=project, check=False).split() or [""])[0]
+        # Released means what the workflow would have published: the latest
+        # tag, annotated, on this commit's history. A lightweight tag at the
+        # version is not a release but a collision waiting for the next cut,
+        # and keeps its failure.
+        released = latest == f"v{version}" \
+            and git("cat-file", "-t", f"v{version}", cwd=project, check=False) == "tag" \
+            and run(["git", "merge-base", "--is-ancestor", f"v{version}", "HEAD"], cwd=project).returncode == 0
+        if between_releases and released:
+            # The state of every repository between two releases, not a
+            # defect: VERSION is what was published last. preflight is also
+            # the one command that reads the environment, the gate and the tap
+            # credentials, so it is run as a health check between releases --
+            # and a FAIL here made every other verdict of that run read as a
+            # failure too. maelys-json ran it that way three times.
+            found.append(("note", f"v{version} is the release this commit already carries; `cut` moves"
+                                  " VERSION when there is something to publish"))
+        else:
+            found.append(("fail", f"tag v{version} already exists; a published tag is never moved or recreated"))
     else:
         found.append(("ok", f"tag v{version} is free"))
     return found
@@ -2963,7 +3013,7 @@ def handle_preflight(invocation: Invocation) -> tuple[dict, int]:
     """What the release workflow will demand of the tag, before it exists."""
     decl, data = check_data(invocation)
     require_socle_mechanism(decl.project, decl.mechanism, "preflight")
-    gate = (tag_checks(decl.project, decl.version)
+    gate = (tag_checks(decl.project, decl.version, between_releases=True)
             + repository_checks(decl)) \
         if data["valid"] else []
     data["preflight"] = [{"status": status, "message": message} for status, message in gate]
@@ -3327,6 +3377,34 @@ def cut_resume(invocation: Invocation, decl: Declarations, data: dict, log, time
     return cut_report(data, check_runs(repository, head) or [])
 
 
+def moved_pins_named(project: pathlib.Path, entry: str) -> list[tuple[str, str]]:
+    """Every pin this release moves, named in the entry that describes it.
+
+    A patch of maelys-cli moved maelys-json across an ABI, and a consumer
+    found out by linking. The socle will not judge a product's versioning --
+    `bump_audit` refuses to, on principle, and the fleet does cross a series
+    in a patch -- but it can make the move impossible to miss: an entry that
+    does not name the dependency it re-pins is refused, and since the tag's
+    annotation is that entry, the name reaches the tag too.
+    """
+    last = git("describe", "--tags", "--abbrev=0", "--match", "v[0-9]*", cwd=project, check=False)
+    if not last:
+        return []
+    moved = [line for line in git("diff", "--name-only", f"{last}..HEAD", "--", "dependencies",
+                                  cwd=project, check=False).splitlines()
+             if line.startswith("dependencies/") and line.endswith(".pin")]
+    found = []
+    for path in moved:
+        name = path[len("dependencies/"):-len(".pin")]
+        if re.search(rf"(?<![A-Za-z0-9._-]){re.escape(name)}(?![A-Za-z0-9._-])", entry):
+            found.append(("ok", f"{path} moved since {last}, and the entry names {name}"))
+        else:
+            found.append(("fail", f"{path} moved since {last} and the entry of this version does not name"
+                                  f" {name}: a consumer of this release links against the new pin, and"
+                                  " the only place it can learn so is the entry and the tag it becomes"))
+    return found
+
+
 def cut_open(invocation: Invocation, decl: Declarations, data: dict, log, timeout: int, poll: int) -> tuple[dict, int]:
     """First stop: the signed bump commit, its pull request, and the wait."""
     project, product, version = decl.project, decl.product, data["version"]
@@ -3370,7 +3448,7 @@ def cut_open(invocation: Invocation, decl: Declarations, data: dict, log, timeou
         raise Failure("PRECONDITION_FAILED",
                       f"{base} is {ahead} ahead and {behind} behind origin/{base}.",
                       f"Bring the two together before cutting: the pull request is opened against origin/{base}.")
-    gate = cut_gate(decl, version)
+    gate = cut_gate(decl, version) + moved_pins_named(project, body)
     data["gate"] = [{"status": status, "message": message} for status, message in gate]
     refused = [message for status, message in gate if status == "fail"]
     data["ready"] = not refused
@@ -4596,6 +4674,15 @@ def handle_protect(invocation: Invocation) -> tuple[dict, int]:
               "pullRequests": partial.get("heads", 0),
               "missingFromRuns": absent, "requiredButNeverRun": stale,
               "proposed": proposed, "applied": False}
+    # A job seen on some pull requests is intermittent only if a workflow
+    # still defines it. maelys-json removed `fuzz` from its ci.yml in 0.2.0,
+    # and protect called it "1 of 3 recent pull requests": the conclusion
+    # right, the reason wrong, with the file that says why in hand.
+    defined = "\n".join(path.read_text(encoding="utf-8", errors="replace")
+                        for path in sorted((project / ".github" / "workflows").glob("*.y*ml")))
+    report["gone"] = [name for name in report["seenOnSome"]
+                      if not re.search(r"^\s*(?:name:\s*['\"]?|)" + re.escape(name.split(" (")[0])
+                                       + r"['\"]?\s*:?\s*$", defined, re.MULTILINE)]
     if state == "unreadable":
         report["note"] = (f"GitHub refused to say what protects {branch} of {repository}, which a private"
                           " repository of a free plan does. That is not the same fact as an open branch.")
@@ -4623,6 +4710,22 @@ def handle_protect(invocation: Invocation) -> tuple[dict, int]:
         report["dropped"] = [name for name in required if legs.match(name)]
         report["requiredButNeverRun"], report["missingFromRuns"] = [], []
         absent, stale = [], []
+    # Widening before the adoption is merged requires names that only the
+    # adoption's own pull request produces, and every other open pull request
+    # -- built on the previous ci.yml -- would wait for them forever. The
+    # order printed in 0.54.0 said "narrow, adopt, widen" and did not say
+    # "merged"; maelys-json followed it as written, had no other pull request
+    # open, and said so. Widen now waits for a merged pull request to have
+    # run under every name it is about to require.
+    if invocation.flag("--apply") and not narrowing and absent and not invocation.flag("--allow-lock"):
+        waiting = [str(pull.get("number")) for pull in github_list(
+            f"repos/{repository}/pulls?state=open&base={branch}&per_page=50") if isinstance(pull, dict)]
+        raise Failure("PRECONDITION_FAILED",
+                      f"no merged pull request of {repository} has run " + ", ".join(absent)
+                      + ": requiring them now would block every pull request that does not produce them yet.",
+                      "Merge the adoption first, then protect --apply."
+                      + (f" Open pull requests built on the previous ci.yml (#{', #'.join(waiting)}) must"
+                         f" merge {branch} to report the new names." if waiting else ""))
     if invocation.flag("--apply") and ours:
         # The ruleset carries the socle's contexts, so the ruleset is what
         # is written -- never a classic protection beside it, which would be
@@ -4721,7 +4824,8 @@ def text_protect(data: dict) -> str:
     if data.get("narrowing"):
         lines.extend(f"{'drop':<8} {name}" for name in data.get("dropped", []))
         lines.append(f"{'narrow':<8} the legs of the socle's matrix leave the required list; everything"
-                     " else stays. Adopt the socle that renames them, then 'protect --apply' again")
+                     " else stays. Adopt the socle that renames them, merge that adoption, then"
+                     " 'protect --apply' again")
     if data.get("note"):
         lines.append(f"note     {data['note']}")
     if data["caller"]:
@@ -4738,6 +4842,9 @@ def text_protect(data: dict) -> str:
                      " carries it: adopt this socle first, or its next pull request will be the first to"
                      " run under that name")
     for name, count in (data.get("seenOnSome") or {}).items():
+        if name in (data.get("gone") or []):
+            lines.append(f"note     {name} is left out: no workflow of this repository defines it any more")
+            continue
         lines.append(f"note     {name} is left out: {count} of {data.get('pullRequests', 0)} recent pull"
                      " requests produced it, and a protection should require what reliably runs")
     for name in data["fromTag"]:
@@ -5496,6 +5603,7 @@ APP = cli.Program(PROGRAM, PRODUCT, socle_version(), [
                 handle_protect,
                 operands=[DIR_OPERAND],
                 options=[cli.flag("--apply", "Write the protection instead of only reporting it."),
+                         cli.flag("--allow-lock", "Require names no merged pull request has produced yet."),
                          cli.flag("--without-legs", "Propose the required list minus the socle's matrix legs:"
                                   " the narrowing that comes before an adoption renames them.")],
                 schema={"type": "object", "additionalProperties": False,
@@ -5515,7 +5623,8 @@ APP = cli.Program(PROGRAM, PRODUCT, socle_version(), [
                                        "protectedBy": {"type": "array", "items": {"type": "string"}},
                                        "ruleset": {"type": "array", "items": {"type": "string"}},
                                        "narrowing": {"type": "boolean"},
-                                       "dropped": {"type": "array", "items": {"type": "string"}}}}),
+                                       "dropped": {"type": "array", "items": {"type": "string"}},
+                                       "gone": {"type": "array", "items": {"type": "string"}}}}),
     cli.execute("rehearse", "rehearse",
                 "Replay the Linux build job of the release in a Docker container on a copy of the working"
                 " tree, make check with --check, or a channel's publish script against a published release"
