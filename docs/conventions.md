@@ -1175,6 +1175,32 @@ does exactly that, in twenty lines of Makefile. The socle does not add a leg
 for it: it cannot build the binaries, and the kit is another repository's
 contract.
 
+## What stays in docs/, sorted as maelys-platform sorts it
+
+`check` sorts `docs/` on maelys-platform's conditions, copied character for
+character, so that `check` and `maelys-platform docs --prose` never sort one
+file two ways. Staying: the generated reference and any file whose head says
+it is generated and must not be edited; a document `LICENSING.md` engages;
+anything that is not Markdown; and **a verified reference** — written by hand,
+its head naming the check that holds it against the code:
+
+```
+<!-- VERIFIED by make api-doc-check against the public API; edit with the code. -->
+```
+
+It stays for the reason `docs/cli.md` does: the check must read it in the
+checkout it verifies, and a public library's `make check` cannot clone a
+private maelys-docs.
+
+**Prose a README links is named, not refused.** A link is inline, by
+reference, in HTML, or through the repository's own GitHub URL, to the file or
+to a directory holding it; a path mentioned in a sentence is not a link. A
+public README holds such a page until a site documents the product, since
+maelys-docs is private. `check` is offline: it sees the link and neither the
+visibility nor the sites, so its note states the rule and `--docs-contract`
+does not count the page. maelys-platform, which reads both, decides `movable`,
+and `--prose` lists only what moves.
+
 ## Moving a product's prose
 
 ```sh

@@ -16,8 +16,17 @@
   `pin` or `prose`, beside the path and in the JSON as `touches`, with a
   count above the plan. maelys-oci read FAILs naming files, with no way short
   of the diff to tell an editorial pass on a block from a fix to the release.
+- **`docs/` is sorted on maelys-platform's conditions, character for
+  character.** A verified reference — a head naming the check that holds it
+  against the code — stays, and prose a README links is named rather than
+  counted by `--docs-contract`: `check` is offline and cannot tell whether
+  that README is public or whether a site exists. On maelys-cli, `check` and
+  `maelys-platform docs` now give the same answer: two verified references,
+  five pages held.
 - **Impact.** A product that declares `[check]`: adopt, merge, then
-  `protect --apply`. Everyone else: nothing; no managed text changes.
+  `protect --apply`. A product with a verified reference: its note becomes an
+  `ok`, at the pinned socle that carries this. Everyone else: nothing; no
+  managed text changes.
 
 ## 0.55.0 — 2026-09-14
 
