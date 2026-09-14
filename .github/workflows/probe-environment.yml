@@ -1,23 +1,21 @@
 name: probe-environment
 
-# Temporary, and deleted before this branch opens a pull request. It answers
-# one question no document answers plainly: what does GitHub do with
+# Temporary, deleted before this branch opens a pull request. It answers one
+# question no document answers plainly: what does GitHub do with
 # `environment:` when the expression is empty? The socle needs to know before
-# it lets a product declare a channel with no gate.
+# it lets a product declare a channel with no gate, and channel.yml runs for
+# exactly one product in the fleet -- so guessing would be found out at
+# somebody's release.
 on:
-  workflow_dispatch:
-    inputs:
-      environment:
-        required: false
-        type: string
-        default: ""
+  push:
+    branches: [feat/said-a-version-early]
 
 permissions:
   contents: read
 
 jobs:
-  probe:
+  empty:
     runs-on: ubuntu-26.04
-    environment: ${{ inputs.environment }}
+    environment: ${{ '' }}
     steps:
-      - run: echo "the job started with environment='${{ inputs.environment }}'"
+      - run: echo "started with an empty environment"
