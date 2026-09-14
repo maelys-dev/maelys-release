@@ -98,7 +98,7 @@
   runner lines in another order than the writer that regenerates it, which
   would have drifted any product that declared a runner against its own new
   file. Both paths now go through one writer.
-- **Impact.** Everyone mid-rename: widen only after the adoption is merged —
+- **Impact.** **Superseded by 0.57.0 for the rename: adopt, merge, `protect . --apply`; never narrow.** Everyone mid-rename: widen only after the adoption is merged —
   `protect --apply` now enforces it. maelys-http: `[package]` lets you verify
   on three targets again. Everyone else: nothing, and the managed blocks
   change prose only.
@@ -126,7 +126,7 @@
   organisation is refused before anything is sent.
 - **`adopt --apply` names the order when it refuses.** It still refuses to
   make a required context disappear, and now says narrow, adopt, widen.
-- **Impact.** Every product on the shared CI, and it is the one version this
+- **Impact.** **Superseded by 0.57.0 for the rename: adopt, merge, `protect . --apply`; never narrow.** Every product on the shared CI, and it is the one version this
   year that asks something of all of them: **before adopting, run `protect
   . --without-legs --apply`; adopt; then `protect . --apply`.** Skip the
   first and `adopt --apply` refuses. maelys-cli, whose ruleset requires only
@@ -234,7 +234,7 @@
   with an empty `environment:` would have been found out at somebody's
   release. A throwaway workflow on a branch answered it: the job started at
   once, left no pending deployment, and created no environment.
-- **Impact.** Products on the shared CI: read the coming note — the leg
+- **Impact.** **Superseded by 0.57.0 for the rename: adopt, merge, `protect . --apply`; never narrow.** Products on the shared CI: read the coming note — the leg
   rename changes every required context, and the order is narrow, adopt,
   widen. Products with a channel: say `none` or `reviewer` in its line, and
   the note becomes an `ok`; saying nothing keeps today's behaviour. Everyone
