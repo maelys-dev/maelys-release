@@ -1519,7 +1519,7 @@ class GoldenTest(unittest.TestCase):
         ok       .github/workflows/ci.yml calls check-product.yml of the socle
         ok       dependencies/packages: linux [pkg-config libjansson-dev] macos [jansson]
         ok       maelys-release.conf [dependencies] apart: the pins are materialised under $MAELYS_DEPENDENCIES_DIR, never beside the product
-        """) + "note     " + COMING_NOTE + "\n"
+        """) + ("note     " + COMING_NOTE + "\n" if COMING_NOTE else "")
     FILES = textwrap.dedent("""\
         same     .github/workflows/release.yml
         same     scripts/checkout-dependency.sh
@@ -2769,17 +2769,24 @@ class LinuxRunnersTest(unittest.TestCase):
     def test_the_workflow_takes_one_input_per_leg(self) -> None:
         for name in ("linux_x86_64_runner", "linux_arm64_runner", "macos_runner"):
             self.assertIn(f"      {name}:", self.WORKFLOW)
-        for leg, name, default in (("ubuntu-26.04", "linux_x86_64_runner", '"ubuntu-26.04"'),
-                                   ("ubuntu-26.04-arm", "linux_arm64_runner", '"ubuntu-26.04-arm"'),
-                                   ("macos-15", "macos_runner", '"macos-15"')):
+        for leg, name, default in (("linux", "linux_x86_64_runner", '"ubuntu-26.04"'),
+                                   ("linux-arm64", "linux_arm64_runner", '"ubuntu-26.04-arm"'),
+                                   ("macos", "macos_runner", '"macos-15"')):
             self.assertIn(f"          - leg: {leg}\n            runner: ${{{{ github.event.repository.private"
                           f" && inputs.{name} || '{default}' }}}}", self.WORKFLOW)
 
-    def test_no_check_name_changed(self) -> None:
-        """The whole care of 0.41.0, and of this: a renamed leg locks a
-        branch that requires it."""
+    def test_the_legs_are_names_and_not_machines(self) -> None:
+        """Renamed once, in 0.54.0, announced a version early: a leg named
+        after an image turned every image upgrade into a fleet-wide lock.
+        The image now lives beside the leg, in its runner, where it can
+        change without anyone's protection noticing."""
         self.assertIn("name: check (${{ matrix.leg }})", self.WORKFLOW)
-        self.assertEqual(MODULE.check_product_legs(), ["ubuntu-26.04", "ubuntu-26.04-arm", "macos-15"])
+        self.assertEqual(MODULE.check_product_legs(), ["linux", "linux-arm64", "macos"])
+        for leg in MODULE.check_product_legs():
+            # An architecture is a name (arm64); an image release is a
+            # version (26.04, macos-15). Only the second turns an upgrade
+            # into a lock.
+            self.assertNotRegex(leg, r"[0-9]+\.[0-9]+|ubuntu|macos-[0-9]", f"{leg} carries an image's version")
 
     def test_fuzz_and_sanitizers_follow_the_x86_64_declaration(self) -> None:
         """Left hosted, they are the reason a repository that forbids hosted
@@ -3807,16 +3814,19 @@ class ProtectByRulesetTest(unittest.TestCase):
         # And what it already requires is not proposed as something to add.
         self.assertIn("check / check (macos-15)", report["required"])
 
-    def test_apply_refuses_rather_than_superimposing(self) -> None:
+    def test_apply_writes_the_ruleset_and_never_a_second_mechanism(self) -> None:
         """Writing the classic protection on a ruled branch leaves two
-        places to keep true, and the ruleset still naming the old contexts
-        after the next rename. agent-cli-spec worked this out from the
-        output before running it."""
-        with self.assertRaises(MODULE.Failure) as refusal:
-            self.run_protect(("absent", None), ("ok", self.RULESET), apply=True)
-        self.assertEqual(refusal.exception.code, "PRECONDITION_FAILED")
-        self.assertIn("already requires check / check (macos-15)", refusal.exception.message)
-        self.assertIn("two mechanisms to keep true", refusal.exception.message)
+        places to keep true. agent-cli-spec worked that out from the output
+        before running it; 0.51.2 refused, and 0.54.0 writes the ruleset."""
+        written = []
+        saved = MODULE.write_ruleset
+        MODULE.write_ruleset = lambda repository, branch, rules, contexts: written.append(contexts) or True
+        try:
+            report = self.run_protect(("absent", None), ("ok", self.RULESET), apply=True)
+        finally:
+            MODULE.write_ruleset = saved
+        self.assertTrue(report["applied"])
+        self.assertEqual(len(written), 1)
 
     def test_a_ruleset_that_requires_nothing_of_ours_does_not_refuse(self) -> None:
         """One repository's ruleset requires a context of its own and
@@ -3832,6 +3842,77 @@ class ProtectByRulesetTest(unittest.TestCase):
         report = self.run_protect(classic, ("ok", self.RULESET))
         self.assertEqual(report["protectedBy"], ["branch protection", "a ruleset"])
         self.assertEqual(sorted(report["required"]), ["check / check (macos-15)", "check / fuzz"])
+
+
+class LegRenameTest(unittest.TestCase):
+    """The rename, and the two capabilities that make it survivable.
+
+    A required context that nothing produces blocks every merge, so a
+    rename can only narrow the protection ahead of the adoption and widen it
+    after. `--without-legs` is the narrowing; `write_ruleset` is what lets a
+    repository protected by a ruleset alone take part at all.
+    """
+
+    RULESET = {"id": 7, "name": "main requires green check", "target": "branch", "enforcement": "active",
+               "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}},
+               "bypass_actors": [], "source_type": "Repository",
+               "rules": [{"type": "deletion", "parameters": None},
+                         {"type": "required_status_checks",
+                          "parameters": {"strict_required_status_checks_policy": False,
+                                         "do_not_enforce_on_create": False,
+                                         "required_status_checks": [
+                                             {"context": "check / check (ubuntu-26.04)", "integration_id": 15368},
+                                             {"context": "check / sanitizers", "integration_id": 15368}]}}]}
+    APPLIED = [{"type": "deletion", "ruleset_id": 7, "ruleset_source_type": "Repository"},
+               {"type": "required_status_checks", "ruleset_id": 7, "ruleset_source_type": "Repository"}]
+
+    def write(self, contexts, applied=None, ruleset=None):
+        sent = {}
+        saved_read, saved_run = MODULE.github_read, MODULE.run
+        MODULE.github_read = lambda path: ("ok", json.loads(json.dumps(ruleset or self.RULESET)))
+        def fake_run(command, cwd=None, env=None):
+            sent["command"] = command
+            sent["body"] = json.loads(pathlib.Path(command[-1]).read_text())
+            return subprocess.CompletedProcess(command, 0, "", "")
+        MODULE.run = fake_run
+        try:
+            return MODULE.write_ruleset("o/r", "main", applied or self.APPLIED, contexts), sent
+        finally:
+            MODULE.github_read, MODULE.run = saved_read, saved_run
+
+    def test_the_ruleset_is_written_whole_with_only_its_checks_changed(self) -> None:
+        ok, sent = self.write(["check / check (linux)", "check / sanitizers"])
+        self.assertTrue(ok)
+        self.assertEqual(sent["command"][:5], ["gh", "api", "-X", "PUT", "repos/o/r/rulesets/7"])
+        body = sent["body"]
+        self.assertEqual(body["name"], "main requires green check")
+        self.assertEqual(body["conditions"], self.RULESET["conditions"])
+        self.assertEqual([rule["type"] for rule in body["rules"]], ["deletion", "required_status_checks"])
+        checks = body["rules"][1]["parameters"]["required_status_checks"]
+        self.assertEqual([check["context"] for check in checks], ["check / check (linux)", "check / sanitizers"])
+        # The integration that was allowed to report stays the one allowed:
+        # a new context takes it from its neighbours, not from nowhere.
+        self.assertTrue(all(check["integration_id"] == 15368 for check in checks))
+        self.assertNotIn("id", body)
+
+    def test_a_ruleset_of_the_organisation_is_refused_before_anything_is_sent(self) -> None:
+        organisation = [dict(rule, ruleset_source_type="Organization") for rule in self.APPLIED]
+        with self.assertRaises(MODULE.Failure) as refusal:
+            self.write(["check / check (linux)"], applied=organisation)
+        self.assertIn("ruleset of the organisation", refusal.exception.message)
+
+    def test_the_adoption_guard_names_the_order(self) -> None:
+        source = (ROOT / "bin" / "maelys-release").read_text(encoding="utf-8")
+        body = source.split("vanishing = vanishing_contexts(project)", 1)[1].split("files = plan(", 1)[0]
+        self.assertIn("--without-legs --apply", body)
+        self.assertIn("then", body)
+
+    def test_nothing_is_announced_once_the_rename_ships(self) -> None:
+        """The announcement is honoured, so it leaves: an entry left standing
+        would be a note about a change every adopter already has."""
+        here = MODULE.version_tuple((ROOT / "VERSION").read_text(encoding="utf-8").strip())
+        self.assertFalse([entry for entry in MODULE.COMING if "renamed" in entry[2]
+                          and MODULE.version_tuple(entry[0]) <= here])
 
 
 class ProtectionContextsTest(unittest.TestCase):
@@ -3866,7 +3947,7 @@ jobs:
     def test_the_legs_come_from_the_workflow_not_from_a_list(self) -> None:
         legs = MODULE.check_product_legs()
         self.assertTrue(legs, "check-product.yml must name its legs")
-        self.assertIn("macos-15", legs)
+        self.assertIn("macos", legs)
 
     def test_the_calling_job_prefixes_every_name(self) -> None:
         """Some products call it check; maelys-egress calls it socle."""
