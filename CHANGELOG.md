@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.51.2 — 2026-09-14
+
+- **`protect` read one protection mechanism of two, and it is the command
+  whose whole subject is what a branch requires.** It told a
+  ruleset-protected repository that its default branch was **not
+  protected**, and proposed to add three contexts the ruleset already
+  required. A branch is protected by the classic protection, by a ruleset,
+  or by both, and GitHub applies them in union.
+- **And `--apply` now refuses on a branch whose ruleset carries the socle's
+  contexts.** This command writes the classic protection; on a ruled branch
+  that is a second mechanism superimposed on the first, two places to keep
+  true, and a ruleset still naming the old contexts after the next rename.
+  Reported by agent-cli-spec, who worked it out from the output and asked
+  before running it.
+- Third time this socle has learned that a ruleset is a protection:
+  `preflight` in 0.46.x, after telling seventeen repositories they were
+  open; the adoption guard in 0.51.1; and now the command that should have
+  known first. The lesson each time was the same and the code was in a new
+  place each time.
+- **Impact.** Repositories protected by a ruleset: `protect` now reports
+  what you actually require, and refuses `--apply` instead of giving you a
+  second protection to maintain. Everyone else: the report names which
+  mechanism protects the branch. Nothing to adopt — `protect` runs at the
+  checkout, not at the pinned socle.
+
 ## 0.51.1 — 2026-09-14
 
 - **The guard that keeps a rename from locking a branch read one endpoint of

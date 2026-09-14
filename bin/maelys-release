@@ -4299,6 +4299,24 @@ def handle_protect(invocation: Invocation) -> tuple[dict, int]:
     state, current = github_read(f"repos/{repository}/branches/{branch}/protection")
     holds = current if isinstance(current, dict) else {}
     required = list(((holds.get("required_status_checks") or {}).get("contexts") or []))
+    # The other endpoint, and the third place this socle has had to learn
+    # it. A branch is protected by the classic protection, by a ruleset, or
+    # by both, and GitHub applies them in union. `preflight` learned it in
+    # 0.46.x after calling seventeen repositories open; the adoption guard
+    # learned it in 0.51.1; `protect` -- the command whose whole subject is
+    # what a branch requires -- was still reading one, and told a
+    # ruleset-protected repository it was not protected while proposing to
+    # add three contexts its ruleset already required.
+    ruled, rules = github_read(f"repos/{repository}/rules/branches/{branch}")
+    by_rule: list[str] = []
+    if ruled == "ok" and isinstance(rules, list):
+        for rule in rules:
+            if not isinstance(rule, dict) or rule.get("type") != "required_status_checks":
+                continue
+            for check in (rule.get("parameters") or {}).get("required_status_checks") or []:
+                if isinstance(check, dict) and check.get("context"):
+                    by_rule.append(str(check["context"]))
+    required += [name for name in by_rule if name not in required]
     # The socle's legs are computed, never observed: they come from the
     # check-product.yml this socle carries, so an adoption that renames them
     # is known here before any run exists. The product's own jobs are the
@@ -4317,7 +4335,11 @@ def handle_protect(invocation: Invocation) -> tuple[dict, int]:
     ever = partial.get("ever", [])
     absent = [name for name in derived if ever and name not in ever]
     stale = [name for name in required if name not in proposed]
-    report = {"repository": repository, "branch": branch, "protected": state == "ok",
+    mechanisms = [name for name, present in (("branch protection", state == "ok"),
+                                             ("a ruleset", bool(by_rule) or ruled == "ok" and bool(rules)))
+                  if present]
+    report = {"repository": repository, "branch": branch, "protected": bool(mechanisms),
+              "protectedBy": mechanisms, "ruleset": sorted(by_rule),
               "caller": caller, "socleContexts": derived, "observed": seen,
               "fromTag": from_tag, "required": sorted(required),
               "seenOnSome": {name: count for name, count in (partial.get("partial") or {}).items()
@@ -4328,6 +4350,21 @@ def handle_protect(invocation: Invocation) -> tuple[dict, int]:
     if state == "unreadable":
         report["note"] = (f"GitHub refused to say what protects {branch} of {repository}, which a private"
                           " repository of a free plan does. That is not the same fact as an open branch.")
+    # A ruleset carrying the socle's own contexts is the one case --apply
+    # must not touch. This command writes the classic protection; on a
+    # branch already ruled, that is a second mechanism superimposed on the
+    # first, two places to keep true, and the ruleset still naming the old
+    # contexts after the next rename. Reported by agent-cli-spec, who
+    # worked it out from the output before running it.
+    ours = [name for name in by_rule if name in derived or name.startswith(f"{caller} / ")]
+    if ours and invocation.flag("--apply"):
+        raise Failure("PRECONDITION_FAILED",
+                      f"{branch} of {repository} is protected by a ruleset that already requires "
+                      + ", ".join(sorted(ours)) + ", and this command writes the classic branch"
+                      " protection: applying it would leave two mechanisms to keep true, and the"
+                      " ruleset would still name the old contexts after the next rename.",
+                      "Align the ruleset with the proposed list by hand -- 'protect' without --apply"
+                      " computes it -- or move this branch to the classic protection the socle derives.")
     if invocation.flag("--apply"):
         if not proposed:
             raise Failure("PRECONDITION_FAILED",
@@ -4356,7 +4393,12 @@ def handle_protect(invocation: Invocation) -> tuple[dict, int]:
 
 def text_protect(data: dict) -> str:
     lines = [f"branch   {data['branch']} of {data['repository']}"
-             + ("" if data["protected"] else " is NOT protected")]
+             + (" is protected by " + " and ".join(data["protectedBy"]) if data.get("protectedBy")
+                else "" if data["protected"] else " is NOT protected")]
+    if data.get("ruleset"):
+        lines.append(f"ruleset  requires " + ", ".join(data["ruleset"])
+                     + " — this command writes the classic protection, so --apply is refused"
+                       " rather than superimposing a second mechanism")
     if data.get("note"):
         lines.append(f"note     {data['note']}")
     if data["caller"]:
