@@ -723,7 +723,8 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
             if re.search(pattern, changelog.read_text(encoding="utf-8"), re.MULTILINE):
                 decl.add("ok", f"CHANGELOG.md has a dated ## {decl.version} entry", "conventions")
             else:
-                decl.add("missing", f"CHANGELOG.md needs a dated entry: ## {decl.version} — YYYY-MM-DD", "conventions")
+                decl.add("missing", f"CHANGELOG.md needs a dated entry: {entry_heading(project, decl.version)}",
+                         "conventions")
     # Every packaging/homebrew/NAME.rb.in becomes one tap job publishing NAME:
     # a formula is named after what it installs, not after the repository.
     homebrew = project / "packaging" / "homebrew"
@@ -3293,6 +3294,20 @@ def worktree_paths(project: pathlib.Path) -> dict:
             in run(["git", "status", "--porcelain", "-uall"], cwd=project).stdout.split("\n") if line}
 
 
+def entry_heading(project: pathlib.Path, version: str) -> str:
+    """The heading to write for `version`, spelled as this changelog spells its entries.
+
+    Any separator is accepted between the version and the date. The hint
+    showed an em dash whatever the file used, and an agent on maelys-cli,
+    whose ten entries say `## 0.5.29 - 2026-09-14`, would have copied the
+    dash of the message rather than the dash of the file.
+    """
+    changelog = project / "CHANGELOG.md"
+    text = changelog.read_text(encoding="utf-8", errors="replace") if changelog.is_file() else ""
+    found = re.search(r"^## [0-9]+\.[0-9]+\.[0-9]+(\s+\S+\s+)[0-9]{4}-[0-9]{2}-[0-9]{2}", text, re.MULTILINE)
+    return f"## {version}{found.group(1) if found else ' — '}YYYY-MM-DD"
+
+
 def changelog_entry(project: pathlib.Path, version: str, at: str = "") -> tuple[str, str]:
     """(date, body) of the ## VERSION entry, in the worktree or at a commit."""
     if at:
@@ -3657,7 +3672,7 @@ def cut_open(invocation: Invocation, decl: Declarations, data: dict, log, timeou
                       "Commit or stash them: the release commit carries the bump and nothing else.")
     date, body = changelog_entry(project, version)
     if not date:
-        raise Failure("PRECONDITION_FAILED", f"CHANGELOG.md has no dated entry '## {version} — YYYY-MM-DD'.",
+        raise Failure("PRECONDITION_FAILED", f"CHANGELOG.md has no dated entry '{entry_heading(project, version)}'.",
                       "Write the entry first: the release workflow compares VERSION with the tag and never reads it,"
                       " so nothing downstream would catch its absence.")
     if date > datetime.date.today().isoformat():

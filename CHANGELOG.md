@@ -23,6 +23,9 @@
   delete the only source. Without a `uses:` line the pin is a dependency like
   any other. maelys-platform is the one repository of the fleet carrying such
   a pin.
+- **`cut` and `check` spell the changelog heading they ask for as the
+  changelog spells its entries.** Any separator was accepted and the hint
+  always showed an em dash; maelys-cli's entries use a hyphen.
 - **Impact.** maelys-http, maelys-oci, agent-cli-spec, maelys-datalog,
   maelys-system — still requiring the old names: adopt, merge, then
   `protect . --apply`; do not narrow. Everyone else: three more short jobs on
