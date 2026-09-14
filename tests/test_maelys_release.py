@@ -1006,8 +1006,13 @@ class MechanismTest(unittest.TestCase):
         self.assertFalse(data["release"]["applicable"])
         self.assertEqual(data["release"]["violations"], [])
         self.assertIn("release mechanism: not applicable (custom mechanism)", completed.stdout)
-        self.assertNotIn("check-product.yml", completed.stdout)
         self.assertNotIn("package-release.sh", completed.stdout)
+        # Not one release-scope line: the workflows this product owns are
+        # never reported. What it may still hear about is the shared CI it
+        # calls, which is a convention and not the release mechanism -- so
+        # an announcement about check-product.yml reaches it, and should.
+        self.assertFalse([check for check in data["checks"] if check["scope"] == "release"],
+                         data["checks"])
 
     def test_the_block_states_the_conventions_not_the_socle_release(self) -> None:
         self.product.run("adopt", self.dir, "--apply")
@@ -1051,7 +1056,8 @@ class MechanismTest(unittest.TestCase):
             (self.product.dir / name).unlink()
         data = self.product.json("check", self.dir)["data"]
         self.assertTrue(data["valid"], data["violations"])
-        notes = [check["message"] for check in data["checks"] if check["status"] == "note"]
+        notes = [check["message"] for check in data["checks"] if check["status"] == "note"
+                 and "writes it once" in check["message"]]
         self.assertEqual(len(notes), 3, notes)
         self.assertTrue(all("adopt --apply' writes it once" in note for note in notes), notes)
 
@@ -1496,6 +1502,10 @@ class DocsContractTest(unittest.TestCase):
         self.assertNotIn("docs/cli-contract.json", {entry["path"] for entry in data["files"]})
 
 
+COMING_NOTE = ("coming in maelys-release " + MODULE.COMING[0][0] + ": " + MODULE.COMING[0][2]) \
+    if MODULE.COMING else ""
+
+
 class GoldenTest(unittest.TestCase):
     """The text a human reads, in full: check conformant, check drifting, preflight not ready."""
 
@@ -1509,7 +1519,7 @@ class GoldenTest(unittest.TestCase):
         ok       .github/workflows/ci.yml calls check-product.yml of the socle
         ok       dependencies/packages: linux [pkg-config libjansson-dev] macos [jansson]
         ok       maelys-release.conf [dependencies] apart: the pins are materialised under $MAELYS_DEPENDENCIES_DIR, never beside the product
-        """)
+        """) + "note     " + COMING_NOTE + "\n"
     FILES = textwrap.dedent("""\
         same     .github/workflows/release.yml
         same     scripts/checkout-dependency.sh
@@ -2939,6 +2949,63 @@ class TagDeploymentsTest(unittest.TestCase):
         self.assertIn("look again then", text)
 
 
+class ChannelGateTest(unittest.TestCase):
+    """Whether a channel asks for an approval of its own, said in the file.
+
+    Every channel ran under the release's environment, which is a second
+    approval — and one that becomes pending only once the release workflow
+    has finished. Measured on one product: the release job at 10:05, the
+    channel job at 14:04, four hours later on the same tag. It read as an
+    approval GitHub had lost, and no product had ever chosen it.
+    """
+
+    def setUp(self) -> None:
+        self.product = Product()
+        self.dir = str(self.product.dir)
+        self.addCleanup(self.product.close)
+        self.product.write("scripts/publish-channel.sh", "#!/bin/sh\nexit 0\n", executable=True)
+
+    def workflow(self, line: str) -> str:
+        self.product.write("maelys-release.conf", "[dependencies]\napart\n\n[channels]\n" + line + "\n")
+        self.product.run("adopt", self.dir, "--apply")
+        return self.product.read(".github/workflows/release.yml")
+
+    def test_a_channel_with_no_gate_carries_an_empty_environment(self) -> None:
+        """An empty environment runs the job with no environment and no
+        approval: measured on run 34817132441 of the socle's own repository,
+        where a job whose environment expression was empty started at once,
+        left no pending deployment and created no environment. channel.yml
+        runs for one product in the fleet, so this was worth a probe."""
+        written = self.workflow("npm github-packages none")
+        self.assertIn("      release_environment: ''", written)
+
+    def test_the_default_is_what_it_has_always_been(self) -> None:
+        """Absent, the channel runs under the release's environment: the
+        behaviour before anything could be declared, and the one a product
+        that says nothing keeps."""
+        self.assertNotIn("release_environment", self.workflow("npm github-packages"))
+        self.assertNotIn("release_environment", self.workflow("npm github-packages reviewer"))
+
+    def test_saying_it_out_loud_turns_the_note_into_an_ok(self) -> None:
+        self.workflow("npm github-packages")
+        said = [check for check in self.product.json("check", self.dir)["data"]["checks"]
+                if "[channels] npm" in check["message"]]
+        self.assertEqual([check["status"] for check in said], ["note"], said)
+        self.assertIn("asks for its own approval", said[0]["message"])
+        self.workflow("npm github-packages none")
+        said = [check for check in self.product.json("check", self.dir)["data"]["checks"]
+                if "[channels] npm" in check["message"]]
+        self.assertEqual([check["status"] for check in said], ["ok"], said)
+        self.assertIn("no approval of its own", said[0]["message"])
+
+    def test_the_gate_is_one_of_the_two_the_socle_knows(self) -> None:
+        for text, expected in (("[channels]\nnpm github-packages sometimes\n", "reviewer or none"),
+                               ("[channels]\nnpm\n", "names one registry, and may add its gate")):
+            with self.assertRaises(ValueError) as refusal:
+                MODULE.parse_release(text)
+            self.assertIn(expected, str(refusal.exception))
+
+
 class ComingRuleTest(unittest.TestCase):
     """What a later version will refuse, said to the products it reaches."""
 
@@ -3908,7 +3975,7 @@ class SbomDeclarationTest(unittest.TestCase):
         return MODULE.parse_release(textwrap.dedent(text))
 
     def test_one_glob_is_read(self) -> None:
-        _, _, _, sbom, _, _, _, _, _, _, unknown = self.parse("""\
+        _, _, _, _, sbom, _, _, _, _, _, _, unknown = self.parse("""\
             [sbom]
             *.spdx.json
             """)
@@ -3922,7 +3989,7 @@ class SbomDeclarationTest(unittest.TestCase):
         self.assertIn("holds one glob", str(refusal.exception))
 
     def test_the_section_is_optional(self) -> None:
-        _, _, _, sbom, _, _, _, _, _, _, _ = self.parse("[manifest]\n*.wasm\n")
+        _, _, _, _, sbom, _, _, _, _, _, _, _ = self.parse("[manifest]\n*.wasm\n")
         self.assertEqual(sbom, "")
 
     def test_it_renders_into_the_workflow(self) -> None:
@@ -4174,23 +4241,23 @@ class UnitTest(unittest.TestCase):
 
     def test_parse_release(self) -> None:
         self.assertEqual(MODULE.parse_release("[targets]\nlinux-arm64\nwasm32 ubuntu-26.04\n"),
-                         ([("linux-arm64", ""), ("wasm32", "ubuntu-26.04")], [], [], "", [], {}, False, "", "", "", []))
+                         ([("linux-arm64", ""), ("wasm32", "ubuntu-26.04")], [], [], {}, "", [], {}, False, "", "", "", []))
         self.assertEqual(MODULE.parse_release("[targets]\nmacos-arm64 self-hosted ARM64\n"),
-                         ([("macos-arm64", ["self-hosted", "ARM64"])], [], [], "", [], {}, False, "", "", "", []))
-        self.assertEqual(MODULE.parse_release("[manifest]\n*.wasm\n"), ([], ["*.wasm"], [], "", [], {}, False, "", "", "", []))
+                         ([("macos-arm64", ["self-hosted", "ARM64"])], [], [], {}, "", [], {}, False, "", "", "", []))
+        self.assertEqual(MODULE.parse_release("[manifest]\n*.wasm\n"), ([], ["*.wasm"], [], {}, "", [], {}, False, "", "", "", []))
         self.assertEqual(MODULE.parse_release("[channels]\nnpm github-packages\n"),
-                         ([], [], [("npm", "github-packages")], "", [], {}, False, "", "", "", []))
-        self.assertEqual(MODULE.parse_release("[gate]\nnone\n"), ([], [], [], "", [], {}, False, "", "none", "", []))
-        self.assertEqual(MODULE.parse_release("[gate]\nreviewer\n"), ([], [], [], "", [], {}, False, "", "reviewer", "", []))
-        self.assertEqual(MODULE.parse_release("# nothing declared\n"), ([], [], [], "", [], {}, False, "", "", "", []))
+                         ([], [], [("npm", "github-packages")], {}, "", [], {}, False, "", "", "", []))
+        self.assertEqual(MODULE.parse_release("[gate]\nnone\n"), ([], [], [], {}, "", [], {}, False, "", "none", "", []))
+        self.assertEqual(MODULE.parse_release("[gate]\nreviewer\n"), ([], [], [], {}, "", [], {}, False, "", "reviewer", "", []))
+        self.assertEqual(MODULE.parse_release("# nothing declared\n"), ([], [], [], {}, "", [], {}, False, "", "", "", []))
         # A section this socle does not know is named and skipped, never fatal:
         # a product pins the socle by commit, and losing its targets in
         # silence on an older socle is worse than an unapplied section.
         self.assertEqual(MODULE.parse_release("[targets]\nlinux-arm64\n[bsd]\nx\n"),
-                         ([("linux-arm64", "")], [], [], "", [], {}, False, "", "", "", ["[bsd] at line 3"]))
+                         ([("linux-arm64", "")], [], [], {}, "", [], {}, False, "", "", "", ["[bsd] at line 3"]))
         # A version materialised twice: the command that regenerates the second.
         self.assertEqual(MODULE.parse_release("[cut]\nafter-version bash scripts/header.sh\n"),
-                         ([], [], [], "", [], {}, False, "", "", "bash scripts/header.sh", []))
+                         ([], [], [], {}, "", [], {}, False, "", "", "bash scripts/header.sh", []))
         for text in ("linux-arm64\n",                      # outside a section
                      "[targets]\nwasm32\n",                # no runner and no default
                      "[targets]\nWASM\n",                  # not a target name
