@@ -3458,6 +3458,75 @@ class DependenciesTest(unittest.TestCase):
         self.assertIn(" ".join(MODULE.CLONE_FLAGS), template)
 
 
+class ProtectByRulesetTest(unittest.TestCase):
+    """`protect` reads both mechanisms, and refuses to superimpose a second.
+
+    A branch is protected by the classic protection, by a ruleset, or by
+    both, and GitHub applies them in union. This socle has had to learn that
+    three times: `preflight` in 0.46.x, after calling seventeen repositories
+    open; the adoption guard in 0.51.1; and here, in the command whose whole
+    subject is what a branch requires -- which told a ruleset-protected
+    repository it was not protected while proposing to add three contexts
+    its ruleset already required.
+    """
+
+    RULESET = [{"type": "deletion"},
+               {"type": "required_status_checks",
+                "parameters": {"required_status_checks": [{"context": "check / check (macos-15)"}]}}]
+
+    def run_protect(self, classic, ruleset, apply: bool = False):
+        saved = (MODULE.github_api, MODULE.github_read, MODULE.socle_check_contexts,
+                 MODULE.github_repository, MODULE.observed_contexts, MODULE.shutil.which)
+        MODULE.github_api = lambda path: {"default_branch": "main"}
+        MODULE.github_read = lambda path: classic if "/protection" in path else ruleset
+        MODULE.socle_check_contexts = lambda project: ("check", ["check / check (macos-15)"])
+        MODULE.github_repository = lambda project: "o/r"
+        MODULE.observed_contexts = lambda repository, branch, samples=3: ([], [], {"heads": 1, "ever": []})
+        MODULE.shutil.which = lambda name: "/usr/bin/" + name
+        invocation = type("I", (), {"operands": ["."], "flag": lambda self, name: apply and name == "--apply",
+                                    "option": lambda self, name, default="": default,
+                                    "format": "json"})()
+        try:
+            return MODULE.handle_protect(invocation)[0]
+        finally:
+            (MODULE.github_api, MODULE.github_read, MODULE.socle_check_contexts,
+             MODULE.github_repository, MODULE.observed_contexts, MODULE.shutil.which) = saved
+
+    def test_a_ruleset_is_a_protection(self) -> None:
+        report = self.run_protect(("absent", None), ("ok", self.RULESET))
+        self.assertTrue(report["protected"])
+        self.assertEqual(report["protectedBy"], ["a ruleset"])
+        self.assertEqual(report["ruleset"], ["check / check (macos-15)"])
+        # And what it already requires is not proposed as something to add.
+        self.assertIn("check / check (macos-15)", report["required"])
+
+    def test_apply_refuses_rather_than_superimposing(self) -> None:
+        """Writing the classic protection on a ruled branch leaves two
+        places to keep true, and the ruleset still naming the old contexts
+        after the next rename. agent-cli-spec worked this out from the
+        output before running it."""
+        with self.assertRaises(MODULE.Failure) as refusal:
+            self.run_protect(("absent", None), ("ok", self.RULESET), apply=True)
+        self.assertEqual(refusal.exception.code, "PRECONDITION_FAILED")
+        self.assertIn("already requires check / check (macos-15)", refusal.exception.message)
+        self.assertIn("two mechanisms to keep true", refusal.exception.message)
+
+    def test_a_ruleset_that_requires_nothing_of_ours_does_not_refuse(self) -> None:
+        """One repository's ruleset requires a context of its own and
+        nothing the socle produces: the rename cannot reach it."""
+        theirs = [{"type": "required_status_checks",
+                   "parameters": {"required_status_checks": [{"context": "ci"}]}}]
+        report = self.run_protect(("absent", None), ("ok", theirs), apply=False)
+        self.assertEqual(report["ruleset"], ["ci"])
+        self.assertTrue(report["protected"])
+
+    def test_both_mechanisms_are_named_when_both_are_there(self) -> None:
+        classic = ("ok", {"required_status_checks": {"contexts": ["check / fuzz"]}})
+        report = self.run_protect(classic, ("ok", self.RULESET))
+        self.assertEqual(report["protectedBy"], ["branch protection", "a ruleset"])
+        self.assertEqual(sorted(report["required"]), ["check / check (macos-15)", "check / fuzz"])
+
+
 class ProtectionContextsTest(unittest.TestCase):
     """The names a branch protection should require, derived and not typed.
 

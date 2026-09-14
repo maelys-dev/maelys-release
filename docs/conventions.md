@@ -585,6 +585,16 @@ organisation of one member that is the honest description, and a pause is
 still worth having: a tag has been pushed here before a trial's verdict was
 read.
 
+**Every reader of a protection reads both endpoints**, and the socle has
+had to learn that three times in three different commands: `preflight` in
+0.46.x, the adoption guard in 0.51.1, and `protect` itself in 0.51.2, which
+told a ruleset-protected repository its branch was not protected while
+proposing to add contexts the ruleset already required. GitHub applies the
+two in union; a reader that sees one of them sees a different repository
+from the one it is describing. And `protect --apply` writes the classic
+protection alone, so on a branch whose ruleset carries the socle's contexts
+it refuses rather than leaving two mechanisms to keep true.
+
 `preflight` also reports an unprotected default branch, as a note — and
 tells that apart from a branch whose protection it **cannot read**. Two
 endpoints answer about a branch and not for the same thing: the classic
