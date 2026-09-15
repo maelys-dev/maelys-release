@@ -1,0 +1,28 @@
+# Versions of maelys-release withdrawn for a command, read from main by the
+# versions that check it (0.58.0 on). One line: VERSION COMMANDS REASON, the
+# commands comma-separated. A withdrawn version keeps its tag; it refuses to
+# run the command, and says why.
+#
+# 0.43.0 to 0.57.0 changed a classic branch protection by PUTting the whole
+# of it with the socle's shape: "up to date before merging" off, linear
+# history off, a pull request required, whatever the branch held before.
+0.43.0 protect writes the whole classic protection, not its checks alone
+0.44.0 protect writes the whole classic protection, not its checks alone
+0.45.0 protect writes the whole classic protection, not its checks alone
+0.46.0 protect writes the whole classic protection, not its checks alone
+0.46.1 protect writes the whole classic protection, not its checks alone
+0.47.0 protect writes the whole classic protection, not its checks alone
+0.48.0 protect writes the whole classic protection, not its checks alone
+0.49.0 protect writes the whole classic protection, not its checks alone
+0.49.1 protect writes the whole classic protection, not its checks alone
+0.50.0 protect writes the whole classic protection, not its checks alone
+0.50.1 protect writes the whole classic protection, not its checks alone
+0.51.0 protect writes the whole classic protection, not its checks alone
+0.51.1 protect writes the whole classic protection, not its checks alone
+0.51.2 protect writes the whole classic protection, not its checks alone
+0.52.0 protect writes the whole classic protection, not its checks alone
+0.53.0 protect writes the whole classic protection, not its checks alone
+0.54.0 protect writes the whole classic protection, not its checks alone
+0.55.0 protect writes the whole classic protection, not its checks alone
+0.56.0 protect writes the whole classic protection, not its checks alone
+0.57.0 protect writes the whole classic protection, not its checks alone

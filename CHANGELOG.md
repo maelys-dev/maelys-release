@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.58.0 — 2026-09-15
+
+- **The damage of the whole-protection write was wider than 0.57.1 said,
+  and the socle says so now.** From 0.43.0 to 0.57.0, `protect --apply` PUT
+  the socle's shape over any classic protection. maelys-datalog lost its
+  linear history and gained a required pull request; the six classic
+  protections of the fleet today read exactly that shape. The Impact line of
+  0.57.1 is corrected, and `WITHDRAWN` on this repository's main lists
+  0.43.0 to 0.57.0 for `protect`.
+- **`protect` re-reads what it wrote and fails on any setting that moved
+  beyond the checks**, for a classic protection and for a ruleset. The
+  property maelys-oci asked for, tested on each setting: after `--apply`,
+  nothing but the checks differs from before.
+- **The plan names every other setting**: `keeps` for an existing protection,
+  and `create` line by line for a branch that has none — which used to receive
+  linear history off without a line saying so (maelys-datalog).
+- **`protect --apply` refuses from a withdrawn version.** The list is read from
+  maelys-release's main; unreadable, it refuses. Suggested by maelys-cli. The
+  versions before 0.58.0 do not read it.
+- **The managed blocks name no documentation repository by default.**
+  maelys-datalog, maelys-egress and maelys-http are public and carried
+  `maelys-dev/maelys-docs` in two public files each, under a bullet forbidding
+  it. A private repository that wants the name declares `[docs] named`;
+  `preflight` refuses that declaration on a public repository. `[docs]
+  unnamed`, the 0.57.2 spelling, gets a note that the line can go.
+- **`check` refuses a changelog title present twice**, `## Unreleased`
+  included: maelys-cli carried five, and `cut` would have met them.
+- **A pin nothing since asks anything about is a note, not a failure.**
+  maelys-system read FAIL on a pin every Impact line since said asked nothing
+  of it; `check` now uses `current`, through the reader `adopt` uses.
+- **The sanitizers-twice note names one line per job, and only a Linux job
+  building ASan or UBSan.** On maelys-system its seven lines were all false: the
+  job's own name, TSan, and the steps of a macOS job.
+- **Impact lines gain two selectors named after who is concerned**: `public`
+  and `classic-protection`, both read from GitHub and unknown offline. 0.57.2
+  named maelys-warden, who asked for `[docs] unnamed`, and maelys-egress, who
+  is concerned, read "nothing".
+- **Impact.** [asks: public, classic-protection] Public repositories: adopt,
+  and AGENTS.md and CLAUDE.md stop naming the private documentation
+  repository — prose only. Classic protections: read 0.57.1's corrected line,
+  and run `protect` from this tag. Everyone else: nothing.
+
 ## 0.57.2 — 2026-09-15
 
 - **A channel declared `reviewer` gets its `ok`.** 0.52.0 promised one for
@@ -66,11 +108,15 @@
 - **`--apply` does not narrow by itself.** A required check the plan leaves
   out — other than an alias retiring for its leg, or a turned-off job kept —
   is printed `DROP`, and written only with `--allow-narrow`.
-- **Impact.** [asks: nothing] Anyone about to run `protect . --apply`: do it
-  from a socle checkout at v0.57.1 — `protect` runs at the checkout, so
-  nothing to adopt. maelys-oci and maelys-http, who ran it with 0.57.0: check
-  "require branches to be up to date" on main, which that write set to false.
-  Everyone else: nothing.
+- **Impact.** [asks: classic-protection] **Corrected in 0.58.0: this line
+  understated it.** Every `protect --apply` on a classic protection from
+  0.43.0 to 0.57.0 — not 0.57.0 alone, not maelys-oci and maelys-http alone —
+  replaced the whole protection with the socle's shape: "up to date before
+  merging" off, linear history off, a pull request required with no
+  approval, administrators included, conversation resolution required, force
+  pushes and deletions off. A product with a classic protection compares
+  every setting with what it had and restores what it wants back.
+  `protect` runs at the checkout: run it from the latest tag.
 
 ## 0.57.0 — 2026-09-15
 

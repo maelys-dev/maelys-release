@@ -508,8 +508,10 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
             continue
         if section == "docs":
             # Read by declared_word(), which rendering the managed block needs.
-            if line != "unnamed":
-                raise ValueError(f"[docs] holds the single word 'unnamed', not {line!r}, at line {number}")
+            if line not in ("unnamed", "named"):
+                raise ValueError(f"[docs] holds 'named' or 'unnamed', not {line!r}, at line {number}")
+            if docs_unnamed:
+                raise ValueError(f"[docs] holds one word, at line {number}")
             docs_unnamed = True
             continue
         if section == "ci":
@@ -692,9 +694,10 @@ DOCS_BULLET = re.compile(r"^- The prose of this repository lives in `maelys-dev/
                          re.MULTILINE | re.DOTALL)
 DOCS_UNNAMED_BULLET = (
     "- `docs/` carries what a machine writes and what this repository engages\n"
-    "  publicly, and no other prose. This repository declares `[docs] unnamed`:\n"
-    "  where its prose lives is not named from its files, which a public reader\n"
-    "  may see. Do not name a documentation repository here.\n")
+    "  publicly, and no other prose. Where the prose lives is not named from this\n"
+    "  repository's files, which a public reader may see: do not name a\n"
+    "  documentation repository here. A private repository that wants the name\n"
+    "  declares `[docs] named` in `maelys-release.conf`.\n")
 
 
 def own_ci(project: pathlib.Path) -> bool:
@@ -791,6 +794,13 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
         # The release of VERSION needs its dated entry; the workflow only
         # compares VERSION with the tag, so the entry is checked here.
         if decl.version:
+            # A heading present twice is refused, `Unreleased` included:
+            # maelys-cli carried five `## Unreleased`, one per pull request,
+            # and `cut` would have found them at the worst moment.
+            titles = re.findall(r"^## (\S+)", changelog.read_text(encoding="utf-8"), re.MULTILINE)
+            for title in sorted({title for title in titles if titles.count(title) > 1}):
+                decl.add("missing", f"CHANGELOG.md has {titles.count(title)} entries titled ## {title}: one entry per"
+                                    " version, and one Unreleased that every change completes", "conventions")
             pattern = rf"^## {re.escape(decl.version)}\s.*[0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}}"
             if re.search(pattern, changelog.read_text(encoding="utf-8"), re.MULTILINE):
                 decl.add("ok", f"CHANGELOG.md has a dated ## {decl.version} entry", "conventions")
@@ -907,9 +917,12 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
                  " scripts/checkout-dependency.sh NAME and"
                  " scripts/checkout-dependencies.sh DESTINATION; delete these")
     ci = project / ".github" / "workflows" / "ci.yml"
-    if declared_word(project, "docs", "unnamed"):
-        decl.add("ok", f"{DECLARATION_FILE} [docs] unnamed: the managed blocks name no documentation"
-                 " repository", "conventions")
+    if declared_word(project, "docs", "named"):
+        decl.add("ok", f"{DECLARATION_FILE} [docs] named: the managed blocks name maelys-dev/maelys-docs;"
+                 " preflight refuses it on a public repository", "conventions")
+    elif declared_word(project, "docs", "unnamed"):
+        decl.add("note", f"{DECLARATION_FILE} [docs] unnamed is the default since 0.58.0; the line can go",
+                 "conventions")
     decl.own_ci = own_ci(project)
     if decl.own_ci:
         if ci.is_file() and CI_USES.search(ci.read_text(encoding="utf-8")):
@@ -1762,7 +1775,13 @@ def stage(decl: Declarations, sha: str, tag: str) -> dict[str, tuple[str, bool]]
     # maelys-warden prepares a public life, and AGENTS.md and CLAUDE.md are as
     # public as a README there: the bullet naming the private documentation
     # repository would break the rule it states. A declaration takes it out.
-    if declared_word(decl.project, "docs", "unnamed"):
+    #
+    # Since 0.58.0 that is the default, and naming it is what a repository
+    # declares: maelys-datalog, maelys-egress and maelys-http are public and
+    # each carried the name in two public files, under a bullet forbidding
+    # it. A default that leaks unless someone thinks to declare is the wrong
+    # way round for a private name.
+    if not declared_word(decl.project, "docs", "named"):
         block = DOCS_BULLET.sub(DOCS_UNNAMED_BULLET, block, count=1)
     for name in CONVENTION_MANAGED:
         path = decl.project / name
@@ -1904,7 +1923,33 @@ def impact_selectors(decl: "Declarations") -> dict:
             "shared-ci": bool(decl.calls_socle_ci),
             "cli-reference": (decl.project / CLI_DECLARATIONS).is_file() or (decl.project / CLI_REFERENCE).is_file(),
             "signed-on-default-branch": decl.commit_verification == "signed-on-default-branch",
-            "old-legs": old_legs}
+            "old-legs": old_legs,
+            # Named after who is concerned, not who asked: 0.57.2's line named
+            # maelys-warden for [docs] unnamed, and maelys-egress, public and
+            # concerned, read "nothing".
+            "public": lambda: repository_visibility(decl.project, "public"),
+            "classic-protection": lambda: classic_protection(decl.project)}
+
+
+def repository_visibility(project: pathlib.Path, visibility: str) -> bool | None:
+    """Whether origin's repository has this visibility; None when GitHub cannot say."""
+    repository = github_repository(project)
+    if not repository or not shutil.which("gh"):
+        return None
+    state, body = github_read(f"repos/{repository}")
+    if state != "ok" or not isinstance(body, dict) or not body.get("visibility"):
+        return None
+    return body["visibility"] == visibility
+
+
+def classic_protection(project: pathlib.Path) -> bool | None:
+    """Whether the default branch carries a classic protection; None when GitHub cannot say."""
+    repository = github_repository(project)
+    if not repository or not shutil.which("gh"):
+        return None
+    branch = (github_api(f"repos/{repository}") or {}).get("default_branch") or "main"
+    state, _ = github_read(f"repos/{repository}/branches/{branch}/protection")
+    return True if state == "ok" else False if state == "absent" else None
 
 
 def asks_this(decl: "Declarations", asks: list[str] | None, cache: dict) -> bool | None:
@@ -1922,6 +1967,43 @@ def asks_this(decl: "Declarations", asks: list[str] | None, cache: dict) -> bool
         if value is None:
             unknown = True
     return None if unknown else False
+
+
+def newest_known_version() -> tuple:
+    """The newest version this socle's changelog describes, or its VERSION.
+
+    Between two cuts the changelog is ahead of VERSION, and it is the
+    changelog that holds the lines a pin is read against.
+    """
+    newest = version_tuple(socle_version())
+    path = socle_root() / "CHANGELOG.md"
+    if path.is_file():
+        found = re.search(r"^## ([0-9]+\.[0-9]+\.[0-9]+) ", path.read_text(encoding="utf-8"), re.MULTILINE)
+        if found:
+            newest = max(newest, version_tuple(found.group(1)))
+    return newest
+
+
+def impact_for(decl: "Declarations", pinned: str) -> tuple[list[dict], bool | None]:
+    """The Impact lines since a pin, each marked for this product, and whether it is current.
+
+    One reader for `adopt` and `check`: the second learned the question in
+    0.58.0, from maelys-system, which read a FAIL on a pin that every line
+    since said asked nothing of it.
+
+    A line a later version supersedes asks nothing of a product whose list
+    holds that later version: maelys-datalog, adopting 0.57.0 from 0.51.1,
+    was told 0.54.0 asked a gesture, and read that line's instruction to
+    narrow its protection -- the gesture 0.57.0 exists to forbid.
+    """
+    entries = socle_impact_entries(pinned)
+    cache: dict = {}
+    listed = {entry["version"] for entry in entries}
+    for entry in entries:
+        superseded = entry.get("supersededBy") in listed
+        entry["asksThis"] = False if superseded else asks_this(decl, entry["asks"], cache)
+    answers = [entry["asksThis"] for entry in entries]
+    return entries, (False if True in answers else (None if None in answers else True))
 
 
 def socle_impact_entries(pinned: str) -> list[dict]:
@@ -2870,22 +2952,9 @@ def handle_adopt(invocation: Invocation) -> tuple[dict, int]:
     data = {"mode": "apply" if apply else "plan", "product": product, "project": str(project),
             "mechanism": mechanism, "socle": socle_data(sha, tag), "changed": changed,
             "impactFrom": (pinned or {}).get("tag", ""),
-            "impact": socle_impact_entries((pinned or {}).get("tag", "")),
             "checks": decl.applicable(), "files": files}
-    # Evaluated on the declarations read before this run wrote anything, and
-    # per product: "current" is whether any version since the pin asks this
-    # product a gesture, and null when a line cannot be evaluated here.
-    cache: dict = {}
-    # A line a later version supersedes asks nothing of a product that
-    # adopts that later version: maelys-datalog, adopting 0.57.0 from 0.51.1,
-    # was told 0.54.0 asked a gesture, and read that line's instruction to
-    # narrow its protection -- the gesture 0.57.0 exists to forbid.
-    listed = {entry["version"] for entry in data["impact"]}
-    for entry in data["impact"]:
-        superseded = entry.get("supersededBy") in listed
-        entry["asksThis"] = False if superseded else asks_this(decl, entry["asks"], cache)
-    answers = [entry["asksThis"] for entry in data["impact"]]
-    data["current"] = False if True in answers else (None if None in answers else True)
+    # Evaluated on the declarations read before this run wrote anything.
+    data["impact"], data["current"] = impact_for(decl, (pinned or {}).get("tag", ""))
     if moved:
         data["moved"] = moved
     return data, EXIT_OK
@@ -2914,9 +2983,24 @@ def check_data(invocation: Invocation) -> tuple[Declarations, dict]:
             (conventions if check["scope"] == "conventions" else release).append(check["message"])
     if decl.valid:
         if decl.releases_here and data["pinned"] and data["pinned"]["sha"] != sha:
-            release.append(
-                f"{product} pins maelys-release {data['pinned']['tag']} ({data['pinned']['sha'][:7]}) but this is"
-                f" {tag} ({sha[:7]}): run the pinned socle, or 'adopt {project} --apply' from this one to upgrade")
+            mismatch = (f"{product} pins maelys-release {data['pinned']['tag']} ({data['pinned']['sha'][:7]}) but this"
+                        f" is {tag} ({sha[:7]})")
+            # A mismatch nothing since the pin asks anything about is not a
+            # failure of the product: `current` is the socle's own answer, and
+            # the verdict now uses it. Unknown -- a selector GitHub must answer
+            # -- keeps the failure.
+            # Only for a pin this socle is not older than: a pin ahead of the
+            # running socle has no lines to read here, and "nothing asks" would
+            # be vacuous rather than true.
+            pinned_tag = data["pinned"]["tag"].lstrip("v")
+            behind = re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", pinned_tag) \
+                and version_tuple(pinned_tag) <= newest_known_version()
+            if behind and impact_for(decl, data["pinned"]["tag"])[1] is True:
+                decl.add("note", f"{mismatch}: nothing since {data['pinned']['tag']} asks this product a gesture,"
+                                 " so it is current in the socle's sense", "release")
+            else:
+                release.append(f"{mismatch}: run the pinned socle, or 'adopt {project} --apply' from this one to"
+                               " upgrade")
             # And say what that upgrade would write. This branch used to
             # return one sentence and no file: a product three versions
             # behind read a FAIL naming a version number, with nothing about
@@ -3379,6 +3463,10 @@ def repository_checks(decl: Declarations) -> list[tuple[str, str]]:
     if not shutil.which("gh"):
         return [("note", f"gh is not installed: release environment of {repository} not checked")]
     repository_data = github_api(f"repos/{repository}") or {}
+    if repository_data.get("visibility") == "public" and declared_word(project, "docs", "named"):
+        found.append(("fail", f"{repository} is public and {DECLARATION_FILE} declares [docs] named: AGENTS.md and"
+                              " CLAUDE.md name the private documentation repository to anyone. Remove the"
+                              " declaration and adopt"))
     if repository_data.get("private"):
         found.append(("note", f"{repository} is private: the release ships no provenance attestation (GitHub reserves"
                               " them to paid plans); the signed tag and SHA256SUMS remain"))
@@ -4462,44 +4550,59 @@ def socle_owned(name: str, caller: str) -> bool:
     return name.startswith((f"{caller} / ", f"{LEGS_JOB} / "))
 
 
-# A job of the product that builds an instrumented tree. The name or the
-# command says so; nothing else can, since the socle does not read Makefiles.
-# Word boundaries, because a substring finds "asan" inside "pleasant" and
-# "please". The names are those the fleet's Makefiles use, plus the stem.
-SANITIZING = re.compile(r"\b(?:asan|ubsan|tsan|msan|lsan|sanitiz\w*)\b", re.IGNORECASE)
+# What the socle's own sanitizers job builds by default: AddressSanitizer and
+# UndefinedBehaviorSanitizer, on Linux. A product job building those on Linux
+# builds the same instrumented tree a second time; TSan, MSan or a macOS job do
+# not. Word boundaries, because a substring finds "asan" inside "pleasant".
+SANITIZING = re.compile(r"\b(?:asan|ubsan)\b|fsanitize=(?:address|undefined)|\baddress,undefined\b", re.IGNORECASE)
 
 
 def sanitizers_twice(text: str) -> list[int]:
-    """Lines of a product's ci.yml that sanitize while the socle's job does too.
+    """One line per product job of ci.yml that sanitizes while the socle's job does too.
 
     `sanitizer_command` is opt-out: a call that does not set it turns the
-    socle's job on, so a product with a sanitizers job of its own pays for
+    socle's job on, so a product with an ASan/UBSan job of its own pays for
     two instrumented builds of the same tree on every pull request. The
     socle cannot choose between them -- the product's job may cover more,
     or less -- so it says the fact and names the line.
+
+    One line per job, the first that builds what the socle's job builds.
+    maelys-system read seven, and every one was false: the job's own name
+    `sanitizers:`, two TSan steps the socle's job never runs, and the ASan
+    steps of a macOS job, where the socle's job never runs either. A job
+    whose runs-on names macOS and no Linux image is not a duplicate; one
+    whose runner cannot be read is counted, since it may be Linux.
     """
-    call = re.search(r"^\s+sanitizer_command:", text, re.MULTILINE)
-    if call:
+    if re.search(r"^\s+sanitizer_command:", text, re.MULTILINE):
         return []
-    # Only what is outside the block that calls the socle: the `with:` of
-    # that call names sanitizer_command and fuzz_command, and a comment
-    # beside it saying what they sanitize is not a second job.
-    lines = text.splitlines()
-    inside = False
     found = []
-    for number, line in enumerate(lines, 1):
-        if CI_USES.search(line):
-            inside = True
-            continue
-        if inside and re.match(r"^  [A-Za-z0-9_-]+:", line):
-            inside = False
-        # A YAML comment is not a job. Unlike the sibling search, where a
-        # commented `docker build --build-context …=../maelys-system` is an
-        # instruction a human follows, nothing here runs a comment: the one
-        # this dropped names the socle's own sanitizers in a sentence
-        # explaining what the call turns on.
-        if not inside and not line.lstrip().startswith("#") and SANITIZING.search(line):
-            found.append(number)
+    job: list[tuple[int, str]] = []
+
+    def close() -> None:
+        if not job:
+            return
+        # The block that calls the socle is not a second job: its `with:`
+        # names the commands, and a comment beside it says what they run.
+        if any(CI_USES.search(line) for _, line in job):
+            return
+        runner = " ".join(line for _, line in job if re.match(r"^\s+runs-on:", line) or "runner" in line
+                          or re.search(r"\b(?:ubuntu|macos)-", line))
+        if re.search(r"macos", runner, re.IGNORECASE) and not re.search(r"ubuntu|linux", runner, re.IGNORECASE):
+            return
+        for number, line in job[1:]:
+            # A YAML comment is not a job: the one this dropped names the
+            # socle's own sanitizers in a sentence explaining the call.
+            if not line.lstrip().startswith("#") and SANITIZING.search(line):
+                found.append(number)
+                return
+
+    for number, line in enumerate(text.splitlines(), 1):
+        if re.match(r"^  [A-Za-z0-9_-]+:\s*$", line):
+            close()
+            job = [(number, line)]
+        elif job:
+            job.append((number, line))
+    close()
     return found
 
 
@@ -5134,6 +5237,36 @@ def text_dependencies(data: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+WITHDRAWN_FILE = "WITHDRAWN"
+
+
+def withdrawn_for(command: str) -> tuple[str, str] | None:
+    """Whether this socle's version is withdrawn for a command, read from the socle's main.
+
+    ("withdrawn", reason), ("unread", why), or None when it may run. `protect`
+    runs at the checkout at hand, so a fix to it needs no adoption -- and the
+    reverse holds: a checkout at a version whose writes were wrong keeps
+    writing them. The list lives on the default branch of maelys-release and
+    not in this file, so that a version found wrong after its tag can be
+    withdrawn without the old code knowing anything new. Suggested by
+    maelys-cli. The versions before 0.58.0 do not read it; that limit is
+    stated, not hidden.
+    """
+    state, body = github_read(f"repos/{SOCLE_REPOSITORY}/contents/{WITHDRAWN_FILE}")
+    if state != "ok" or not isinstance(body, dict) or body.get("encoding") != "base64":
+        return "unread", f"{SOCLE_REPOSITORY}/{WITHDRAWN_FILE} could not be read ({state})"
+    version = socle_version()
+    for raw in base64.b64decode(body.get("content", "")).decode("utf-8", "replace").splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if not line:
+            continue
+        listed, _, rest = line.partition(" ")
+        commands, _, reason = rest.strip().partition(" ")
+        if listed == version and command in commands.split(","):
+            return "withdrawn", reason.strip() or "withdrawn"
+    return None
+
+
 def handle_protect(invocation: Invocation) -> tuple[dict, int]:
     """What the default branch should require, derived rather than typed.
 
@@ -5277,6 +5410,24 @@ def handle_protect(invocation: Invocation) -> tuple[dict, int]:
                                            not partial.get("unanswered")))
               if not answered]
     report["unread"] = unread
+    # Every other setting, in the plan: what an existing protection keeps,
+    # and what a new one is created with. A new protection used to receive
+    # the socle's shape -- linear history off among others -- without a line
+    # saying so (maelys-datalog).
+    if state == "ok":
+        report["keeps"] = protection_settings(holds)
+    elif state == "absent" and not by_rule:
+        report["creates"] = protection_settings(dict(PROTECTION_SHAPE, required_status_checks={"strict": False}))
+    if invocation.flag("--apply"):
+        withdrawn = withdrawn_for("protect")
+        if withdrawn and withdrawn[0] == "withdrawn":
+            raise Failure("PRECONDITION_FAILED",
+                          f"maelys-release {socle_version()} is withdrawn for protect --apply: {withdrawn[1]}.",
+                          "Run protect from a checkout of the latest tag of maelys-release.")
+        if withdrawn:
+            raise Failure("PRECONDITION_FAILED",
+                          f"whether maelys-release {socle_version()} may write a protection is unknown: {withdrawn[1]}.",
+                          "Nothing is written on a reading that is not there; run again once GitHub answers.")
     if invocation.flag("--apply") and unread:
         raise Failure("PRECONDITION_FAILED",
                       f"GitHub did not answer for {', '.join(unread)} of {repository}: nothing is written on a"
@@ -5338,9 +5489,11 @@ def handle_protect(invocation: Invocation) -> tuple[dict, int]:
         if isinstance(existing, dict):
             method, endpoint = "PATCH", f"repos/{repository}/branches/{branch}/protection/required_status_checks"
             body = {"strict": bool(existing.get("strict")), "contexts": proposed}
+            expected = protection_settings(holds)
         else:
             method, endpoint = "PUT", f"repos/{repository}/branches/{branch}/protection"
             body = {**PROTECTION_SHAPE, "required_status_checks": {"strict": False, "contexts": proposed}}
+            expected = protection_settings(body)
         with tempfile.TemporaryDirectory(prefix="maelys-release-protect.") as temp:
             payload = pathlib.Path(temp) / "protection.json"
             payload.write_text(json.dumps(body), encoding="utf-8")
@@ -5348,8 +5501,84 @@ def handle_protect(invocation: Invocation) -> tuple[dict, int]:
         if done.returncode != 0:
             raise Failure("PROCESS_FAILED", f"the protection of {branch} was refused: {done.stderr.strip()}",
                           "A private repository needs a paid plan for branch protection; read the message above.")
+        verify_protection(repository, branch, expected, proposed)
         report["applied"] = True
     return report, EXIT_OK if not (absent or stale) else EXIT_VIOLATIONS
+
+
+def protection_settings(body: object) -> dict:
+    """Every setting of a classic protection except its required contexts, normalised.
+
+    Read from what GitHub answers (settings as `{"enabled": bool}`) and from
+    what this command sends (plain booleans) alike, so that the plan, the
+    write and the re-read compare as one shape.
+    """
+    if not isinstance(body, dict):
+        return {}
+
+    def on(key: str) -> bool:
+        value = body.get(key)
+        return bool(value.get("enabled")) if isinstance(value, dict) else bool(value)
+
+    reviews = body.get("required_pull_request_reviews")
+    return {"strict": bool((body.get("required_status_checks") or {}).get("strict")),
+            "required_pull_request_reviews": None if not isinstance(reviews, dict) else {
+                "required_approving_review_count": int(reviews.get("required_approving_review_count") or 0),
+                "dismiss_stale_reviews": bool(reviews.get("dismiss_stale_reviews")),
+                "require_code_owner_reviews": bool(reviews.get("require_code_owner_reviews")),
+                "require_last_push_approval": bool(reviews.get("require_last_push_approval"))},
+            "enforce_admins": on("enforce_admins"),
+            "required_linear_history": on("required_linear_history"),
+            "required_conversation_resolution": on("required_conversation_resolution"),
+            "required_signatures": on("required_signatures"),
+            "allow_force_pushes": on("allow_force_pushes"),
+            "allow_deletions": on("allow_deletions"),
+            "lock_branch": on("lock_branch"),
+            "allow_fork_syncing": on("allow_fork_syncing"),
+            "block_creations": on("block_creations"),
+            "restrictions": bool(body.get("restrictions"))}
+
+
+def verify_protection(repository: str, branch: str, expected: dict, contexts: list[str]) -> None:
+    """Re-read the protection just written, and fail on any setting that moved.
+
+    From 0.43.0 to 0.57.0 this command PUT a whole protection to change its
+    checks, and nothing compared what GitHub held afterwards with what the
+    plan said: maelys-oci lost "up to date before merging", maelys-datalog
+    its linear history, both under plans that named checks alone. The write
+    is narrower since 0.57.1; this is the check that would have caught it,
+    and that catches whatever the next write gets wrong.
+    """
+    state, after = github_read(f"repos/{repository}/branches/{branch}/protection")
+    if state != "ok" or not isinstance(after, dict):
+        raise Failure("PROCESS_FAILED",
+                      f"the protection of {branch} of {repository} was written, and GitHub did not answer its"
+                      " re-read: nothing confirms what it holds now.",
+                      f"Read it: gh api repos/{repository}/branches/{branch}/protection")
+    held = protection_settings(after)
+    moved = [f"{key}: {expected.get(key)!r} -> {held.get(key)!r}" for key in expected
+             if expected.get(key) != held.get(key)]
+    required = ((after.get("required_status_checks") or {}).get("contexts")) or []
+    if sorted(required) != sorted(contexts):
+        moved.append(f"contexts: {sorted(contexts)} -> {sorted(required)}")
+    if moved:
+        raise Failure("PROCESS_FAILED",
+                      f"the protection of {branch} of {repository} changed beyond what the plan said: "
+                      + "; ".join(moved) + ".",
+                      "Restore those settings by hand; this is a defect of the socle, report it.")
+
+
+def ruleset_shape(rules: object) -> list[str]:
+    """The rules of a branch as comparable text, required contexts set apart."""
+    shaped = []
+    for rule in rules if isinstance(rules, list) else []:
+        if not isinstance(rule, dict):
+            continue
+        parameters = dict(rule.get("parameters") or {})
+        parameters.pop("required_status_checks", None)
+        shaped.append(json.dumps({"type": rule.get("type"), "ruleset_id": rule.get("ruleset_id"),
+                                  "parameters": parameters}, sort_keys=True))
+    return sorted(shaped)
 
 
 def write_ruleset(repository: str, branch: str, rules: object, contexts: list[str]) -> bool:
@@ -5400,6 +5629,21 @@ def write_ruleset(repository: str, branch: str, rules: object, contexts: list[st
     if done.returncode != 0:
         raise Failure("PROCESS_FAILED", f"ruleset {identifier} of {repository} was refused: {done.stderr.strip()}",
                       "Writing a ruleset needs administration of the repository.")
+    # Re-read, as for a classic protection: every rule but the required
+    # contexts must read back as it was, and the contexts as written.
+    state, after = github_read(f"repos/{repository}/rules/branches/{branch}")
+    if state != "ok" or not isinstance(after, list):
+        raise Failure("PROCESS_FAILED",
+                      f"ruleset {identifier} of {repository} was written, and GitHub did not answer its re-read.",
+                      f"Read it: gh api repos/{repository}/rules/branches/{branch}")
+    written = sorted(check.get("context") for rule in after if isinstance(rule, dict)
+                     and rule.get("type") == "required_status_checks"
+                     for check in (rule.get("parameters") or {}).get("required_status_checks") or [])
+    if ruleset_shape(after) != ruleset_shape(rules) or written != sorted(contexts):
+        raise Failure("PROCESS_FAILED",
+                      f"ruleset {identifier} of {repository} changed beyond its required checks, or they did not"
+                      " read back as written.",
+                      "Compare the ruleset with what protect printed; this is a defect of the socle, report it.")
     return True
 
 
@@ -5431,6 +5675,11 @@ def text_protect(data: dict) -> str:
     for name in data.get("kept") or []:
         lines.append(f"{'keep':<8} {name}: this call turns the job off, so it reports skipped, which passes;"
                      " the branch already requires it and protect does not narrow it")
+    if data.get("keeps"):
+        lines.append(f"{'keeps':<8} every other setting as it is: "
+                     + ", ".join(f"{key}={json.dumps(value)}" for key, value in data["keeps"].items()))
+    for key, value in (data.get("creates") or {}).items():
+        lines.append(f"{'create':<8} {key}={json.dumps(value)} (no protection exists; --apply creates it with this)")
     for pair in data.get("replaced") or []:
         lines.append(f"{'replace':<8} {pair['required']} -> {pair['by']}: the alias leaves in the same write"
                      " that requires the leg it mirrored, so main never requires less")
@@ -6263,6 +6512,7 @@ APP = cli.Program(PROGRAM, PRODUCT, socle_version(), [
                                        "dropped": {"type": "array", "items": {"type": "string"}},
                                        "kept": {"type": "array", "items": {"type": "string"}},
                                        "unread": {"type": "array", "items": {"type": "string"}},
+                                       "keeps": {"type": "object"}, "creates": {"type": "object"},
                                        "dropping": {"type": "array", "items": {"type": "string"}},
                                        "replaced": {"type": "array", "items": {
                                            "type": "object", "required": ["required", "by"],
