@@ -4448,10 +4448,97 @@ class LegAliasTest(unittest.TestCase):
         self.assertEqual(report["requiredButNeverRun"], [], "an alias with its successor is not stale")
         self.assertEqual(code, MODULE.EXIT_OK)
         self.assertEqual(len(written), 1, "one write, never a narrowed protection in between")
-        self.assertEqual(sorted(written[0]["required_status_checks"]["contexts"]),
+        self.assertEqual(sorted(written[0]["contexts"]),
                          ["check / check (linux)", "check / check (macos)", "mine"])
         text = MODULE.text_protect(report)
         self.assertIn("replace  check / check (macos-15) -> check / check (macos)", text)
+
+    def test_a_yaml_comment_is_not_a_command(self) -> None:
+        """agent-cli-spec: `sanitizer_command: ''   # no compiled code here`."""
+        for raw, value in (("''   # no compiled code here", "''"), ('""', '""'), ("make asan  # both", "make asan"),
+                           ("'a # b'", "'a # b'"), ("'it''s # x'  # c", "'it''s # x'"), ("|", "|"),
+                           ("make a#b", "make a#b")):
+            self.assertEqual(MODULE.yaml_scalar(raw), value, raw)
+
+    def test_a_turned_off_job_already_required_is_kept_and_blocks_no_swap(self) -> None:
+        """The refusal agent-cli-spec met after merging its adoption: sanitizers
+        never runs there, its ruleset requires it, and protect --apply said no
+        merged pull request had run it."""
+        old = ["check / check (ubuntu-26.04)", "check / check (macos-15)", "check / sanitizers"]
+        seen = ["check / check (linux)", "check / check (macos)"]
+        (report, code), written = self.protect(old, seen, apply=True)
+        self.assertEqual(report["kept"], ["check / sanitizers"])
+        self.assertEqual(report["requiredButNeverRun"], [])
+        self.assertEqual(sorted(written[0]["contexts"]),
+                         ["check / check (linux)", "check / check (macos)", "check / sanitizers"])
+
+    def protect_with(self, reads, required, seen, flags=()):
+        """protect --apply with each GitHub read answered by `reads(path)`."""
+        saved = (MODULE.github_api, MODULE.github_read, MODULE.socle_check_contexts, MODULE.github_repository,
+                 MODULE.shutil.which, MODULE.github_list, MODULE.run)
+        commands = []
+        MODULE.github_read = reads
+        MODULE.github_api = lambda path: {"default_branch": "main"}
+        MODULE.socle_check_contexts = lambda project: ("check", ["check / check (linux)"])
+        MODULE.github_repository = lambda project: "o/r"
+        MODULE.shutil.which = lambda name: "/usr/bin/" + name
+        MODULE.github_list = lambda path: []
+        MODULE.run = lambda command, cwd=None, env=None: commands.append(
+            (command, json.loads(pathlib.Path(command[-1]).read_text()))) or subprocess.CompletedProcess(command, 0, "", "")
+        on = {"--apply", *flags}
+        invocation = type("I", (), {"operands": ["."], "flag": lambda self, name: name in on,
+                                    "option": lambda self, name, default="": default, "format": "json"})()
+        try:
+            return MODULE.handle_protect(invocation)[0], commands
+        finally:
+            (MODULE.github_api, MODULE.github_read, MODULE.socle_check_contexts, MODULE.github_repository,
+             MODULE.shutil.which, MODULE.github_list, MODULE.run) = saved
+
+    @staticmethod
+    def answers(required, seen, strict=True, timeout=()):
+        def read(path):
+            if any(part in path for part in timeout):
+                return "unreadable", None
+            if path.endswith("/protection"):
+                return "ok", {"required_status_checks": {"strict": strict, "contexts": list(required)}}
+            if "/rules/branches/" in path:
+                return "ok", []
+            if "pulls?" in path:
+                return "ok", [{"merged_at": "x", "head": {"sha": "abc"}}]
+            if "/check-runs" in path:
+                return "ok", {"check_runs": [{"name": name, "conclusion": "success"} for name in seen]}
+            return "ok", {}
+        return read
+
+    def test_nothing_is_written_on_a_protection_github_did_not_answer_for(self) -> None:
+        """maelys-system: a timeout made a protected main look open, and the plan
+        proposed four contexts of seventeen."""
+        required = ["check / check (ubuntu-26.04)", "mutation", "macos-gates"]
+        seen = ["check / check (linux)", "check / check (ubuntu-26.04)", "mutation", "macos-gates"]
+        for timeout in (("/protection",), ("/check-runs",), ("pulls?",)):
+            with self.assertRaises(MODULE.Failure) as refusal:
+                self.protect_with(self.answers(required, seen, timeout=timeout), required, seen)
+            self.assertIn("did not answer", refusal.exception.message, timeout)
+
+    def test_apply_does_not_narrow_by_itself(self) -> None:
+        required = ["check / check (ubuntu-26.04)", "mutation", "macos-gates"]
+        seen = ["check / check (linux)", "check / check (ubuntu-26.04)", "mutation"]
+        with self.assertRaises(MODULE.Failure) as refusal:
+            self.protect_with(self.answers(required, seen), required, seen)
+        self.assertIn("macos-gates", refusal.exception.message)
+        report, commands = self.protect_with(self.answers(required, seen), required, seen, flags=("--allow-narrow",))
+        self.assertTrue(report["applied"])
+
+    def test_an_existing_protection_changes_in_its_checks_alone(self) -> None:
+        """maelys-oci: "require branches to be up to date" went from true to
+        false under a plan that named three replacements."""
+        required = ["check / check (ubuntu-26.04)", "mutation"]
+        seen = ["check / check (linux)", "check / check (ubuntu-26.04)", "mutation"]
+        report, commands = self.protect_with(self.answers(required, seen, strict=True), required, seen)
+        command, body = commands[0]
+        self.assertEqual(command[:5], ["gh", "api", "-X", "PATCH",
+                                       "repos/o/r/branches/main/protection/required_status_checks"])
+        self.assertEqual(body, {"strict": True, "contexts": ["check / check (linux)", "mutation"]})
 
     def test_before_the_adoption_merges_the_swap_is_still_refused(self) -> None:
         with self.assertRaises(MODULE.Failure):

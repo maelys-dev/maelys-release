@@ -2381,6 +2381,14 @@
               },
               {
                 "conflictsWith": [],
+                "long": "--allow-narrow",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "Stop requiring checks the plan leaves out, beyond alias replacements."
+              },
+              {
+                "conflictsWith": [],
                 "long": "--without-legs",
                 "repeatable": false,
                 "required": false,
@@ -2389,7 +2397,7 @@
               }
             ],
             "passthrough": false,
-            "synopsis": "protect DIR [--apply] [--allow-lock] [--without-legs]"
+            "synopsis": "protect DIR [--apply] [--allow-lock] [--allow-narrow] [--without-legs]"
           },
           "outputMode": "json-envelope",
           "outputSchema": {
@@ -2410,6 +2418,12 @@
                 },
                 "type": "array"
               },
+              "dropping": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
               "fromTag": {
                 "items": {
                   "type": "string"
@@ -2417,6 +2431,12 @@
                 "type": "array"
               },
               "gone": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "kept": {
                 "items": {
                   "type": "string"
                 },
@@ -2505,6 +2525,12 @@
                   "type": "string"
                 },
                 "type": "array"
+              },
+              "unread": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
               }
             },
             "required": [
@@ -2518,7 +2544,7 @@
             "protect"
           ],
           "purpose": "Report what the default branch should require, derived from the workflows and the runs it carries rather than typed by hand; --apply writes it.",
-          "usage": "protect DIR [--apply] [--allow-lock] [--without-legs]"
+          "usage": "protect DIR [--apply] [--allow-lock] [--allow-narrow] [--without-legs]"
         },
         {
           "available": true,

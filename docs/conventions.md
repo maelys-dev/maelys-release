@@ -1615,6 +1615,14 @@ maelys-release adopt DIR --apply     # then merge that pull request
 maelys-release protect DIR --apply   # each alias leaves in the write that requires its leg
 ```
 
+**What `protect --apply` writes, and what it refuses to write** (0.57.1).
+An existing classic protection changes through its `required_status_checks`
+endpoint alone, `strict` and every other setting kept; a ruleset has its
+checks replaced and every other rule sent back as read. It refuses when
+GitHub did not answer for the protection, the rulesets or a check-run read
+(`UNREAD`), and when the write would stop requiring a check other than an
+alias retiring for its leg (`DROP`, allowed with `--allow-narrow`).
+
 **Since 0.57.0 the old names are aliases, and nothing is narrowed.**
 0.54.0 to 0.56.0 printed another order — narrow, adopt, merge, widen — and
 maelys-egress, who followed it, named its cost: main required less for a whole

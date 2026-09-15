@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.57.1 — 2026-09-15
+
+- **`protect --apply` refused agent-cli-spec's rename over a job that never
+  runs there.** Its `ci.yml` says `sanitizer_command: ''   # no compiled code
+  here`; the socle read the comment as part of the value, counted a
+  sanitizers job among what the call produces, and refused because no merged
+  pull request had run it. A trailing YAML comment is now set apart. Found by
+  agent-cli-spec, who read the code and named the refusal false; their
+  diagnosis pointed at `skipped` runs, and the cause was one line earlier.
+- **A job of the socle the call turns off, already required, is kept.** It
+  reports as skipped, which passes; dropping it would be `protect` narrowing a
+  protection outside a rename.
+- **The widening guard refuses only names the write adds.** A context the
+  branch already requires blocks nothing new by being written again.
+- **`protect --apply` rewrote a whole classic protection to change its
+  checks.** It PUT the socle's shape with `strict: false`, and maelys-oci's
+  "require branches to be up to date" went from true to false under a plan
+  that named three replacements. An existing protection now changes through
+  its `required_status_checks` endpoint alone, keeping `strict` and every
+  other setting; the full shape is written only where no protection exists.
+- **Nothing is written on what GitHub did not answer.** During timeouts,
+  maelys-system watched `protect` call its protected main open and propose
+  four contexts of seventeen: an unreadable protection counted as none, and
+  an observation missing its pull requests as a job nobody runs. The
+  protection, the rulesets and every check-run read are now counted; one that
+  did not answer is printed `UNREAD`, and `--apply` refuses.
+- **`--apply` does not narrow by itself.** A required check the plan leaves
+  out — other than an alias retiring for its leg, or a turned-off job kept —
+  is printed `DROP`, and written only with `--allow-narrow`.
+- **Impact.** [asks: nothing] Anyone about to run `protect . --apply`: do it
+  from a socle checkout at v0.57.1 — `protect` runs at the checkout, so
+  nothing to adopt. maelys-oci and maelys-http, who ran it with 0.57.0: check
+  "require branches to be up to date" on main, which that write set to false.
+  Everyone else: nothing.
+
 ## 0.57.0 — 2026-09-15
 
 - **A rename no longer narrows a protection.** `check-product.yml` reports

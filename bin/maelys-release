@@ -4311,6 +4311,25 @@ CI_JOB = re.compile(r"^  ([A-Za-z0-9_-]+):\s*$")
 TAG_WORKFLOWS = ("release", "tap", "channel")
 
 
+def yaml_scalar(raw: str) -> str:
+    """One line's YAML value, its trailing comment set apart.
+
+    agent-cli-spec writes `sanitizer_command: ''   # no compiled code here`.
+    Read whole, that was not empty, so the socle counted a sanitizers job that
+    never runs among what it produces -- and `protect --apply` refused a
+    rename, for want of a merged pull request that had run it. A `#` starts a
+    comment only after whitespace and outside quotes.
+    """
+    value = raw.strip()
+    if value[:1] in ("'", '"'):
+        quote = value[0]
+        closing = value.find(quote, 1)
+        while quote == "'" and closing != -1 and value[closing + 1:closing + 2] == "'":
+            closing = value.find(quote, closing + 2)
+        return value[:closing + 1] if closing != -1 else value
+    return re.split(r"\s+#", value, maxsplit=1)[0].strip()
+
+
 def socle_check_contexts(project: pathlib.Path) -> tuple[str, list[str]]:
     """The contexts the socle's check job produces, and the job that calls it.
 
@@ -4346,7 +4365,7 @@ def socle_check_contexts(project: pathlib.Path) -> tuple[str, list[str]]:
     # product, for sanitizers.
     for job, gate in (("fuzz", "fuzz_command"), ("sanitizers", "sanitizer_command")):
         called = re.search(rf"^\s+{gate}:(.*)$", text, re.MULTILINE)
-        value = (called.group(1) if called else check_product_default(gate)).strip()
+        value = yaml_scalar(called.group(1) if called else check_product_default(gate))
         # A block indicator is not an empty value: it says the value is on
         # the lines below. Reading `sanitizer_command: |` as empty made the
         # socle announce that two protected repositories required a job that
@@ -4542,18 +4561,33 @@ def observed_contexts(repository: str, branch: str, samples: int = 3) -> tuple[l
     reported and left out: a protection should require what reliably runs,
     and the operator can add the rest by hand once it does.
     """
-    pulls = github_list(f"repos/{repository}/pulls?state=closed&per_page=30")
+    # Every read that did not answer is counted. An observation missing a
+    # pull request, or one of its check runs, is an intersection of fewer
+    # sets or of empty ones, and what it leaves out reads as "not produced".
+    # maelys-system watched `protect` call its main unprotected and propose
+    # four contexts of seventeen while GitHub was timing out.
+    unanswered = 0
+    listed, pulls = github_read(f"repos/{repository}/pulls?state=closed&per_page=30")
+    if listed != "ok" or not isinstance(pulls, list):
+        unanswered += 1
+        pulls = []
     heads = [pull.get("head", {}).get("sha", "") for pull in pulls
              if isinstance(pull, dict) and pull.get("merged_at")][:samples]
     if not heads:
-        head = github_api(f"repos/{repository}/commits/{branch}") or {}
+        read, head = github_read(f"repos/{repository}/commits/{branch}")
+        unanswered += read != "ok"
+        head = head if isinstance(head, dict) else {}
         heads = [head.get("sha", "")] if head.get("sha") else []
     if not heads:
-        return [], [], {}
+        return [], [], {"unanswered": unanswered}
     per_head: list[set] = []
     from_tag: set = set()
     for sha in heads:
-        runs = (github_api(f"repos/{repository}/commits/{sha}/check-runs?per_page=100") or {}).get("check_runs", [])
+        read, body = github_read(f"repos/{repository}/commits/{sha}/check-runs?per_page=100")
+        if read != "ok" or not isinstance(body, dict):
+            unanswered += 1
+            continue
+        runs = body.get("check_runs", [])
         names = set()
         for run in runs:
             name = str(run.get("name", ""))
@@ -4569,7 +4603,7 @@ def observed_contexts(repository: str, branch: str, samples: int = 3) -> tuple[l
     every = set.intersection(*per_head) if per_head else set()
     some = set().union(*per_head) - every if per_head else set()
     counted = {name: sum(1 for names in per_head if name in names) for name in sorted(some)}
-    return sorted(every), sorted(from_tag), {"heads": len(per_head), "partial": counted,
+    return sorted(every), sorted(from_tag), {"heads": len(per_head), "partial": counted, "unanswered": unanswered,
                                              "ever": sorted(set().union(*per_head)) if per_head else []}
 
 
@@ -5081,7 +5115,14 @@ def handle_protect(invocation: Invocation) -> tuple[dict, int]:
     # still carry the previous names, and an intersection would have called
     # a renamed leg intermittent and dropped it.
     others = [name for name in seen if name not in derived and not socle_owned(name, caller)]
-    proposed = derived + others
+    # A job of the socle this call turns off -- fuzz or sanitizers with an
+    # empty command -- reports as skipped, and a skipped job passes a required
+    # check. A branch that already requires one keeps it: dropping it would be
+    # this command narrowing a protection outside a rename, and turning the
+    # command back on would then run a check nobody requires.
+    turned_off = [f"{caller} / {job}" for job in ("fuzz", "sanitizers") if f"{caller} / {job}" not in derived]
+    kept = [name for name in required if name in turned_off]
+    proposed = derived + kept + others
     # "never seen" is judged on every pull request sampled, not on their
     # intersection: a leg renamed by a recent adoption runs on the newest
     # head alone, and calling that absent would have been the same mistake
@@ -5107,7 +5148,7 @@ def handle_protect(invocation: Invocation) -> tuple[dict, int]:
               "seenOnSome": {name: count for name, count in (partial.get("partial") or {}).items()
                              if name not in derived and not socle_owned(name, caller)},
               "pullRequests": partial.get("heads", 0),
-              "missingFromRuns": absent, "requiredButNeverRun": stale, "replaced": replaced,
+              "missingFromRuns": absent, "requiredButNeverRun": stale, "replaced": replaced, "kept": kept,
               "proposed": proposed, "applied": False}
     # A job seen on some pull requests is intermittent only if a workflow
     # still defines it. maelys-json removed `fuzz` from its ci.yml in 0.2.0,
@@ -5152,11 +5193,42 @@ def handle_protect(invocation: Invocation) -> tuple[dict, int]:
     # "merged"; maelys-json followed it as written, had no other pull request
     # open, and said so. Widen now waits for a merged pull request to have
     # run under every name it is about to require.
-    if invocation.flag("--apply") and not narrowing and absent and not invocation.flag("--allow-lock"):
+    # Nothing is written on what could not be read. `unreadable` is not
+    # `absent`: a timeout on the protection endpoint made a protected branch
+    # look open, and --apply would have written four contexts over
+    # seventeen. Measured on maelys-system, the day 0.57.0 asked five
+    # products to run this.
+    unread = [what for what, answered in (("the branch protection", state in ("ok", "absent")),
+                                          ("the rulesets", ruled in ("ok", "absent")),
+                                          ("the check runs of recent pull requests",
+                                           not partial.get("unanswered")))
+              if not answered]
+    report["unread"] = unread
+    if invocation.flag("--apply") and unread:
+        raise Failure("PRECONDITION_FAILED",
+                      f"GitHub did not answer for {', '.join(unread)} of {repository}: nothing is written on a"
+                      " reading that is not there.",
+                      "Run protect again once GitHub answers, and read the plan before --apply.")
+    # --apply never narrows by itself. Retiring an alias for its leg is a
+    # replacement, and a job the call turned off is kept; anything else the
+    # branch requires and the proposal leaves out is named, and written only
+    # when asked.
+    dropping = [name for name in required if name not in proposed and name not in retiring]
+    report["dropping"] = dropping
+    if invocation.flag("--apply") and dropping and not narrowing and not invocation.flag("--allow-narrow"):
+        raise Failure("PRECONDITION_FAILED",
+                      f"this write would stop requiring {', '.join(dropping)} on {branch} of {repository}.",
+                      "protect --apply does not narrow a protection by itself. If those checks are gone for"
+                      " good, pass --allow-narrow; otherwise let them run on a pull request first.")
+    # A name the branch already requires blocks nothing new by being written
+    # again: the refusal is for names this write would add. agent-cli-spec
+    # was refused a rename over a context its ruleset had required for a day.
+    adding = [name for name in absent if name not in required]
+    if invocation.flag("--apply") and not narrowing and adding and not invocation.flag("--allow-lock"):
         waiting = [str(pull.get("number")) for pull in github_list(
             f"repos/{repository}/pulls?state=open&base={branch}&per_page=50") if isinstance(pull, dict)]
         raise Failure("PRECONDITION_FAILED",
-                      f"no merged pull request of {repository} has run " + ", ".join(absent)
+                      f"no merged pull request of {repository} has run " + ", ".join(adding)
                       + ": requiring them now would block every pull request that does not produce them yet.",
                       "Merge the adoption first, then protect --apply."
                       + (f" Open pull requests built on the previous ci.yml (#{', #'.join(waiting)}) must"
@@ -5184,13 +5256,22 @@ def handle_protect(invocation: Invocation) -> tuple[dict, int]:
         # adoption renaming a leg, --apply required the old name still
         # present in older pull requests -- the very lock this command was
         # written to prevent, in the command itself.
-        body = {**PROTECTION_SHAPE, "required_status_checks": {"strict": False, "contexts": proposed}}
+        # An existing protection is changed in its required checks alone,
+        # through their own endpoint, and keeps every other setting as it is.
+        # The whole protection used to be PUT with the socle's shape, and
+        # maelys-oci's "require branches to be up to date" went from true to
+        # false with a plan that named three replacements and nothing else.
+        existing = holds.get("required_status_checks") if state == "ok" else None
+        if isinstance(existing, dict):
+            method, endpoint = "PATCH", f"repos/{repository}/branches/{branch}/protection/required_status_checks"
+            body = {"strict": bool(existing.get("strict")), "contexts": proposed}
+        else:
+            method, endpoint = "PUT", f"repos/{repository}/branches/{branch}/protection"
+            body = {**PROTECTION_SHAPE, "required_status_checks": {"strict": False, "contexts": proposed}}
         with tempfile.TemporaryDirectory(prefix="maelys-release-protect.") as temp:
             payload = pathlib.Path(temp) / "protection.json"
             payload.write_text(json.dumps(body), encoding="utf-8")
-            done = run(["gh", "api", "-X", "PUT",
-                        f"repos/{repository}/branches/{branch}/protection", "--input", str(payload)],
-                       cwd=project)
+            done = run(["gh", "api", "-X", method, endpoint, "--input", str(payload)], cwd=project)
         if done.returncode != 0:
             raise Failure("PROCESS_FAILED", f"the protection of {branch} was refused: {done.stderr.strip()}",
                           "A private repository needs a paid plan for branch protection; read the message above.")
@@ -5252,7 +5333,12 @@ def write_ruleset(repository: str, branch: str, rules: object, contexts: list[st
 def text_protect(data: dict) -> str:
     lines = [f"branch   {data['branch']} of {data['repository']}"
              + (" is protected by " + " and ".join(data["protectedBy"]) if data.get("protectedBy")
+                else " could not be read" if "the branch protection" in (data.get("unread") or [])
                 else "" if data["protected"] else " is NOT protected")]
+    for what in data.get("unread") or []:
+        lines.append(f"UNREAD   GitHub did not answer for {what}: this plan is not a reading, and --apply refuses")
+    for name in data.get("dropping") or []:
+        lines.append(f"DROP     {name} is required and this plan leaves it out: --apply refuses without --allow-narrow")
     if data.get("ruleset"):
         lines.append(f"ruleset  requires " + ", ".join(data["ruleset"])
                      + " — --apply writes this ruleset, never a classic protection beside it")
@@ -5269,6 +5355,9 @@ def text_protect(data: dict) -> str:
     for name in data["proposed"]:
         mark = "ok" if name in data["required"] else "add"
         lines.append(f"{mark:<8} {name}")
+    for name in data.get("kept") or []:
+        lines.append(f"{'keep':<8} {name}: this call turns the job off, so it reports skipped, which passes;"
+                     " the branch already requires it and protect does not narrow it")
     for pair in data.get("replaced") or []:
         lines.append(f"{'replace':<8} {pair['required']} -> {pair['by']}: the alias leaves in the same write"
                      " that requires the leg it mirrored, so main never requires less")
@@ -6071,6 +6160,7 @@ APP = cli.Program(PROGRAM, PRODUCT, socle_version(), [
                 operands=[DIR_OPERAND],
                 options=[cli.flag("--apply", "Write the protection instead of only reporting it."),
                          cli.flag("--allow-lock", "Require names no merged pull request has produced yet."),
+                         cli.flag("--allow-narrow", "Stop requiring checks the plan leaves out, beyond alias replacements."),
                          cli.flag("--without-legs", "Propose the required list minus the socle's matrix legs:"
                                   " the narrowing that comes before an adoption renames them.")],
                 schema={"type": "object", "additionalProperties": False,
@@ -6091,6 +6181,9 @@ APP = cli.Program(PROGRAM, PRODUCT, socle_version(), [
                                        "ruleset": {"type": "array", "items": {"type": "string"}},
                                        "narrowing": {"type": "boolean"},
                                        "dropped": {"type": "array", "items": {"type": "string"}},
+                                       "kept": {"type": "array", "items": {"type": "string"}},
+                                       "unread": {"type": "array", "items": {"type": "string"}},
+                                       "dropping": {"type": "array", "items": {"type": "string"}},
                                        "replaced": {"type": "array", "items": {
                                            "type": "object", "required": ["required", "by"],
                                            "properties": {"required": {"type": "string"},
