@@ -943,10 +943,10 @@ does not say where either came from.
   for a call to `check-product.yml` — and refuses the declaration if a
   workflow makes that call anyway. The socle is the first: its `check.yml`
   lints what it ships, runs its tests and runs `check .` on itself.
-- A repository whose public files must not name the documentation
-  repository declares `[docs] unnamed`: the managed blocks drop the bullet
-  naming `maelys-dev/maelys-docs` for one that names none. AGENTS.md and
-  CLAUDE.md are as public as a README in a public repository.
+- The managed blocks name no documentation repository unless
+  `maelys-release.conf` declares `[docs] named` (since 0.58.0): AGENTS.md
+  and CLAUDE.md are as public as a README in a public repository, and
+  `preflight` refuses that declaration on one.
 - The checkout scripts are written and checked for every repository that
   pins and calls the shared CI, whatever its mechanism but `none`:
   `check-product.yml` calls them. `[ci] own` receives none.
@@ -1114,6 +1114,8 @@ evaluate**: `[asks: nothing]`, or one or more selectors right after
 | `cli-reference` | carries `docs/cli.reference` or `docs/cli.md` |
 | `signed-on-default-branch` | declares that commit verification |
 | `old-legs` | still requires a leg under its name before 0.54.0 — asks GitHub, unknown offline |
+| `public` | is a public repository — asks GitHub, unknown offline |
+| `classic-protection` | carries a classic branch protection — asks GitHub, unknown offline |
 
 A line a later version replaces also says so, as data after its selectors:
 `[superseded-by: 0.57.0]`. For a product whose list holds that later version,
@@ -1626,6 +1628,12 @@ nothing produces blocks every merge:
 maelys-release adopt DIR --apply     # then merge that pull request
 maelys-release protect DIR --apply   # each alias leaves in the write that requires its leg
 ```
+
+**What `protect --apply` checks after writing** (0.58.0). It re-reads the
+protection and fails on any setting that moved beyond the checks, and the plan
+names every other setting — `keeps`, or `create` line by line on a branch
+with none. It refuses from a version listed for `protect` in `WITHDRAWN` on
+this repository's main, and when that list cannot be read.
 
 **What `protect --apply` writes, and what it refuses to write** (0.57.1).
 An existing classic protection changes through its `required_status_checks`
