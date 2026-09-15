@@ -36,3 +36,33 @@ jobs:
           bin/maelys-release version --json --compact
       - name: Self-test on a fixture
         run: bin/maelys-release self-test
+      - name: The CLI reference follows describe
+        if: runner.os == 'Linux'
+        # The socle documents its own command line the way it documents a
+        # product's, and through the same code: read_declarations finds
+        # docs/cli.reference, render_cli_reference fetches maelys-cli's
+        # generator at dependencies/maelys-cli.pin. A generator that did not
+        # run leaves the files as they stand, which would pass unseen, so
+        # that note fails here.
+        run: |
+          python3 - <<'PY'
+          import difflib, importlib.machinery, importlib.util, pathlib, sys
+          loader = importlib.machinery.SourceFileLoader("socle", "bin/maelys-release")
+          spec = importlib.util.spec_from_loader("socle", loader)
+          socle = importlib.util.module_from_spec(spec)
+          loader.exec_module(socle)
+          root = pathlib.Path(".").resolve()
+          decl = socle.read_declarations(root, "maelys-release", "custom")
+          markdown, contract = socle.render_cli_reference(decl)
+          failed = [check["message"] for check in decl.checks if "did not run" in check["message"]
+                    or "not available" in check["message"]]
+          for name, fresh in (("docs/cli.md", markdown), ("docs/cli-contract.json", contract)):
+              current = (root / name).read_text(encoding="utf-8")
+              if current != fresh:
+                  sys.stdout.writelines(difflib.unified_diff(current.splitlines(True), fresh.splitlines(True), name, name))
+                  failed.append(f"{name} does not follow describe: regenerate it")
+          if failed:
+              print("\n".join(failed))
+              sys.exit(1)
+          print("docs/cli.md and docs/cli-contract.json follow describe")
+          PY

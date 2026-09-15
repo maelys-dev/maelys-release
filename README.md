@@ -31,7 +31,8 @@ framework travels inside it. The program is Python (standard library, 3.9 or lat
 catalog drives the parser, `help`, `describe` and the shell completion;
 success is a JSON envelope on stdout with `--format json`, failure an
 envelope on stderr; exit 0 completed, 1 failed, 2 a validation that found
-violations. It runs from a checkout at a tag, or installed.
+violations. It runs from a checkout at a tag, or installed. Every command, its
+options and effect are in [docs/cli.md](docs/cli.md), generated from `describe`.
 
 ```sh
 git clone https://github.com/maelys-dev/maelys-release && git -C maelys-release checkout vX.Y.Z
