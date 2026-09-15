@@ -26,6 +26,11 @@
 - **`cut` and `check` spell the changelog heading they ask for as the
   changelog spells its entries.** Any separator was accepted and the hint
   always showed an em dash; maelys-cli's entries use a hyphen.
+- **The socle documents its own command line.** `docs/cli.md` and
+  `docs/cli-contract.json` are generated from `describe` by maelys-cli's
+  generator at the pin, through the code that generates a product's, and the
+  socle's CI refuses a drift. It had a reference for every product built on
+  the framework and none for itself.
 - **Impact.** maelys-http, maelys-oci, agent-cli-spec, maelys-datalog,
   maelys-system — still requiring the old names: adopt, merge, then
   `protect . --apply`; do not narrow. Everyone else: three more short jobs on

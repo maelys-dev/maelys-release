@@ -1,0 +1,8 @@
+# The socle's own command line, documented as it documents a product's: the
+# generator of maelys-cli at dependencies/maelys-cli.pin writes docs/cli.md and
+# docs/cli-contract.json from `describe`, and check.yml refuses a drift.
+[build]
+bin
+
+[programs]
+maelys-release

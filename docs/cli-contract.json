@@ -1,0 +1,3165 @@
+{
+  "contract": "agent-cli/v2",
+  "programs": {
+    "maelys-release": {
+      "cliApi": 1,
+      "commands": [
+        {
+          "available": true,
+          "effect": "read",
+          "exitCodes": {
+            "0": "command completed",
+            "1": "execution failed",
+            "2": "valid report with violations"
+          },
+          "external": false,
+          "hidden": false,
+          "id": "help",
+          "input": {
+            "constraints": [],
+            "operands": [
+              {
+                "name": "COMMAND_ID",
+                "required": false,
+                "summary": "Command identifier.",
+                "variadic": false
+              }
+            ],
+            "options": [],
+            "passthrough": false,
+            "synopsis": "help [COMMAND_ID] | --help"
+          },
+          "outputMode": "json-envelope",
+          "outputSchema": {
+            "properties": {
+              "commands": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "text": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "text",
+              "commands"
+            ],
+            "type": "object"
+          },
+          "pattern": [
+            "help"
+          ],
+          "purpose": "Show the help of the program or of one command.",
+          "usage": "help [COMMAND_ID] | --help"
+        },
+        {
+          "available": true,
+          "effect": "read",
+          "exitCodes": {
+            "0": "command completed",
+            "1": "execution failed",
+            "2": "valid report with violations"
+          },
+          "external": false,
+          "hidden": false,
+          "id": "version",
+          "input": {
+            "constraints": [],
+            "operands": [],
+            "options": [],
+            "passthrough": false,
+            "synopsis": "version | --version"
+          },
+          "outputMode": "json-envelope",
+          "outputSchema": {
+            "required": [
+              "product",
+              "program",
+              "version",
+              "contract",
+              "cliApi",
+              "framework"
+            ],
+            "type": "object"
+          },
+          "pattern": [
+            "version"
+          ],
+          "purpose": "Show the product, program, version and contract.",
+          "usage": "version | --version"
+        },
+        {
+          "available": true,
+          "effect": "read",
+          "exitCodes": {
+            "0": "command completed",
+            "1": "execution failed",
+            "2": "valid report with violations"
+          },
+          "external": false,
+          "hidden": false,
+          "id": "describe",
+          "input": {
+            "constraints": [
+              {
+                "kind": "requires",
+                "options": [
+                  "--prefix",
+                  "--summary"
+                ]
+              }
+            ],
+            "operands": [
+              {
+                "name": "COMMAND_ID",
+                "required": false,
+                "summary": "Command identifier.",
+                "variadic": false
+              }
+            ],
+            "options": [
+              {
+                "conflictsWith": [],
+                "long": "--summary",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "Every descriptor without its schema and exit codes."
+              },
+              {
+                "argument": {
+                  "name": "PREFIX",
+                  "pattern": "^[a-z]([a-z0-9.-]*[a-z0-9-])?$",
+                  "type": "string"
+                },
+                "conflictsWith": [
+                  "COMMAND_ID"
+                ],
+                "long": "--prefix",
+                "repeatable": false,
+                "required": false,
+                "requires": [
+                  "--summary"
+                ],
+                "summary": "Select the command namespace PREFIX."
+              }
+            ],
+            "passthrough": false,
+            "synopsis": "describe [COMMAND_ID] [--summary] [--prefix PREFIX]"
+          },
+          "outputMode": "json-envelope",
+          "outputSchema": {
+            "required": [
+              "schemaVersion",
+              "kind",
+              "program",
+              "commands"
+            ],
+            "type": "object"
+          },
+          "pattern": [
+            "describe"
+          ],
+          "purpose": "Show the machine-readable catalog, or one descriptor.",
+          "usage": "describe [COMMAND_ID] [--summary] [--prefix PREFIX]"
+        },
+        {
+          "available": true,
+          "effect": "read",
+          "exitCodes": {
+            "0": "command completed",
+            "1": "execution failed",
+            "2": "valid report with violations"
+          },
+          "external": false,
+          "hidden": false,
+          "id": "completion",
+          "input": {
+            "constraints": [],
+            "operands": [
+              {
+                "choices": [
+                  "bash",
+                  "zsh",
+                  "fish"
+                ],
+                "name": "SHELL",
+                "required": true,
+                "summary": "Shell.",
+                "type": "choice",
+                "variadic": false
+              }
+            ],
+            "options": [],
+            "passthrough": false,
+            "synopsis": "completion SHELL"
+          },
+          "outputMode": "json-envelope",
+          "outputSchema": {
+            "required": [
+              "shell",
+              "script"
+            ],
+            "type": "object"
+          },
+          "pattern": [
+            "completion"
+          ],
+          "purpose": "Print the shell completion script generated from the catalog.",
+          "usage": "completion SHELL"
+        },
+        {
+          "available": true,
+          "effect": "read",
+          "exitCodes": {
+            "0": "command completed",
+            "1": "execution failed",
+            "2": "valid report with violations"
+          },
+          "external": false,
+          "hidden": true,
+          "id": "complete.candidates",
+          "input": {
+            "constraints": [],
+            "operands": [
+              {
+                "name": "WORDS",
+                "required": false,
+                "summary": "Words typed so far.",
+                "variadic": true
+              }
+            ],
+            "options": [],
+            "passthrough": false,
+            "synopsis": "__complete [WORDS...]"
+          },
+          "outputMode": "json-records",
+          "outputSchema": {
+            "required": [
+              "count",
+              "records"
+            ],
+            "type": "object"
+          },
+          "pattern": [
+            "__complete"
+          ],
+          "purpose": "Completion candidates for the words given after --.",
+          "usage": "__complete [WORDS...]"
+        },
+        {
+          "available": true,
+          "effect": {
+            "apply": "apply",
+            "plan": "preview"
+          },
+          "exitCodes": {
+            "0": "command completed",
+            "1": "execution failed",
+            "2": "valid report with violations"
+          },
+          "external": false,
+          "hidden": false,
+          "id": "migrate",
+          "input": {
+            "constraints": [],
+            "operands": [
+              {
+                "name": "DIR",
+                "required": true,
+                "summary": "Product repository.",
+                "variadic": false
+              }
+            ],
+            "options": [
+              {
+                "argument": {
+                  "name": "NAME",
+                  "type": "string"
+                },
+                "conflictsWith": [],
+                "long": "--product",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "Product name; defaults to the directory name."
+              },
+              {
+                "argument": {
+                  "name": "FILE",
+                  "type": "string"
+                },
+                "conflictsWith": [],
+                "default": "-",
+                "long": "--documents",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "JSONL of the documents to move, '-' for stdin (maelys-platform docs --prose --only PRODUCT --format jsonl)."
+              },
+              {
+                "argument": {
+                  "name": "REPOSITORY",
+                  "type": "string"
+                },
+                "conflictsWith": [],
+                "default": "maelys-dev/maelys-docs",
+                "long": "--documents-repository",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "Repository the prose moves to."
+              },
+              {
+                "conflictsWith": [],
+                "long": "--push",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "Send both branches; without it nothing leaves this machine."
+              },
+              {
+                "conflictsWith": [],
+                "long": "--apply",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "Apply the reviewed plan instead of only planning it."
+              }
+            ],
+            "passthrough": false,
+            "synopsis": "migrate DIR [--product NAME] [--documents FILE] [--documents-repository REPOSITORY] [--push] [--apply]"
+          },
+          "outputMode": "json-envelope",
+          "outputSchema": {
+            "additionalProperties": false,
+            "properties": {
+              "commit": {
+                "type": "string"
+              },
+              "documents": {
+                "type": "integer"
+              },
+              "documentsBranch": {
+                "type": "string"
+              },
+              "documentsCommit": {
+                "type": "string"
+              },
+              "globs": {
+                "items": {
+                  "properties": {
+                    "line": {
+                      "type": "integer"
+                    },
+                    "names": {
+                      "type": "string"
+                    },
+                    "path": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "line",
+                    "names"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "kept": {
+                "type": "string"
+              },
+              "mode": {
+                "enum": [
+                  "plan",
+                  "apply"
+                ]
+              },
+              "moving": {
+                "items": {
+                  "properties": {
+                    "destination": {
+                      "type": "string"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "referencedBy": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "destination",
+                    "referencedBy"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "product": {
+                "type": "string"
+              },
+              "productBranch": {
+                "type": "string"
+              },
+              "productCommit": {
+                "type": "string"
+              },
+              "project": {
+                "type": "string"
+              },
+              "pushed": {
+                "type": "boolean"
+              },
+              "readme": {
+                "type": "string"
+              },
+              "remaining": {
+                "items": {
+                  "properties": {
+                    "line": {
+                      "type": "integer"
+                    },
+                    "names": {
+                      "type": "string"
+                    },
+                    "path": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "line",
+                    "names"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "repository": {
+                "type": "string"
+              },
+              "rewritten": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "staying": {
+                "items": {
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    },
+                    "reason": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "reason"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "tag": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "mode",
+              "product",
+              "project",
+              "repository",
+              "version",
+              "tag",
+              "commit",
+              "moving",
+              "staying",
+              "documents"
+            ],
+            "type": "object"
+          },
+          "pattern": [
+            "migrate"
+          ],
+          "purpose": "Move a product's prose into maelys-docs with its history and out of the product; plan without --apply.",
+          "usage": "migrate DIR [--product NAME] [--documents FILE] [--documents-repository REPOSITORY] [--push] [--apply]"
+        },
+        {
+          "available": true,
+          "effect": {
+            "apply": "apply",
+            "plan": "preview"
+          },
+          "exitCodes": {
+            "0": "command completed",
+            "1": "execution failed",
+            "2": "valid report with violations"
+          },
+          "external": false,
+          "hidden": false,
+          "id": "new",
+          "input": {
+            "constraints": [],
+            "operands": [
+              {
+                "name": "DIR",
+                "required": true,
+                "summary": "Directory to create the repository in; empty, or absent.",
+                "variadic": false
+              }
+            ],
+            "options": [
+              {
+                "argument": {
+                  "name": "NAME",
+                  "type": "string"
+                },
+                "conflictsWith": [],
+                "long": "--product",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "Product name; defaults to the directory name."
+              },
+              {
+                "argument": {
+                  "name": "SHA",
+                  "pattern": "^[0-9a-f]{40}$",
+                  "type": "string"
+                },
+                "conflictsWith": [],
+                "hidden": true,
+                "long": "--socle-sha",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "Socle commit to pin instead of this checkout's HEAD (trials and tests)."
+              },
+              {
+                "argument": {
+                  "name": "TAG",
+                  "type": "string"
+                },
+                "conflictsWith": [],
+                "hidden": true,
+                "long": "--socle-tag",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "Socle tag written next to --socle-sha."
+              },
+              {
+                "argument": {
+                  "choices": [
+                    "maelys-release",
+                    "custom",
+                    "none"
+                  ],
+                  "name": "MECHANISM",
+                  "type": "string"
+                },
+                "conflictsWith": [],
+                "long": "--mechanism",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "How the product publishes when it carries no release.yml yet."
+              },
+              {
+                "argument": {
+                  "name": "DEPENDENCY",
+                  "type": "string"
+                },
+                "conflictsWith": [],
+                "long": "--depends",
+                "repeatable": true,
+                "required": false,
+                "requires": [],
+                "summary": "A pinned Maelys dependency, NAME@vX.Y.Z; repeatable."
+              },
+              {
+                "conflictsWith": [],
+                "long": "--apply",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "Apply the reviewed plan instead of only planning it."
+              }
+            ],
+            "passthrough": false,
+            "synopsis": "new DIR [--product NAME] [--mechanism MECHANISM] [--depends DEPENDENCY] [--apply]"
+          },
+          "outputMode": "json-envelope",
+          "outputSchema": {
+            "additionalProperties": false,
+            "properties": {
+              "adopted": {
+                "items": {
+                  "properties": {
+                    "action": {
+                      "enum": [
+                        "create",
+                        "update",
+                        "same"
+                      ]
+                    },
+                    "diff": {
+                      "type": "string"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "scope": {
+                      "enum": [
+                        "conventions",
+                        "release"
+                      ]
+                    },
+                    "seeded": {
+                      "type": "boolean"
+                    },
+                    "touches": {
+                      "enum": [
+                        "prose",
+                        "pin",
+                        "mechanism"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "action",
+                    "scope"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "dependencies": {
+                "items": {
+                  "properties": {
+                    "commit": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "tag": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "tag",
+                    "commit"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "files": {
+                "items": {
+                  "properties": {
+                    "action": {
+                      "enum": [
+                        "create",
+                        "update",
+                        "same"
+                      ]
+                    },
+                    "diff": {
+                      "type": "string"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "scope": {
+                      "enum": [
+                        "conventions",
+                        "release"
+                      ]
+                    },
+                    "seeded": {
+                      "type": "boolean"
+                    },
+                    "touches": {
+                      "enum": [
+                        "prose",
+                        "pin",
+                        "mechanism"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "action",
+                    "scope"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "mechanism": {
+                "enum": [
+                  "maelys-release",
+                  "custom",
+                  "none"
+                ]
+              },
+              "mode": {
+                "enum": [
+                  "plan",
+                  "apply"
+                ]
+              },
+              "product": {
+                "type": "string"
+              },
+              "project": {
+                "type": "string"
+              },
+              "socle": {
+                "properties": {
+                  "sha": {
+                    "type": "string"
+                  },
+                  "tag": {
+                    "type": "string"
+                  },
+                  "version": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "version",
+                  "tag",
+                  "sha"
+                ],
+                "type": "object"
+              },
+              "version": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "mode",
+              "product",
+              "project",
+              "mechanism",
+              "version",
+              "dependencies",
+              "files",
+              "adopted"
+            ],
+            "type": "object"
+          },
+          "pattern": [
+            "new"
+          ],
+          "purpose": "Create a Maelys repository in an empty directory: licence, version, changelog, pins, and the files of the socle; plan without --apply.",
+          "usage": "new DIR [--product NAME] [--mechanism MECHANISM] [--depends DEPENDENCY] [--apply]"
+        },
+        {
+          "available": true,
+          "effect": {
+            "apply": "apply",
+            "plan": "preview"
+          },
+          "exitCodes": {
+            "0": "command completed",
+            "1": "execution failed",
+            "2": "valid report with violations"
+          },
+          "external": false,
+          "hidden": false,
+          "id": "adopt",
+          "input": {
+            "constraints": [],
+            "operands": [
+              {
+                "name": "DIR",
+                "required": true,
+                "summary": "Product repository.",
+                "variadic": false
+              }
+            ],
+            "options": [
+              {
+                "argument": {
+                  "name": "NAME",
+                  "type": "string"
+                },
+                "conflictsWith": [],
+                "long": "--product",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "Product name; defaults to the directory name."
+              },
+              {
+                "argument": {
+                  "name": "SHA",
+                  "pattern": "^[0-9a-f]{40}$",
+                  "type": "string"
+                },
+                "conflictsWith": [],
+                "hidden": true,
+                "long": "--socle-sha",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "Socle commit to pin instead of this checkout's HEAD (trials and tests)."
+              },
+              {
+                "argument": {
+                  "name": "TAG",
+                  "type": "string"
+                },
+                "conflictsWith": [],
+                "hidden": true,
+                "long": "--socle-tag",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "Socle tag written next to --socle-sha."
+              },
+              {
+                "argument": {
+                  "choices": [
+                    "maelys-release",
+                    "custom",
+                    "none"
+                  ],
+                  "name": "MECHANISM",
+                  "type": "string"
+                },
+                "conflictsWith": [],
+                "long": "--mechanism",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "How the product publishes when it carries no release.yml yet."
+              },
+              {
+                "conflictsWith": [],
+                "long": "--allow-untagged",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "Accept a socle commit without a tag (a trial of a candidate)."
+              },
+              {
+                "conflictsWith": [],
+                "long": "--allow-lock",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "Adopt even when a required check would stop being produced."
+              },
+              {
+                "conflictsWith": [],
+                "long": "--apply",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "Apply the reviewed plan instead of only planning it."
+              }
+            ],
+            "passthrough": false,
+            "synopsis": "adopt DIR [--product NAME] [--mechanism MECHANISM] [--allow-untagged] [--allow-lock] [--apply]"
+          },
+          "outputMode": "json-envelope",
+          "outputSchema": {
+            "additionalProperties": false,
+            "properties": {
+              "changed": {
+                "type": "boolean"
+              },
+              "checks": {
+                "items": {
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    },
+                    "scope": {
+                      "enum": [
+                        "conventions",
+                        "release"
+                      ]
+                    },
+                    "status": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "message",
+                    "scope"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "files": {
+                "items": {
+                  "properties": {
+                    "action": {
+                      "enum": [
+                        "create",
+                        "update",
+                        "same"
+                      ]
+                    },
+                    "diff": {
+                      "type": "string"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "scope": {
+                      "enum": [
+                        "conventions",
+                        "release"
+                      ]
+                    },
+                    "seeded": {
+                      "type": "boolean"
+                    },
+                    "touches": {
+                      "enum": [
+                        "prose",
+                        "pin",
+                        "mechanism"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "action",
+                    "scope"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "mechanism": {
+                "enum": [
+                  "maelys-release",
+                  "custom",
+                  "none"
+                ]
+              },
+              "mode": {
+                "enum": [
+                  "plan",
+                  "apply"
+                ]
+              },
+              "moved": {
+                "type": "string"
+              },
+              "product": {
+                "type": "string"
+              },
+              "project": {
+                "type": "string"
+              },
+              "socle": {
+                "properties": {
+                  "sha": {
+                    "type": "string"
+                  },
+                  "tag": {
+                    "type": "string"
+                  },
+                  "version": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "version",
+                  "tag",
+                  "sha"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "mode",
+              "product",
+              "project",
+              "mechanism",
+              "socle",
+              "changed",
+              "checks",
+              "files"
+            ],
+            "type": "object"
+          },
+          "pattern": [
+            "adopt"
+          ],
+          "purpose": "Write the conventions of the socle into a product, and its release files when it publishes through the socle; plan without --apply.",
+          "usage": "adopt DIR [--product NAME] [--mechanism MECHANISM] [--allow-untagged] [--allow-lock] [--apply]"
+        },
+        {
+          "available": true,
+          "effect": "read",
+          "exitCodes": {
+            "0": "command completed",
+            "1": "execution failed",
+            "2": "valid report with violations"
+          },
+          "external": false,
+          "hidden": false,
+          "id": "check",
+          "input": {
+            "constraints": [],
+            "operands": [
+              {
+                "name": "DIR",
+                "required": true,
+                "summary": "Product repository.",
+                "variadic": false
+              }
+            ],
+            "options": [
+              {
+                "argument": {
+                  "name": "NAME",
+                  "type": "string"
+                },
+                "conflictsWith": [],
+                "long": "--product",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "Product name; defaults to the directory name."
+              },
+              {
+                "argument": {
+                  "name": "SHA",
+                  "pattern": "^[0-9a-f]{40}$",
+                  "type": "string"
+                },
+                "conflictsWith": [],
+                "hidden": true,
+                "long": "--socle-sha",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "Socle commit to pin instead of this checkout's HEAD (trials and tests)."
+              },
+              {
+                "argument": {
+                  "name": "TAG",
+                  "type": "string"
+                },
+                "conflictsWith": [],
+                "hidden": true,
+                "long": "--socle-tag",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "Socle tag written next to --socle-sha."
+              },
+              {
+                "argument": {
+                  "choices": [
+                    "maelys-release",
+                    "custom",
+                    "none"
+                  ],
+                  "name": "MECHANISM",
+                  "type": "string"
+                },
+                "conflictsWith": [],
+                "long": "--mechanism",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "How the product publishes when it carries no release.yml yet."
+              },
+              {
+                "conflictsWith": [],
+                "long": "--docs-contract",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "Refuse prose in docs/ and a CLI reference outside docs/cli.md, instead of noting them."
+              }
+            ],
+            "passthrough": false,
+            "synopsis": "check DIR [--product NAME] [--mechanism MECHANISM] [--docs-contract]"
+          },
+          "outputMode": "json-envelope",
+          "outputSchema": {
+            "additionalProperties": false,
+            "properties": {
+              "checks": {
+                "items": {
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    },
+                    "scope": {
+                      "enum": [
+                        "conventions",
+                        "release"
+                      ]
+                    },
+                    "status": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "message",
+                    "scope"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "conventions": {
+                "properties": {
+                  "applicable": {
+                    "type": "boolean"
+                  },
+                  "valid": {
+                    "type": "boolean"
+                  },
+                  "violations": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "valid",
+                  "violations"
+                ],
+                "type": "object"
+              },
+              "files": {
+                "items": {
+                  "properties": {
+                    "action": {
+                      "enum": [
+                        "create",
+                        "update",
+                        "same"
+                      ]
+                    },
+                    "diff": {
+                      "type": "string"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "scope": {
+                      "enum": [
+                        "conventions",
+                        "release"
+                      ]
+                    },
+                    "seeded": {
+                      "type": "boolean"
+                    },
+                    "touches": {
+                      "enum": [
+                        "prose",
+                        "pin",
+                        "mechanism"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "action",
+                    "scope"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "mechanism": {
+                "enum": [
+                  "maelys-release",
+                  "custom",
+                  "none"
+                ]
+              },
+              "pinned": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "product": {
+                "type": "string"
+              },
+              "project": {
+                "type": "string"
+              },
+              "release": {
+                "properties": {
+                  "applicable": {
+                    "type": "boolean"
+                  },
+                  "valid": {
+                    "type": "boolean"
+                  },
+                  "violations": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "valid",
+                  "violations"
+                ],
+                "type": "object"
+              },
+              "socle": {
+                "properties": {
+                  "sha": {
+                    "type": "string"
+                  },
+                  "tag": {
+                    "type": "string"
+                  },
+                  "version": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "version",
+                  "tag",
+                  "sha"
+                ],
+                "type": "object"
+              },
+              "valid": {
+                "type": "boolean"
+              },
+              "violations": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "valid",
+              "product",
+              "project",
+              "mechanism",
+              "socle",
+              "pinned",
+              "checks",
+              "files",
+              "violations",
+              "conventions",
+              "release"
+            ],
+            "type": "object"
+          },
+          "pattern": [
+            "check"
+          ],
+          "purpose": "Report the conventions of a product and, when it publishes through the socle, its release mechanism; exit 2 on any violation.",
+          "usage": "check DIR [--product NAME] [--mechanism MECHANISM] [--docs-contract]"
+        },
+        {
+          "available": true,
+          "effect": "read",
+          "exitCodes": {
+            "0": "command completed",
+            "1": "execution failed",
+            "2": "valid report with violations"
+          },
+          "external": false,
+          "hidden": false,
+          "id": "declarations",
+          "input": {
+            "constraints": [],
+            "operands": [
+              {
+                "name": "DIR",
+                "required": true,
+                "summary": "Product repository.",
+                "variadic": false
+              }
+            ],
+            "options": [
+              {
+                "argument": {
+                  "name": "NAME",
+                  "type": "string"
+                },
+                "conflictsWith": [],
+                "long": "--product",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "Product name; defaults to the directory name."
+              }
+            ],
+            "passthrough": false,
+            "synopsis": "declarations DIR [--product NAME]"
+          },
+          "outputMode": "json-envelope",
+          "outputSchema": {
+            "additionalProperties": false,
+            "properties": {
+              "afterVersion": {
+                "type": "string"
+              },
+              "channels": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "registry": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "registry"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "checks": {
+                "items": {
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    },
+                    "scope": {
+                      "enum": [
+                        "conventions",
+                        "release"
+                      ]
+                    },
+                    "status": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "message",
+                    "scope"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "declared": {
+                "additionalProperties": false,
+                "properties": {
+                  "manifestPatterns": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "targets": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "targets",
+                  "manifestPatterns"
+                ],
+                "type": "object"
+              },
+              "dependencies": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "formulas": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "fuzz": {
+                "additionalProperties": false,
+                "properties": {
+                  "harnesses": {
+                    "type": "string"
+                  },
+                  "runs": {
+                    "enum": [
+                      "socle",
+                      "own",
+                      "none"
+                    ]
+                  }
+                },
+                "required": [
+                  "harnesses",
+                  "runs"
+                ],
+                "type": "object"
+              },
+              "gate": {
+                "enum": [
+                  "",
+                  "reviewer",
+                  "none"
+                ]
+              },
+              "linuxPackages": {
+                "type": "string"
+              },
+              "macosPackages": {
+                "type": "string"
+              },
+              "managedBy": {
+                "type": "string"
+              },
+              "manifestPatterns": {
+                "type": "string"
+              },
+              "mechanism": {
+                "enum": [
+                  "maelys-release",
+                  "custom",
+                  "none"
+                ]
+              },
+              "pinned": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "product": {
+                "type": "string"
+              },
+              "project": {
+                "type": "string"
+              },
+              "runners": {
+                "additionalProperties": false,
+                "properties": {
+                  "delegated": {
+                    "type": "boolean"
+                  },
+                  "labels": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "unresolved": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "labels",
+                  "unresolved",
+                  "delegated"
+                ],
+                "type": "object"
+              },
+              "targets": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "valid": {
+                "type": "boolean"
+              },
+              "version": {
+                "type": "string"
+              },
+              "workflows": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "branches": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "delegates": {
+                      "type": "boolean"
+                    },
+                    "events": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "file": {
+                      "type": "string"
+                    },
+                    "jobs": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "runners": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "tags": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "unresolved": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "file",
+                    "events",
+                    "branches",
+                    "tags",
+                    "jobs",
+                    "runners",
+                    "unresolved",
+                    "delegates"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "valid",
+              "product",
+              "project",
+              "version",
+              "mechanism",
+              "dependencies",
+              "linuxPackages",
+              "macosPackages",
+              "formulas",
+              "targets",
+              "manifestPatterns",
+              "channels",
+              "gate",
+              "afterVersion",
+              "fuzz",
+              "declared",
+              "pinned",
+              "managedBy",
+              "runners",
+              "workflows",
+              "checks"
+            ],
+            "type": "object"
+          },
+          "pattern": [
+            "declarations"
+          ],
+          "purpose": "Return the product contract as data: pinned dependencies, packages, formulas; exit 2 when invalid.",
+          "usage": "declarations DIR [--product NAME]"
+        },
+        {
+          "available": true,
+          "effect": "read",
+          "exitCodes": {
+            "0": "command completed",
+            "1": "execution failed",
+            "2": "valid report with violations"
+          },
+          "external": false,
+          "hidden": false,
+          "id": "preflight",
+          "input": {
+            "constraints": [],
+            "operands": [
+              {
+                "name": "DIR",
+                "required": true,
+                "summary": "Product repository.",
+                "variadic": false
+              }
+            ],
+            "options": [
+              {
+                "argument": {
+                  "name": "NAME",
+                  "type": "string"
+                },
+                "conflictsWith": [],
+                "long": "--product",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "Product name; defaults to the directory name."
+              },
+              {
+                "argument": {
+                  "name": "SHA",
+                  "pattern": "^[0-9a-f]{40}$",
+                  "type": "string"
+                },
+                "conflictsWith": [],
+                "hidden": true,
+                "long": "--socle-sha",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "Socle commit to pin instead of this checkout's HEAD (trials and tests)."
+              },
+              {
+                "argument": {
+                  "name": "TAG",
+                  "type": "string"
+                },
+                "conflictsWith": [],
+                "hidden": true,
+                "long": "--socle-tag",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "Socle tag written next to --socle-sha."
+              },
+              {
+                "conflictsWith": [],
+                "long": "--docs-contract",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "Refuse prose in docs/ and a CLI reference outside docs/cli.md, instead of noting them."
+              }
+            ],
+            "passthrough": false,
+            "synopsis": "preflight DIR [--product NAME] [--docs-contract]"
+          },
+          "outputMode": "json-envelope",
+          "outputSchema": {
+            "additionalProperties": false,
+            "properties": {
+              "checks": {
+                "items": {
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    },
+                    "scope": {
+                      "enum": [
+                        "conventions",
+                        "release"
+                      ]
+                    },
+                    "status": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "message",
+                    "scope"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "files": {
+                "items": {
+                  "properties": {
+                    "action": {
+                      "enum": [
+                        "create",
+                        "update",
+                        "same"
+                      ]
+                    },
+                    "diff": {
+                      "type": "string"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "scope": {
+                      "enum": [
+                        "conventions",
+                        "release"
+                      ]
+                    },
+                    "seeded": {
+                      "type": "boolean"
+                    },
+                    "touches": {
+                      "enum": [
+                        "prose",
+                        "pin",
+                        "mechanism"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "action",
+                    "scope"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "pinned": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "preflight": {
+                "items": {
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    },
+                    "scope": {
+                      "enum": [
+                        "conventions",
+                        "release"
+                      ]
+                    },
+                    "status": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "message",
+                    "scope"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "product": {
+                "type": "string"
+              },
+              "project": {
+                "type": "string"
+              },
+              "ready": {
+                "type": "boolean"
+              },
+              "socle": {
+                "properties": {
+                  "sha": {
+                    "type": "string"
+                  },
+                  "tag": {
+                    "type": "string"
+                  },
+                  "version": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "version",
+                  "tag",
+                  "sha"
+                ],
+                "type": "object"
+              },
+              "valid": {
+                "type": "boolean"
+              },
+              "violations": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "ready",
+              "valid",
+              "product",
+              "project",
+              "socle",
+              "pinned",
+              "checks",
+              "files",
+              "preflight",
+              "violations"
+            ],
+            "type": "object"
+          },
+          "pattern": [
+            "preflight"
+          ],
+          "purpose": "Check, then report what the release workflow would refuse of the next tag; exit 2 when not ready.",
+          "usage": "preflight DIR [--product NAME] [--docs-contract]"
+        },
+        {
+          "available": true,
+          "effect": {
+            "apply": "commit",
+            "plan": "preview"
+          },
+          "exitCodes": {
+            "0": "command completed",
+            "1": "execution failed",
+            "2": "valid report with violations"
+          },
+          "external": false,
+          "hidden": false,
+          "id": "cut",
+          "input": {
+            "constraints": [
+              {
+                "kind": "requires",
+                "options": [
+                  "--message",
+                  "--tag"
+                ]
+              }
+            ],
+            "operands": [
+              {
+                "name": "DIR",
+                "required": true,
+                "summary": "Product repository.",
+                "variadic": false
+              },
+              {
+                "name": "VERSION",
+                "required": true,
+                "summary": "The version this release carries, X.Y.Z.",
+                "variadic": false
+              }
+            ],
+            "options": [
+              {
+                "argument": {
+                  "name": "NAME",
+                  "type": "string"
+                },
+                "conflictsWith": [],
+                "long": "--product",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "Product name; defaults to the directory name."
+              },
+              {
+                "argument": {
+                  "choices": [
+                    "maelys-release",
+                    "custom",
+                    "none"
+                  ],
+                  "name": "MECHANISM",
+                  "type": "string"
+                },
+                "conflictsWith": [],
+                "long": "--mechanism",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "How the product publishes when it carries no release.yml yet."
+              },
+              {
+                "conflictsWith": [],
+                "long": "--tag",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "The second stop: read the merged pull request and sign the tag."
+              },
+              {
+                "argument": {
+                  "name": "FILE",
+                  "type": "string"
+                },
+                "conflictsWith": [],
+                "long": "--message",
+                "repeatable": false,
+                "required": false,
+                "requires": [
+                  "--tag"
+                ],
+                "summary": "File holding the tag's annotation; the CHANGELOG entry of the version by default."
+              },
+              {
+                "argument": {
+                  "maximum": 240,
+                  "minimum": 1,
+                  "name": "MINUTES",
+                  "type": "integer"
+                },
+                "conflictsWith": [],
+                "default": "30",
+                "long": "--timeout",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "Minutes to wait for the checks of a commit."
+              },
+              {
+                "argument": {
+                  "maximum": 300,
+                  "minimum": 5,
+                  "name": "SECONDS",
+                  "type": "integer"
+                },
+                "conflictsWith": [],
+                "default": "15",
+                "hidden": true,
+                "long": "--poll",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "Seconds between two readings of the checks."
+              },
+              {
+                "conflictsWith": [],
+                "long": "--apply",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "Apply the reviewed plan instead of only planning it."
+              }
+            ],
+            "passthrough": false,
+            "synopsis": "cut DIR VERSION [--product NAME] [--mechanism MECHANISM] [--tag] [--message FILE] [--timeout MINUTES] [--apply]"
+          },
+          "outputMode": "json-envelope",
+          "outputSchema": {
+            "additionalProperties": false,
+            "properties": {
+              "base": {
+                "type": "string"
+              },
+              "branch": {
+                "type": "string"
+              },
+              "changelog": {
+                "type": "string"
+              },
+              "checks": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "conclusion": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "status",
+                    "conclusion"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "commit": {
+                "type": "string"
+              },
+              "gate": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "message"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "mode": {
+                "enum": [
+                  "plan",
+                  "apply"
+                ]
+              },
+              "next": {
+                "type": "string"
+              },
+              "previousVersion": {
+                "type": "string"
+              },
+              "product": {
+                "type": "string"
+              },
+              "project": {
+                "type": "string"
+              },
+              "pullRequest": {
+                "additionalProperties": false,
+                "properties": {
+                  "number": {
+                    "type": "integer"
+                  },
+                  "state": {
+                    "type": "string"
+                  },
+                  "url": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "number",
+                  "url",
+                  "state"
+                ],
+                "type": "object"
+              },
+              "pushed": {
+                "type": "boolean"
+              },
+              "ready": {
+                "type": "boolean"
+              },
+              "regenerated": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "repository": {
+                "type": "string"
+              },
+              "stage": {
+                "enum": [
+                  "open",
+                  "tag"
+                ]
+              },
+              "tag": {
+                "type": "string"
+              },
+              "verified": {
+                "type": "boolean"
+              },
+              "version": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "mode",
+              "stage",
+              "product",
+              "project",
+              "repository",
+              "version",
+              "tag",
+              "branch",
+              "base",
+              "gate",
+              "checks",
+              "ready"
+            ],
+            "type": "object"
+          },
+          "pattern": [
+            "cut"
+          ],
+          "purpose": "Open the release of a version, then sign its tag on the merge commit whose checks passed; plan without --apply.",
+          "usage": "cut DIR VERSION [--product NAME] [--mechanism MECHANISM] [--tag] [--message FILE] [--timeout MINUTES] [--apply]"
+        },
+        {
+          "available": true,
+          "effect": {
+            "apply": "apply",
+            "plan": "preview"
+          },
+          "exitCodes": {
+            "0": "command completed",
+            "1": "execution failed",
+            "2": "valid report with violations"
+          },
+          "external": false,
+          "hidden": false,
+          "id": "dependencies",
+          "input": {
+            "constraints": [],
+            "operands": [
+              {
+                "name": "DIR",
+                "required": true,
+                "summary": "Product repository.",
+                "variadic": false
+              }
+            ],
+            "options": [
+              {
+                "argument": {
+                  "name": "NAME",
+                  "type": "string"
+                },
+                "conflictsWith": [],
+                "long": "--product",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "Product name; defaults to the directory name."
+              },
+              {
+                "argument": {
+                  "name": "DIR",
+                  "type": "string"
+                },
+                "conflictsWith": [],
+                "long": "--directory",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "Where the checkouts go; ~/.cache/maelys-release/dependencies/PRODUCT by default."
+              },
+              {
+                "conflictsWith": [],
+                "long": "--apply",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "Apply the reviewed plan instead of only planning it."
+              }
+            ],
+            "passthrough": false,
+            "synopsis": "dependencies DIR [--product NAME] [--directory DIR] [--apply]"
+          },
+          "outputMode": "json-envelope",
+          "outputSchema": {
+            "additionalProperties": false,
+            "properties": {
+              "blocked": {
+                "type": "boolean"
+              },
+              "declared": {
+                "type": "boolean"
+              },
+              "dependencies": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "action": {
+                      "enum": [
+                        "clone",
+                        "refresh",
+                        "same",
+                        "blocked"
+                      ]
+                    },
+                    "commit": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "previous": {
+                      "type": "string"
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "repository": {
+                      "type": "string"
+                    },
+                    "submodules": {
+                      "enum": [
+                        "",
+                        "recursive"
+                      ]
+                    },
+                    "tag": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "tag",
+                    "commit",
+                    "repository",
+                    "path",
+                    "action"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "directory": {
+                "type": "string"
+              },
+              "mode": {
+                "enum": [
+                  "plan",
+                  "apply"
+                ]
+              },
+              "notes": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "product": {
+                "type": "string"
+              },
+              "project": {
+                "type": "string"
+              },
+              "variable": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "mode",
+              "product",
+              "project",
+              "directory",
+              "variable",
+              "declared",
+              "dependencies",
+              "notes",
+              "blocked"
+            ],
+            "type": "object"
+          },
+          "pattern": [
+            "dependencies"
+          ],
+          "purpose": "Materialise the product's pinned dependencies at their commits in one directory apart from any working copy, refreshing what is already there; plan without --apply.",
+          "usage": "dependencies DIR [--product NAME] [--directory DIR] [--apply]"
+        },
+        {
+          "available": true,
+          "effect": "execute",
+          "exitCodes": {
+            "0": "command completed",
+            "1": "execution failed",
+            "2": "valid report with violations"
+          },
+          "external": false,
+          "hidden": false,
+          "id": "protect",
+          "input": {
+            "constraints": [],
+            "operands": [
+              {
+                "name": "DIR",
+                "required": true,
+                "summary": "Product repository.",
+                "variadic": false
+              }
+            ],
+            "options": [
+              {
+                "conflictsWith": [],
+                "long": "--apply",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "Write the protection instead of only reporting it."
+              },
+              {
+                "conflictsWith": [],
+                "long": "--allow-lock",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "Require names no merged pull request has produced yet."
+              },
+              {
+                "conflictsWith": [],
+                "long": "--without-legs",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "Propose the required list minus the socle's matrix legs: the narrowing that comes before an adoption renames them."
+              }
+            ],
+            "passthrough": false,
+            "synopsis": "protect DIR [--apply] [--allow-lock] [--without-legs]"
+          },
+          "outputMode": "json-envelope",
+          "outputSchema": {
+            "additionalProperties": false,
+            "properties": {
+              "applied": {
+                "type": "boolean"
+              },
+              "branch": {
+                "type": "string"
+              },
+              "caller": {
+                "type": "string"
+              },
+              "dropped": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "fromTag": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "gone": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "missingFromRuns": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "narrowing": {
+                "type": "boolean"
+              },
+              "note": {
+                "type": "string"
+              },
+              "observed": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "proposed": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "protected": {
+                "type": "boolean"
+              },
+              "protectedBy": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "pullRequests": {
+                "type": "integer"
+              },
+              "replaced": {
+                "items": {
+                  "properties": {
+                    "by": {
+                      "type": "string"
+                    },
+                    "required": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "required",
+                    "by"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "repository": {
+                "type": "string"
+              },
+              "required": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "requiredButNeverRun": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "ruleset": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "seenOnSome": {
+                "type": "object"
+              },
+              "socleContexts": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "repository",
+              "branch",
+              "proposed"
+            ],
+            "type": "object"
+          },
+          "pattern": [
+            "protect"
+          ],
+          "purpose": "Report what the default branch should require, derived from the workflows and the runs it carries rather than typed by hand; --apply writes it.",
+          "usage": "protect DIR [--apply] [--allow-lock] [--without-legs]"
+        },
+        {
+          "available": true,
+          "effect": "execute",
+          "exitCodes": {
+            "0": "command completed",
+            "1": "execution failed",
+            "2": "valid report with violations"
+          },
+          "external": false,
+          "hidden": false,
+          "id": "rehearse",
+          "input": {
+            "constraints": [
+              {
+                "kind": "requires",
+                "options": [
+                  "--channel",
+                  "--tag"
+                ]
+              },
+              {
+                "kind": "requires",
+                "options": [
+                  "--tag",
+                  "--channel"
+                ]
+              }
+            ],
+            "operands": [
+              {
+                "name": "DIR",
+                "required": true,
+                "summary": "Product repository.",
+                "variadic": false
+              },
+              {
+                "choices": [
+                  "linux-x86_64",
+                  "linux-arm64"
+                ],
+                "name": "TARGET",
+                "required": false,
+                "summary": "linux-x86_64 or linux-arm64; absent with --channel.",
+                "type": "choice",
+                "variadic": false
+              }
+            ],
+            "options": [
+              {
+                "argument": {
+                  "name": "NAME",
+                  "type": "string"
+                },
+                "conflictsWith": [],
+                "long": "--product",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "Product name; defaults to the directory name."
+              },
+              {
+                "argument": {
+                  "name": "SHA",
+                  "pattern": "^[0-9a-f]{40}$",
+                  "type": "string"
+                },
+                "conflictsWith": [],
+                "hidden": true,
+                "long": "--socle-sha",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "Socle commit to pin instead of this checkout's HEAD (trials and tests)."
+              },
+              {
+                "argument": {
+                  "name": "TAG",
+                  "type": "string"
+                },
+                "conflictsWith": [],
+                "hidden": true,
+                "long": "--socle-tag",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "Socle tag written next to --socle-sha."
+              },
+              {
+                "argument": {
+                  "name": "IMAGE",
+                  "type": "string"
+                },
+                "conflictsWith": [],
+                "default": "ubuntu:26.04",
+                "long": "--image",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "Container image."
+              },
+              {
+                "argument": {
+                  "name": "COMMAND",
+                  "type": "string"
+                },
+                "conflictsWith": [],
+                "default": "bash scripts/package-release.sh TARGET",
+                "long": "--package-command",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "Command producing dist/; TARGET is substituted."
+              },
+              {
+                "conflictsWith": [],
+                "long": "--check",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "Run the check command instead of packaging; dist/ is left alone."
+              },
+              {
+                "argument": {
+                  "name": "COMMAND",
+                  "type": "string"
+                },
+                "conflictsWith": [],
+                "default": "make check",
+                "long": "--check-command",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "Command run with --check."
+              },
+              {
+                "conflictsWith": [],
+                "long": "--keep",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "Keep the container for inspection."
+              },
+              {
+                "argument": {
+                  "name": "NAME",
+                  "type": "string"
+                },
+                "conflictsWith": [],
+                "long": "--channel",
+                "repeatable": false,
+                "required": false,
+                "requires": [
+                  "--tag"
+                ],
+                "summary": "Run the product's publish script against a published release instead of a build; needs --tag."
+              },
+              {
+                "argument": {
+                  "name": "TAG",
+                  "type": "string"
+                },
+                "conflictsWith": [],
+                "long": "--tag",
+                "repeatable": false,
+                "required": false,
+                "requires": [
+                  "--channel"
+                ],
+                "summary": "The published tag the channel carries."
+              }
+            ],
+            "passthrough": false,
+            "synopsis": "rehearse DIR [TARGET] [--product NAME] [--image IMAGE] [--package-command COMMAND] [--check] [--check-command COMMAND] [--keep] [--channel NAME] [--tag TAG]"
+          },
+          "outputMode": "json-envelope",
+          "outputSchema": {
+            "additionalProperties": false,
+            "properties": {
+              "artifacts": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "assets": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "channel": {
+                "type": "string"
+              },
+              "command": {
+                "type": "string"
+              },
+              "differs": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "image": {
+                "type": "string"
+              },
+              "marker": {
+                "type": "object"
+              },
+              "matches": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "mode": {
+                "enum": [
+                  "package",
+                  "check"
+                ]
+              },
+              "platform": {
+                "type": "string"
+              },
+              "product": {
+                "type": "string"
+              },
+              "recorded": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "repository": {
+                "type": "string"
+              },
+              "tag": {
+                "type": "string"
+              },
+              "target": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "product"
+            ],
+            "type": "object"
+          },
+          "pattern": [
+            "rehearse"
+          ],
+          "purpose": "Replay the Linux build job of the release in a Docker container on a copy of the working tree, make check with --check, or a channel's publish script against a published release with --channel.",
+          "usage": "rehearse DIR [TARGET] [--product NAME] [--image IMAGE] [--package-command COMMAND] [--check] [--check-command COMMAND] [--keep] [--channel NAME] [--tag TAG]"
+        },
+        {
+          "available": true,
+          "effect": "execute",
+          "exitCodes": {
+            "0": "command completed",
+            "1": "execution failed",
+            "2": "valid report with violations"
+          },
+          "external": false,
+          "hidden": false,
+          "id": "render",
+          "input": {
+            "constraints": [],
+            "operands": [
+              {
+                "name": "TEMPLATE",
+                "required": true,
+                "summary": "Template file.",
+                "variadic": false
+              },
+              {
+                "name": "OUTPUT",
+                "required": true,
+                "summary": "File written.",
+                "variadic": false
+              },
+              {
+                "name": "KEY=VALUE",
+                "required": false,
+                "summary": "Placeholder values.",
+                "variadic": true
+              }
+            ],
+            "options": [],
+            "passthrough": false,
+            "synopsis": "render TEMPLATE OUTPUT [KEY=VALUE...]"
+          },
+          "outputMode": "json-envelope",
+          "outputSchema": {
+            "additionalProperties": false,
+            "properties": {
+              "output": {
+                "type": "string"
+              },
+              "placeholders": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "template": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "template",
+              "output",
+              "placeholders"
+            ],
+            "type": "object"
+          },
+          "pattern": [
+            "render"
+          ],
+          "purpose": "Replace @KEY@ placeholders of a template, refusing to leave one unrendered.",
+          "usage": "render TEMPLATE OUTPUT [KEY=VALUE...]"
+        },
+        {
+          "available": true,
+          "effect": {
+            "apply": "commit",
+            "plan": "preview"
+          },
+          "exitCodes": {
+            "0": "command completed",
+            "1": "execution failed",
+            "2": "valid report with violations"
+          },
+          "external": false,
+          "hidden": false,
+          "id": "tap",
+          "input": {
+            "constraints": [],
+            "operands": [
+              {
+                "name": "PRODUCT",
+                "required": true,
+                "summary": "Formula name.",
+                "variadic": false
+              },
+              {
+                "name": "TAG",
+                "required": true,
+                "summary": "Release tag vX.Y.Z.",
+                "variadic": false
+              },
+              {
+                "name": "FORMULA",
+                "required": true,
+                "summary": "Rendered formula file.",
+                "variadic": false
+              }
+            ],
+            "options": [
+              {
+                "conflictsWith": [],
+                "long": "--skip-style",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "Do not run brew style."
+              },
+              {
+                "conflictsWith": [],
+                "long": "--apply",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "Apply the reviewed plan instead of only planning it."
+              }
+            ],
+            "passthrough": false,
+            "synopsis": "tap PRODUCT TAG FORMULA [--skip-style] [--apply]"
+          },
+          "outputMode": "json-envelope",
+          "outputSchema": {
+            "additionalProperties": false,
+            "properties": {
+              "changed": {
+                "type": "boolean"
+              },
+              "commit": {
+                "type": "string"
+              },
+              "diff": {
+                "type": "string"
+              },
+              "formula": {
+                "type": "string"
+              },
+              "install": {
+                "type": "string"
+              },
+              "mode": {
+                "enum": [
+                  "plan",
+                  "apply"
+                ]
+              },
+              "product": {
+                "type": "string"
+              },
+              "repository": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "mode",
+              "product",
+              "version",
+              "repository",
+              "formula",
+              "changed"
+            ],
+            "type": "object"
+          },
+          "pattern": [
+            "tap"
+          ],
+          "purpose": "Publish a rendered formula into the Homebrew tap with a signed commit; plan without --apply.",
+          "usage": "tap PRODUCT TAG FORMULA [--skip-style] [--apply]"
+        },
+        {
+          "available": true,
+          "effect": "execute",
+          "exitCodes": {
+            "0": "command completed",
+            "1": "execution failed",
+            "2": "valid report with violations"
+          },
+          "external": false,
+          "hidden": false,
+          "id": "self-test",
+          "input": {
+            "constraints": [],
+            "operands": [],
+            "options": [
+              {
+                "conflictsWith": [],
+                "long": "--verbose",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "Report every test."
+              }
+            ],
+            "passthrough": false,
+            "synopsis": "self-test [--verbose]"
+          },
+          "outputMode": "json-envelope",
+          "outputSchema": {
+            "additionalProperties": false,
+            "properties": {
+              "passed": {
+                "type": "boolean"
+              },
+              "tests": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "tests",
+              "passed"
+            ],
+            "type": "object"
+          },
+          "pattern": [
+            "self-test"
+          ],
+          "purpose": "Run the socle's own tests.",
+          "usage": "self-test [--verbose]"
+        },
+        {
+          "available": true,
+          "effect": "execute",
+          "exitCodes": {
+            "0": "command completed",
+            "1": "execution failed",
+            "2": "valid report with violations"
+          },
+          "external": false,
+          "hidden": false,
+          "id": "vendor",
+          "input": {
+            "constraints": [],
+            "operands": [],
+            "options": [],
+            "passthrough": false,
+            "synopsis": "vendor"
+          },
+          "outputMode": "json-envelope",
+          "outputSchema": {
+            "additionalProperties": false,
+            "properties": {
+              "changed": {
+                "type": "boolean"
+              },
+              "commit": {
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              },
+              "sha256": {
+                "type": "string"
+              },
+              "tag": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "tag",
+              "commit",
+              "sha256",
+              "path",
+              "changed"
+            ],
+            "type": "object"
+          },
+          "pattern": [
+            "vendor"
+          ],
+          "purpose": "Refresh bin/maelys_cli.py from maelys-cli at dependencies/maelys-cli.pin and record its digest.",
+          "usage": "vendor"
+        }
+      ],
+      "contract": "agent-cli/v2",
+      "globalOptions": [
+        {
+          "argument": {
+            "choices": [
+              "text",
+              "json",
+              "jsonl"
+            ],
+            "name": "VALUE",
+            "type": "choice"
+          },
+          "conflictsWith": [],
+          "default": "text",
+          "long": "--format",
+          "repeatable": false,
+          "required": false,
+          "requires": [],
+          "summary": "Select text for humans, json for one envelope or jsonl for records."
+        },
+        {
+          "conflictsWith": [],
+          "long": "--json",
+          "repeatable": false,
+          "required": false,
+          "requires": [],
+          "summary": "Exact alias of --format json."
+        },
+        {
+          "conflictsWith": [],
+          "long": "--compact",
+          "repeatable": false,
+          "required": false,
+          "requires": [],
+          "summary": "Render JSON on a single line."
+        },
+        {
+          "conflictsWith": [],
+          "long": "--pretty",
+          "repeatable": false,
+          "required": false,
+          "requires": [],
+          "summary": "--pretty=false selects compact JSON."
+        },
+        {
+          "conflictsWith": [],
+          "long": "--non-interactive",
+          "repeatable": false,
+          "required": false,
+          "requires": [],
+          "summary": "Never prompt; fail instead of asking a question."
+        },
+        {
+          "argument": {
+            "choices": [
+              "auto",
+              "always",
+              "never"
+            ],
+            "name": "VALUE",
+            "type": "choice"
+          },
+          "conflictsWith": [],
+          "default": "auto",
+          "long": "--color",
+          "repeatable": false,
+          "required": false,
+          "requires": [],
+          "summary": "Control ANSI colors on terminals."
+        },
+        {
+          "argument": {
+            "choices": [
+              "auto",
+              "always",
+              "never"
+            ],
+            "name": "VALUE",
+            "type": "choice"
+          },
+          "conflictsWith": [],
+          "default": "auto",
+          "long": "--progress",
+          "repeatable": false,
+          "required": false,
+          "requires": [],
+          "summary": "Show the progress of a long run on stderr in text mode: auto only when stderr is a terminal."
+        },
+        {
+          "conflictsWith": [],
+          "long": "--verbose",
+          "repeatable": false,
+          "required": false,
+          "requires": [],
+          "summary": "Add the details of the run on stderr in text mode; silent in JSON."
+        },
+        {
+          "argument": {
+            "choices": [
+              "auto",
+              "always",
+              "never"
+            ],
+            "name": "VALUE",
+            "type": "choice"
+          },
+          "conflictsWith": [],
+          "default": "auto",
+          "long": "--pager",
+          "repeatable": false,
+          "required": false,
+          "requires": [],
+          "summary": "Page the text rendering when stdout is a terminal; never in a pipe, in JSON or under --non-interactive."
+        },
+        {
+          "argument": {
+            "name": "NAME",
+            "type": "string"
+          },
+          "conflictsWith": [],
+          "long": "--field",
+          "repeatable": false,
+          "required": false,
+          "requires": [],
+          "summary": "Render one top-level member of data instead of the whole result, by the text or jsonl rendering rules."
+        },
+        {
+          "conflictsWith": [],
+          "long": "--help",
+          "repeatable": false,
+          "required": false,
+          "requires": [],
+          "summary": "Show the help of the selected command."
+        }
+      ],
+      "invariants": [
+        "usage and agent discovery share one catalog",
+        "transactional commands plan by default and require --apply",
+        "stdout carries success data; stderr carries failures",
+        "--json and --format json are identical",
+        "unknown or duplicated options are refused"
+      ],
+      "kind": "catalog",
+      "output": {
+        "contract": "agent-cli/v2",
+        "schemaVersion": 2,
+        "stderr": "diagnostics and failure envelopes",
+        "stdout": "success data only; protocol streams are explicit exceptions"
+      },
+      "product": "Maelys Release",
+      "program": "maelys-release",
+      "schemaVersion": 1
+    }
+  }
+}

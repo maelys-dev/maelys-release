@@ -53,5 +53,9 @@ the fleet at each product's next adoption.
   the product contract.
 - **Use `git -C /abs/path` for every git call**, never a `cd` chain: a script
   that changed directory once tagged the wrong repository.
+- **`docs/cli.md` and `docs/cli-contract.json` are generated**, from
+  `describe`, by maelys-cli's generator at `dependencies/maelys-cli.pin`, as
+  the socle generates a product's. A change to a command changes them in the
+  same commit; `check.yml` refuses a drift.
 - This repository publishes no artifact. Its release is the signed tag alone,
   which products pin by commit in their `release.yml`.
