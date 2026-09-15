@@ -5,8 +5,10 @@ The contract lives in maelys-dev/agent-cli-spec; dependencies/agent-cli-spec.pin
 names the tag and commit this program is held to. The kit of that
 repository drives the program from the outside; every one of its checks
 must pass. AGENT_CLI_SPEC_DIR names a checkout to use; otherwise
-../agent-cli-spec when it is at the pinned commit, otherwise a clone at
-the pin.
+$MAELYS_DEPENDENCIES_DIR/agent-cli-spec when it is at the pinned commit,
+otherwise a clone at the pin. Never ../agent-cli-spec: the socle declares
+[dependencies] apart, as it asks every product to, and a working copy next
+door is whatever its developer left there.
 """
 from __future__ import annotations
 
@@ -28,8 +30,9 @@ def spec_checkout() -> pathlib.Path:
     named = os.environ.get("AGENT_CLI_SPEC_DIR")
     if named:
         return pathlib.Path(named)
-    sibling = ROOT.parent / "agent-cli-spec"
-    if (sibling / "conformance" / "run.py").is_file():
+    root = os.environ.get("MAELYS_DEPENDENCIES_DIR")
+    sibling = pathlib.Path(root) / "agent-cli-spec" if root else None
+    if sibling and (sibling / "conformance" / "run.py").is_file():
         head = subprocess.run(["git", "-C", str(sibling), "rev-parse", "HEAD"], check=False, text=True,
                               stdout=subprocess.PIPE).stdout.strip()
         if head == commit:

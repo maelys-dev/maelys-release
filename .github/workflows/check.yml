@@ -36,6 +36,11 @@ jobs:
           bin/maelys-release version --json --compact
       - name: Self-test on a fixture
         run: bin/maelys-release self-test
+      - name: The socle follows its own conventions
+        # What it verifies in every product, verified here: its managed
+        # blocks, its declarations, its docs. It drifted from 0.16.0 to 0.57.0
+        # because nothing ran this on the repository that writes the rules.
+        run: bin/maelys-release check . --product maelys-release
       - name: The CLI reference follows describe
         if: runner.os == 'Linux'
         # The socle documents its own command line the way it documents a

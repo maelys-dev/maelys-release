@@ -351,6 +351,8 @@ class Declarations:
         self.prose: list[str] = []
         # Prose README.md links: a public README holds it until a site exists.
         self.readme_held: list[str] = []
+        # [ci] own: no shared CI is called, and no ci.yml is written.
+        self.own_ci = False
         self.checks: list[dict] = []
 
     @property
@@ -467,6 +469,7 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
     after_version = ""
     package: list[str] = []
     checks: list[tuple[str, str, str]] = []
+    own_ci = False
     unknown: list[str] = []
     section = ""
     for number, raw in enumerate(text.splitlines(), 1):
@@ -475,7 +478,7 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
             continue
         if line.startswith("["):
             if line in ("[targets]", "[manifest]", "[sbom]", "[runners]", "[dependencies]",
-                        "[commit]", "[channels]", "[gate]", "[cut]", "[package]", "[check]"):
+                        "[commit]", "[channels]", "[gate]", "[cut]", "[package]", "[check]", "[ci]"):
                 section = line[1:-1]
                 continue
             # A section this socle does not know is named and skipped, never
@@ -501,6 +504,13 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
             if not command.strip():
                 raise ValueError(f"[cut] after-version names no command at line {number}")
             after_version = command.strip()
+            continue
+        if section == "ci":
+            # Read by own_ci(), which the ci.yml rule needs before the rest of
+            # the file is parsed; validated here with everything else.
+            if line != "own":
+                raise ValueError(f"[ci] holds the single word 'own', not {line!r}, at line {number}")
+            own_ci = True
             continue
         if section == "check":
             # A leg of the product's own, run by the shared CI beside the
@@ -638,8 +648,11 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
         targets.append((name, runner))
     if section and not unknown and not targets and not manifest and not channels \
             and not gate and not after_version and not sbom and not runners and not apart \
-            and not commit_verification and not package and not checks:
+            and not commit_verification and not package and not checks and not own_ci:
         raise ValueError(f"{DECLARATION_FILE} declares no target, archive kind, channel, gate or cut command")
+    if own_ci and checks:
+        raise ValueError("[check] legs run from the ci.yml job that calls the shared CI, and [ci] own says"
+                         " this repository calls none: declare one or the other")
     known = [name for name, _ in targets] or list(SOCLE_TARGETS)
     for name in package:
         if name not in known:
@@ -647,6 +660,30 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
                              f" ({', '.join(known)})")
     return (targets, manifest, channels, channel_gates, sbom, macos_runner, runners, apart,
             commit_verification, gate, after_version, unknown, package, checks)
+
+
+def own_ci(project: pathlib.Path) -> bool:
+    """Whether maelys-release.conf declares `[ci] own`.
+
+    A repository whose CI is entirely its own calls no shared CI, and `check`
+    must not create a ci.yml for it nor warn that none calls check-product.yml.
+    The socle is the first: its CI lints the workflows it ships and runs its
+    own tests, and three `make check` legs mean nothing to a Python program
+    with no Makefile. A declaration, and not an exception for one name.
+    """
+    release = project / DECLARATION_FILE
+    if not release.is_file():
+        return False
+    section = ""
+    for raw in release.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("["):
+            section = line
+        elif section == "[ci]" and line == "own":
+            return True
+    return False
 
 
 def read_fuzz(decl: Declarations) -> None:
@@ -835,7 +872,15 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
                  " scripts/checkout-dependency.sh NAME and"
                  " scripts/checkout-dependencies.sh DESTINATION; delete these")
     ci = project / ".github" / "workflows" / "ci.yml"
-    if ci.is_file():
+    decl.own_ci = own_ci(project)
+    if decl.own_ci:
+        if ci.is_file() and CI_USES.search(ci.read_text(encoding="utf-8")):
+            decl.add("missing", f"{DECLARATION_FILE} declares [ci] own and .github/workflows/ci.yml calls the"
+                     " socle's check-product.yml: remove the one that is not true", "conventions")
+        else:
+            decl.add("ok", f"{DECLARATION_FILE} [ci] own: this repository's CI is its own and calls no shared"
+                     " CI; adopt writes no ci.yml", "conventions")
+    elif ci.is_file():
         text = ci.read_text(encoding="utf-8")
         if CI_USES.search(text):
             decl.calls_socle_ci = True
@@ -1678,7 +1723,7 @@ def stage(decl: Declarations, sha: str, tag: str) -> dict[str, tuple[str, bool]]
     # by itself can still run check-product.yml, which finds the socle from
     # the ci.yml line that calls it. A repository that publishes by nothing
     # at all keeps its workflows to itself.
-    if decl.mechanism == "none":
+    if decl.mechanism == "none" or decl.own_ci:
         return staged
     ci = decl.project / ".github" / "workflows" / "ci.yml"
     if not ci.is_file():
@@ -4538,17 +4583,27 @@ def sibling_readers(project: pathlib.Path, names: list[str]) -> list[tuple[str, 
         if path not in migrated:
             whole = project / path
             text_of = whole.read_text(encoding="utf-8", errors="replace") if whole.is_file() else ""
+            # A reusable workflow runs in the repository that calls it, not in
+            # the one that ships it: its lines describe its callers' layout.
+            # The socle's check-product.yml clones beside the product for the
+            # products that have not declared apart, and checking the socle
+            # against itself read those lines as the socle's own.
+            if path.startswith(".github/workflows/") and re.search(r"^\s*workflow_call\s*:", text_of, re.MULTILINE):
+                migrated[path] = None
             # One exemption per root, not one per file: a Makefile that reads
             # $MAELYS_DEPENDENCIES_DIR has migrated its pins and may still
             # take the socle from ../maelys-release, which is exactly where
             # two products stand. The socle's root is its own variable.
-            migrated[path] = (bool(DEPENDENCIES_READ.search(text_of)),
-                              bool(re.search(r"[$({\[\"']\s*" + SOCLE_VARIABLE
-                                             + r"|" + SOCLE_VARIABLE + r"\s*[?:+]?[=:]", text_of)))
+            else:
+                migrated[path] = (bool(DEPENDENCIES_READ.search(text_of)),
+                                  bool(re.search(r"[$({\[\"']\s*" + SOCLE_VARIABLE
+                                                 + r"|" + SOCLE_VARIABLE + r"\s*[?:+]?[=:]", text_of)))
         # The limit of the exemption, stated rather than hidden: a file that
         # reads the root and carries the fallback on ANOTHER line is silent
         # here. No product of the fleet is in that state today; the
         # one-line form, which is the one that has been written, is caught.
+        if migrated[path] is None:
+            continue
         match = sibling.search(text)
         root, variable = (migrated[path][1], SOCLE_VARIABLE) if match and match.group(1) == SOCLE_NAME \
             else (migrated[path][0], DEPENDENCIES_VARIABLE)

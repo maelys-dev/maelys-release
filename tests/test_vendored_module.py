@@ -3,7 +3,9 @@
 
 Two levels: offline, the digest recorded on line 3 of dependencies/maelys-cli.pin
 matches the copy; online, the file at the pinned commit matches the copy
-(../maelys-cli when it holds that commit, otherwise a depth-1 fetch).
+(MAELYS_CLI_DIR, or $MAELYS_DEPENDENCIES_DIR/maelys-cli, when it holds that
+commit, otherwise a depth-1 fetch). Never ../maelys-cli: the socle declares
+[dependencies] apart, as it asks every product to.
 """
 from __future__ import annotations
 
@@ -25,8 +27,10 @@ def pinned() -> tuple[str, str, str]:
 
 
 def file_at_pin(commit: str) -> bytes:
-    sibling = pathlib.Path(os.environ.get("MAELYS_CLI_DIR") or ROOT.parent / "maelys-cli")
-    if (sibling / ".git").exists():
+    named = os.environ.get("MAELYS_CLI_DIR") or (
+        os.environ.get("MAELYS_DEPENDENCIES_DIR") and f"{os.environ['MAELYS_DEPENDENCIES_DIR']}/maelys-cli")
+    sibling = pathlib.Path(named) if named else None
+    if sibling and (sibling / ".git").exists():
         shown = subprocess.run(["git", "-C", str(sibling), "show", f"{commit}:python/maelys_cli.py"],
                                check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         if shown.returncode == 0:

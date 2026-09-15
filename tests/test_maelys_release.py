@@ -1370,9 +1370,12 @@ class DocsContractTest(unittest.TestCase):
                          ["docs/free.md", "docs/mentioned.md"])
 
     def test_the_conditions_are_maelys_platforms(self) -> None:
-        platform = ROOT.parent / "maelys-platform" / "bin" / "maelys-platform"
-        if not platform.is_file():
-            self.skipTest("maelys-platform is not checked out beside this repository")
+        # Named, never guessed next door: a neighbour is whatever its
+        # developer left there, which is the rule this socle holds itself to.
+        named = os.environ.get("MAELYS_PLATFORM_DIR")
+        platform = pathlib.Path(named) / "bin" / "maelys-platform" if named else None
+        if not platform or not platform.is_file():
+            self.skipTest("MAELYS_PLATFORM_DIR names no maelys-platform checkout")
         text = platform.read_text(encoding="utf-8")
         self.assertIn(MODULE.VERIFIED_MARK.pattern, text)
         self.assertIn(MODULE.README_LINK.pattern, text)
@@ -4298,6 +4301,60 @@ class LegRenameTest(unittest.TestCase):
         here = MODULE.version_tuple((ROOT / "VERSION").read_text(encoding="utf-8").strip())
         self.assertFalse([entry for entry in MODULE.COMING if "renamed" in entry[2]
                           and MODULE.version_tuple(entry[0]) <= here])
+
+
+class OwnCiTest(unittest.TestCase):
+    """[ci] own, and the socle held to its own conventions.
+
+    check had never run on the repository that writes the rules: its managed
+    blocks dated from 0.16.0, it read its pins next door, and it had no ci.yml
+    because its CI is its own -- which nothing could declare.
+    """
+
+    def work(self) -> pathlib.Path:
+        work = pathlib.Path(tempfile.mkdtemp(prefix="maelys-release-own-ci."))
+        self.addCleanup(shutil.rmtree, work, True)
+        (work / ".github" / "workflows").mkdir(parents=True)
+        return work
+
+    def test_own_ci_writes_no_ci_yml_and_warns_of_none(self) -> None:
+        work = self.work()
+        (work / "maelys-release.conf").write_text("[ci]\nown\n")
+        decl = MODULE.read_declarations(work, "p", "custom")
+        self.assertTrue(decl.own_ci)
+        self.assertNotIn(".github/workflows/ci.yml", MODULE.stage(decl, "a" * 40, "v9.9.9"))
+        self.assertFalse([c for c in decl.checks if "does not call the socle's check-product.yml" in c["message"]])
+
+    def test_own_ci_and_a_call_to_the_shared_ci_contradict(self) -> None:
+        work = self.work()
+        (work / "maelys-release.conf").write_text("[ci]\nown\n")
+        (work / ".github" / "workflows" / "ci.yml").write_text(
+            "jobs:\n  check:\n    uses: maelys-dev/maelys-release/.github/workflows/check-product.yml@"
+            + "a" * 40 + " # v1\n")
+        decl = MODULE.read_declarations(work, "p", "custom")
+        self.assertTrue([c for c in decl.checks if c["status"] == "missing" and "[ci] own" in c["message"]])
+
+    def test_the_section_holds_one_word_and_excludes_legs(self) -> None:
+        with self.assertRaises(ValueError):
+            MODULE.parse_release("[ci]\nshared\n")
+        with self.assertRaises(ValueError):
+            MODULE.parse_release("[ci]\nown\n\n[check]\nx linux true\n")
+
+    def test_a_reusable_workflow_describes_its_callers_not_its_repository(self) -> None:
+        work = self.work()
+        subprocess.run(["git", "init", "-q"], cwd=work, check=True)
+        (work / ".github" / "workflows" / "shared.yml").write_text(
+            "on:\n  workflow_call:\njobs:\n  a:\n    steps:\n      - run: sh scripts/checkout-dependency.sh \"$name\"\n")
+        (work / ".github" / "workflows" / "ci.yml").write_text(
+            "on: [push]\njobs:\n  a:\n    steps:\n      - run: sh scripts/checkout-dependency.sh \"$name\"\n")
+        subprocess.run(["git", "add", "-A"], cwd=work, check=True)
+        found = [path for path, *_ in MODULE.sibling_readers(work, ["x"])]
+        self.assertEqual(found, [".github/workflows/ci.yml"])
+
+    def test_the_socle_checks_itself_in_its_ci(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "check.yml").read_text(encoding="utf-8")
+        self.assertIn("bin/maelys-release check . --product maelys-release", workflow)
+        self.assertIn("[ci]", (ROOT / "maelys-release.conf").read_text(encoding="utf-8"))
 
 
 class LegAliasTest(unittest.TestCase):
