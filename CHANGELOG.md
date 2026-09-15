@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.57.0 — 2026-09-14
+## 0.57.0 — 2026-09-15
 
 - **A rename no longer narrows a protection.** `check-product.yml` reports
   the legs' names before 0.54.0 again, as aliases: `check (ubuntu-26.04)`,
