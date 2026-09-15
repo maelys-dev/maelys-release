@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.58.0 — 2026-09-15
+## 0.58.0 — 2026-09-16
 
 - **The damage of the whole-protection write was wider than 0.57.1 said,
   and the socle says so now.** From 0.43.0 to 0.57.0, `protect --apply` PUT
