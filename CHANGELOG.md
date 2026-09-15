@@ -40,7 +40,15 @@
   to write no `ci.yml` and `check` to ask for no call to the shared CI; and
   `check.yml` runs `check .` so it cannot drift again. A reusable workflow is
   no longer searched as the layout of the repository that ships it.
-- **Impact.** maelys-http, maelys-oci, agent-cli-spec, maelys-datalog,
+- **Each Impact line names whom it asks a gesture**, in words `adopt`
+  evaluates on the product: `[asks: nothing]`, or selectors such as
+  `channels`, `pins`, `old-legs`. `adopt` marks each line `ASKS`, `-` or `?`
+  for this product and returns `current` in its JSON: true when nothing since
+  the pin asks it anything. A product — or maelys-platform — can be current
+  in the socle's sense without being on its last version. Asked by maelys-cli,
+  which adopted 0.56.0 because it was told to and not because a line asked it.
+  Lines from 0.48.0 on carry the marker; older ones are `?`.
+- **Impact.** [asks: old-legs] maelys-http, maelys-oci, agent-cli-spec, maelys-datalog,
   maelys-system — still requiring the old names: adopt, merge, then
   `protect . --apply`; do not narrow. Everyone else: three more short jobs on
   each pull request until a later version removes them, announced before; the
@@ -70,7 +78,7 @@
   that README is public or whether a site exists. On maelys-cli, `check` and
   `maelys-platform docs` now give the same answer: two verified references,
   five pages held.
-- **Impact.** A product that declares `[check]`: adopt, merge, then
+- **Impact.** [asks: nothing] A product that declares `[check]`: adopt, merge, then
   `protect --apply`. A product with a verified reference: its note becomes an
   `ok`, at the pinned socle that carries this. Everyone else: nothing; no
   managed text changes.
@@ -123,7 +131,7 @@
   runner lines in another order than the writer that regenerates it, which
   would have drifted any product that declared a runner against its own new
   file. Both paths now go through one writer.
-- **Impact.** **Superseded by 0.57.0 for the rename: adopt, merge, `protect . --apply`; never narrow.** Everyone mid-rename: widen only after the adoption is merged —
+- **Impact.** [asks: nothing] **Superseded by 0.57.0 for the rename: adopt, merge, `protect . --apply`; never narrow.** Everyone mid-rename: widen only after the adoption is merged —
   `protect --apply` now enforces it. maelys-http: `[package]` lets you verify
   on three targets again. Everyone else: nothing, and the managed blocks
   change prose only.
@@ -151,7 +159,7 @@
   organisation is refused before anything is sent.
 - **`adopt --apply` names the order when it refuses.** It still refuses to
   make a required context disappear, and now says narrow, adopt, widen.
-- **Impact.** **Superseded by 0.57.0 for the rename: adopt, merge, `protect . --apply`; never narrow.** Every product on the shared CI, and it is the one version this
+- **Impact.** [asks: old-legs] **Superseded by 0.57.0 for the rename: adopt, merge, `protect . --apply`; never narrow.** Every product on the shared CI, and it is the one version this
   year that asks something of all of them: **before adopting, run `protect
   . --without-legs --apply`; adopt; then `protect . --apply`.** Skip the
   first and `adopt --apply` refuses. maelys-cli, whose ruleset requires only
@@ -218,7 +226,7 @@
 - **The leg rename moves from 0.53.0 to 0.54.0**, in the open, because this
   version carries five other things and two matrix changes in one release
   would be two rounds of branch protection for every product.
-- **Impact.** Everyone: nothing to do, and one thing to know — the neighbour
+- **Impact.** [asks: nothing] Everyone: nothing to do, and one thing to know — the neighbour
   search now names `../maelys-release`, so a Makefile that reads it gets a
   note. Private repositories forbidding hosted runners: `[runners]` now
   reaches every job of a release. Products with pinned dependencies: a pin
@@ -259,7 +267,7 @@
   with an empty `environment:` would have been found out at somebody's
   release. A throwaway workflow on a branch answered it: the job started at
   once, left no pending deployment, and created no environment.
-- **Impact.** **Superseded by 0.57.0 for the rename: adopt, merge, `protect . --apply`; never narrow.** Products on the shared CI: read the coming note — the leg
+- **Impact.** [asks: nothing] **Superseded by 0.57.0 for the rename: adopt, merge, `protect . --apply`; never narrow.** Products on the shared CI: read the coming note — the leg
   rename changes every required context, and the order is narrow, adopt,
   widen. Products with a channel: say `none` or `reviewer` in its line, and
   the note becomes an `ok`; saying nothing keeps today's behaviour. Everyone
@@ -284,7 +292,7 @@
   open; the adoption guard in 0.51.1; and now the command that should have
   known first. The lesson each time was the same and the code was in a new
   place each time.
-- **Impact.** Repositories protected by a ruleset: `protect` now reports
+- **Impact.** [asks: nothing] Repositories protected by a ruleset: `protect` now reports
   what you actually require, and refuses `--apply` instead of giving you a
   second protection to maintain. Everyone else: the report names which
   mechanism protects the branch. Nothing to adopt — `protect` runs at the
@@ -302,7 +310,7 @@
   guard written yesterday made the same mistake in a new place.
 - Found while listing what each repository of the fleet actually requires,
   for the plan of that rename. The plan's first measurement was the bug.
-- **Impact.** Nobody: `adopt` refuses in one more case than it did, which is
+- **Impact.** [asks: nothing] Nobody: `adopt` refuses in one more case than it did, which is
   a case where it should always have refused.
 
 ## 0.51.0 — 2026-09-14
@@ -354,7 +362,7 @@
   and was tagged in 0.50.0. Nothing exercises `cut --tag` but a real
   release; the socle makes one most days, and now it exercises this.
 - Reported by maelys-oci, maelys-warden and maelys-platform.
-- **Impact.** Private repositories with self-hosted Linux runners: declare
+- **Impact.** [asks: nothing] Private repositories with self-hosted Linux runners: declare
   `[runners] linux-x86_64` and `linux-arm64`. Everyone adopting: `adopt
   --apply` may now refuse, which means it found a lock — run `protect .
   --apply` first. Everyone else: nothing.
@@ -388,7 +396,7 @@
 - The two defects are mine and were two hours old. Found by a reviewer
   reading the diff of a version that had already been tagged, which is why
   this is 0.50.1 and not a moved tag.
-- **Impact.** Nobody: a released tag is never moved, and nothing here
+- **Impact.** [asks: nothing] Nobody: a released tag is never moved, and nothing here
   changes a managed file. Products wanting the Impact lines: they work in
   `--apply` from this version, and they now cover every version since
   0.34.0.
@@ -458,7 +466,7 @@
   far enough" were the same answer.
 - Reported by maelys-oci, maelys-platform and Fable, who read for one of
   these and found three others.
-- **Impact.** Products with a `docs/cli.reference` and a per-platform build
+- **Impact.** [asks: cli-reference, signed-on-default-branch] Products with a `docs/cli.reference` and a per-platform build
   tree: declare every directory. Products declaring `[commit]
   signed-on-default-branch` on an unprotected branch: protect it, or declare
   `[commit] signed` — `preflight` now refuses. Products with a sanitizers
@@ -484,7 +492,7 @@
   public page.
 - Reported as a red `record` on a name already taken, which cannot happen —
   the deletion comes first. Found by reading for that and meeting this.
-- **Impact.** Nobody: workflows only, and a product that stays on its pin
+- **Impact.** [asks: nothing] Nobody: workflows only, and a product that stays on its pin
   stays conformant. Products with a channel get it at their next adoption.
 
 ## 0.49.0 — 2026-09-13
@@ -529,7 +537,7 @@
   twice, because nothing said in ten seconds which versions reached it. Half
   of them rewrote prose and nothing else. The socle's own tests hold the
   rule from this version on.
-- **Impact.** Products with a channel: re-adopt, then read `preflight` — the
+- **Impact.** [asks: channels] Products with a channel: re-adopt, then read `preflight` — the
   marker of the next publication keeps four fields and drops the rest.
   Products with a `scripts/render-homebrew-formula.sh`: nothing to do, a
   note becomes an `ok`. Everyone else: nothing.
@@ -577,7 +585,7 @@
 - All three reported by maelys-egress, from an adoption that cost them three
   rounds of CI and found four of their files. Their count was three: the
   search found the fourth.
-- **Impact.** Everyone with `[dependencies] apart`: a note per tracked line that still reads a sibling, at your next adoption. Nobody else.
+- **Impact.** [asks: nothing] Everyone with `[dependencies] apart`: a note per tracked line that still reads a sibling, at your next adoption. Nobody else.
 
 ## 0.47.0 — 2026-09-13
 

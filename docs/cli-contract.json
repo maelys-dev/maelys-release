@@ -920,6 +920,12 @@
                 },
                 "type": "array"
               },
+              "current": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
               "files": {
                 "items": {
                   "properties": {
@@ -964,6 +970,44 @@
                   "type": "object"
                 },
                 "type": "array"
+              },
+              "impact": {
+                "items": {
+                  "properties": {
+                    "asks": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": [
+                        "array",
+                        "null"
+                      ]
+                    },
+                    "asksThis": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "says": {
+                      "type": "string"
+                    },
+                    "version": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "says",
+                    "asks",
+                    "asksThis"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "impactFrom": {
+                "type": "string"
               },
               "mechanism": {
                 "enum": [

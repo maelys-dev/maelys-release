@@ -1810,6 +1810,77 @@ def render_cli_reference(decl: Declarations) -> tuple[str, str]:
         return markdown.read_text(encoding="utf-8"), contract.read_text(encoding="utf-8")
 
 
+# Who an Impact line asks a gesture of -- adopting, protecting, declaring --
+# in words `adopt` can evaluate on the product at hand. A consumer asked for
+# "adopt or nothing" in the JSON, so that "current in the socle's sense" need
+# not mean "on the last version": five versions in a day, and a product that
+# adopted each paid a pull request per version whose line asked it nothing.
+# A line says `[asks: nothing]` or names the readers it asks; the prose after
+# it says what. A selector over-approximates rather than misses: it names who
+# the line addresses, and the line says whether the case is theirs.
+IMPACT_ASKS = re.compile(r"^\[asks: ([a-z][a-z, -]*)\]\s*")
+# The legs' names before 0.54.0, which a branch may still require.
+OLD_LEGS = ("ubuntu-26.04", "ubuntu-26.04-arm", "macos-15")
+
+
+def impact_selectors(decl: "Declarations") -> dict:
+    """Each selector an Impact line may name, as a question on this product.
+
+    True, False, or a callable for the one that must ask GitHub, evaluated
+    only when a line names it: `old-legs` reads what the default branch
+    requires, and is unknown rather than false when GitHub cannot be asked.
+    """
+    def old_legs():
+        required = required_contexts(decl.project)
+        if required is None:
+            return None
+        return any(re.fullmatch(r".+ / check \((?:" + "|".join(re.escape(leg) for leg in OLD_LEGS) + r")\)", name)
+                   for name in required)
+    return {"nothing": False,
+            "channels": bool(decl.channels),
+            "check-legs": bool(decl.legs),
+            "pins": bool(decl.dependencies),
+            "apart": bool(decl.dependencies_apart),
+            "runners": bool(decl.runners),
+            "formulas": bool(decl.formulas),
+            "shared-ci": bool(decl.calls_socle_ci),
+            "cli-reference": (decl.project / CLI_DECLARATIONS).is_file() or (decl.project / CLI_REFERENCE).is_file(),
+            "signed-on-default-branch": decl.commit_verification == "signed-on-default-branch",
+            "old-legs": old_legs}
+
+
+def asks_this(decl: "Declarations", asks: list[str] | None, cache: dict) -> bool | None:
+    """Whether a line with these selectors asks this product a gesture; None when unknown."""
+    if asks is None:
+        return None
+    selectors = cache.setdefault("selectors", impact_selectors(decl))
+    unknown = False
+    for name in asks:
+        value = selectors.get(name)
+        if callable(value):
+            value = cache.setdefault(name, value())
+        if value is True:
+            return True
+        if value is None:
+            unknown = True
+    return None if unknown else False
+
+
+def socle_impact_entries(pinned: str) -> list[dict]:
+    """The Impact lines since a pin, oldest first: version, what it says, whom it asks.
+
+    `asks` is None for a line written before the marker, which is a line the
+    socle cannot evaluate, and not a line that asks nothing.
+    """
+    entries = []
+    for version, says in socle_impact(pinned):
+        marker = IMPACT_ASKS.match(says)
+        entries.append({"version": version, "says": says[marker.end():] if marker else says,
+                        "asks": [name.strip() for name in marker.group(1).split(",") if name.strip()]
+                        if marker else None})
+    return entries
+
+
 def socle_impact(pinned: str) -> list[tuple[str, str]]:
     """The Impact line of every socle version between a product's pin and this one.
 
@@ -2739,9 +2810,16 @@ def handle_adopt(invocation: Invocation) -> tuple[dict, int]:
     data = {"mode": "apply" if apply else "plan", "product": product, "project": str(project),
             "mechanism": mechanism, "socle": socle_data(sha, tag), "changed": changed,
             "impactFrom": (pinned or {}).get("tag", ""),
-            "impact": [{"version": version, "says": says}
-                       for version, says in socle_impact((pinned or {}).get("tag", ""))],
+            "impact": socle_impact_entries((pinned or {}).get("tag", "")),
             "checks": decl.applicable(), "files": files}
+    # Evaluated on the declarations read before this run wrote anything, and
+    # per product: "current" is whether any version since the pin asks this
+    # product a gesture, and null when a line cannot be evaluated here.
+    cache: dict = {}
+    for entry in data["impact"]:
+        entry["asksThis"] = asks_this(decl, entry["asks"], cache)
+    answers = [entry["asksThis"] for entry in data["impact"]]
+    data["current"] = False if True in answers else (None if None in answers else True)
     if moved:
         data["moved"] = moved
     return data, EXIT_OK
@@ -4340,6 +4418,39 @@ def sanitizers_twice(text: str) -> list[int]:
     return found
 
 
+def required_contexts(project: pathlib.Path) -> list[str] | None:
+    """The checks the default branch requires, by the classic protection and by rulesets.
+
+    None when GitHub cannot be asked -- no origin, no gh, or neither endpoint
+    answering -- which is not the same as a branch that requires nothing.
+    """
+    repository = github_repository(project)
+    if not repository or not shutil.which("gh"):
+        return None
+    branch = (github_api(f"repos/{repository}") or {}).get("default_branch") or "main"
+    # Both endpoints, as `branch_protection` reads them: a repository of the
+    # fleet is protected by a ruleset alone, and reading the classic
+    # protection by itself called it open -- the very mistake this socle
+    # corrected in 0.46.x and made again in the guard written to keep a rename
+    # from locking a branch. agent-cli-spec requires the socle legs through a
+    # ruleset and nothing else.
+    required: list[str] = []
+    state, body = github_read(f"repos/{repository}/branches/{branch}/protection")
+    if state == "ok" and isinstance(body, dict):
+        required += ((body.get("required_status_checks") or {}).get("contexts")) or []
+    ruled, rules = github_read(f"repos/{repository}/rules/branches/{branch}")
+    if ruled == "ok" and isinstance(rules, list):
+        for rule in rules:
+            if not isinstance(rule, dict) or rule.get("type") != "required_status_checks":
+                continue
+            for check in (rule.get("parameters") or {}).get("required_status_checks") or []:
+                if isinstance(check, dict) and check.get("context"):
+                    required.append(str(check["context"]))
+    if state not in ("ok", "absent") and ruled not in ("ok", "absent"):
+        return None
+    return [name for name in required if isinstance(name, str)]
+
+
 def vanishing_contexts(project: pathlib.Path) -> list[str]:
     """Required checks of the default branch that this socle would stop producing.
 
@@ -4356,28 +4467,9 @@ def vanishing_contexts(project: pathlib.Path) -> list[str]:
     # An alias is produced too: the old name keeps reporting while the new
     # one starts, and a branch that requires it loses nothing at adoption.
     produced = produced + [f"{caller} / check ({old})" for old, _ in check_product_aliases()]
-    repository = github_repository(project)
-    if not caller or not repository or not shutil.which("gh"):
+    if not caller:
         return []
-    branch = (github_api(f"repos/{repository}") or {}).get("default_branch") or "main"
-    # Both endpoints, as `branch_protection` reads them: a repository of the
-    # fleet is protected by a ruleset alone, and reading the classic
-    # protection by itself called it open -- the very mistake this socle
-    # corrected in 0.46.x and which I made again here, in the guard written
-    # to keep a rename from locking a branch. agent-cli-spec requires the
-    # three socle legs through a ruleset and nothing else.
-    required: list[str] = []
-    state, body = github_read(f"repos/{repository}/branches/{branch}/protection")
-    if state == "ok" and isinstance(body, dict):
-        required += ((body.get("required_status_checks") or {}).get("contexts")) or []
-    ruled, rules = github_read(f"repos/{repository}/rules/branches/{branch}")
-    if ruled == "ok" and isinstance(rules, list):
-        for rule in rules:
-            if not isinstance(rule, dict) or rule.get("type") != "required_status_checks":
-                continue
-            for check in (rule.get("parameters") or {}).get("required_status_checks") or []:
-                if isinstance(check, dict) and check.get("context"):
-                    required.append(str(check["context"]))
+    required = required_contexts(project) or []
     if not required:
         return []
     # Only the socle's own contexts: what a product requires of its own jobs
@@ -5450,7 +5542,19 @@ def text_adopt(data: dict) -> str:
         if data["mode"] == "plan" and entry.get("diff"):
             lines.extend("         " + line for line in entry["diff"].rstrip("\n").split("\n"))
     for entry in data.get("impact", []):
-        lines.append(f"{entry['version']:<8} {entry['says']}")
+        mark = {True: "ASKS", False: "-", None: "?"}[entry.get("asksThis")]
+        lines.append(f"{entry['version']:<8} {mark:<4} {entry['says']}")
+    if data.get("impact"):
+        asking = [entry["version"] for entry in data["impact"] if entry.get("asksThis") is True]
+        unknown = [entry["version"] for entry in data["impact"] if entry.get("asksThis") is None]
+        if asking:
+            lines.append(f"{'impact':<8} {', '.join(asking)} ask this product a gesture: read those lines")
+        elif unknown:
+            lines.append(f"{'impact':<8} {', '.join(unknown)} cannot be evaluated here; nothing else asks"
+                         " this product a gesture")
+        else:
+            lines.append(f"{'impact':<8} nothing since {data['impactFrom']} asks this product a gesture:"
+                         " it is current in the socle's sense")
     # An empty list says four different things, and the useful one is rare.
     # A product reading nothing here should know whether that means "nothing
     # to do" or "the socle could not tell which versions you are missing".
@@ -5842,7 +5946,16 @@ APP = cli.Program(PROGRAM, PRODUCT, socle_version(), [
                                            "project": {"type": "string"}, "mechanism": MECHANISM_SCHEMA,
                                            "socle": SOCLE_SCHEMA,
                                            "changed": {"type": "boolean"}, "checks": CHECKS_SCHEMA,
-                                           "moved": {"type": "string"}, "files": FILES_SCHEMA}}),
+                                           "moved": {"type": "string"}, "files": FILES_SCHEMA,
+                                           "impactFrom": {"type": "string"},
+                                           "impact": {"type": "array", "items": {
+                                               "type": "object", "required": ["version", "says", "asks", "asksThis"],
+                                               "properties": {"version": {"type": "string"},
+                                                              "says": {"type": "string"},
+                                                              "asks": {"type": ["array", "null"],
+                                                                       "items": {"type": "string"}},
+                                                              "asksThis": {"type": ["boolean", "null"]}}}},
+                                           "current": {"type": ["boolean", "null"]}}}),
     cli.read("check", "check",
              "Report the conventions of a product and, when it publishes through the socle, its release mechanism;"
              " exit 2 on any violation.",
