@@ -3130,6 +3130,27 @@ class SocleAsADependencyTest(unittest.TestCase):
         self.assertTrue(any("the socle is pinned by the 'uses:' line" in violation
                             for violation in data["conventions"]["violations"]), data["conventions"])
 
+    def test_the_changelog_hint_is_spelled_as_the_changelog_is(self) -> None:
+        """maelys-cli writes `## 0.5.29 - 2026-09-14`; the hint showed an em dash."""
+        work = pathlib.Path(tempfile.mkdtemp(prefix="maelys-release-heading."))
+        self.addCleanup(shutil.rmtree, work, True)
+        self.assertEqual(MODULE.entry_heading(work, "1.0.0"), "## 1.0.0 — YYYY-MM-DD")
+        (work / "CHANGELOG.md").write_text("# Changelog\n\n## Unreleased\n\n## 0.5.29 - 2026-09-14\n\n- x\n")
+        self.assertEqual(MODULE.entry_heading(work, "0.5.30"), "## 0.5.30 - YYYY-MM-DD")
+
+    def test_a_pin_for_the_socle_is_the_one_source_where_no_workflow_names_it(self) -> None:
+        """maelys-platform: no workflow calls the socle, and the pin chooses the
+        socle its program runs. Deleting it would delete the only source."""
+        work = pathlib.Path(tempfile.mkdtemp(prefix="maelys-release-consumer."))
+        self.addCleanup(shutil.rmtree, work, True)
+        (work / ".github" / "workflows").mkdir(parents=True)
+        (work / ".github" / "workflows" / "check.yml").write_text("jobs:\n  test:\n    runs-on: ubuntu-26.04\n")
+        (work / "dependencies").mkdir()
+        (work / "dependencies" / "maelys-release.pin").write_text("v0.56.0\n" + "a" * 40 + "\n")
+        decl = MODULE.read_declarations(work, "maelys-platform", "custom")
+        self.assertFalse([check for check in decl.checks if "the socle is pinned by the 'uses:' line" in check["message"]])
+        self.assertIn("maelys-release", decl.dependencies)
+
     def test_the_search_learns_the_name_under_its_own_root(self) -> None:
         """And keeps the two roots apart: a Makefile that reads
         $MAELYS_DEPENDENCIES_DIR has migrated its pins and may still take the
