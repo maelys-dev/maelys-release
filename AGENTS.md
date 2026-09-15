@@ -45,14 +45,11 @@ rules below hold whatever that mechanism is; the complete conventions are in
 - `LICENSING.md` states what each part of this repository is licensed under,
   and names every document it engages publicly. `SECURITY.md` states how to
   report a vulnerability.
-- The prose of this repository lives in `maelys-dev/maelys-docs`, directory
-  `maelys-release/`, with a neighbouring checkout at `../maelys-docs`.
-  Documenting means opening a pull request there, not writing in `docs/`
-  here, which carries what a machine writes and what this repository engages
-  publicly. An agent that finds prose in `docs/` moves it rather than
-  enriching it, and `maelys-release migrate` moves it with its history.
-  **That repository is private: never name it from a public README.** The
-  reader of this block has access to it; the reader of a README may not.
+- `docs/` carries what a machine writes and what this repository engages
+  publicly, and no other prose. Where the prose lives is not named from this
+  repository's files, which a public reader may see: do not name a
+  documentation repository here. A private repository that wants the name
+  declares `[docs] named` in `maelys-release.conf`.
 - Never commit a secret, a token or a signing key.
 <!-- maelys-release:end -->
 

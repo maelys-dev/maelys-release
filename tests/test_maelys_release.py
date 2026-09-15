@@ -40,6 +40,12 @@ def load_module():
 
 
 MODULE = load_module()
+# protect --apply reads the list of withdrawn versions from GitHub before
+# writing. The harnesses below answer the protection endpoints and nothing
+# else, so the reader is set aside for them; WithdrawnVersionTest exercises
+# the real one against its own answers.
+REAL_WITHDRAWN_FOR = MODULE.withdrawn_for
+MODULE.withdrawn_for = lambda command: None
 
 
 class Product:
@@ -859,8 +865,12 @@ jobs:
 
     def test_the_block_says_where_the_prose_lives_and_names_the_product(self) -> None:
         """maelys-platform's documentation policy says this block carries it,
-        and it did not. The reader of a block has access to maelys-docs; the
-        reader of a README may not, which is why only the block names it."""
+        and it did not. Since 0.58.0 only a repository that declares [docs]
+        named carries the name: three public products had it in two public
+        files each, under a bullet forbidding it."""
+        existing = self.product.dir / "maelys-release.conf"
+        conf = existing.read_text() if existing.is_file() else ""
+        self.product.write("maelys-release.conf", conf + "\n[docs]\nnamed\n")
         self.product.run("adopt", self.dir, "--apply")
         for name in ("AGENTS.md", "CLAUDE.md"):
             text = self.product.read(name)
@@ -2937,6 +2947,33 @@ class ImpactLinesTest(unittest.TestCase):
             self.assertIsNotNone(entry["asks"], f"{entry['version']} carries no [asks: ...] marker")
             self.assertTrue(set(entry["asks"]) <= known, (entry["version"], entry["asks"]))
 
+    def test_a_pin_nothing_since_asks_about_is_a_note_not_a_failure(self) -> None:
+        """maelys-system: check read FAIL on a pin every line since said asked
+        nothing of it. `current` is the socle's own answer; the verdict uses it."""
+        workflow = self.product.dir / ".github" / "workflows" / "release.yml"
+        text = workflow.read_text()
+        # Pinned at this socle's own version under another commit: no line since
+        # asks anything, whatever the changelog grows to.
+        version = re.search(r"^## ([0-9.]+) ", (ROOT / "CHANGELOG.md").read_text(encoding="utf-8"), re.MULTILINE).group(1)
+        workflow.write_text(text.replace("release.yml@" + "f" * 40 + " # v0.49.0",
+                                         "release.yml@" + "0" * 40 + f" # v{version}"), encoding="utf-8")
+        data = self.product.json("check", self.dir, expect=0)["data"]
+        self.assertFalse([violation for violation in data["violations"] if "pins maelys-release" in violation])
+        self.assertTrue([check for check in data["checks"] if "current in the socle's sense" in check["message"]])
+        # A pin whose lines cannot all be evaluated keeps the failure.
+        workflow.write_text(text.replace("release.yml@" + "f" * 40 + " # v0.49.0",
+                                         "release.yml@" + "0" * 40 + " # v0.49.0"), encoding="utf-8")
+        data = self.product.json("check", self.dir, expect=2)["data"]
+        self.assertTrue([violation for violation in data["violations"] if "pins maelys-release" in violation])
+
+    def test_a_changelog_title_present_twice_is_refused(self) -> None:
+        """maelys-cli carried five `## Unreleased`, one per pull request."""
+        changelog = self.product.dir / "CHANGELOG.md"
+        changelog.write_text(changelog.read_text() + "\n## Unreleased\n\n- a\n\n## Unreleased\n\n- b\n",
+                             encoding="utf-8")
+        data = self.product.json("check", self.dir, expect=2)["data"]
+        self.assertTrue([v for v in data["violations"] if "entries titled ## Unreleased" in v], data["violations"])
+
     def test_an_empty_list_says_which_kind_of_empty(self) -> None:
         """Nothing to do, no pin, no tag on the pin and no changelog were
         the same answer."""
@@ -3397,7 +3434,19 @@ class SanitizersTwiceTest(unittest.TestCase):
     def test_a_product_job_that_sanitizes_beside_the_socle_is_named(self) -> None:
         lines = MODULE.sanitizers_twice(self.CALL + "  own:\n    steps:\n"
                                         "      - run: make asan\n      - run: make ubsan\n")
-        self.assertEqual(lines, [8, 9])
+        # One line per job, the first that builds what the socle's job builds.
+        self.assertEqual(lines, [8])
+
+    def test_what_is_not_the_same_instrumented_build_is_not_named(self) -> None:
+        """maelys-system: seven lines, all false."""
+        text = self.CALL + (
+            "  sanitizers:\n    runs-on: ubuntu-24.04\n    steps:\n      - name: TSan\n        run: make tsan\n"
+            "  macos-gates:\n    runs-on: macos-15\n    steps:\n      - name: ASan and UBSan\n"
+            "        run: make asan-ubsan\n"
+            "  linux:\n    strategy:\n      matrix:\n        runner: [ubuntu-24.04, ubuntu-24.04-arm]\n"
+            "    runs-on: ${{ matrix.runner }}\n    steps:\n      - run: make check CFLAGS=-fsanitize=address\n")
+        lines = MODULE.sanitizers_twice(text)
+        self.assertEqual([text.splitlines()[n - 1].strip() for n in lines], ["- run: make check CFLAGS=-fsanitize=address"])
 
     def test_a_call_that_sets_the_input_is_the_product_having_chosen(self) -> None:
         """maelys-egress passes an empty sanitizer_command and keeps its own
@@ -4028,6 +4077,36 @@ class PackageTargetsTest(unittest.TestCase):
         self.assertNotEqual(nothing.returncode, 0)
 
 
+class FakeProtection:
+    """A classic branch protection that the fake `gh api` writes actually change.
+
+    protect re-reads what it wrote since 0.58.0; a fake that answered the
+    same body before and after a write would call every correct write a
+    defect. `drift` sets settings the next write disturbs, to prove that
+    the re-read catches a write that moves more than the checks.
+    """
+
+    def __init__(self, contexts, strict=False, drift=None):
+        self.body = {"required_status_checks": {"strict": strict, "contexts": list(contexts)},
+                     "required_linear_history": {"enabled": True}, "enforce_admins": {"enabled": True}}
+        self.drift = drift or {}
+        self.sent = []
+
+    def read(self, path):
+        return "ok", json.loads(json.dumps(self.body))
+
+    def run(self, command, cwd=None, env=None):
+        body = json.loads(pathlib.Path(command[-1]).read_text())
+        self.sent.append((command, body))
+        if command[3] == "PATCH":
+            self.body["required_status_checks"] = {"strict": body["strict"], "contexts": body["contexts"]}
+        else:
+            self.body = {key: ({"enabled": value} if isinstance(value, bool) else value)
+                         for key, value in body.items()}
+        self.body.update(self.drift)
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+
 class WidenAfterTheMergeTest(unittest.TestCase):
     """Three findings of maelys-json, after adopting 0.54.0 as written.
 
@@ -4036,12 +4115,12 @@ class WidenAfterTheMergeTest(unittest.TestCase):
     produces, and every other open pull request waits forever.
     """
 
-    def protect(self, absent: list, apply: bool = True, allow: bool = False, open_pulls=()):
+    def protect(self, absent: list, apply: bool = True, allow: bool = False, open_pulls=(), fake_writes=False):
         saved = (MODULE.github_api, MODULE.github_read, MODULE.socle_check_contexts, MODULE.github_repository,
                  MODULE.observed_contexts, MODULE.shutil.which, MODULE.github_list)
+        fake = FakeProtection([])
         MODULE.github_api = lambda path: {"default_branch": "main"}
-        MODULE.github_read = lambda path: ("ok", {"required_status_checks": {"contexts": []}}) \
-            if "/protection" in path else ("ok", [])
+        MODULE.github_read = lambda path: fake.read(path) if "/protection" in path else ("ok", [])
         MODULE.socle_check_contexts = lambda project: ("check", ["check / check (linux)"])
         MODULE.github_repository = lambda project: "o/r"
         seen = [] if absent else ["check / check (linux)"]
@@ -4049,6 +4128,8 @@ class WidenAfterTheMergeTest(unittest.TestCase):
             seen, [], {"heads": 3, "ever": ["check / check (ubuntu-26.04)"] if absent else seen})
         MODULE.shutil.which = lambda name: "/usr/bin/" + name
         MODULE.github_list = lambda path: [{"number": number} for number in open_pulls]
+        if fake_writes:
+            MODULE.run = fake.run
         flags = {"--apply": apply, "--allow-lock": allow}
         invocation = type("I", (), {"operands": ["."], "flag": lambda self, name: flags.get(name, False),
                                     "option": lambda self, name, default="": default, "format": "json"})()
@@ -4066,12 +4147,10 @@ class WidenAfterTheMergeTest(unittest.TestCase):
         self.assertIn("#12, #15", refusal.exception.hint)
 
     def test_once_merged_it_widens(self) -> None:
-        written = []
         saved = MODULE.run
-        MODULE.run = lambda command, cwd=None, env=None: written.append(command) or \
-            subprocess.CompletedProcess(command, 0, "", "")
         try:
-            report = self.protect(absent=False)
+            # The harness's fake protection is the one written and re-read.
+            report = self.protect(absent=False, fake_writes=True)
         finally:
             MODULE.run = saved
         self.assertTrue(report["applied"])
@@ -4307,20 +4386,34 @@ class LegRenameTest(unittest.TestCase):
                                          "required_status_checks": [
                                              {"context": "check / check (ubuntu-26.04)", "integration_id": 15368},
                                              {"context": "check / sanitizers", "integration_id": 15368}]}}]}
-    APPLIED = [{"type": "deletion", "ruleset_id": 7, "ruleset_source_type": "Repository"},
-               {"type": "required_status_checks", "ruleset_id": 7, "ruleset_source_type": "Repository"}]
+    # As rules/branches answers them: each rule with its parameters.
+    APPLIED = [{"type": "deletion", "ruleset_id": 7, "ruleset_source_type": "Repository", "parameters": None},
+               {"type": "required_status_checks", "ruleset_id": 7, "ruleset_source_type": "Repository",
+                "parameters": {"strict_required_status_checks_policy": False, "do_not_enforce_on_create": False,
+                               "required_status_checks": [{"context": "check / check (ubuntu-26.04)"},
+                                                          {"context": "check / sanitizers"}]}}]
 
     def write(self, contexts, applied=None, ruleset=None):
         sent = {}
         saved_read, saved_run = MODULE.github_read, MODULE.run
-        MODULE.github_read = lambda path: ("ok", json.loads(json.dumps(ruleset or self.RULESET)))
+        applied = applied or self.APPLIED
+
+        def fake_read(path):
+            if "/rules/branches/" in path:
+                if "body" not in sent:
+                    return "ok", json.loads(json.dumps(applied))
+                return "ok", [{"type": rule["type"], "ruleset_id": 7, "ruleset_source_type": "Repository",
+                               "parameters": rule.get("parameters")} for rule in sent["body"]["rules"]]
+            return "ok", json.loads(json.dumps(ruleset or self.RULESET))
+        MODULE.github_read = fake_read
+
         def fake_run(command, cwd=None, env=None):
             sent["command"] = command
             sent["body"] = json.loads(pathlib.Path(command[-1]).read_text())
             return subprocess.CompletedProcess(command, 0, "", "")
         MODULE.run = fake_run
         try:
-            return MODULE.write_ruleset("o/r", "main", applied or self.APPLIED, contexts), sent
+            return MODULE.write_ruleset("o/r", "main", applied, contexts), sent
         finally:
             MODULE.github_read, MODULE.run = saved_read, saved_run
 
@@ -4441,16 +4534,20 @@ class WardenAdoptionTest(unittest.TestCase):
             self.product("[dependencies]\napart\n\n[ci]\nown\n"), "a" * 40, "v9.9.9"),
             "a repository whose CI calls no shared CI has nothing that runs them")
 
-    def test_docs_unnamed_takes_the_repository_out_of_the_block(self) -> None:
+    def test_the_block_names_no_documentation_repository_unless_declared(self) -> None:
         for mechanism in ("custom", "maelys-release"):
-            named = MODULE.stage(self.product("[dependencies]\napart\n", mechanism), "a" * 40, "v9.9.9")["AGENTS.md"][0]
-            unnamed = MODULE.stage(self.product("[dependencies]\napart\n\n[docs]\nunnamed\n", mechanism),
-                                   "a" * 40, "v9.9.9")["AGENTS.md"][0]
-            self.assertIn("maelys-docs", named, mechanism)
-            self.assertNotIn("maelys-docs", unnamed, mechanism)
-            self.assertIn("declares `[docs] unnamed`", unnamed, mechanism)
-        with self.assertRaises(ValueError):
-            MODULE.parse_release("[docs]\npublic\n")
+            default = MODULE.stage(self.product("[dependencies]\napart\n", mechanism), "a" * 40, "v9.9.9")["AGENTS.md"][0]
+            named = MODULE.stage(self.product("[dependencies]\napart\n\n[docs]\nnamed\n", mechanism),
+                                 "a" * 40, "v9.9.9")["AGENTS.md"][0]
+            self.assertNotIn("maelys-docs", default, mechanism)
+            self.assertIn("declares `[docs] named`", default, mechanism)
+            self.assertIn("`maelys-dev/maelys-docs`", named, mechanism)
+        # unnamed, the 0.57.2 spelling, still reads and says the line can go.
+        decl = self.product("[dependencies]\napart\n\n[docs]\nunnamed\n")
+        self.assertTrue([c for c in decl.checks if "is the default since 0.58.0" in c["message"]])
+        for text in ("[docs]\npublic\n", "[docs]\nnamed\nunnamed\n"):
+            with self.assertRaises(ValueError):
+                MODULE.parse_release(text)
 
     def test_the_adoption_guard_counts_a_turned_off_job_as_reporting(self) -> None:
         saved = (MODULE.socle_check_contexts, MODULE.required_contexts)
@@ -4460,6 +4557,36 @@ class WardenAdoptionTest(unittest.TestCase):
             self.assertEqual(MODULE.vanishing_contexts(pathlib.Path(".")), ["check / gone"])
         finally:
             MODULE.socle_check_contexts, MODULE.required_contexts = saved
+
+
+class WithdrawnVersionTest(unittest.TestCase):
+    """protect --apply refuses from a socle version withdrawn for it (maelys-cli)."""
+
+    def read_with(self, text: str | None):
+        saved = MODULE.github_read, MODULE.socle_version
+        MODULE.socle_version = lambda: "0.57.0"
+        MODULE.github_read = lambda path: ("unreadable", None) if text is None else (
+            "ok", {"encoding": "base64", "content": base64.b64encode(text.encode()).decode()})
+        try:
+            return REAL_WITHDRAWN_FOR("protect")
+        finally:
+            MODULE.github_read, MODULE.socle_version = saved
+
+    def test_a_listed_version_is_withdrawn_for_its_command_alone(self) -> None:
+        listed = "# comment\n0.57.0 protect writes the whole protection\n0.57.1 tap something\n"
+        self.assertEqual(self.read_with(listed), ("withdrawn", "writes the whole protection"))
+        self.assertIsNone(self.read_with("0.57.0 tap other\n0.56.0 protect x\n"))
+
+    def test_an_unreadable_list_is_not_a_permission(self) -> None:
+        self.assertEqual(self.read_with(None)[0], "unread")
+
+    def test_the_list_on_main_withdraws_every_version_that_put_the_whole_protection(self) -> None:
+        text = (ROOT / "WITHDRAWN").read_text(encoding="utf-8")
+        listed = {line.split()[0] for line in text.splitlines() if line and not line.startswith("#")}
+        self.assertIn("0.43.0", listed)
+        self.assertIn("0.57.0", listed)
+        self.assertNotIn("0.57.1", listed)
+        self.assertEqual(self.read_with(text)[0], "withdrawn")
 
 
 class LegAliasTest(unittest.TestCase):
@@ -4489,17 +4616,17 @@ class LegAliasTest(unittest.TestCase):
     def protect(self, required, seen, apply=False):
         saved = (MODULE.github_api, MODULE.github_read, MODULE.socle_check_contexts, MODULE.github_repository,
                  MODULE.observed_contexts, MODULE.shutil.which, MODULE.github_list, MODULE.run)
+        fake = FakeProtection(required)
         written = []
         MODULE.github_api = lambda path: {"default_branch": "main"}
-        MODULE.github_read = lambda path: ("ok", {"required_status_checks": {"contexts": list(required)}}) \
-            if "/protection" in path else ("ok", [])
+        MODULE.github_read = lambda path: fake.read(path) if "/protection" in path else ("ok", [])
         MODULE.socle_check_contexts = lambda project: ("check", ["check / check (linux)", "check / check (macos)"])
         MODULE.github_repository = lambda project: "o/r"
         MODULE.observed_contexts = lambda repository, branch, samples=3: (seen, [], {"heads": 3, "ever": seen})
         MODULE.shutil.which = lambda name: "/usr/bin/" + name
         MODULE.github_list = lambda path: []
         MODULE.run = lambda command, cwd=None, env=None: written.append(
-            json.loads(pathlib.Path(command[-1]).read_text())) or subprocess.CompletedProcess(command, 0, "", "")
+            json.loads(pathlib.Path(command[-1]).read_text())) or fake.run(command)
         flags = {"--apply": apply}
         invocation = type("I", (), {"operands": ["."], "flag": lambda self, name: flags.get(name, False),
                                     "option": lambda self, name, default="": default, "format": "json"})()
@@ -4523,6 +4650,58 @@ class LegAliasTest(unittest.TestCase):
                          ["check / check (linux)", "check / check (macos)", "mine"])
         text = MODULE.text_protect(report)
         self.assertIn("replace  check / check (macos-15) -> check / check (macos)", text)
+
+    def test_a_write_that_moves_any_other_setting_fails_loudly(self) -> None:
+        """The property maelys-oci asked for: after --apply, no setting but the
+        checks differs from before. A GitHub that turned linear history off
+        during the write is caught by the re-read, whatever the write was."""
+        required = ["check / check (ubuntu-26.04)", "check / check (macos-15)"]
+        seen = ["check / check (linux)", "check / check (macos)"]
+        saved = MODULE.github_read, MODULE.run
+        for moved in ({"required_linear_history": {"enabled": False}},
+                      {"required_status_checks": {"strict": False, "contexts": []}},
+                      {"required_pull_request_reviews": {"required_approving_review_count": 0}}):
+            fake = FakeProtection(required, strict=True, drift=moved)
+            try:
+                with self.assertRaises(MODULE.Failure) as refusal:
+                    self.protect_with_fake(fake, seen)
+            finally:
+                MODULE.github_read, MODULE.run = saved
+            self.assertIn("changed beyond what the plan said", refusal.exception.message, moved)
+
+    def test_the_plan_names_every_setting_it_keeps_and_every_one_it_creates(self) -> None:
+        """maelys-datalog: a new protection received linear history off with
+        no line saying so."""
+        fake = FakeProtection(["check / check (ubuntu-26.04)"], strict=True)
+        report = self.protect_with_fake(fake, ["check / check (linux)"], apply=False)
+        self.assertEqual(report["keeps"]["strict"], True)
+        self.assertEqual(report["keeps"]["required_linear_history"], True)
+        self.assertIn("keeps    every other setting as it is: strict=true", MODULE.text_protect(report))
+        absent = self.protect_with_fake(None, ["check / check (linux)"], apply=False)
+        self.assertEqual(absent["creates"]["required_linear_history"], False)
+        self.assertIn("create   required_linear_history=false", MODULE.text_protect(absent))
+
+    def protect_with_fake(self, fake, seen, apply=True):
+        saved = (MODULE.github_api, MODULE.github_read, MODULE.socle_check_contexts, MODULE.github_repository,
+                 MODULE.observed_contexts, MODULE.shutil.which, MODULE.github_list, MODULE.run)
+        MODULE.github_api = lambda path: {"default_branch": "main"}
+        MODULE.github_read = lambda path: (fake.read(path) if fake else ("absent", None)) \
+            if path.endswith("/protection") else ("ok", [])
+        MODULE.socle_check_contexts = lambda project: ("check", ["check / check (linux)", "check / check (macos)"])
+        MODULE.github_repository = lambda project: "o/r"
+        MODULE.observed_contexts = lambda repository, branch, samples=3: (seen, [], {"heads": 3, "ever": seen})
+        MODULE.shutil.which = lambda name: "/usr/bin/" + name
+        MODULE.github_list = lambda path: []
+        if fake:
+            MODULE.run = fake.run
+        flags = {"--apply": apply}
+        invocation = type("I", (), {"operands": ["."], "flag": lambda self, name: flags.get(name, False),
+                                    "option": lambda self, name, default="": default, "format": "json"})()
+        try:
+            return MODULE.handle_protect(invocation)[0]
+        finally:
+            (MODULE.github_api, MODULE.github_read, MODULE.socle_check_contexts, MODULE.github_repository,
+             MODULE.observed_contexts, MODULE.shutil.which, MODULE.github_list, MODULE.run) = saved
 
     def test_a_yaml_comment_is_not_a_command(self) -> None:
         """agent-cli-spec: `sanitizer_command: ''   # no compiled code here`."""
@@ -4554,8 +4733,13 @@ class LegAliasTest(unittest.TestCase):
         MODULE.github_repository = lambda project: "o/r"
         MODULE.shutil.which = lambda name: "/usr/bin/" + name
         MODULE.github_list = lambda path: []
-        MODULE.run = lambda command, cwd=None, env=None: commands.append(
-            (command, json.loads(pathlib.Path(command[-1]).read_text()))) or subprocess.CompletedProcess(command, 0, "", "")
+        def fake_run(command, cwd=None, env=None):
+            body = json.loads(pathlib.Path(command[-1]).read_text())
+            commands.append((command, body))
+            if hasattr(reads, "written"):
+                reads.written(body)
+            return subprocess.CompletedProcess(command, 0, "", "")
+        MODULE.run = fake_run
         on = {"--apply", *flags}
         invocation = type("I", (), {"operands": ["."], "flag": lambda self, name: name in on,
                                     "option": lambda self, name, default="": default, "format": "json"})()
@@ -4567,11 +4751,13 @@ class LegAliasTest(unittest.TestCase):
 
     @staticmethod
     def answers(required, seen, strict=True, timeout=()):
+        held = {"required_status_checks": {"strict": strict, "contexts": list(required)}}
+
         def read(path):
             if any(part in path for part in timeout):
                 return "unreadable", None
             if path.endswith("/protection"):
-                return "ok", {"required_status_checks": {"strict": strict, "contexts": list(required)}}
+                return "ok", json.loads(json.dumps(held))
             if "/rules/branches/" in path:
                 return "ok", []
             if "pulls?" in path:
@@ -4579,6 +4765,7 @@ class LegAliasTest(unittest.TestCase):
             if "/check-runs" in path:
                 return "ok", {"check_runs": [{"name": name, "conclusion": "success"} for name in seen]}
             return "ok", {}
+        read.written = lambda body: held["required_status_checks"].update(body)
         return read
 
     def test_nothing_is_written_on_a_protection_github_did_not_answer_for(self) -> None:

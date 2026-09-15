@@ -2418,6 +2418,9 @@
               "caller": {
                 "type": "string"
               },
+              "creates": {
+                "type": "object"
+              },
               "dropped": {
                 "items": {
                   "type": "string"
@@ -2441,6 +2444,9 @@
                   "type": "string"
                 },
                 "type": "array"
+              },
+              "keeps": {
+                "type": "object"
               },
               "kept": {
                 "items": {
