@@ -938,6 +938,14 @@ does not say where either came from.
   pinned socle, so `ci.yml` repeats nothing: same checkouts, same packages,
   `make check` on the three release targets, sanitizers with clang, socle
   drift. Its other jobs are the product's own.
+- A repository whose CI is entirely its own declares `[ci] own` in
+  `maelys-release.conf`: `adopt` writes no `ci.yml`, and `check` stops asking
+  for a call to `check-product.yml` — and refuses the declaration if a
+  workflow makes that call anyway. The socle is the first: its `check.yml`
+  lints what it ships, runs its tests and runs `check .` on itself.
+- A reusable workflow (`on: workflow_call`) runs in the repositories that
+  call it, so the search for lines reading a sibling does not read it as the
+  layout of the repository that ships it.
 - A product's own legs, declared in `[check]`, run from a second job adopt
   writes into `ci.yml`: `legs`, calling `check-legs.yml` at the same pin.
   That job is the socle's from its name to the next job; the rest of the

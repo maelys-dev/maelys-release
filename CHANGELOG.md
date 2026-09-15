@@ -31,6 +31,15 @@
   generator at the pin, through the code that generates a product's, and the
   socle's CI refuses a drift. It had a reference for every product built on
   the framework and none for itself.
+- **The socle follows its own conventions, and its CI says so.** `check .`
+  on the socle failed: its managed blocks dated from 0.16.0, its tests read
+  `../agent-cli-spec` and `../maelys-cli`, and it had no `ci.yml` because its
+  CI is its own. The blocks are regenerated; the tests read
+  `$MAELYS_DEPENDENCIES_DIR` or fetch at the pin; `maelys-release.conf`
+  declares `[dependencies] apart` and the new `[ci] own`, which tells `adopt`
+  to write no `ci.yml` and `check` to ask for no call to the shared CI; and
+  `check.yml` runs `check .` so it cannot drift again. A reusable workflow is
+  no longer searched as the layout of the repository that ships it.
 - **Impact.** maelys-http, maelys-oci, agent-cli-spec, maelys-datalog,
   maelys-system — still requiring the old names: adopt, merge, then
   `protect . --apply`; do not narrow. Everyone else: three more short jobs on
