@@ -1093,6 +1093,31 @@ the most useful one.
 It says what a product must do, never what the socle did: the entry above it
 is the account, and a reader who needs only the decision reads one line.
 
+**Since 0.57.0 the line also names whom it asks, in words `adopt` can
+evaluate**: `[asks: nothing]`, or one or more selectors right after
+`**Impact.**`:
+
+| selector | asks a product that |
+| --- | --- |
+| `channels` | declares a channel |
+| `check-legs` | declares `[check]` legs |
+| `pins`, `apart` | pins dependencies; declares them apart |
+| `runners`, `formulas` | declares runners; carries Homebrew formulas |
+| `shared-ci` | calls `check-product.yml` |
+| `cli-reference` | carries `docs/cli.reference` or `docs/cli.md` |
+| `signed-on-default-branch` | declares that commit verification |
+| `old-legs` | still requires a leg under its name before 0.54.0 — asks GitHub, unknown offline |
+
+`adopt` marks each line for the product at hand — `ASKS`, `-`, or `?` when a
+selector cannot be evaluated or the line predates the marker — and returns
+`current` in its JSON: true when nothing since the pin asks this product a
+gesture, false when a line does, null when one cannot tell. A product is then
+current in the socle's sense without being on its last version, and a fleet
+observer can say so from the same field. A selector over-approximates rather
+than misses: it names who the line addresses, and the prose says whether the
+case is theirs. maelys-cli asked for it after adopting a version because it
+was told to, not because a line asked it.
+
 **`adopt` refuses to make a required check disappear.** A branch requires a
 check by name, the socle generates the workflow whose jobs carry those
 names, and it is the only thing in the chain that can see the two together:

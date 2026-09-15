@@ -2888,6 +2888,40 @@ class ImpactLinesTest(unittest.TestCase):
         for entry in data["impact"]:
             self.assertTrue(entry["says"].strip(), entry)
 
+    def test_each_line_says_whether_it_asks_this_product_anything(self) -> None:
+        """maelys-cli: "adopt or nothing" in the JSON, so that current in the
+        socle's sense need not mean on its last version."""
+        data = self.product.json("adopt", self.dir)["data"]
+        by_version = {entry["version"]: entry for entry in data["impact"]}
+        self.assertEqual(by_version["0.49.1"]["asks"], ["nothing"])
+        self.assertIs(by_version["0.49.1"]["asksThis"], False)
+        self.assertNotIn("[asks:", by_version["0.49.1"]["says"], "the marker is data, not prose")
+        # old-legs asks GitHub, and this fixture has no origin: unknown, not no.
+        self.assertIsNone(by_version["0.57.0"]["asksThis"])
+        self.assertIsNone(data["current"])
+        text = self.product.run("adopt", self.dir).stdout
+        self.assertIn("0.49.1   -    Nobody", text)
+        self.assertIn("0.57.0   ?    ", text)
+
+    def test_a_selector_that_holds_asks_and_an_unknown_one_does_not_hide_it(self) -> None:
+        decl = MODULE.Declarations(pathlib.Path("/nonexistent"), "p")
+        decl.channels = [("npm", "github-packages")]
+        self.assertIs(MODULE.asks_this(decl, ["channels"], {}), True)
+        self.assertIs(MODULE.asks_this(decl, ["nothing"], {}), False)
+        self.assertIs(MODULE.asks_this(decl, ["pins", "formulas"], {}), False)
+        self.assertIsNone(MODULE.asks_this(decl, None, {}), "a line without the marker is unknown")
+        unknown = {"selectors": {**MODULE.impact_selectors(decl), "old-legs": lambda: None}}
+        self.assertIsNone(MODULE.asks_this(decl, ["old-legs"], dict(unknown)))
+        self.assertIs(MODULE.asks_this(decl, ["old-legs", "channels"], dict(unknown)), True)
+
+    def test_every_marker_names_selectors_the_socle_evaluates(self) -> None:
+        known = set(MODULE.impact_selectors(MODULE.Declarations(pathlib.Path("/nonexistent"), "p")))
+        entries = MODULE.socle_impact_entries("v0.47.0")
+        self.assertTrue(entries)
+        for entry in entries:
+            self.assertIsNotNone(entry["asks"], f"{entry['version']} carries no [asks: ...] marker")
+            self.assertTrue(set(entry["asks"]) <= known, (entry["version"], entry["asks"]))
+
     def test_an_empty_list_says_which_kind_of_empty(self) -> None:
         """Nothing to do, no pin, no tag on the pin and no changelog were
         the same answer."""
