@@ -1076,6 +1076,13 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
             if decl.channel_gates.get(name) == "none":
                 decl.add("ok", f"[channels] {name} none: it publishes as soon as the release does,"
                                " with no approval of its own", "release")
+            elif decl.channel_gates.get(name) == "reviewer":
+                # The choice declared, which 0.52.0 promised to turn into an ok
+                # and did not: a declared reviewer fell into the branch of a line
+                # without a third word, and was told to declare what it had.
+                # Found by maelys-datalog on its own `npm github-packages reviewer`.
+                decl.add("ok", f"[channels] {name} reviewer: it asks for its own approval once the release"
+                               " workflow has finished, as declared", "release")
             else:
                 decl.add("note", f"[channels] {name} asks for its own approval, under the release's"
                                  " environment, and it becomes pending only once the release workflow"
@@ -1818,7 +1825,7 @@ def render_cli_reference(decl: Declarations) -> tuple[str, str]:
 # A line says `[asks: nothing]` or names the readers it asks; the prose after
 # it says what. A selector over-approximates rather than misses: it names who
 # the line addresses, and the line says whether the case is theirs.
-IMPACT_ASKS = re.compile(r"^\[asks: ([a-z][a-z, -]*)\]\s*")
+IMPACT_ASKS = re.compile(r"^\[asks: ([a-z][a-z, -]*)\]\s*(?:\[superseded-by: ([0-9]+\.[0-9]+\.[0-9]+)\]\s*)?")
 # The legs' names before 0.54.0, which a branch may still require.
 OLD_LEGS = ("ubuntu-26.04", "ubuntu-26.04-arm", "macos-15")
 
@@ -1877,7 +1884,8 @@ def socle_impact_entries(pinned: str) -> list[dict]:
         marker = IMPACT_ASKS.match(says)
         entries.append({"version": version, "says": says[marker.end():] if marker else says,
                         "asks": [name.strip() for name in marker.group(1).split(",") if name.strip()]
-                        if marker else None})
+                        if marker else None,
+                        "supersededBy": marker.group(2) if marker and marker.group(2) else None})
     return entries
 
 
@@ -2816,8 +2824,14 @@ def handle_adopt(invocation: Invocation) -> tuple[dict, int]:
     # per product: "current" is whether any version since the pin asks this
     # product a gesture, and null when a line cannot be evaluated here.
     cache: dict = {}
+    # A line a later version supersedes asks nothing of a product that
+    # adopts that later version: maelys-datalog, adopting 0.57.0 from 0.51.1,
+    # was told 0.54.0 asked a gesture, and read that line's instruction to
+    # narrow its protection -- the gesture 0.57.0 exists to forbid.
+    listed = {entry["version"] for entry in data["impact"]}
     for entry in data["impact"]:
-        entry["asksThis"] = asks_this(decl, entry["asks"], cache)
+        superseded = entry.get("supersededBy") in listed
+        entry["asksThis"] = False if superseded else asks_this(decl, entry["asks"], cache)
     answers = [entry["asksThis"] for entry in data["impact"]]
     data["current"] = False if True in answers else (None if None in answers else True)
     if moved:
@@ -5630,7 +5644,13 @@ def text_adopt(data: dict) -> str:
                      + (f" [{entry['touches']}]" if "touches" in entry else ""))
         if data["mode"] == "plan" and entry.get("diff"):
             lines.extend("         " + line for line in entry["diff"].rstrip("\n").split("\n"))
+    listed = {entry["version"] for entry in data.get("impact", [])}
     for entry in data.get("impact", []):
+        if entry.get("supersededBy") in listed:
+            # Its instruction is not printed: a reader going line by line
+            # would act on it before reaching the version that replaces it.
+            lines.append(f"{entry['version']:<8} {'-':<4} superseded by {entry['supersededBy']}, below: read that line")
+            continue
         mark = {True: "ASKS", False: "-", None: "?"}[entry.get("asksThis")]
         lines.append(f"{entry['version']:<8} {mark:<4} {entry['says']}")
     if data.get("impact"):
@@ -6043,7 +6063,8 @@ APP = cli.Program(PROGRAM, PRODUCT, socle_version(), [
                                                               "says": {"type": "string"},
                                                               "asks": {"type": ["array", "null"],
                                                                        "items": {"type": "string"}},
-                                                              "asksThis": {"type": ["boolean", "null"]}}}},
+                                                              "asksThis": {"type": ["boolean", "null"]},
+                                                              "supersededBy": {"type": ["string", "null"]}}}},
                                            "current": {"type": ["boolean", "null"]}}}),
     cli.read("check", "check",
              "Report the conventions of a product and, when it publishes through the socle, its release mechanism;"

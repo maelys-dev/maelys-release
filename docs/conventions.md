@@ -1108,6 +1108,11 @@ evaluate**: `[asks: nothing]`, or one or more selectors right after
 | `signed-on-default-branch` | declares that commit verification |
 | `old-legs` | still requires a leg under its name before 0.54.0 — asks GitHub, unknown offline |
 
+A line a later version replaces also says so, as data after its selectors:
+`[superseded-by: 0.57.0]`. For a product whose list holds that later version,
+the line asks nothing, and `adopt` prints only that it is superseded — never
+its instruction, which a reader going line by line would act on first.
+
 `adopt` marks each line for the product at hand — `ASKS`, `-`, or `?` when a
 selector cannot be evaluated or the line predates the marker — and returns
 `current` in its JSON: true when nothing since the pin asks this product a
