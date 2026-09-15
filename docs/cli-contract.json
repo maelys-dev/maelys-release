@@ -992,6 +992,12 @@
                     "says": {
                       "type": "string"
                     },
+                    "supersededBy": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
                     "version": {
                       "type": "string"
                     }

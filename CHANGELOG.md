@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.57.2 — 2026-09-15
+
+- **A channel declared `reviewer` gets its `ok`.** 0.52.0 promised one for
+  `none` and for `reviewer`, and the branch tested `none` alone: a declared
+  reviewer received the note telling it to declare reviewer. The test held
+  one of the two answers. Found by maelys-datalog on its own line.
+- **A superseded Impact line asks nothing, and its instruction is not
+  printed.** Adopting 0.57.0 from 0.51.1, maelys-datalog was told "0.54.0,
+  0.57.0 ask this product a gesture", and the 0.54.0 line it was sent to read
+  says, in bold, to narrow the protection first — the gesture 0.57.0 forbids.
+  The replacement is now data, `[superseded-by: 0.57.0]` after the selectors:
+  such a line is `-` for a product whose list also holds the version that
+  replaces it, prints only "superseded by 0.57.0, below", and carries
+  `supersededBy` in the JSON.
+- **Impact.** [asks: nothing] Nothing to adopt for the second: `adopt` reads
+  the changelog of the socle that runs it. A product with a `reviewer`
+  channel: the note becomes an `ok` at a pin carrying this. Everyone else:
+  nothing.
+
 ## 0.57.1 — 2026-09-15
 
 - **`protect --apply` refused agent-cli-spec's rename over a job that never
@@ -166,7 +185,7 @@
   runner lines in another order than the writer that regenerates it, which
   would have drifted any product that declared a runner against its own new
   file. Both paths now go through one writer.
-- **Impact.** [asks: nothing] **Superseded by 0.57.0 for the rename: adopt, merge, `protect . --apply`; never narrow.** Everyone mid-rename: widen only after the adoption is merged —
+- **Impact.** [asks: nothing] [superseded-by: 0.57.0] Everyone mid-rename: widen only after the adoption is merged —
   `protect --apply` now enforces it. maelys-http: `[package]` lets you verify
   on three targets again. Everyone else: nothing, and the managed blocks
   change prose only.
@@ -194,7 +213,7 @@
   organisation is refused before anything is sent.
 - **`adopt --apply` names the order when it refuses.** It still refuses to
   make a required context disappear, and now says narrow, adopt, widen.
-- **Impact.** [asks: old-legs] **Superseded by 0.57.0 for the rename: adopt, merge, `protect . --apply`; never narrow.** Every product on the shared CI, and it is the one version this
+- **Impact.** [asks: old-legs] [superseded-by: 0.57.0] Every product on the shared CI, and it is the one version this
   year that asks something of all of them: **before adopting, run `protect
   . --without-legs --apply`; adopt; then `protect . --apply`.** Skip the
   first and `adopt --apply` refuses. maelys-cli, whose ruleset requires only
@@ -302,7 +321,7 @@
   with an empty `environment:` would have been found out at somebody's
   release. A throwaway workflow on a branch answered it: the job started at
   once, left no pending deployment, and created no environment.
-- **Impact.** [asks: nothing] **Superseded by 0.57.0 for the rename: adopt, merge, `protect . --apply`; never narrow.** Products on the shared CI: read the coming note — the leg
+- **Impact.** [asks: nothing] [superseded-by: 0.57.0] Products on the shared CI: read the coming note — the leg
   rename changes every required context, and the order is narrow, adopt,
   widen. Products with a channel: say `none` or `reviewer` in its line, and
   the note becomes an `ok`; saying nothing keeps today's behaviour. Everyone

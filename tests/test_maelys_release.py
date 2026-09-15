@@ -2903,6 +2903,17 @@ class ImpactLinesTest(unittest.TestCase):
         self.assertIn("0.49.1   -    Nobody", text)
         self.assertIn("0.57.0   ?    ", text)
 
+    def test_a_superseded_line_asks_nothing_and_its_instruction_is_not_printed(self) -> None:
+        """maelys-datalog, adopting 0.57.0 from 0.51.1, was told 0.54.0 asked a
+        gesture, whose bold instruction is to narrow the protection."""
+        data = self.product.json("adopt", self.dir)["data"]
+        by_version = {entry["version"]: entry for entry in data["impact"]}
+        self.assertEqual(by_version["0.54.0"]["supersededBy"], "0.57.0")
+        self.assertIs(by_version["0.54.0"]["asksThis"], False)
+        text = self.product.run("adopt", self.dir).stdout
+        self.assertIn("0.54.0   -    superseded by 0.57.0, below: read that line", text)
+        self.assertNotIn("--without-legs --apply`; adopt", text)
+
     def test_a_selector_that_holds_asks_and_an_unknown_one_does_not_hide_it(self) -> None:
         decl = MODULE.Declarations(pathlib.Path("/nonexistent"), "p")
         decl.channels = [("npm", "github-packages")]
@@ -3088,6 +3099,13 @@ class ChannelGateTest(unittest.TestCase):
                 if "[channels] npm" in check["message"]]
         self.assertEqual([check["status"] for check in said], ["ok"], said)
         self.assertIn("no approval of its own", said[0]["message"])
+        # Both declared answers, not one: this test held `none` alone, and a
+        # declared reviewer kept the note telling it to declare reviewer.
+        self.workflow("npm github-packages reviewer")
+        said = [check for check in self.product.json("check", self.dir)["data"]["checks"]
+                if "[channels] npm" in check["message"]]
+        self.assertEqual([check["status"] for check in said], ["ok"], said)
+        self.assertIn("as declared", said[0]["message"])
 
     def test_the_gate_is_one_of_the_two_the_socle_knows(self) -> None:
         for text, expected in (("[channels]\nnpm github-packages sometimes\n", "reviewer or none"),
