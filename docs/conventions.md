@@ -943,6 +943,13 @@ does not say where either came from.
   for a call to `check-product.yml` — and refuses the declaration if a
   workflow makes that call anyway. The socle is the first: its `check.yml`
   lints what it ships, runs its tests and runs `check .` on itself.
+- A repository whose public files must not name the documentation
+  repository declares `[docs] unnamed`: the managed blocks drop the bullet
+  naming `maelys-dev/maelys-docs` for one that names none. AGENTS.md and
+  CLAUDE.md are as public as a README in a public repository.
+- The checkout scripts are written and checked for every repository that
+  pins and calls the shared CI, whatever its mechanism but `none`:
+  `check-product.yml` calls them. `[ci] own` receives none.
 - A reusable workflow (`on: workflow_call`) runs in the repositories that
   call it, so the search for lines reading a sibling does not read it as the
   layout of the repository that ships it.

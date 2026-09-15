@@ -928,9 +928,12 @@ class MechanismTest(unittest.TestCase):
         data = self.product.json("adopt", self.dir)["data"]
         self.assertEqual(data["mechanism"], "custom")
         written = {entry["path"] for entry in data["files"]}
-        # The conventions, and the shared CI, which is not the mechanism.
+        # The conventions, the shared CI, which is not the mechanism, and --
+        # since 0.57.2 -- the checkout scripts that CI calls for a product that
+        # pins, whatever publishes it: maelys-warden copied them by hand.
         self.assertEqual(written, {"AGENTS.md", "CLAUDE.md", "RELEASING.md", "LICENSING.md", "SECURITY.md",
-                                   ".github/workflows/ci.yml"})
+                                   ".github/workflows/ci.yml", "scripts/checkout-dependency.sh",
+                                   "scripts/checkout-dependencies.sh"})
         self.assertNotIn(".github/workflows/release.yml", written)
 
     def test_adopt_leaves_the_products_own_workflow_alone(self) -> None:
@@ -942,7 +945,8 @@ class MechanismTest(unittest.TestCase):
             self.assertIn("https://creativecommons.org/licenses/by/4.0/", text)
             self.assertNotIn("CC0", text)
         self.assertEqual(self.product.read(".github/workflows/release.yml"), self.OWN_WORKFLOW)
-        self.assertFalse((self.product.dir / "scripts" / "checkout-dependency.sh").exists())
+        # The scripts the shared CI calls, yes; the release skill, no.
+        self.assertTrue(os.access(self.product.dir / "scripts" / "checkout-dependency.sh", os.X_OK))
         self.assertFalse((self.product.dir / ".claude").exists())
 
     def test_the_shared_ci_is_installed_whatever_publishes_the_product(self) -> None:
@@ -4407,6 +4411,55 @@ class OwnCiTest(unittest.TestCase):
         workflow = (ROOT / ".github" / "workflows" / "check.yml").read_text(encoding="utf-8")
         self.assertIn("bin/maelys-release check . --product maelys-release", workflow)
         self.assertIn("[ci]", (ROOT / "maelys-release.conf").read_text(encoding="utf-8"))
+
+
+class WardenAdoptionTest(unittest.TestCase):
+    """maelys-warden, custom, private, pins apart, bound to be public; and
+    agent-cli-spec's adoption of 0.57.1 refused over a job that reports."""
+
+    def product(self, conf: str, mechanism: str = "custom") -> MODULE.Declarations:
+        work = pathlib.Path(tempfile.mkdtemp(prefix="maelys-release-warden."))
+        self.addCleanup(shutil.rmtree, work, True)
+        (work / "dependencies").mkdir()
+        (work / "dependencies" / "maelys-cli.pin").write_text("v0.5.23\n" + "a" * 40 + "\n")
+        (work / "VERSION").write_text("1.0.0\n")
+        (work / "maelys-release.conf").write_text(conf)
+        return MODULE.read_declarations(work, "maelys-warden", mechanism)
+
+    def test_a_custom_product_that_pins_receives_the_checkout_scripts_in_its_conventions(self) -> None:
+        decl = self.product("[dependencies]\napart\n")
+        staged = MODULE.stage(decl, "a" * 40, "v9.9.9")
+        for script in MODULE.CHECKOUT_SCRIPTS:
+            self.assertIn(script, staged)
+            self.assertTrue(staged[script][1], "executable")
+        scopes = {entry["path"]: entry["scope"] for entry in MODULE.plan(decl, staged, apply=False)}
+        self.assertEqual(scopes["scripts/checkout-dependencies.sh"], "conventions",
+                         "a release-scope drift on a custom product raises instead of reporting")
+        self.assertNotIn("scripts/checkout-dependency.sh", MODULE.stage(
+            self.product("[dependencies]\napart\n", mechanism="none"), "a" * 40, "v9.9.9"))
+        self.assertNotIn("scripts/checkout-dependency.sh", MODULE.stage(
+            self.product("[dependencies]\napart\n\n[ci]\nown\n"), "a" * 40, "v9.9.9"),
+            "a repository whose CI calls no shared CI has nothing that runs them")
+
+    def test_docs_unnamed_takes_the_repository_out_of_the_block(self) -> None:
+        for mechanism in ("custom", "maelys-release"):
+            named = MODULE.stage(self.product("[dependencies]\napart\n", mechanism), "a" * 40, "v9.9.9")["AGENTS.md"][0]
+            unnamed = MODULE.stage(self.product("[dependencies]\napart\n\n[docs]\nunnamed\n", mechanism),
+                                   "a" * 40, "v9.9.9")["AGENTS.md"][0]
+            self.assertIn("maelys-docs", named, mechanism)
+            self.assertNotIn("maelys-docs", unnamed, mechanism)
+            self.assertIn("declares `[docs] unnamed`", unnamed, mechanism)
+        with self.assertRaises(ValueError):
+            MODULE.parse_release("[docs]\npublic\n")
+
+    def test_the_adoption_guard_counts_a_turned_off_job_as_reporting(self) -> None:
+        saved = (MODULE.socle_check_contexts, MODULE.required_contexts)
+        MODULE.socle_check_contexts = lambda project: ("check", ["check / check (linux)"])
+        MODULE.required_contexts = lambda project: ["check / check (linux)", "check / sanitizers", "check / gone"]
+        try:
+            self.assertEqual(MODULE.vanishing_contexts(pathlib.Path(".")), ["check / gone"])
+        finally:
+            MODULE.socle_check_contexts, MODULE.required_contexts = saved
 
 
 class LegAliasTest(unittest.TestCase):

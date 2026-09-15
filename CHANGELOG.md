@@ -14,10 +14,28 @@
   such a line is `-` for a product whose list also holds the version that
   replaces it, prints only "superseded by 0.57.0, below", and carries
   `supersededBy` in the JSON.
-- **Impact.** [asks: nothing] Nothing to adopt for the second: `adopt` reads
-  the changelog of the socle that runs it. A product with a `reviewer`
-  channel: the note becomes an `ok` at a pin carrying this. Everyone else:
-  nothing.
+- **`adopt --apply` refused agent-cli-spec's 0.57.1 adoption over a job that
+  reports on every pull request.** 0.57.1 stopped counting its turned-off
+  sanitizers job as run, and the adoption guard, which read the same list,
+  then called `check / sanitizers` a context about to vanish. `protect` had
+  learned in the same version that a skipped job passes; the guard had not.
+  It now counts the fuzz and sanitizers jobs as reporting whatever the call
+  says. A defect of 0.57.1, and mine.
+- **A custom product that pins receives the checkout scripts.**
+  `check-product.yml` calls them whatever publishes the product, and `adopt`
+  wrote them only for the socle's own mechanism: maelys-warden, custom with
+  `[dependencies] apart`, copied the templates by hand, where nothing would
+  see them drift. They are now written and checked for every mechanism but
+  `none`, in the conventions verdict when the socle does not release.
+- **`[docs] unnamed` takes the documentation repository out of the managed
+  blocks.** AGENTS.md and CLAUDE.md are as public as a README in a public
+  repository, and the bullet naming maelys-docs broke the rule it states for
+  a product bound to be public. Asked by maelys-warden.
+- **Impact.** [asks: nothing] agent-cli-spec: adopt again from a checkout at
+  v0.57.2, without `--allow-lock`. maelys-warden: adopt to have your checkout
+  scripts checked, and declare `[docs] unnamed` if the block must not name
+  maelys-docs. A product with a `reviewer` channel: the note becomes an `ok`
+  at a pin carrying this. Everyone else: nothing.
 
 ## 0.57.1 — 2026-09-15
 
