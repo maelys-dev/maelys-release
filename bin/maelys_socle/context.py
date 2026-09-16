@@ -2,9 +2,11 @@
 """One explicit context for the services shared by extracted commands.
 
 The entry point constructs this immutable object once, after defining its
-services. Every extracted module receives that same context; further command
-moves extend it instead of adding callable parameters to command signatures.
-Ordinary inputs (invocations, paths, values) remain ordinary parameters.
+services. Every extracted module receives that same context. A service leaves
+it as soon as its implementation can be imported from the package: command
+moves must shrink this temporary list, not add callable parameter lists.
+Ordinary inputs (invocations, paths, values) remain ordinary parameters. The
+final refactoring PR reports the remaining services.
 
 Fields hold functions, never their results: construction performs no reads,
 GitHub requests or planning. In particular the context never captures HOST;
@@ -24,7 +26,6 @@ from .declarations import Declarations
 class Context:
     """Shared services still owned by the entry point during the extraction."""
 
-    project_of: Callable[[Invocation], tuple[pathlib.Path, str, str]]
     run_pinned_socle: Callable[[Invocation, pathlib.Path], None]
     read_declarations: Callable[[pathlib.Path, str, str], Declarations]
     socle_identity: Callable[[str, str], tuple[str, str]]

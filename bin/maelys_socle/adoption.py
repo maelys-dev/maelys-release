@@ -11,6 +11,7 @@ from .constants import DECLARATION_FILE, FORMER_DECLARATION_FILE, PROGRAM, SOCLE
 from .context import Context
 from .host import git, run
 from .inspection import pinned_socle
+from .project import project_of
 from .texts import checks_text
 
 
@@ -34,7 +35,7 @@ def move_declaration(project: pathlib.Path, apply: bool) -> str:
 
 
 def handle_adopt(invocation: Invocation, context: Context) -> tuple[dict, int]:
-    project, product, mechanism = context.project_of(invocation)
+    project, product, mechanism = project_of(invocation)
     apply = invocation.flag("--apply")
     decl = context.read_declarations(project, product, mechanism)
     context.require_valid(decl, "adopt")
