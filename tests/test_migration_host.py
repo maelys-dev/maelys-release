@@ -6,6 +6,7 @@ import io
 import json
 import os
 import pathlib
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -49,6 +50,7 @@ class MigrationHost(fixtures.FakeHost):
         return MODULE.Host.run(self, command, cwd=cwd, env=self.environment)
 
 
+@unittest.skipUnless(shutil.which("git-filter-repo"), "git-filter-repo is required to rewrite history")
 class MigrationHostTest(unittest.TestCase):
     def setUp(self):
         # Reuse the existing real-history fixture, not another migration model.
@@ -71,7 +73,7 @@ class MigrationHostTest(unittest.TestCase):
                                     "--format", "json"])
         self.assertEqual(self.product.git(self.product.dir, "rev-parse", "HEAD"), self.original_head)
         self.assertTrue((self.product.dir / "docs/guide.md").is_file())
-        self.assertEqual(host.reads, ["repos/maelys-dev/maelys-docs"])
+        self.assertEqual(host.reads, ["repos/maelys-dev/maelys-docs"], err.getvalue())
         self.assertEqual(host.writes, [])
         self.assertEqual([cwd.name for _, cwd in host.pushes], ["documents", "product"])
         self.assertTrue(all(not clone.exists() for clone in host.clones))
