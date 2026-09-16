@@ -56,20 +56,22 @@ class HostBoundaryTest(unittest.TestCase):
         self.assertIn("reserved for self-test", expired.stderr)
 
     def test_api_writes_and_process_calls_stay_inside_host(self):
-        source = CLI.read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        host = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "Host")
-        # Search literal flags regardless of quoting, not the longer help
-        # strings that hand an API command to the operator without running it.
-        escaped = [node.lineno for node in ast.walk(tree)
-                   if isinstance(node, ast.Constant) and node.value == "-X"
-                   and not host.lineno <= node.lineno <= host.end_lineno]
-        self.assertEqual(escaped, [], "GitHub write flags outside Host")
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name):
-                if node.func.value.id == "subprocess" or (node.func.value.id, node.func.attr) in (
-                        ("os", "execve"), ("shutil", "which")):
-                    self.assertTrue(host.lineno <= node.lineno <= host.end_lineno, ast.unparse(node))
+        for path in [CLI, *sorted((ROOT / "bin" / "maelys_socle").rglob("*.py"))]:
+            with self.subTest(path=path.relative_to(ROOT)):
+                tree = ast.parse(path.read_text(encoding="utf-8"))
+                host = next((node for node in tree.body if isinstance(node, ast.ClassDef)
+                             and node.name == "Host" and path == CLI), None)
+                inside_host = set(ast.walk(host)) if host else set()
+                # Search literal flags regardless of quoting, not the longer help
+                # strings that hand an API command to the operator without running it.
+                escaped = [node.lineno for node in ast.walk(tree)
+                           if isinstance(node, ast.Constant) and node.value == "-X" and node not in inside_host]
+                self.assertEqual(escaped, [], "GitHub write flags outside Host")
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name):
+                        if node.func.value.id == "subprocess" or (node.func.value.id, node.func.attr) in (
+                                ("os", "execve"), ("shutil", "which")):
+                            self.assertIn(node, inside_host, ast.unparse(node))
 
     def test_tests_replace_the_host_not_module_functions(self):
         tree = ast.parse((ROOT / "tests" / "test_maelys_release.py").read_text())

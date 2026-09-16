@@ -56,8 +56,9 @@ Refreshing fixture/fleet inputs is a separate, explicitly reviewed operation.
 ## Coverage still to add
 
 This reference covers `describe`, `declarations`, `check` and the `adopt` plan.
-The next approved stage must record API responses through the host and add the
-`protect` and `preflight` plans before any code is moved. Include the `public`
+Before moving `protect`, record API responses through the host and add the
+`protect` and `preflight` plans. The pure extraction approved after stage 1
+precedes that additional coverage. Include the `public`
 and `classic-protection` selectors, the adoption guard and `current` behavior.
 Until then, the no-gh reference cannot prove those GitHub-dependent branches
 unchanged; the stateful host tests exercise writes and their verification reads.

@@ -4,8 +4,8 @@ Copyright 2026 David Bromberg.
 
 ## Source code: MPL-2.0
 
-`bin/maelys-release`, the reusable workflows of `.github/workflows/`, the
-tests and the documentation of this repository are available under the
+`bin/maelys-release`, its internal modules in `bin/maelys_socle/`, the reusable
+workflows of `.github/workflows/`, the tests and the documentation of this repository are available under the
 Mozilla Public License 2.0. The complete terms are in [`LICENSE`](LICENSE).
 
 ## Installed agent texts: CC-BY-4.0
