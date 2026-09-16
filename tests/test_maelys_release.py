@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import importlib.machinery
 import importlib.util
+import atexit
 import io
 import base64
 import json
@@ -40,9 +41,14 @@ def load_module():
     return module
 
 
-# Also guard direct unittest runs and every CLI subprocess they start.
-os.environ["_MAELYS_RELEASE_SELF_TEST"] = "1"
 MODULE = load_module()
+# Also guard direct unittest runs and every CLI subprocess they start. Import
+# first so an invalid inherited self-test environment fails instead of being
+# silently replaced by a fresh token. A self-test child reuses its live token.
+if not MODULE.HOST._self_test():
+    _test_environment = MODULE.HOST.self_test_environment()
+    os.environ.update(_test_environment.__enter__())
+    atexit.register(_test_environment.__exit__, None, None, None)
 
 
 @contextmanager
