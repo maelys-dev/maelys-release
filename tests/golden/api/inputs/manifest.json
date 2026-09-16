@@ -623,6 +623,8 @@
     "cases/protect-ruleset-text.json": "09dd534ce96aa241ed622bbd657f4709333c0ec7b71ec0c976943f35597deb81",
     "cases/protect-unreadable-json.json": "3db0581d4ce942e062dca301dafefab8d4f28db9b1dc2e790da49572b615fcad",
     "cases/protect-unreadable-text.json": "8a056d392dfca911c2e17aeeb8b8ae2e3957eab7b491d9245724d84d056f4158",
-    "responses.json": "75ea11888d9fb921c4f5cd3cde1a0a9f3de01788e10ec9d03d22410cd24f2db2"
+    "responses.json": "75ea11888d9fb921c4f5cd3cde1a0a9f3de01788e10ec9d03d22410cd24f2db2",
+    "socle/VERSION": "f8de3de8a138497bc14999472efa9f096f64fa424a84665266a1f800f6ff5515",
+    "socle/CHANGELOG.md": "a133ee89125ad2abc47afba65e26ebb2d156b725bb915d3d46422a22c3bb2caf"
   }
 }

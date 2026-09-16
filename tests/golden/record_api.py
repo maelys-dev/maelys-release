@@ -277,6 +277,13 @@ def main():
         replay.write_json(stage / 'responses.json', responses.used)
         for path in sorted(stage.rglob('*.json')):
             manifest['sha256'][path.relative_to(stage).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
+        # The version and the changelog are inputs, not code: frozen with the
+        # cases, restored by the replay, so a later cut changes nothing here.
+        for relative in replay.SOCLE_INPUTS:
+            path = stage / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes((source / pathlib.PurePosixPath(relative).name).read_bytes())
+            manifest['sha256'][relative] = hashlib.sha256(path.read_bytes()).hexdigest()
         replay.write_json(stage / 'manifest.json', manifest)
         shutil.copytree(stage, output)
     print(f'Recorded {len(manifest["cases"])} cases; outputs must now be captured from the same source commit.')

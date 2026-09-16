@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "sourceCommit": "a6a308b67c26ddd2a16dfffee25f7476f02a06d1",
-  "inputsSha256": "26473c791713358f046bbbac23ffdc544647a8c35bb42e1d36e9a078f77474b9",
+  "inputsSha256": "7395e8adf96f5a23cc2bcc4ee60e668106820ed653f1aef3f3079ef3117cc935",
   "cases": [
     "protect-classic-json",
     "protect-classic-text",

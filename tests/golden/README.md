@@ -57,6 +57,14 @@ Refreshing fixture/fleet inputs is a separate, explicitly reviewed operation.
 
 ## API and host reference
 
+`api/inputs/socle/VERSION` and `api/inputs/socle/CHANGELOG.md` are inputs of
+this reference, frozen at recording and restored into a copy of the candidate at
+replay: the version is in the header of every generated `release.yml`, and the
+changelog is what `adopt` and `check` read to say what a product is behind on.
+Without them, the first `cut` after a recording turned every recorded fixture
+into a drift. A candidate at any version replays the same reference.
+
+
 The original reference remains unchanged: 680 observations, 142 command triplets,
 eight pinned fleet repositories, without `gh`. The additional `api/` reference
 records the approved stage 4d implementation at

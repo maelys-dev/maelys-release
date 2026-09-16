@@ -81,6 +81,29 @@ class ApiGoldenBoundaryTest(unittest.TestCase):
             with self.subTest(argv=argv), self.assertRaises(RuntimeError):
                 REPLAY.validate_argv(argv)
 
+    def test_a_version_bump_and_a_changelog_entry_change_nothing_in_the_replay(self):
+        """The defect the first cut after the recording revealed: VERSION 0.59.0
+        made every recorded release.yml a drift, and the release pull request's
+        self-test red with 27 unconsumed host calls. VERSION and CHANGELOG.md are
+        inputs of the reference, restored by the replay, so a candidate at any
+        version replays the same."""
+        with tempfile.TemporaryDirectory() as directory:
+            bumped = pathlib.Path(directory) / 'bumped'
+            for name in ('bin', 'share', 'docs', 'tests', '.github/workflows'):
+                shutil.copytree(ROOT / name, bumped / name, ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
+            for name in ('WITHDRAWN',):
+                shutil.copy2(ROOT / name, bumped / name)
+            (bumped / 'VERSION').write_text('9.9.9\n')
+            (bumped / 'CHANGELOG.md').write_text('# Changelog\n\n## 9.9.9 — 2099-01-01\n\n- **Impact.** [asks: nothing] x\n\n'
+                                                 + (ROOT / 'CHANGELOG.md').read_text(encoding='utf-8'))
+            output = pathlib.Path(directory) / 'replay'
+            completed = self.replay(output, '--source', str(bumped), '--case', 'preflight-ruleset-text',
+                                    '--case', 'current-private-open-adopt-json')
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            for case in ('preflight-ruleset-text', 'current-private-open-adopt-json'):
+                self.assertEqual(REPLAY.read_json(output / f'{case}.json'),
+                                 REPLAY.read_json(ROOT / 'tests/golden/api/baseline' / f'{case}.json'), case)
+
     def test_changed_or_unhashed_inputs_are_refused(self):
         with tempfile.TemporaryDirectory() as directory:
             inputs = pathlib.Path(directory) / 'inputs'
