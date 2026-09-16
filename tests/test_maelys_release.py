@@ -5658,3 +5658,36 @@ class UnitTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OnePullTest(unittest.TestCase):
+    """The pull request of a release branch, with the closed ones set aside.
+
+    0.59.0: the first release pull request was closed after its checks
+    refused, the branch deleted and cut again; `cut --tag` then counted the
+    closed one beside the merged one and refused to sign, with a hint asking
+    to close what was already closed.
+    """
+
+    def listing(self, pulls):
+        def runner(command, cwd=None, env=None):
+            self.assertEqual(command[:3], ["gh", "pr", "list"])
+            return subprocess.CompletedProcess(command, 0, json.dumps(pulls), "")
+        return FakeHost(run=runner)
+
+    def test_a_closed_unmerged_pull_request_is_not_this_release(self) -> None:
+        closed = {"number": 124, "url": "u/124", "state": "CLOSED", "mergeCommit": None, "headRefOid": "a" * 40}
+        merged = {"number": 126, "url": "u/126", "state": "MERGED", "mergeCommit": {"oid": "b" * 40},
+                  "headRefOid": "c" * 40}
+        with using_host(self.listing([merged, closed])):
+            self.assertEqual(MODULE.one_pull(pathlib.Path("."), "o/r", "release/v0.59.0")["number"], 126)
+        with using_host(self.listing([closed])):
+            self.assertIsNone(MODULE.one_pull(pathlib.Path("."), "o/r", "release/v0.59.0"))
+
+    def test_two_live_pull_requests_are_still_refused(self) -> None:
+        live = [{"number": n, "url": f"u/{n}", "state": "OPEN", "mergeCommit": None, "headRefOid": "a" * 40}
+                for n in (1, 2)]
+        with using_host(self.listing(live)), self.assertRaises(MODULE.Failure) as refusal:
+            MODULE.one_pull(pathlib.Path("."), "o/r", "release/v0.59.0")
+        self.assertIn("2 pull requests", refusal.exception.message)
+
