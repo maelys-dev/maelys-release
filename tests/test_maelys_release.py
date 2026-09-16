@@ -45,20 +45,20 @@ MODULE = load_module()
 # Also guard direct unittest runs and every CLI subprocess they start. Import
 # first so an invalid inherited self-test environment fails instead of being
 # silently replaced by a fresh token. A self-test child reuses its live token.
-if not MODULE.HOST._self_test():
-    _test_environment = MODULE.HOST.self_test_environment()
+if not MODULE.host.HOST._self_test():
+    _test_environment = MODULE.host.HOST.self_test_environment()
     os.environ.update(_test_environment.__enter__())
     atexit.register(_test_environment.__exit__, None, None, None)
 
 
 @contextmanager
 def using_host(host):
-    previous = MODULE.HOST
-    MODULE.HOST = host
+    previous = MODULE.host.HOST
+    MODULE.host.HOST = host
     try:
         yield host
     finally:
-        MODULE.HOST = previous
+        MODULE.host.HOST = previous
 
 
 class FakeHost(MODULE.Host):

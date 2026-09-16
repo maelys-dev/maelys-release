@@ -40,6 +40,75 @@ class HostBoundaryTest(unittest.TestCase):
                     self.assertEqual(result.stdout, "")
                     self.assertIn("reserved for self-test", result.stderr)
                     self.assertIn("Unset _MAELYS_RELEASE_SELF_TEST", result.stderr)
+                    body = json.loads(result.stderr)
+                    self.assertEqual(body["contract"], "agent-cli/v2")
+                    self.assertEqual(body["schemaVersion"], 2)
+                    self.assertEqual(body["command"], "describe")
+                    self.assertFalse(body["ok"])
+                    self.assertEqual(body["exitCode"], result.returncode)
+                    self.assertEqual(body["error"]["code"], "PRECONDITION_FAILED")
+
+    def test_token_refusal_uses_the_resolved_command_and_output_format(self):
+        env = {**os.environ, "_MAELYS_RELEASE_SELF_TEST": "invalid", "MAELYS_CLI_FORMAT": "json"}
+        for argv, command, machine in (
+                (["version"], "version", True),
+                (["--version", "--json"], "version", True),
+                (["describe", "--format=json", "--compact"], "describe", True),
+                (["version", "--format", "jsonl", "--field", "version"], "version", True),
+                (["help", "--format", "text"], "help", False),
+        ):
+            with self.subTest(argv=argv):
+                result = subprocess.run([sys.executable, str(CLI), *argv], env=env,
+                                        text=True, capture_output=True, check=False)
+                self.assertEqual(result.returncode, 1)
+                self.assertEqual(result.stdout, "")
+                if machine:
+                    body = json.loads(result.stderr)
+                    self.assertEqual(body["command"], command)
+                    self.assertEqual(body["error"]["code"], "PRECONDITION_FAILED")
+                    self.assertEqual(body["exitCode"], 1)
+                    self.assertFalse(body["ok"])
+                else:
+                    self.assertIn("maelys-release: [PRECONDITION_FAILED]", result.stderr)
+                for name in ("_MAELYS_RELEASE_SELF_TEST", "_MAELYS_RELEASE_SELF_TEST_FILE", "_MAELYS_RELEASE_TEST_GH"):
+                    self.assertIn(name, result.stderr)
+                self.assertNotIn("Traceback", result.stderr)
+
+    def test_token_refusal_precedes_any_command_handler(self):
+        with tempfile.TemporaryDirectory() as directory:
+            env = {**os.environ, "_MAELYS_RELEASE_SELF_TEST": "invalid"}
+            result = subprocess.run([sys.executable, str(CLI), "adopt", directory, "--apply", "--format", "json"],
+                                    env=env, text=True, capture_output=True, check=False)
+            self.assertEqual(result.returncode, 1)
+            self.assertEqual(result.stdout, "")
+            body = json.loads(result.stderr)
+            self.assertEqual(body["command"], "adopt")
+            self.assertEqual(body["error"]["code"], "PRECONDITION_FAILED")
+            self.assertIn("reserved for self-test", body["error"]["message"])
+            self.assertEqual(list(pathlib.Path(directory).iterdir()), [])
+
+    def test_imported_host_refuses_an_invalid_environment_before_any_use(self):
+        code = '''import importlib.machinery, importlib.util, os, sys
+loader = importlib.machinery.SourceFileLoader("candidate", sys.argv[1])
+spec = importlib.util.spec_from_loader(loader.name, loader)
+module = importlib.util.module_from_spec(spec)
+loader.exec_module(module)
+for operation in (lambda: module.host.HOST.which("python3"),
+                  lambda: module.host.HOST.run(["/unreachable"]),
+                  lambda: module.host.HOST.stream(["/unreachable"], sys.stdout),
+                  lambda: module.host.HOST.exec("/unreachable", ["/unreachable"], dict(os.environ))):
+    try:
+        operation()
+    except module.Failure as failure:
+        assert failure.code == "PRECONDITION_FAILED"
+    else:
+        raise AssertionError("the invalid environment reached a host operation")
+'''
+        result = subprocess.run([sys.executable, "-c", code, str(CLI)],
+                                env={**os.environ, "_MAELYS_RELEASE_SELF_TEST": "invalid"},
+                                text=True, capture_output=True, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "")
 
     def test_a_self_test_token_is_unique_and_expires_with_its_context(self):
         with MODULE.Host.self_test_environment() as first, MODULE.Host.self_test_environment() as second:
@@ -54,13 +123,14 @@ class HostBoundaryTest(unittest.TestCase):
                                  env=first, text=True, capture_output=True, check=False)
         self.assertNotEqual(expired.returncode, 0)
         self.assertIn("reserved for self-test", expired.stderr)
+        self.assertEqual(json.loads(expired.stderr)["error"]["code"], "PRECONDITION_FAILED")
 
     def test_api_writes_and_process_calls_stay_inside_host(self):
         for path in [CLI, *sorted((ROOT / "bin" / "maelys_socle").rglob("*.py"))]:
             with self.subTest(path=path.relative_to(ROOT)):
                 tree = ast.parse(path.read_text(encoding="utf-8"))
                 host = next((node for node in tree.body if isinstance(node, ast.ClassDef)
-                             and node.name == "Host" and path == CLI), None)
+                             and node.name == "Host" and path == ROOT / "bin" / "maelys_socle" / "host.py"), None)
                 inside_host = set(ast.walk(host)) if host else set()
                 # Search literal flags regardless of quoting, not the longer help
                 # strings that hand an API command to the operator without running it.
@@ -73,13 +143,27 @@ class HostBoundaryTest(unittest.TestCase):
                                 ("os", "execve"), ("shutil", "which")):
                             self.assertIn(node, inside_host, ast.unparse(node))
 
+    def test_only_the_host_module_owns_the_current_host_binding(self):
+        host_path = ROOT / "bin" / "maelys_socle" / "host.py"
+        for path in [CLI, *sorted((ROOT / "bin" / "maelys_socle").rglob("*.py"))]:
+            if path == host_path:
+                continue
+            with self.subTest(path=path.relative_to(ROOT)):
+                tree = ast.parse(path.read_text(encoding="utf-8"))
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.ImportFrom):
+                        self.assertNotIn("HOST", [name.name for name in node.names],
+                                         "Import the host module, not a stale copy of its HOST binding")
+                    if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+                        self.assertNotEqual(node.id, "HOST", "Only host.py owns the current host")
+
     def test_tests_replace_the_host_not_module_functions(self):
         tree = ast.parse((ROOT / "tests" / "test_maelys_release.py").read_text())
         for node in ast.walk(tree):
             if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Store):
                 expression = ast.unparse(node)
                 if expression.startswith("MODULE."):
-                    self.assertEqual(expression, "MODULE.HOST")
+                    self.assertEqual(expression, "MODULE.host.HOST")
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "setattr":
                 self.assertNotEqual(ast.unparse(node.args[0]), "MODULE")
 
@@ -107,7 +191,7 @@ loader = importlib.machinery.SourceFileLoader("candidate", sys.argv[1])
 spec = importlib.util.spec_from_loader(loader.name, loader)
 module = importlib.util.module_from_spec(spec)
 loader.exec_module(module)
-module.HOST.run(["gh", "pr", "create"])
+module.host.HOST.run(["gh", "pr", "create"])
 '''
         completed = subprocess.run([sys.executable, "-c", code, str(CLI)],
                                    text=True, capture_output=True, check=False)
@@ -150,7 +234,7 @@ module.HOST.run(["gh", "pr", "create"])
             self.assertTrue(host.run(["git", "rev-parse", "refs/heads/main"], cwd=origin).stdout.strip())
 
     def test_public_wrappers_share_the_installed_host_and_restore_it(self):
-        original = MODULE.HOST
+        original = MODULE.host.HOST
         host = FakeHost({"object": ("ok", {"a": 1}), "array": ("ok", [1, 2])})
         with self.assertRaisesRegex(RuntimeError, "leave"):
             with using_host(host):
@@ -159,7 +243,7 @@ module.HOST.run(["gh", "pr", "create"])
                 self.assertEqual(MODULE.github_list("array"), [1, 2])
                 self.assertEqual(MODULE.git("remote", "get-url", "origin"), "https://github.com/o/r.git")
                 raise RuntimeError("leave")
-        self.assertIs(MODULE.HOST, original)
+        self.assertIs(MODULE.host.HOST, original)
         self.assertEqual(host.reads, ["object", "object", "array"])
         self.assertEqual(len(host.commands), 1)
 

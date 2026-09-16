@@ -45,12 +45,22 @@ class PackageLayoutTest(unittest.TestCase):
                 self.assertEqual(adopted.returncode, reference.returncode, adopted.stderr)
                 self.assertEqual(adopted.stdout, reference.stdout)
                 self.assertEqual(adopted.stderr, reference.stderr)
-                code = '''import importlib.machinery, importlib.util, json, sys
+                # The GitHub withdrawal reader must use this entry point's
+                # version, even though its implementation now lives in a package.
+                (prefix / "VERSION").write_text("99.98.97\n", encoding="utf-8")
+                code = '''import base64, importlib.machinery, importlib.util, json, sys
 loader = importlib.machinery.SourceFileLoader("maelys_release", sys.argv[1])
 spec = importlib.util.spec_from_loader(loader.name, loader)
 module = importlib.util.module_from_spec(spec)
 loader.exec_module(module)
+class RecordedHost(module.Host):
+    def read(self, path):
+        assert path == "repos/maelys-dev/maelys-release/contents/WITHDRAWN"
+        return "ok", {"encoding": "base64", "content": base64.b64encode(
+            b"99.98.97 protect installed-version\\n").decode()}
+module.host.HOST = RecordedHost()
 print(json.dumps({"root": str(module.socle_root()), "share": str(module.share_dir()),
+                  "withdrawal": module.withdrawn_for("protect"),
                   "modules": [value.__file__ for name, value in sys.modules.items()
                               if name == "maelys_socle" or name.startswith("maelys_socle.")]}))
 '''
@@ -59,6 +69,7 @@ print(json.dumps({"root": str(module.socle_root()), "share": str(module.share_di
                 data = json.loads(loaded.stdout)
                 self.assertEqual(data["root"], str(prefix.resolve()))
                 self.assertEqual(data["share"], str(share.resolve()))
+                self.assertEqual(data["withdrawal"], ["withdrawn", "installed-version"])
                 self.assertEqual(len(data["modules"]), len(list((ROOT / "bin" / "maelys_socle").glob("*.py"))))
                 for filename in data["modules"]:
                     self.assertEqual(pathlib.Path(filename).parent, prefix.resolve() / "bin" / "maelys_socle")
