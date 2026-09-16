@@ -25,8 +25,8 @@ changes. Never update the reference to make a pure refactor pass.
 1. Reproduce the defect, add its regression test, and implement the fix. Replay
    against the current reference first. Keep the failing diff and explain each
    changed message, value or exit code in the PR.
-2. Commit the implementation and tests on the fix branch. The source files used
-   by the capture must be clean. Read its full commit with
+2. Commit the implementation and tests on the fix branch. The source checkout
+   must be clean, including workflows and dependency pins. Read its full commit with
    `git -C /absolute/socle rev-parse HEAD`.
 3. Explicitly record that candidate, into a new directory:
 

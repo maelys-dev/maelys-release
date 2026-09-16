@@ -402,9 +402,7 @@ def main():
         raw_env = dict(os.environ)
         commit = git(source, "rev-parse", "HEAD", env=raw_env)
         expected = args.candidate or git(source, "rev-parse", "refs/remotes/origin/main", env=raw_env)
-        if commit != expected or git(source, "status", "--porcelain", "--", "bin", "share",
-                                      "tests/test_maelys_release.py", "VERSION", "CHANGELOG.md",
-                                      "WITHDRAWN", "docs", env=raw_env):
+        if commit != expected or git(source, "status", "--porcelain", env=raw_env):
             parser.error("--record requires the unchanged origin/main source" if not args.candidate else
                          "--candidate must name the exact clean HEAD commit of the behavior fix")
         if not args.candidate:

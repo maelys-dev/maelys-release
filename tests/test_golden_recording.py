@@ -42,12 +42,20 @@ class GoldenRecordingTest(unittest.TestCase):
                                        "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false",
                                        *arguments], text=True, capture_output=True, check=True).stdout.strip()
             git("init", "-q")
-            (source / "bin").mkdir()
-            script = source / "bin" / "maelys-release"
-            script.write_text("committed\n")
-            git("add", "bin")
+            inputs = [source / name for name in ("bin/maelys-release", ".github/workflows/check-product.yml",
+                                                "dependencies/maelys-cli.pin")]
+            for path in inputs:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("committed\n")
+            git("add", ".")
             git("commit", "-qm", "behavior fix")
             commit = git("rev-parse", "HEAD")
-            script.write_text("uncommitted\n")
-            self.assertIn("exact clean HEAD commit", self.refused(
-                directory, "--source", str(source), "--record", "--candidate", commit))
+            git("update-ref", "refs/remotes/origin/main", commit)
+            for path in inputs:
+                with self.subTest(dirty=path.relative_to(source)):
+                    path.write_text("uncommitted\n")
+                    self.assertIn("exact clean HEAD commit", self.refused(
+                        directory, "--source", str(source), "--record", "--candidate", commit))
+                    self.assertIn("unchanged origin/main source", self.refused(
+                        directory, "--source", str(source), "--record"))
+                    path.write_text("committed\n")
