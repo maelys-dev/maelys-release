@@ -6,6 +6,7 @@ import os
 import pathlib
 
 from maelys_cli import Failure
+from .constants import PROGRAM
 from .host import git, run
 
 
@@ -118,3 +119,25 @@ def materialise(path: pathlib.Path, pin: dict, repository: str, action: str) -> 
         arguments = ["submodule", "update", "--quiet", "--init"] + (["--recursive"] if pin["submodules"] else [])
         if run(["git", *arguments, "--depth", "1"], cwd=path).returncode != 0:
             git(*arguments, cwd=path)
+
+
+def author_identity(path: pathlib.Path) -> None:
+    """Leave the operator's identity alone, and name one only if git has none.
+
+    A clone inherits the global configuration, which is the identity the
+    operator commits and signs with. Setting a machine name and address over
+    it produced commits nobody's account stands behind -- one of them reached
+    the tap and was never verified -- and the branch a migration opens could
+    not merge into a default branch that requires signed commits.
+
+    The machine identity stays as a floor: a CI runner with no configured
+    user must still be able to commit.
+    """
+    if os.environ.get("GIT_AUTHOR_NAME") or os.environ.get("GIT_AUTHOR_EMAIL"):
+        # git reads these itself; writing them into the clone's config would
+        # only shadow what the operator asked for.
+        return
+    if run(["git", "var", "GIT_AUTHOR_IDENT"], cwd=path).returncode == 0:
+        return
+    git("config", "user.name", PROGRAM, cwd=path)
+    git("config", "user.email", f"{PROGRAM}@users.noreply.github.com", cwd=path)

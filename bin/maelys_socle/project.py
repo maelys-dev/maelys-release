@@ -67,3 +67,12 @@ def require_socle_mechanism(project: pathlib.Path, mechanism: str, action: str) 
         raise Failure("PRECONDITION_FAILED",
                       f"{project} publishes through a {mechanism} mechanism, so {action} does not apply to it.",
                       f"'{PROGRAM} check {project}' verifies the conventions of a product the socle does not release.")
+
+
+def engaged_documents(project: pathlib.Path) -> set[str]:
+    """The docs/ files LICENSING.md links: a public engagement stays here."""
+    licensing = project / "LICENSING.md"
+    if not licensing.is_file():
+        return set()
+    return {match.replace("./", "") for match in
+            re.findall(r"\(([^)\s]*docs/[^)\s#]+)\)", licensing.read_text(encoding="utf-8"))}

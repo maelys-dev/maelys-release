@@ -35,7 +35,6 @@ class Context:
     plan: Callable[..., list[dict]]
     stage: Callable[[Declarations, str, str], dict[str, tuple[str, bool]]]
     socle_impact: Callable[[str], list[tuple[str, str]]]
-    version_tuple: Callable[[str], tuple]
     socle_version: Callable[[], str]
     socle_root: Callable[[], pathlib.Path]
     vanishing_contexts: Callable[[pathlib.Path], list[str]]

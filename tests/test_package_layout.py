@@ -16,11 +16,15 @@ class PackageLayoutTest(unittest.TestCase):
     def test_copied_checkout_and_installed_prefix_keep_the_same_roots_and_outputs(self):
         product = Product()
         self.addCleanup(product.close)
+        product.write("docs/migration-fixture.md", "# Prose to move\n")
+        documents = product.work / "documents.jsonl"
+        documents.write_text(json.dumps({"repository": "maelys-fixture", "path": "docs/migration-fixture.md",
+                                        "destination": "documents/maelys-fixture/migration-fixture.md"}) + "\n")
         reference = product.run("adopt", str(product.dir), "--format", "json", "--compact")
         described = subprocess.run([sys.executable, "-I", str(CLI), "describe", "--format", "json"],
                                    env=product.env, text=True, capture_output=True, check=True)
         inspections = []
-        for command in ("declarations", "check", "dependencies", "rehearse"):
+        for command in ("declarations", "check", "dependencies", "rehearse", "migrate"):
             for output in ("text", "json"):
                 args = [command, str(product.dir), "--format", output]
                 if command == "check":
@@ -29,6 +33,8 @@ class PackageLayoutTest(unittest.TestCase):
                     args.extend(["--directory", str(product.work / "materialised")])
                 if command == "rehearse":
                     args.extend(Product.SOCLE)
+                if command == "migrate":
+                    args.extend(["--documents", str(documents), "--documents-repository", "example/documents"])
                 result = subprocess.run([sys.executable, "-I", str(CLI), *args],
                                         env=product.env, text=True, capture_output=True, check=False)
                 expected_code = {"check": 2, "rehearse": 1}.get(command, 0)

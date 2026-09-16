@@ -17,7 +17,7 @@ from .constants import (
     SOCLE_REPOSITORY, SOCLE_TARGETS,
 )
 from .context import Context
-from .declarations import Declarations
+from .declarations import Declarations, version_tuple
 from .project import project_of
 from .texts import checks_text
 from .workflows import block_list, file_runners, sub_block, top_block, workflow_events
@@ -153,7 +153,7 @@ def check_data(invocation: Invocation, context: Context) -> tuple[Declarations, 
             # be vacuous rather than true.
             pinned_tag = data["pinned"]["tag"].lstrip("v")
             behind = re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", pinned_tag) \
-                and context.version_tuple(pinned_tag) <= context.newest_known_version()
+                and version_tuple(pinned_tag) <= context.newest_known_version()
             if behind and context.impact_for(decl, data["pinned"]["tag"])[1] is True:
                 decl.add("note", f"{mismatch}: nothing since {data['pinned']['tag']} asks this product a gesture,"
                                  " so it is current in the socle's sense", "release")
