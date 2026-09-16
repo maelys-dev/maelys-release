@@ -71,6 +71,12 @@ loader = importlib.machinery.SourceFileLoader("maelys_release", sys.argv[1])
 spec = importlib.util.spec_from_loader(loader.name, loader)
 module = importlib.util.module_from_spec(spec)
 loader.exec_module(module)
+# Load a second entry point in the same interpreter: cached package modules
+# must not make either context read the other checkout's VERSION.
+other_loader = importlib.machinery.SourceFileLoader("other_socle", sys.argv[2])
+other_spec = importlib.util.spec_from_loader(other_loader.name, other_loader)
+other = importlib.util.module_from_spec(other_spec)
+other_loader.exec_module(other)
 class RecordedHost(module.Host):
     def read(self, path):
         assert path == "repos/maelys-dev/maelys-release/contents/WITHDRAWN"
@@ -79,15 +85,18 @@ class RecordedHost(module.Host):
 module.host.HOST = RecordedHost()
 print(json.dumps({"root": str(module.socle_root()), "share": str(module.share_dir()),
                   "withdrawal": module.withdrawn_for("protect"),
+                  "otherRoot": str(other.socle_root()), "otherWithdrawal": other.withdrawn_for("protect"),
                   "modules": [value.__file__ for name, value in sys.modules.items()
                               if name == "maelys_socle" or name.startswith("maelys_socle.")]}))
 '''
-                loaded = subprocess.run([sys.executable, "-I", "-c", code, str(executable)],
+                loaded = subprocess.run([sys.executable, "-I", "-c", code, str(executable), str(CLI)],
                                         cwd=product.work, env=product.env, text=True, capture_output=True, check=True)
                 data = json.loads(loaded.stdout)
                 self.assertEqual(data["root"], str(prefix.resolve()))
                 self.assertEqual(data["share"], str(share.resolve()))
                 self.assertEqual(data["withdrawal"], ["withdrawn", "installed-version"])
+                self.assertEqual(data["otherRoot"], str(ROOT))
+                self.assertIsNone(data["otherWithdrawal"])
                 self.assertEqual(len(data["modules"]), len(list((ROOT / "bin" / "maelys_socle").glob("*.py"))))
                 for filename in data["modules"]:
                     self.assertEqual(pathlib.Path(filename).parent, prefix.resolve() / "bin" / "maelys_socle")

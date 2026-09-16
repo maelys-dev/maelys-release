@@ -6,10 +6,10 @@ import base64
 import json
 import pathlib
 import re
-from typing import Callable
 
 from maelys_cli import Failure
 from . import host
+from .context import Context
 from .host import git
 from .constants import DECLARATION_FILE, DEFAULT_TAP, SOCLE_REPOSITORY
 
@@ -559,7 +559,7 @@ def ruleset_shape(rules: object) -> list[str]:
     return sorted(shaped)
 
 
-def withdrawn_for(command: str, socle_version: Callable[[], str]) -> tuple[str, str] | None:
+def withdrawn_for(command: str, context: Context) -> tuple[str, str] | None:
     """Whether this socle's version is withdrawn for a command, read from the socle's main.
 
     ("withdrawn", reason), ("unread", why), or None when it may run. `protect`
@@ -574,7 +574,7 @@ def withdrawn_for(command: str, socle_version: Callable[[], str]) -> tuple[str, 
     state, body = github_read(f"repos/{SOCLE_REPOSITORY}/contents/{WITHDRAWN_FILE}")
     if state != "ok" or not isinstance(body, dict) or body.get("encoding") != "base64":
         return "unread", f"{SOCLE_REPOSITORY}/{WITHDRAWN_FILE} could not be read ({state})"
-    version = socle_version()
+    version = context.socle_version()
     for raw in base64.b64decode(body.get("content", "")).decode("utf-8", "replace").splitlines():
         line = raw.split("#", 1)[0].strip()
         if not line:
