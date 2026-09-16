@@ -18,21 +18,60 @@ from test_maelys_release import (CLI, MODULE, ROOT, ALL_LEGS, FakeHost, FakeProt
 
 
 class HostBoundaryTest(unittest.TestCase):
+    def test_an_accidental_or_invalid_self_test_environment_fails_at_startup(self):
+        clean = {key: value for key, value in os.environ.items()
+                 if key not in ("_MAELYS_RELEASE_SELF_TEST", "_MAELYS_RELEASE_SELF_TEST_FILE", "_MAELYS_RELEASE_TEST_GH")}
+        with tempfile.TemporaryDirectory() as directory:
+            witness = pathlib.Path(directory) / "token"
+            witness.write_text("a" * 64, encoding="utf-8")
+            for variables in (
+                    {"_MAELYS_RELEASE_SELF_TEST": "1"},
+                    {"_MAELYS_RELEASE_SELF_TEST": ""},
+                    {"_MAELYS_RELEASE_SELF_TEST_FILE": str(witness)},
+                    {"_MAELYS_RELEASE_TEST_GH": "/accidental/gh"},
+                    {"_MAELYS_RELEASE_SELF_TEST": "a" * 64},
+                    {"_MAELYS_RELEASE_SELF_TEST": "b" * 64, "_MAELYS_RELEASE_SELF_TEST_FILE": str(witness)},
+                    {"_MAELYS_RELEASE_SELF_TEST": "a" * 64, "_MAELYS_RELEASE_SELF_TEST_FILE": str(witness / "missing")},
+            ):
+                with self.subTest(variables=variables):
+                    result = subprocess.run([sys.executable, str(CLI), "describe", "--format", "json"],
+                                            env={**clean, **variables}, text=True, capture_output=True, check=False)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertEqual(result.stdout, "")
+                    self.assertIn("reserved for self-test", result.stderr)
+                    self.assertIn("Unset _MAELYS_RELEASE_SELF_TEST", result.stderr)
+
+    def test_a_self_test_token_is_unique_and_expires_with_its_context(self):
+        with MODULE.Host.self_test_environment() as first, MODULE.Host.self_test_environment() as second:
+            self.assertNotEqual(first["_MAELYS_RELEASE_SELF_TEST"], second["_MAELYS_RELEASE_SELF_TEST"])
+            witness = pathlib.Path(first["_MAELYS_RELEASE_SELF_TEST_FILE"])
+            self.assertEqual(witness.read_text(), first["_MAELYS_RELEASE_SELF_TEST"])
+            result = subprocess.run([sys.executable, str(CLI), "describe", "--format", "json"],
+                                    env=first, text=True, capture_output=True, check=False)
+            self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(witness.exists())
+        expired = subprocess.run([sys.executable, str(CLI), "describe", "--format", "json"],
+                                 env=first, text=True, capture_output=True, check=False)
+        self.assertNotEqual(expired.returncode, 0)
+        self.assertIn("reserved for self-test", expired.stderr)
+
     def test_api_writes_and_process_calls_stay_inside_host(self):
-        source = CLI.read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        host = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "Host")
-        # Search literal flags regardless of quoting, not the longer help
-        # strings that hand an API command to the operator without running it.
-        escaped = [node.lineno for node in ast.walk(tree)
-                   if isinstance(node, ast.Constant) and node.value == "-X"
-                   and not host.lineno <= node.lineno <= host.end_lineno]
-        self.assertEqual(escaped, [], "GitHub write flags outside Host")
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name):
-                if node.func.value.id == "subprocess" or (node.func.value.id, node.func.attr) in (
-                        ("os", "execve"), ("shutil", "which")):
-                    self.assertTrue(host.lineno <= node.lineno <= host.end_lineno, ast.unparse(node))
+        for path in [CLI, *sorted((ROOT / "bin" / "maelys_socle").rglob("*.py"))]:
+            with self.subTest(path=path.relative_to(ROOT)):
+                tree = ast.parse(path.read_text(encoding="utf-8"))
+                host = next((node for node in tree.body if isinstance(node, ast.ClassDef)
+                             and node.name == "Host" and path == CLI), None)
+                inside_host = set(ast.walk(host)) if host else set()
+                # Search literal flags regardless of quoting, not the longer help
+                # strings that hand an API command to the operator without running it.
+                escaped = [node.lineno for node in ast.walk(tree)
+                           if isinstance(node, ast.Constant) and node.value == "-X" and node not in inside_host]
+                self.assertEqual(escaped, [], "GitHub write flags outside Host")
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name):
+                        if node.func.value.id == "subprocess" or (node.func.value.id, node.func.attr) in (
+                                ("os", "execve"), ("shutil", "which")):
+                            self.assertIn(node, inside_host, ast.unparse(node))
 
     def test_tests_replace_the_host_not_module_functions(self):
         tree = ast.parse((ROOT / "tests" / "test_maelys_release.py").read_text())

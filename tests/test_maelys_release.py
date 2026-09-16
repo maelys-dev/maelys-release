@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import importlib.machinery
 import importlib.util
+import atexit
 import io
 import base64
 import json
@@ -40,9 +41,14 @@ def load_module():
     return module
 
 
-# Also guard direct unittest runs and every CLI subprocess they start.
-os.environ["_MAELYS_RELEASE_SELF_TEST"] = "1"
 MODULE = load_module()
+# Also guard direct unittest runs and every CLI subprocess they start. Import
+# first so an invalid inherited self-test environment fails instead of being
+# silently replaced by a fresh token. A self-test child reuses its live token.
+if not MODULE.HOST._self_test():
+    _test_environment = MODULE.HOST.self_test_environment()
+    os.environ.update(_test_environment.__enter__())
+    atexit.register(_test_environment.__exit__, None, None, None)
 
 
 @contextmanager
@@ -486,12 +492,10 @@ class AdoptTest(unittest.TestCase):
         copy = product.work / "socle-copy"
         product.git(product.work, "clone", "-q", str(ROOT), str(copy))
         # the copy runs the program under test, committed there so it is clean
-        shutil.copy2(CLI, copy / "bin" / "maelys-release")
-        shutil.copy2(ROOT / "bin" / "maelys_cli.py", copy / "bin" / "maelys_cli.py")   # the vendored framework
         shutil.copy2(ROOT / "VERSION", copy / "VERSION")
-        for directory in ("share", "dependencies"):
+        for directory in ("bin", "share", "dependencies"):
             shutil.rmtree(copy / directory, ignore_errors=True)
-            shutil.copytree(ROOT / directory, copy / directory)
+            shutil.copytree(ROOT / directory, copy / directory, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
         product.git(copy, "add", "-A")
         product.git(copy, "-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m", "under test")
         with (copy / "share" / "agents" / "instructions-block.md").open("a") as block:
@@ -545,6 +549,9 @@ class AdoptTest(unittest.TestCase):
         pinned_sha = product.git(copy, "rev-parse", "HEAD")
         self.assertEqual(json.loads(relocated.stdout)["data"]["socle"]["sha"], pinned_sha)
         self.assertTrue((product.work / "cache" / "maelys-release" / pinned_sha / "bin" / "maelys-release").is_file())
+        for path in (ROOT / "bin" / "maelys_socle").glob("*.py"):
+            self.assertEqual((product.work / "cache" / "maelys-release" / pinned_sha / "bin" / "maelys_socle" / path.name).read_bytes(),
+                             path.read_bytes())
         text = subprocess.run([str(CLI), "check", self.dir], env=env, check=False, text=True,
                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         self.assertEqual(text.returncode, 0, text.stdout + text.stderr)

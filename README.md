@@ -27,7 +27,9 @@ is that framework's `python/maelys_cli.py` at the commit
 `dependencies/maelys-cli.pin` names, byte for byte, with its digest on the pin's
 third line; `self-test` verifies both, and `maelys-release vendor` refreshes
 the copy after a pin bump. The socle stays one fetch of one commit: the
-framework travels inside it. The program is Python (standard library, 3.9 or later): one
+framework and the internal `bin/maelys_socle/` package travel inside it. An
+installation keeps that package beside the executable and `maelys_cli.py`.
+The program is Python (standard library, 3.9 or later): one
 catalog drives the parser, `help`, `describe` and the shell completion;
 success is a JSON envelope on stdout with `--format json`, failure an
 envelope on stderr; exit 0 completed, 1 failed, 2 a validation that found

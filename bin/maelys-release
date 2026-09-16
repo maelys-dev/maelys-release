@@ -19,6 +19,7 @@ into products, VERSION its version.
 from __future__ import annotations
 
 import base64
+from contextlib import contextmanager
 import datetime
 import difflib
 import hashlib
@@ -26,6 +27,7 @@ import json
 import os
 import pathlib
 import re
+import secrets
 import shutil
 import subprocess
 import sys
@@ -36,179 +38,35 @@ import urllib.parse
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import maelys_cli as cli  # noqa: E402
 
-PROGRAM = "maelys-release"
-PRODUCT = "Maelys Release"
+# Keep the SourceFileLoader interface while the pure implementation lives beside it.
+from maelys_socle.constants import (
+    AGENT_BRANCHES, BEGIN, BOTTLES, CHECK_PLATFORMS, CI_JOB, CI_USES, CLI_CONTRACT,
+    CLI_DECLARATIONS, CLI_GENERATOR, CLI_REFERENCE, CONVENTION_MANAGED, CONVENTION_SEEDED,
+    DECLARATION_FILE, DEFAULT_DOCUMENTS, DEFAULT_IMAGE, DEFAULT_TAP, END, EXPRESSION,
+    FORMER_DECLARATION_FILE, FUZZ_DIRECTORIES, FUZZ_TARGET, GENERATED_HEAD_LINES,
+    GENERATED_MARK, GENERATED_REFUSAL, JOB_ID, LABEL, LEGACY_CLI_REFERENCES, LEGS_JOB,
+    LEGS_USES, MANAGED, MATRIX_REFERENCE, MECHANISMS, PIN_SPELLINGS, PLATFORMS, PRODUCT,
+    PROGRAM, PUBLISHED_DOWNLOAD, README_LINK, RELEASE_MANAGED, RELEASE_USES, RUNNER_INPUTS,
+    RUNS_ON, SANITIZING, SOCLE_CHANNEL_KINDS, SOCLE_COMMIT_VERIFICATIONS, SOCLE_GATES,
+    SOCLE_LINUX_PACKAGES, SOCLE_MANIFEST_PATTERNS, SOCLE_MECHANISM, SOCLE_REPOSITORY,
+    SOCLE_RUNNER_KEYS, SOCLE_TARGETS, VERIFIED_MARK, WORKFLOW_EVENTS,
+)
+from maelys_socle.declarations import (
+    Declarations, parse_cli_declarations, parse_packages, parse_pin, parse_release,
+)
+from maelys_socle.texts import (
+    is_generated, managed_block, readme_links, touches, verified_by,
+)
+from maelys_socle.workflows import (
+    block_list, ci_legs, ci_macos_runner, ci_workflow, file_runners, legs_job,
+    macos_runner_input, matrix_values, release_workflow, runner_inputs, runner_json,
+    sanitizers_twice, sub_block, top_block, workflow_events, yaml_scalar,
+)
 Failure = cli.Failure
 Invocation = cli.Invocation
 EXIT_OK = cli.EXIT_OK
 EXIT_FAILURE = cli.EXIT_FAILURE
 EXIT_VIOLATIONS = cli.EXIT_VIOLATIONS
-
-SOCLE_REPOSITORY = "maelys-dev/maelys-release"
-DEFAULT_TAP = "maelys-dev/homebrew-tap"
-DEFAULT_DOCUMENTS = "maelys-dev/maelys-docs"
-DEFAULT_IMAGE = "ubuntu:26.04"
-SOCLE_LINUX_PACKAGES = "build-essential dpkg-dev file rpm"  # the release.yml default
-SOCLE_MANIFEST_PATTERNS = "*.tar.gz *.deb *.rpm"  # the release.yml default
-# What a renderer that hashes published bytes names: the tag's source archive,
-# which tap.yml's own path downloads; a release asset, which a product that
-# publishes its own tarball hashes instead; and the command that fetches one.
-# The first list held the source archive alone and left maelys-http -- which
-# hashes releases/download/$tag/... -- with a note saying the opposite of what
-# its script does. Two of three recognised is not a recogniser.
-PUBLISHED_DOWNLOAD = ("archive/refs/tags", "releases/download", "gh release download")
-# Registries a channel of the socle can serve. GitHub Packages publishes
-# with the run's own token; npmjs and PyPI would need trusted publishing,
-# which matches an OIDC claim naming this repository rather than the
-# product once a reusable workflow runs the publication, and PyPI
-# documents that a reusable workflow cannot be a trusted publisher.
-SOCLE_CHANNEL_KINDS = ("github-packages",)
-# What a product asks of its release environment. The socle verifies the
-# answer a repository gave; it does not give it in the repository's place.
-SOCLE_GATES = ("reviewer", "none")
-# The legs whose runner a private repository may declare, named as
-# check-product.yml's matrix names them -- except macos, which keeps the
-# bare word ten repositories already carry.
-SOCLE_RUNNER_KEYS = ("macos", "linux-x86_64", "linux-arm64")
-# Where a leg of [check] runs, named as the socle's own legs are.
-CHECK_PLATFORMS = ("linux", "linux-arm64", "macos")
-# The job of ci.yml that calls check-legs.yml. Fixed, because it is the first
-# half of every context a leg reports -- `legs / NAME` -- and a protection
-# requires by that name.
-LEGS_JOB = "legs"
-# What release.yml asks of the commit a tag names, beyond the tag's own
-# signature. The workflow has offered these since 0.21.0 and nothing rendered
-# the input, so `none` was the only value a product could reach while the
-# conventions described it as the one every product had chosen.
-SOCLE_COMMIT_VERIFICATIONS = ("signed", "signed-on-default-branch")
-# Where the fleet keeps its fuzz harnesses, preferred first. Five
-# repositories use tests/fuzz, four use fuzz; the socle reads either and
-# says which it found rather than refusing the second.
-FUZZ_DIRECTORIES = ("tests/fuzz", "fuzz")
-FUZZ_TARGET = re.compile(r"make\s+[A-Za-z0-9_.-]*fuzz[A-Za-z0-9_.-]*")
-# The targets release.yml builds when a product declares none of its own.
-SOCLE_TARGETS = ("linux-x86_64", "linux-arm64", "macos-arm64")
-BOTTLES = '\'["macos-15","macos-26"]\''
-PLATFORMS = {"linux-x86_64": "linux/amd64", "linux-arm64": "linux/arm64"}
-# One name and one place for the reference a machine writes from describe
-# (docs/policies/documentation.md of maelys-platform). Everything else in
-# docs/ is prose, and prose lives in maelys-docs.
-CLI_REFERENCE = "docs/cli.md"
-CLI_CONTRACT = "docs/cli-contract.json"
-# What a product declares about its own reference, when the conventions do
-# not already say it: [programs] to describe, [flags] for the generator.
-CLI_DECLARATIONS = "docs/cli.reference"
-# maelys-cli carries the generator instead of pinning it: the framework is
-# held to the same rule as the products it serves.
-CLI_GENERATOR = "tools/generate_cli_reference.py"
-LEGACY_CLI_REFERENCES = ("docs/cli-reference.md", "docs/generated/cli-reference.md")
-# A generated file says so in its head, whatever wrote it: the word
-# "generated" and a refusal to be edited, within the first ten lines. The
-# generators live in maelys-cli and in the products, not here, so the socle
-# fixes the rule rather than one spelling; the three in use satisfy it, and
-# one of them sits on line 3, under the title.
-GENERATED_HEAD_LINES = 10
-GENERATED_MARK = re.compile(r"generated", re.IGNORECASE)
-GENERATED_REFUSAL = re.compile(r"do not edit|don't edit|ne pas .diter", re.IGNORECASE)
-
-
-# A reference a check of the repository holds against the code, written by
-# hand: "<!-- VERIFIED by make api-doc-check against the public API; edit with
-# the code. -->". maelys-platform's condition, character for character, so that
-# `check` and `maelys-platform docs --prose` never sort one file two ways. It
-# stays for the reason docs/cli.md does: the check that holds it must read it
-# in the checkout it verifies.
-VERIFIED_MARK = re.compile(r"verified by\s+(?P<check>\S.{0,120}?)\s+against\b.{0,200}?edit with the code",
-                           re.I | re.S)
-# A link a README makes to a page of docs/: inline, by reference, in HTML, or
-# through the repository's own GitHub URL. maelys-platform's, as above.
-README_LINK = re.compile(r"""(?:\]\(\s*<?|^\s{0,3}\[[^\]]+\]:\s*<?|\bhref\s*=\s*["'])(?P<target>[^\s)"'>]+)""",
-                         re.I | re.M)
-
-
-def readme_links(readme: str, repository: str) -> set[str]:
-    """The paths of docs/ a README points at, files or directories.
-
-    maelys-platform's `readme_links`, kept identical: a document is linked
-    when the README names it or a directory holding it, and a plain mention
-    of a path in a sentence is not a link.
-    """
-    own = re.compile(rf"^https?://github\.com/{re.escape(repository)}/(?:blob|tree)/[^/]+/", re.I) \
-        if repository else None
-    found = set()
-    for match in README_LINK.finditer(readme or ""):
-        target = urllib.parse.unquote(match.group("target").split("#", 1)[0].split("?", 1)[0])
-        if own:
-            target = own.sub("", target)
-        while target.startswith("./"):
-            target = target[2:]
-        target = target.rstrip("/")
-        if target == "docs" or target.startswith("docs/"):
-            found.add(target)
-    return found
-
-
-def verified_by(text: str) -> str:
-    """The check a verified reference names in its head, or ''."""
-    head = "\n".join(text.lstrip().splitlines()[:GENERATED_HEAD_LINES])
-    found = VERIFIED_MARK.search(head)
-    return " ".join(found.group("check").split()) if found else ""
-
-
-def is_generated(text: str) -> bool:
-    head = "\n".join(text.split("\n", GENERATED_HEAD_LINES)[:GENERATED_HEAD_LINES])
-    return bool(GENERATED_MARK.search(head) and GENERATED_REFUSAL.search(head))
-# What a product carries whatever publishes it, and what belongs to the
-# socle's release mechanism. A product whose mechanism is custom or none
-# receives and is checked on the first set only (docs/conventions.md,
-# "Conventions and mechanism").
-CONVENTION_MANAGED = ("AGENTS.md", "CLAUDE.md")
-# Written once when missing, then owned by the product: the socle cannot
-# judge prose it does not generate, so check reports absence as a note.
-CONVENTION_SEEDED = ("RELEASING.md", "LICENSING.md", "SECURITY.md")
-RELEASE_MANAGED = (
-    ".github/workflows/release.yml",
-    "scripts/checkout-dependency.sh",
-    "scripts/checkout-dependencies.sh",
-    ".claude/skills/maelys-release/SKILL.md",
-    ".github/workflows/ci.yml",
-)
-MANAGED = (
-    ".github/workflows/release.yml",
-    "scripts/checkout-dependency.sh",
-    "scripts/checkout-dependencies.sh",
-    CLI_REFERENCE,
-    CLI_CONTRACT,
-    "AGENTS.md",
-    "CLAUDE.md",
-    ".claude/skills/maelys-release/SKILL.md",
-    "RELEASING.md",
-    "LICENSING.md",
-    "SECURITY.md",
-    ".github/workflows/ci.yml",
-)
-# The agents that work in the fleet and name a worktree branch after
-# themselves by default. The rule is that a branch carries the prefix of
-# its change and never the name of the tool, so this is the one list the
-# socle can close: it is the set of agents the socle writes instructions
-# for, not a vocabulary of change types, which belongs to each repository.
-AGENT_BRANCHES = ("claude", "codex")
-# What a repository declares to this command: one grammar, one home. It sat
-# in packaging/release until 0.37.0, and the eleven packaging/ of the fleet
-# hold materials — formula templates, systemd units, Containerfiles, a kernel
-# config — never settings, while eighteen repositories have no packaging/ at
-# all and still want to declare. The name says the tool and the nature; the
-# socle only ever reads this file, never writes it, so the comments a product
-# puts beside each section are the product's.
-DECLARATION_FILE = "maelys-release.conf"
-FORMER_DECLARATION_FILE = "packaging/release"
-SOCLE_MECHANISM = "maelys-release"
-MECHANISMS = (SOCLE_MECHANISM, "custom", "none")
-RELEASE_USES = re.compile(rf"{re.escape(SOCLE_REPOSITORY)}/\.github/workflows/release\.yml@[0-9a-f]{{40}}")
-CI_USES = re.compile(rf"({re.escape(SOCLE_REPOSITORY)}/\.github/workflows/check-product\.yml@)[0-9a-f]{{40}} # \S+")
-LEGS_USES = re.compile(rf"({re.escape(SOCLE_REPOSITORY)}/\.github/workflows/check-legs\.yml@)[0-9a-f]{{40}} # \S+")
-BEGIN = "<!-- maelys-release:begin -->"
-END = "<!-- maelys-release:end -->"
 
 
 # ---- the socle itself --------------------------------------------------------
@@ -245,14 +103,46 @@ class Host:
     only an explicitly named fake gh may receive writes in that environment.
     """
 
+    def __init__(self) -> None:
+        self._self_test()
+
+    @staticmethod
+    def _self_test() -> bool:
+        keys = ("_MAELYS_RELEASE_SELF_TEST", "_MAELYS_RELEASE_SELF_TEST_FILE", "_MAELYS_RELEASE_TEST_GH")
+        if not any(key in os.environ for key in keys):
+            return False
+        token = os.environ.get(keys[0], "")
+        path = os.environ.get(keys[1], "")
+        if re.fullmatch(r"[0-9a-f]{64}", token) and path:
+            try:
+                with open(path, encoding="utf-8") as witness:
+                    if secrets.compare_digest(witness.read(65), token):
+                        return True
+            except (OSError, UnicodeError, ValueError, TypeError):
+                pass
+        raise SystemExit("maelys-release: _MAELYS_RELEASE_SELF_TEST and its companion variables are reserved "
+                         "for self-test; the temporary token is missing, invalid or expired. "
+                         "Unset _MAELYS_RELEASE_SELF_TEST, _MAELYS_RELEASE_SELF_TEST_FILE and _MAELYS_RELEASE_TEST_GH.")
+
+    @staticmethod
+    @contextmanager
+    def self_test_environment():
+        """A child and its descendants may use the guard only while this file lives."""
+        token = secrets.token_hex(32)
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", prefix="maelys-self-test-") as witness:
+            witness.write(token)
+            witness.flush()
+            yield {**os.environ, "_MAELYS_RELEASE_SELF_TEST": token,
+                   "_MAELYS_RELEASE_SELF_TEST_FILE": witness.name}
+
     def which(self, name: str) -> str | None:
-        if name == "gh" and os.environ.get("_MAELYS_RELEASE_SELF_TEST"):
+        if name == "gh" and self._self_test():
             return os.environ.get("_MAELYS_RELEASE_TEST_GH") or None
         return shutil.which(name)
 
     def _command(self, command: list[str], cwd: pathlib.Path | None, env: dict[str, str] | None) -> list[str]:
         environment = os.environ if env is None else env
-        if pathlib.Path(command[0]).name == "gh" and os.environ.get("_MAELYS_RELEASE_SELF_TEST"):
+        if pathlib.Path(command[0]).name == "gh" and self._self_test():
             fake = environment.get("_MAELYS_RELEASE_TEST_GH")
             executable = shutil.which(command[0], path=environment.get("PATH"))
             if fake:
@@ -263,7 +153,7 @@ class Host:
                       or command[1:3] in (["pr", "list"], ["pr", "view"], ["release", "download"])):
                 raise AssertionError(f"self-test refused a real GitHub write: {command!r}")
         if command[0] == "git":
-            if os.environ.get("_MAELYS_RELEASE_SELF_TEST") and "push" in command[1:]:
+            if self._self_test() and "push" in command[1:]:
                 self._local_push(command, cwd, env)
             command = ["git", "-C", str((cwd or pathlib.Path.cwd()).resolve()), *command[1:]]
         return command
@@ -360,398 +250,6 @@ def socle_identity(sha: str, tag: str) -> tuple[str, str]:
 
 # ---- the product contract ----------------------------------------------------
 
-class Declarations:
-    """What a product declares, read once and used by every command."""
-
-    def __init__(self, project: pathlib.Path, product: str, mechanism: str = SOCLE_MECHANISM) -> None:
-        self.project = project
-        self.product = product
-        # How this product publishes: the socle's workflows, a mechanism of
-        # its own, or nothing. It decides which files adopt writes and which
-        # checks apply; the conventions apply to all three.
-        self.mechanism = mechanism
-        self.version = ""
-        self.formulas: list[str] = []
-        self.render_command = ""
-        self.dependencies: list[str] = []
-        # name -> the pin as parse_pin reads it; dependencies keeps the order
-        self.pins: dict[str, dict] = {}
-        # what parse_pin refused: nothing is materialised on a broken pin
-        self.pin_problems: list[str] = []
-        self.linux_packages = ""
-        self.macos_packages = ""
-        self.generates_reference = False
-        self.cli_programs: list[str] = []
-        self.cli_flags: list[str] = []
-        self.cli_build: list[str] = []
-        self.verify_command = ""
-        # (target, runner) of the declaration file; an empty runner keeps the
-        # one release.yml holds for that target. Empty means the three the
-        # socle builds by default.
-        self.targets: list[tuple[str, object]] = []
-        # Archive kinds SHA256SUMS covers beyond the socle's three.
-        self.manifest_patterns: list[str] = []
-        # (channel, registry kind) of the declaration file; one channel.yml job each.
-        self.channels: list[tuple[str, str]] = []
-        # The glob of the SBOM a build leaves in dist/, empty when none.
-        self.sbom_pattern = ""
-        # "signed", "signed-on-default-branch", or "" for the workflow's
-        # default of none.
-        self.commit_verification = ""
-        # Whether the build takes its dependencies from
-        # MAELYS_DEPENDENCIES_DIR instead of assuming a sibling.
-        self.dependencies_apart = False
-        # Labels of the macOS runner for the socle's own jobs, empty for
-        # the hosted default. Honoured on a private repository only.
-        self.macos_runner: list[str] = []
-        self.runners: dict[str, list[str]] = {}
-        # Whether this product's ci.yml calls the socle's check job, which is
-        # what decides who a coming change to that workflow reaches.
-        self.calls_socle_ci = False
-        # channel name -> the gate it declares, when it declares one.
-        self.channel_gates: dict[str, str] = {}
-        # The targets that package, when [package] says; empty means all.
-        self.package: list[str] = []
-        # The product's own legs of the shared CI: (name, platform, command).
-        # Not `checks`, which is where this class keeps its diagnostics: the
-        # first cut used that name, and the report looping over it appended
-        # to the very list it walked until the self-test was killed.
-        self.legs: list[tuple[str, str, str]] = []
-        # "reviewer", "none", or "" when this repository has not chosen.
-        self.gate = ""
-        # What cut runs between writing VERSION and the bump commit, for a
-        # product whose version is also materialised somewhere else.
-        self.after_version = ""
-        # Observation only: where the harnesses are, and who runs them.
-        self.fuzz_harnesses = ""
-        self.fuzz_runs = "none"
-        # name -> repository, for a dependency that does not live in maelys-dev
-        self.foreign: dict[str, str] = {}
-        # name -> "" or "recursive", for a dependency whose build needs them
-        self.submodules: dict[str, str] = {}
-        # Files of docs/ that are neither generated, engaged by LICENSING.md
-        # nor data: they belong in maelys-docs/<product>/.
-        self.prose: list[str] = []
-        # Prose README.md links: a public README holds it until a site exists.
-        self.readme_held: list[str] = []
-        # [ci] own: no shared CI is called, and no ci.yml is written.
-        self.own_ci = False
-        self.checks: list[dict] = []
-
-    @property
-    def releases_here(self) -> bool:
-        """Whether the socle's release mechanism applies to this product."""
-        return self.mechanism == SOCLE_MECHANISM
-
-    def applicable(self) -> list[dict]:
-        """The checks that hold for this product: its mechanism's, and the conventions."""
-        return [check for check in self.checks
-                if check["scope"] == "conventions" or self.releases_here]
-
-    @property
-    def valid(self) -> bool:
-        """Whether adopt may proceed; a warning is reported by check only."""
-        return all(check["status"] in ("ok", "note", "warn") for check in self.applicable())
-
-    def add(self, status: str, message: str, scope: str = "release") -> None:
-        self.checks.append({"status": status, "message": message, "scope": scope})
-
-
-def parse_packages(text: str) -> tuple[str, str]:
-    """dependencies/packages: one package per line under [linux] or [macos]."""
-    packages: dict[str, list[str]] = {"linux": [], "macos": []}
-    section = ""
-    for number, raw in enumerate(text.splitlines(), 1):
-        line = raw.strip()
-        if not line or line.startswith("#"):
-            continue
-        if line.startswith("["):
-            if line in ("[linux]", "[macos]"):
-                section = line[1:-1]
-                continue
-            raise ValueError(f"unknown section {line} at line {number}")
-        if not section:
-            raise ValueError(f"package outside a [linux] or [macos] section at line {number}")
-        if len(line.split()) != 1 or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9+._@:-]*", line):
-            raise ValueError(f"one package per line at line {number}: {raw}")
-        packages[section].append(line)
-    return " ".join(packages["linux"]), " ".join(packages["macos"])
-
-
-def parse_pin(name: str, text: str) -> tuple[dict, list[str]]:
-    """One dependencies/NAME.pin as data: (pin, problems); an empty pin when unusable.
-
-    Line 1 is the nearest tag, for humans; line 2 the commit, for everything
-    else. A dependency outside maelys-dev says where it lives, once, on a
-    `repository <https URL>` line: maelys-http builds Mbed TLS from a pinned
-    commit because the distribution's version is under its security floor.
-    A dependency whose build needs its submodules says so on a `submodules`
-    line, or `submodules recursive`: a submodule's commit is pinned by its
-    superproject, but its URL comes from a .gitmodules this pin does not
-    name, so fetching one is declared, never automatic.
-
-    Read here rather than in read_declarations alone, because the command
-    that materialises the pins needs the same reading and a second one would
-    drift from it.
-    """
-    if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", name):
-        return {}, [f"dependencies/{name}.pin: the file is named after the repository, [a-z0-9-]"]
-    lines = text.splitlines()
-    if len(lines) < 2 or not re.fullmatch(r"[0-9a-f]{40}", lines[1].strip()):
-        return {}, [f"dependencies/{name}.pin: line 2 must be the pinned commit (line 1 its tag)"]
-    pin: dict = {"name": name, "tag": lines[0].strip(), "commit": lines[1].strip(),
-                 "repository": "", "submodules": None}
-    problems: list[str] = []
-    for attribute in lines[2:]:
-        if attribute.startswith("repository "):
-            repository = attribute[len("repository "):].strip()
-            if not re.fullmatch(r"https://[^\s]+", repository):
-                problems.append(f"dependencies/{name}.pin: the repository line must be an https URL")
-            else:
-                pin["repository"] = repository
-        elif attribute.split(" ")[0] == "submodules":
-            mode = attribute[len("submodules"):].strip()
-            if mode not in ("", "recursive"):
-                problems.append(f"dependencies/{name}.pin: the submodules line takes nothing, or recursive")
-            else:
-                pin["submodules"] = mode
-    return pin, problems
-
-
-def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[tuple[str, str]], str, str, str]:
-    """The declaration file: [targets], [manifest], [sbom], [runners], [dependencies], [commit], [channels], [gate] and [cut].
-
-    A target line naming no label keeps the runner release.yml holds for that
-    target, which only exists for the three the socle builds; one label is a
-    runner label, several are a label set. The [targets] section replaces the
-    matrix rather than adding to it, so a product that adds one target names
-    the others it keeps. [manifest] adds to the socle's archive kinds.
-    [commit] holds what the release asks of the commit the tag names, beyond
-    the tag's own signature: 'signed', or 'signed-on-default-branch' which
-    also requires it to be an ancestor of the default branch. [dependencies] holds the single word 'apart': the build reads
-    MAELYS_DEPENDENCIES_DIR and the socle materialises the pins there rather
-    than beside the product. [runners] holds one 'macos LABEL...' line, the runner the socle's own
-    macOS jobs use on a private repository. [sbom] holds one glob, the document a build leaves in dist/ beside the
-    packages it describes; the release then attests that document against
-    the files the document itself names. [channels] names one 'CHANNEL REGISTRY' per line, each rendered into a
-    channel.yml job that runs once the release is published. [cut] holds
-    'after-version COMMAND', run by cut between writing VERSION and the
-    bump commit, for a product that materialises its version somewhere
-    else as well.
-    """
-    targets: list[tuple[str, object]] = []
-    manifest: list[str] = []
-    channels: list[tuple[str, str]] = []
-    channel_gates: dict[str, str] = {}
-    sbom = ""
-    macos_runner: list[str] = []
-    runners: dict[str, list[str]] = {}
-    apart = False
-    commit_verification = ""
-    gate = ""
-    after_version = ""
-    package: list[str] = []
-    checks: list[tuple[str, str, str]] = []
-    own_ci = False
-    docs_unnamed = False
-    unknown: list[str] = []
-    section = ""
-    for number, raw in enumerate(text.splitlines(), 1):
-        line = raw.strip()
-        if not line or line.startswith("#"):
-            continue
-        if line.startswith("["):
-            if line in ("[targets]", "[manifest]", "[sbom]", "[runners]", "[dependencies]",
-                        "[commit]", "[channels]", "[gate]", "[cut]", "[package]", "[check]", "[ci]", "[docs]"):
-                section = line[1:-1]
-                continue
-            # A section this socle does not know is named and skipped, never
-            # fatal. Products pin the socle by commit: one that adds a section
-            # a newer socle understands would otherwise lose its targets, its
-            # channels and its gate in silence, everywhere the older socle
-            # still reads the file — including the fleet observer.
-            unknown.append(f"{line} at line {number}")
-            section = "unknown"
-            continue
-        if section == "unknown":
-            continue
-        if not section:
-            raise ValueError(f"line outside a [targets], [manifest], [sbom], [runners],"
-                             f" [dependencies], [commit], [channels], [gate] or [cut] section"
-                             f" at line {number}")
-        if section == "cut":
-            key, _, command = line.partition(" ")
-            if key != "after-version":
-                raise ValueError(f"[cut] knows after-version, not {key}, at line {number}")
-            if after_version:
-                raise ValueError(f"[cut] holds one after-version, and line {number} is a second")
-            if not command.strip():
-                raise ValueError(f"[cut] after-version names no command at line {number}")
-            after_version = command.strip()
-            continue
-        if section == "docs":
-            # Read by declared_word(), which rendering the managed block needs.
-            if line not in ("unnamed", "named"):
-                raise ValueError(f"[docs] holds 'named' or 'unnamed', not {line!r}, at line {number}")
-            if docs_unnamed:
-                raise ValueError(f"[docs] holds one word, at line {number}")
-            docs_unnamed = True
-            continue
-        if section == "ci":
-            # Read by own_ci(), which the ci.yml rule needs before the rest of
-            # the file is parsed; validated here with everything else.
-            if line != "own":
-                raise ValueError(f"[ci] holds the single word 'own', not {line!r}, at line {number}")
-            own_ci = True
-            continue
-        if section == "check":
-            # A leg of the product's own, run by the shared CI beside the
-            # socle's three: a name, the platform it runs on, and the command.
-            # maelys-git-core tests with and without an agent enabled, which
-            # the shared matrix had no way to say, so it kept a CI of its own.
-            name, _, rest = line.partition(" ")
-            platform, _, command = rest.strip().partition(" ")
-            if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", name):
-                raise ValueError(f"a [check] leg is named [a-z0-9-] at line {number}: {name}")
-            if any(name == known for known, _, _ in checks):
-                raise ValueError(f"[check] names the leg {name} twice, at line {number}")
-            if platform not in CHECK_PLATFORMS:
-                raise ValueError(f"a [check] leg runs on {' or '.join(CHECK_PLATFORMS)}, not {platform or 'nothing'},"
-                                 f" at line {number}")
-            if not command.strip():
-                raise ValueError(f"the [check] leg {name} names no command at line {number}")
-            checks.append((name, platform, command.strip()))
-            continue
-        if section == "package":
-            # The targets that package; every target of [targets] verifies.
-            # A source archive is the same tree everywhere and not the same
-            # gzip bytes everywhere, so a product publishing one could not
-            # verify on three targets without three archives clashing.
-            for name in line.split():
-                if name in package:
-                    raise ValueError(f"[package] names {name} twice, at line {number}")
-                package.append(name)
-            continue
-        if section == "gate":
-            if gate:
-                raise ValueError(f"[gate] holds one line, and line {number} is a second")
-            if line not in SOCLE_GATES:
-                raise ValueError(f"[gate] is {' or '.join(SOCLE_GATES)}, not {line}, at line {number}")
-            gate = line
-            continue
-        if section == "commit":
-            if commit_verification:
-                raise ValueError(f"[commit] holds one line, and line {number} is a second")
-            if line not in SOCLE_COMMIT_VERIFICATIONS:
-                raise ValueError(f"[commit] is {' or '.join(SOCLE_COMMIT_VERIFICATIONS)},"
-                                 f" not {line}, at line {number}")
-            commit_verification = line
-            continue
-        if section == "dependencies":
-            # One word, not a variable per dependency. Every Makefile of the
-            # fleet reads <root>/<name> and nothing else, and the names it
-            # uses for the roots differ -- SYSTEM_DIR here, MAELYS_SPEC_DIR
-            # there -- so a declaration naming them would be a second list
-            # to keep true, with nothing the root does not already give.
-            if line != "apart":
-                raise ValueError(f"[dependencies] holds the single word apart, not {line}, at line {number}")
-            if apart:
-                raise ValueError(f"[dependencies] holds one line, and line {number} is a second")
-            apart = True
-            continue
-        if section == "runners":
-            key, *labels = line.split()
-            # The three legs of check-product.yml's matrix, named as the
-            # workflow names them. macos keeps its bare word: it is what ten
-            # repositories already declare, and renaming a key of a file the
-            # socle reads would refuse every one of them at once.
-            if key not in SOCLE_RUNNER_KEYS:
-                raise ValueError(f"[runners] knows {', '.join(SOCLE_RUNNER_KEYS)}, not {key}, at line {number}")
-            if key in runners:
-                raise ValueError(f"[runners] holds one {key} line, and line {number} is a second")
-            if not labels:
-                raise ValueError(f"[runners] {key} names no label at line {number}")
-            for label in labels:
-                if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", label):
-                    raise ValueError(f"a runner label is [A-Za-z0-9._-] at line {number}: {label}")
-            runners[key] = labels
-            if key == "macos":
-                macos_runner = labels
-            continue
-        if section == "sbom":
-            # One document per target, because one attestation carries one
-            # predicate: actions/attest takes a single sbom-path, and a
-            # second document would need a second step this workflow cannot
-            # write without knowing how many there are.
-            if sbom:
-                raise ValueError(f"[sbom] holds one glob, and line {number} is a second")
-            if len(line.split()) != 1 or not re.fullmatch(r"[A-Za-z0-9*][A-Za-z0-9*+._-]*", line):
-                raise ValueError(f"one glob per line at line {number}: {raw}")
-            sbom = line
-            continue
-        if section == "channels":
-            name, *rest = line.split()
-            if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", name):
-                raise ValueError(f"a channel is named [a-z0-9-] at line {number}: {name}")
-            # A third word is the gate this channel asks for. Absent, it is
-            # the release's own environment -- which is a second approval,
-            # measured four hours apart on one product's release, and was
-            # the behaviour before anything could be declared.
-            if len(rest) == 2:
-                if rest[1] not in SOCLE_GATES:
-                    raise ValueError(f"a channel's gate is {' or '.join(SOCLE_GATES)},"
-                                     f" not {rest[1]}, at line {number}")
-                channel_gates[name] = rest[1]
-                rest = rest[:1]
-            if len(rest) != 1:
-                raise ValueError(f"a channel names one registry, and may add its gate,"
-                                 f" at line {number}: {raw}")
-            if rest[0] not in SOCLE_CHANNEL_KINDS:
-                raise ValueError(f"the socle serves no {rest[0]} channel at line {number};"
-                                 f" it serves {', '.join(SOCLE_CHANNEL_KINDS)}."
-                                 " Trusted publishing on npmjs or PyPI matches an OIDC claim"
-                                 " naming the socle rather than this repository once a reusable"
-                                 " workflow publishes: such a channel stays in this repository")
-            if any(name == known for known, _ in channels):
-                raise ValueError(f"the channel {name} appears twice, at line {number}")
-            channels.append((name, rest[0]))
-            continue
-        if section == "manifest":
-            if len(line.split()) != 1 or not re.fullmatch(r"[A-Za-z0-9*][A-Za-z0-9*+._-]*", line):
-                raise ValueError(f"one glob per line at line {number}: {raw}")
-            if line in SOCLE_MANIFEST_PATTERNS.split():
-                raise ValueError(f"{line} is already covered at line {number}")
-            if line in manifest:
-                raise ValueError(f"{line} appears twice, at line {number}")
-            manifest.append(line)
-            continue
-        name, *labels = line.split()
-        if not re.fullmatch(r"[a-z0-9][a-z0-9._-]*", name):
-            raise ValueError(f"a target is named [a-z0-9._-] at line {number}: {name}")
-        if any(name == known for known, _ in targets):
-            raise ValueError(f"the target {name} appears twice, at line {number}")
-        if not labels and name not in SOCLE_TARGETS:
-            raise ValueError(f"the target {name} names no runner at line {number},"
-                             f" and the socle only has a default for {', '.join(SOCLE_TARGETS)}")
-        for label in labels:
-            if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", label):
-                raise ValueError(f"a runner label is [A-Za-z0-9._-] at line {number}: {label}")
-        runner: object = "" if not labels else (labels[0] if len(labels) == 1 else labels)
-        targets.append((name, runner))
-    if section and not unknown and not targets and not manifest and not channels \
-            and not gate and not after_version and not sbom and not runners and not apart \
-            and not commit_verification and not package and not checks and not own_ci and not docs_unnamed:
-        raise ValueError(f"{DECLARATION_FILE} declares no target, archive kind, channel, gate or cut command")
-    if own_ci and checks:
-        raise ValueError("[check] legs run from the ci.yml job that calls the shared CI, and [ci] own says"
-                         " this repository calls none: declare one or the other")
-    known = [name for name, _ in targets] or list(SOCLE_TARGETS)
-    for name in package:
-        if name not in known:
-            raise ValueError(f"[package] names {name}, which is not a target of this release"
-                             f" ({', '.join(known)})")
-    return (targets, manifest, channels, channel_gates, sbom, macos_runner, runners, apart,
-            commit_verification, gate, after_version, unknown, package, checks)
 
 
 def declared_word(project: pathlib.Path, section: str, word: str) -> bool:
@@ -1319,42 +817,6 @@ def engaged_documents(project: pathlib.Path) -> set[str]:
             re.findall(r"\(([^)\s]*docs/[^)\s#]+)\)", licensing.read_text(encoding="utf-8"))}
 
 
-def parse_cli_declarations(text: str) -> tuple[list[str], list[str], str]:
-    """docs/cli.reference: [build] holding the programs, [programs], [flags]."""
-    sections: dict[str, list[str]] = {"build": [], "programs": [], "flags": []}
-    section = ""
-    for number, raw in enumerate(text.splitlines(), 1):
-        line = raw.strip()
-        if not line or line.startswith("#"):
-            continue
-        if line.startswith("["):
-            if line[1:-1] not in sections or not line.endswith("]"):
-                raise ValueError(f"unknown section {line} at line {number}")
-            section = line[1:-1]
-            continue
-        if not section:
-            raise ValueError(f"line outside a [build], [programs] or [flags] section at line {number}")
-        if section == "programs":
-            if not re.fullmatch(r"[a-z0-9][a-z0-9._-]*", line):
-                raise ValueError(f"one program per line at line {number}: {raw}")
-            sections["programs"].append(line)
-        elif section == "build":
-            # Several lines, and not one: a product whose build tree is per
-            # platform has a directory per target, and the socle would
-            # otherwise print "the generator did not run here" on every
-            # machine but one -- a note that stops being read. No pattern
-            # language here: a glob would make the answer depend on what
-            # happens to have been built, and this file is a declaration.
-            if line.startswith("/") or ".." in pathlib.PurePosixPath(line).parts:
-                raise ValueError(f"[build] is a path inside the product at line {number}: {raw}")
-            if line in sections["build"]:
-                raise ValueError(f"[build] names {line} twice, at line {number}")
-            sections["build"].append(line)
-        else:
-            sections["flags"].extend(line.split())
-    return sections["programs"], sections["flags"], sections["build"]
-
-
 def read_docs(decl: Declarations) -> None:
     """Classify docs/: the generated reference, public engagements, data, prose.
 
@@ -1496,332 +958,6 @@ def render_text(template: pathlib.Path, mapping: dict[str, str]) -> str:
     for key, value in mapping.items():
         text = text.replace(f"@{key}@", value)
     return text
-
-
-def runner_json(labels: list[str]) -> str:
-    """A runs-on value: one label is a string, several are an array."""
-    return json.dumps(labels[0] if len(labels) == 1 else labels)
-
-
-# The input each declared leg fills, in the order check-product.yml lists
-# them. A key here is a line under the call's `with:`, and nothing else.
-RUNNER_INPUTS = {"macos": "macos_runner", "linux-x86_64": "linux_x86_64_runner",
-                 "linux-arm64": "linux_arm64_runner"}
-
-
-def legs_job(decl: "Declarations", sha: str, tag: str) -> list[str]:
-    """The job of ci.yml that calls check-legs.yml, or nothing when [check] is empty.
-
-    The legs are single-quoted YAML, where a quote is written twice: a
-    command is the product's shell and may well contain one. Runners follow
-    [runners] as the check call's do, and check-legs.yml reads them on a
-    private repository only.
-    """
-    if not decl.legs:
-        return []
-    value = json.dumps([{"name": name, "platform": platform, "command": command}
-                        for name, platform, command in decl.legs])
-    return [
-        f"  {LEGS_JOB}:",
-        f"    # Written by maelys-release adopt from [check] of {DECLARATION_FILE}; each leg",
-        f"    # reports as '{LEGS_JOB} / NAME'. Declare there, never here.",
-        f"    uses: {SOCLE_REPOSITORY}/.github/workflows/check-legs.yml@{sha} # {tag}",
-        "    with:",
-        f"      product: {decl.product}",
-        f"      legs: '{value.replace(chr(39), chr(39) * 2)}'",
-        *runner_inputs(decl),
-    ]
-
-
-def ci_legs(text: str, decl: "Declarations", sha: str, tag: str) -> str:
-    """Set, replace or remove the legs job of ci.yml.
-
-    The job is the socle's from its name to the next job: replaced where it
-    stands, appended after the last job when it is new, and taken away with
-    the blank line before it when [check] is emptied. Everything else of the
-    file is left byte for byte. A job of the product's own that happens to be
-    named `legs` is never touched: the declarations refuse that pairing.
-    """
-    lines = text.splitlines(keepends=True)
-    start = next((index for index, line in enumerate(lines) if line.rstrip() == f"  {LEGS_JOB}:"), None)
-    end = None
-    if start is not None:
-        end = start + 1
-        while end < len(lines) and not CI_JOB.match(lines[end]) \
-                and not (lines[end].strip() and not lines[end].startswith(" ")):
-            end += 1
-        if not any(LEGS_USES.search(line) for line in lines[start:end]):
-            return text
-        # Trailing blank lines and comments belong to what follows.
-        while end > start + 1 and (not lines[end - 1].strip() or lines[end - 1].lstrip().startswith("#")) \
-                and not LEGS_USES.search(lines[end - 1]):
-            end -= 1
-    block = [line + "\n" for line in legs_job(decl, sha, tag)]
-    if start is not None:
-        if not block:
-            if start > 0 and not lines[start - 1].strip():
-                start -= 1
-            del lines[start:end]
-            return "".join(lines)
-        lines[start:end] = block
-        return "".join(lines)
-    if not block:
-        return text
-    if lines and not lines[-1].endswith("\n"):
-        lines[-1] += "\n"
-    while lines and not lines[-1].strip():
-        lines.pop()
-    return "".join(lines) + "\n" + "".join(block)
-
-
-def macos_runner_input(decl: Declarations) -> list[str]:
-    """The macos_runner line of the tap's call, or nothing.
-
-    tap.yml renders and lints a formula on macOS and knows no other leg, so
-    it takes this one alone: passing it a Linux input would be an input the
-    workflow does not declare, and the run would fail at startup.
-    """
-    if not decl.runners.get("macos"):
-        return []
-    return [f"      macos_runner: '{runner_json(decl.runners['macos'])}'"]
-
-
-def runner_inputs(decl: Declarations) -> list[str]:
-    """The runner lines of the check call, one per declared leg."""
-    return [f"      {RUNNER_INPUTS[key]}: '{runner_json(decl.runners[key])}'"
-            for key in SOCLE_RUNNER_KEYS if decl.runners.get(key)]
-
-
-def ci_macos_runner(text: str, labels) -> str:
-    """Set, replace or remove the runner lines of ci.yml's socle call.
-
-    `labels` is the declaration's `[runners]` mapping; a bare list is read
-    as the macos one, which is what every caller passed before three legs
-    were declarable.
-
-    ci.yml belongs to the product everywhere else, and the socle has always
-    kept only the line naming itself current there. This adds one more line
-    under the same job's with:, because a runner is declared once in
-    maelys-release.conf and applied, never typed into a workflow by hand --
-    and an empty declaration takes the line away again, so the file follows
-    the declaration in both directions. Everything else is left byte for
-    byte, blank lines and comments included.
-    """
-    lines = text.splitlines(keepends=True)
-    at = next((index for index, line in enumerate(lines) if CI_USES.search(line)), None)
-    if at is None:
-        return text
-    indent = len(lines[at]) - len(lines[at].lstrip())
-    with_at = None
-    for index in range(at + 1, len(lines)):
-        stripped = lines[index].strip()
-        if not stripped:
-            continue
-        here = len(lines[index]) - len(lines[index].lstrip())
-        if here < indent:
-            break
-        if here == indent and stripped == "with:":
-            with_at = index
-            break
-    if with_at is None:
-        return text
-    body = indent + 2
-    end = with_at + 1
-    while end < len(lines):
-        stripped = lines[end].strip()
-        if stripped and (len(lines[end]) - len(lines[end].lstrip())) < body:
-            break
-        end += 1
-    names = tuple(f"{name}:" for name in RUNNER_INPUTS.values())
-    for index in reversed([i for i in range(with_at + 1, end)
-                           if lines[i].strip().startswith(names)]):
-        del lines[index]
-    for key in reversed(SOCLE_RUNNER_KEYS):
-        declared = labels.get(key) if isinstance(labels, dict) else (labels if key == "macos" else None)
-        if declared:
-            lines.insert(with_at + 1, f"{' ' * body}{RUNNER_INPUTS[key]}: '{runner_json(declared)}'\n")
-    return "".join(lines)
-
-
-def release_workflow(decl: Declarations, sha: str, tag: str, version: str) -> str:
-    lines = [
-        "name: release",
-        "",
-        f"# Managed by maelys-release {tag} ({version}). Regenerate with",
-        f"# '{PROGRAM} adopt' of maelys-release; do not edit by hand.",
-        # A job that calls a reusable workflow cannot be granted more than the
-        # caller workflow declares at the top level, so the ceiling is set
-        # here and each job narrows it.
-        "on:",
-        "  push:",
-        '    tags: ["v*"]',
-        "  workflow_dispatch:",
-        "    inputs:",
-        "      tag:",
-        "        description: Existing signed tag whose release and Homebrew publication are replayed",
-        "        required: true",
-        "        type: string",
-        "",
-        "permissions:",
-        "  contents: write",
-        "  id-token: write",
-        "  attestations: write",
-        "",
-        "jobs:",
-        "  release:",
-        f"    uses: {SOCLE_REPOSITORY}/.github/workflows/release.yml@{sha} # {tag}",
-        "    permissions:",
-        "      contents: write",
-        "      id-token: write",
-        "      attestations: write",
-        "    with:",
-        f"      product: {decl.product}",
-        "      tag: ${{ inputs.tag || github.ref_name }}",
-        *runner_inputs(decl),
-    ]
-    if decl.dependencies:
-        lines.append("      dependency_checkout: |")
-        if decl.dependencies_apart:
-            # release.yml never fetches the socle, so this cannot call the
-            # command; it uses the managed script's own DESTINATION, which
-            # is the unit maelys-egress said it had used by hand five times.
-            # The root is exported for the packaging command that follows,
-            # so a release and a `make check` read their dependencies from
-            # the same place -- and ../NAME names nothing here either.
-            # One line, and no list of pins: the script reads them when it
-            # runs, so a new pin is cloned without this file being
-            # regenerated. That is the lesson of 0.6.0, where the job
-            # started reading the product's declarations itself.
-            lines.append('        sh scripts/checkout-dependencies.sh'
-                         ' "$RUNNER_TEMP/dependencies" >>"$GITHUB_ENV"')
-        else:
-            lines.extend(f"        sh scripts/checkout-dependency.sh {name}" for name in decl.dependencies)
-    if decl.verify_command:
-        lines.append(f"      verify_command: {decl.verify_command}")
-    if decl.linux_packages:
-        lines.append(f"      linux_packages: {SOCLE_LINUX_PACKAGES} {decl.linux_packages}")
-    if decl.macos_packages:
-        lines.append(f"      macos_packages: {decl.macos_packages}")
-    if decl.targets or decl.package:
-        declared = decl.targets or [(name, "") for name in SOCLE_TARGETS]
-        entries = []
-        for name, runner in declared:
-            entry: dict = {"target": name} if runner == "" else {"target": name, "runner": runner}
-            if decl.package and name not in decl.package:
-                entry["package"] = False
-            entries.append(entry)
-        lines.append(f"      targets: '{json.dumps(entries)}'")
-    if decl.manifest_patterns:
-        lines.append(f"      manifest_patterns: '{SOCLE_MANIFEST_PATTERNS} "
-                     + " ".join(decl.manifest_patterns) + "'")
-    if decl.sbom_pattern:
-        lines.append(f"      sbom_pattern: '{decl.sbom_pattern}'")
-    if decl.commit_verification:
-        lines.append(f"      commit_verification: {decl.commit_verification}")
-    for name, _kind in decl.channels:
-        # An empty environment runs the job with no environment and no
-        # approval: measured on run 34817132441 of this repository, a job
-        # whose `environment:` expression was empty started at once, left no
-        # pending deployment and created no environment. channel.yml runs
-        # for one product in the fleet, so this was worth a probe rather
-        # than a belief.
-        gated = decl.channel_gates.get(name, "reviewer") != "none"
-        lines.extend([
-            "",
-            f"  channel-{name}:",
-            "    needs: release",
-            "    if: needs.release.result == 'success'",
-            f"    uses: {SOCLE_REPOSITORY}/.github/workflows/channel.yml@{sha} # {tag}",
-            "    permissions:",
-            # The ceiling, which each job of channel.yml narrows: the job that
-            # runs this product's publish script keeps contents: read, and
-            # only the one that attaches the marker writes.
-            "      contents: write",
-            "      packages: write",
-            "    with:",
-            f"      product: {decl.product}",
-            "      tag: ${{ inputs.tag || github.ref_name }}",
-            f"      channel: {name}",
-            # bash, like verify_command and package_command: `sh` is dash on
-            # the Ubuntu runner and bash in POSIX mode on the operator's
-            # macOS, and 0.36.0 fixed only two of the three.
-            "      publish_command: bash scripts/publish-channel.sh TAG CHANNEL",
-            *[line for line in runner_inputs(decl) if "linux_x86_64_runner" in line],
-        ])
-        if not gated:
-            lines.append("      release_environment: ''")
-    for formula in decl.formulas:
-        lines.extend([
-            "",
-            f"  tap-{formula}:",
-            "    needs: release",
-            "    if: needs.release.result == 'success'",
-            f"    uses: {SOCLE_REPOSITORY}/.github/workflows/tap.yml@{sha} # {tag}",
-            "    permissions:",
-            "      contents: write",
-            "      id-token: write",
-            "      attestations: write",
-            "    with:",
-            f"      product: {formula}",
-            "      tag: ${{ inputs.tag || github.ref_name }}",
-        ])
-        if decl.render_command:
-            lines.append(f"      render_command: {decl.render_command} {formula}")
-        lines.extend([
-            f"      bottles: {BOTTLES}",
-            *macos_runner_input(decl),
-            "    secrets:",
-            "      tap_token: ${{ secrets.HOMEBREW_TAP_TOKEN }}",
-            "      tap_signing_key: ${{ secrets.HOMEBREW_TAP_SIGNING_KEY }}",
-        ])
-    return "\n".join(lines) + "\n"
-
-
-def ci_workflow(decl: Declarations, sha: str, tag: str, version: str) -> str:
-    """Created once from the same declarations, then owned by the product."""
-    lines = [
-        "name: ci",
-        "",
-        f"# Created by maelys-release {tag} ({version}) and owned by this repository: add",
-        "# jobs next to check; adopt keeps the socle line of check current.",
-        "on:",
-        "  push:",
-        "    branches: [main]",
-        "  pull_request:",
-        "",
-        "permissions:",
-        "  contents: read",
-        "",
-        "jobs:",
-        "  check:",
-        f"    uses: {SOCLE_REPOSITORY}/.github/workflows/check-product.yml@{sha} # {tag}",
-        "    with:",
-        f"      product: {decl.product}",
-    ]
-    # Through the same writer adopt applies to an existing file, so a file
-    # created here and the same file regenerated later are byte for byte one
-    # text. They were not: this rendered the runner lines after `product:`
-    # and the writer inserts them first, so a product that declared a runner
-    # would have drifted against its own freshly created ci.yml.
-    return ci_legs(ci_macos_runner("\n".join(lines) + "\n", decl.runners), decl, sha, tag)
-
-
-def managed_block(existing: str | None, block: str) -> str:
-    """Replace the block between the markers, or append it."""
-    if existing is not None and BEGIN in existing:
-        out: list[str] = []
-        skipping = False
-        for line in existing.splitlines():
-            if line.strip() == BEGIN:
-                out.extend([BEGIN, *block.rstrip("\n").splitlines(), END])
-                skipping = True
-            elif line.strip() == END:
-                skipping = False
-            elif not skipping:
-                out.append(line)
-        return "\n".join(out) + "\n"
-    head = (existing.rstrip("\n") + "\n\n") if existing else ""
-    return head + BEGIN + "\n" + block.rstrip("\n") + "\n" + END + "\n"
 
 
 def stage(decl: Declarations, sha: str, tag: str) -> dict[str, tuple[str, bool]]:
@@ -2131,45 +1267,6 @@ def socle_impact(pinned: str) -> list[tuple[str, str]]:
     return list(reversed(impacts))
 
 
-# What a line naming the socle looks like once its commit and tag are taken
-# out: a pin that moves and nothing else is a third kind of change, neither
-# the mechanism nor its prose.
-PIN_SPELLINGS = (re.compile(r"@[0-9a-f]{40} # \S+"), re.compile(r"(maelys-release) v?[0-9][0-9.]*\S* \([0-9.]+\)"))
-
-
-def touches(relative: str, current: str, content: str) -> str:
-    """What a change to a managed file touches: prose, pin or mechanism.
-
-    Asked by maelys-oci, sixty-eight tags into the fleet: check named the
-    file that moved and the diff, and a reader still had to read the diff to
-    learn whether an adoption rewrote a sentence or the release. A text file
-    is prose. A workflow or a script is prose when only its comments moved,
-    pin when only the commit it names moved (comments aside), and mechanism
-    otherwise -- the only kind that changes what runs.
-    """
-    if relative.endswith(".md"):
-        return "prose"
-
-    def normalised(text: str, comments: bool) -> list[str]:
-        out = []
-        for line in text.splitlines():
-            for spelling in PIN_SPELLINGS:
-                line = spelling.sub("PIN", line)
-            if not comments and (not line.strip() or line.lstrip().startswith("#")):
-                continue
-            out.append(line)
-        return out
-
-    def uncommented(text: str) -> list[str]:
-        return [line for line in text.splitlines() if line.strip() and not line.lstrip().startswith("#")]
-
-    if normalised(current, False) != normalised(content, False):
-        return "mechanism"
-    if uncommented(current) != uncommented(content):
-        return "pin"
-    return "prose"
-
-
 def plan(decl: Declarations, staged: dict[str, tuple[str, bool]], apply: bool) -> list[dict]:
     """One entry per managed file: create, update or same; written when applying."""
     files: list[dict] = []
@@ -2236,80 +1333,6 @@ def pinned_socle(project: pathlib.Path) -> dict | None:
     return None
 
 
-RUNS_ON = re.compile(r"^[ \t]*runs-on:[ \t]*(.*?)[ \t]*$", re.M)
-# A runner label is what GitHub accepts as one. Anything else read out of a
-# workflow is not a label the socle may vouch for: it goes to `unresolved`,
-# where an observer blocks on it, rather than into `labels`, where it would
-# pass and, worse, make a genuinely unreadable `runs-on` look resolved.
-LABEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
-MATRIX_REFERENCE = re.compile(r"^\$\{\{\s*(?:fromJSON\()?\s*matrix\.([A-Za-z0-9_-]+)\s*\)?\s*\}\}$")
-EXPRESSION = re.compile(r"\$\{\{")
-
-
-def matrix_values(text: str, key: str) -> list[str]:
-    """The literal values a matrix key lists, anywhere in one workflow.
-
-    Line-based on purpose: the socle carries no YAML parser and vendors none.
-    A value it cannot read as a literal is not guessed, it is reported
-    unresolved, because a runner nobody could name must not read as absent.
-    """
-    values: list[str] = []
-    for number, line in enumerate(text.splitlines()):
-        if not re.fullmatch(rf"\s*{re.escape(key)}:\s*(\[.*\])?\s*", line):
-            continue
-        inline = re.search(r"\[(.*)\]", line)
-        if inline:
-            values.extend(item.strip().strip("\"'") for item in inline.group(1).split(",") if item.strip())
-            continue
-        indent = len(line) - len(line.lstrip())
-        for following in text.splitlines()[number + 1:]:
-            if not following.strip():
-                continue
-            if len(following) - len(following.lstrip()) <= indent:
-                break
-            item = re.fullmatch(r"\s*-\s*(.+?)\s*", following)
-            if not item:
-                break
-            values.append(item.group(1).strip("\"'"))
-    # A matrix written as `include:` names the key on each entry rather than
-    # once above a list, and that is the shape maelys-datalog and the socle's
-    # own release.yml used. Collecting the scalar form too may pick up a key
-    # of the same name elsewhere in the file, which adds a label that is not
-    # a runner; for a control that refuses a self-hosted runner, naming one
-    # too many is a nuisance and naming one too few is a hole.
-    for line in text.splitlines():
-        scalar = re.fullmatch(rf"\s*-?\s*{re.escape(key)}:\s*(?!\s*[\[|>])(\S.*?)\s*", line)
-        if scalar:
-            values.append(scalar.group(1).strip("\"'"))
-    return sorted({value for value in values if LABEL.fullmatch(value)})
-
-
-def file_runners(name: str, text: str) -> tuple[list, list]:
-    """(labels, unresolved) of one workflow file, matrix references resolved."""
-    labels: set = set()
-    unresolved: list = []
-    for match in RUNS_ON.finditer(text):
-        value = match.group(1).strip().strip("\"'")
-        # The line, so an operator finds what the socle could not read.
-        where = f"{name}:{text.count(chr(10), 0, match.start()) + 1}"
-        reference = MATRIX_REFERENCE.fullmatch(value)
-        if reference:
-            found = matrix_values(text, reference.group(1))
-            if found:
-                labels.update(found)
-            else:
-                unresolved.append(f"{where}: {value}")
-            continue
-        # `runs-on:` alone introduces a block list or a `group:` mapping on
-        # the following lines; the socle does not read either, and says so.
-        named = [item.strip().strip("\"'") for item in value.strip("[]").split(",") if item.strip()]
-        if not named or not all(LABEL.fullmatch(item) for item in named):
-            unresolved.append(f"{where}: {value or 'a block or a group below this line'}")
-            continue
-        labels.update(named)
-    return sorted(labels), unresolved
-
-
 def read_runners(project: pathlib.Path) -> dict:
     """Which runners this repository's workflows select, and what could not be read.
 
@@ -2353,76 +1376,6 @@ def read_runners(project: pathlib.Path) -> dict:
 
 # The events the socle names; anything else a workflow declares is reported
 # verbatim, because an event nobody named must not read as absence.
-WORKFLOW_EVENTS = ("push", "pull_request", "pull_request_target", "workflow_dispatch",
-                   "workflow_call", "schedule", "release", "merge_group", "issue_comment",
-                   "repository_dispatch")
-JOB_ID = re.compile(r"^  ([A-Za-z0-9_-]+):\s*$", re.M)
-
-
-def top_block(text: str, key: str) -> str:
-    """The body of a top-level `key:`, or its inline value when it has one."""
-    match = re.search(rf"^{re.escape(key)}:(.*)$", text, re.M)
-    if not match:
-        return ""
-    if match.group(1).strip():
-        return match.group(1).strip()
-    rest = text[match.end():]
-    end = re.search(r"^[A-Za-z]", rest, re.M)
-    return rest[:end.start()] if end else rest
-
-
-def sub_block(block: str, key: str) -> str:
-    """The body of `key:` inside a block, by indentation."""
-    match = re.search(rf"^(\s*){re.escape(key)}:\s*$", block, re.M)
-    if not match:
-        return ""
-    indent = len(match.group(1))
-    kept = []
-    for line in block[match.end():].splitlines():
-        if line.strip() and len(line) - len(line.lstrip()) <= indent:
-            break
-        kept.append(line)
-    return "\n".join(kept)
-
-
-def block_list(block: str, key: str) -> list:
-    """The values `key:` lists: inline `[a, b]`, or a `- a` list below it.
-
-    Unlike the runner reader this keeps every value as written: a branch
-    filter is `main` but a tag filter is `v*`, and a reader that only
-    accepted label-shaped words would drop the tag rule silently.
-    """
-    match = re.search(rf"^(\s*){re.escape(key)}:(.*)$", block, re.M)
-    if not match:
-        return []
-    inline = match.group(2).strip()
-    if inline:
-        return [item.strip().strip("\"'") for item in inline.strip("[]").split(",") if item.strip()]
-    indent = len(match.group(1))
-    values = []
-    for line in block[match.end():].splitlines():
-        if not line.strip():
-            continue
-        if len(line) - len(line.lstrip()) <= indent:
-            break
-        item = re.fullmatch(r"\s*-\s*(.+?)\s*", line)
-        if not item:
-            break
-        values.append(item.group(1).strip("\"'"))
-    return values
-
-
-def workflow_events(text: str) -> list:
-    """The events of one workflow, in the three shapes GitHub accepts."""
-    block = top_block(text, "on")
-    if not block:
-        return []
-    found = []
-    for event in WORKFLOW_EVENTS:
-        if re.search(rf"^\s*-?\s*{re.escape(event)}\s*:", block, re.M) \
-                or re.search(rf"(^|[\[,\s]){re.escape(event)}($|[\],\s])", block.split("\n")[0]):
-            found.append(event)
-    return found
 
 
 def read_workflows(project: pathlib.Path) -> list:
@@ -4531,29 +3484,7 @@ def rehearse_channel(invocation: Invocation, project: pathlib.Path, product: str
         for path in sorted(dist.iterdir()) if dist.is_dir() else []:
             path.unlink()
     return data, EXIT_OK if data["matches"] is not False else EXIT_VIOLATIONS
-
-
-CI_JOB = re.compile(r"^  ([A-Za-z0-9_-]+):\s*$")
 TAG_WORKFLOWS = ("release", "tap", "channel")
-
-
-def yaml_scalar(raw: str) -> str:
-    """One line's YAML value, its trailing comment set apart.
-
-    agent-cli-spec writes `sanitizer_command: ''   # no compiled code here`.
-    Read whole, that was not empty, so the socle counted a sanitizers job that
-    never runs among what it produces -- and `protect --apply` refused a
-    rename, for want of a merged pull request that had run it. A `#` starts a
-    comment only after whitespace and outside quotes.
-    """
-    value = raw.strip()
-    if value[:1] in ("'", '"'):
-        quote = value[0]
-        closing = value.find(quote, 1)
-        while quote == "'" and closing != -1 and value[closing + 1:closing + 2] == "'":
-            closing = value.find(quote, closing + 2)
-        return value[:closing + 1] if closing != -1 else value
-    return re.split(r"\s+#", value, maxsplit=1)[0].strip()
 
 
 def socle_check_contexts(project: pathlib.Path) -> tuple[str, list[str]]:
@@ -4620,62 +3551,6 @@ def declared_legs(project: pathlib.Path) -> list[str]:
 def socle_owned(name: str, caller: str) -> bool:
     """Whether a context is one the socle's workflows report, by its prefix."""
     return name.startswith((f"{caller} / ", f"{LEGS_JOB} / "))
-
-
-# What the socle's own sanitizers job builds by default: AddressSanitizer and
-# UndefinedBehaviorSanitizer, on Linux. A product job building those on Linux
-# builds the same instrumented tree a second time; TSan, MSan or a macOS job do
-# not. Word boundaries, because a substring finds "asan" inside "pleasant".
-SANITIZING = re.compile(r"\b(?:asan|ubsan)\b|fsanitize=(?:address|undefined)|\baddress,undefined\b", re.IGNORECASE)
-
-
-def sanitizers_twice(text: str) -> list[int]:
-    """One line per product job of ci.yml that sanitizes while the socle's job does too.
-
-    `sanitizer_command` is opt-out: a call that does not set it turns the
-    socle's job on, so a product with an ASan/UBSan job of its own pays for
-    two instrumented builds of the same tree on every pull request. The
-    socle cannot choose between them -- the product's job may cover more,
-    or less -- so it says the fact and names the line.
-
-    One line per job, the first that builds what the socle's job builds.
-    maelys-system read seven, and every one was false: the job's own name
-    `sanitizers:`, two TSan steps the socle's job never runs, and the ASan
-    steps of a macOS job, where the socle's job never runs either. A job
-    whose runs-on names macOS and no Linux image is not a duplicate; one
-    whose runner cannot be read is counted, since it may be Linux.
-    """
-    if re.search(r"^\s+sanitizer_command:", text, re.MULTILINE):
-        return []
-    found = []
-    job: list[tuple[int, str]] = []
-
-    def close() -> None:
-        if not job:
-            return
-        # The block that calls the socle is not a second job: its `with:`
-        # names the commands, and a comment beside it says what they run.
-        if any(CI_USES.search(line) for _, line in job):
-            return
-        runner = " ".join(line for _, line in job if re.match(r"^\s+runs-on:", line) or "runner" in line
-                          or re.search(r"\b(?:ubuntu|macos)-", line))
-        if re.search(r"macos", runner, re.IGNORECASE) and not re.search(r"ubuntu|linux", runner, re.IGNORECASE):
-            return
-        for number, line in job[1:]:
-            # A YAML comment is not a job: the one this dropped names the
-            # socle's own sanitizers in a sentence explaining the call.
-            if not line.lstrip().startswith("#") and SANITIZING.search(line):
-                found.append(number)
-                return
-
-    for number, line in enumerate(text.splitlines(), 1):
-        if re.match(r"^  [A-Za-z0-9_-]+:\s*$", line):
-            close()
-            job = [(number, line)]
-        elif job:
-            job.append((number, line))
-    close()
-    return found
 
 
 def required_contexts(project: pathlib.Path) -> list[str] | None:
@@ -5947,7 +4822,8 @@ def handle_self_test(invocation: Invocation) -> tuple[dict, int]:
         command.append("-v")
     log = sys.stderr if invocation.format != "text" else sys.stdout
     log.flush()
-    completed = HOST.stream(command, log, env={**os.environ, "_MAELYS_RELEASE_SELF_TEST": "1"})
+    with HOST.self_test_environment() as environment:
+        completed = HOST.stream(command, log, env=environment)
     if completed.returncode != 0:
         raise Failure("PROCESS_FAILED", f"The self-test failed with exit {completed.returncode}.", "Read the report above.")
     return {"tests": str(tests), "passed": True}, EXIT_OK
