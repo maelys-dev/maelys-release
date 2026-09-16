@@ -18,6 +18,7 @@ from .constants import (
 )
 from .context import Context
 from .declarations import Declarations
+from .project import project_of
 from .texts import checks_text
 from .workflows import block_list, file_runners, sub_block, top_block, workflow_events
 
@@ -119,7 +120,7 @@ def read_workflows(project: pathlib.Path) -> list:
 
 
 def check_data(invocation: Invocation, context: Context) -> tuple[Declarations, dict]:
-    project, product, mechanism = context.project_of(invocation)
+    project, product, mechanism = project_of(invocation)
     context.run_pinned_socle(invocation, project)
     decl = context.read_declarations(project, product, mechanism)
     sha, tag = context.socle_identity(str(invocation.option("--socle-sha", "")), str(invocation.option("--socle-tag", "")))
@@ -205,7 +206,7 @@ def check_data(invocation: Invocation, context: Context) -> tuple[Declarations, 
 
 def handle_declarations(invocation: Invocation, context: Context) -> tuple[dict, int]:
     """The product contract as data, for a CI job that installs what it declares."""
-    project, product, mechanism = context.project_of(invocation)
+    project, product, mechanism = project_of(invocation)
     decl = context.read_declarations(project, product, mechanism)
     release_workflow_text = (project / ".github" / "workflows" / "release.yml")
     stamp = re.search(r"# Managed by maelys-release (\S+) \(([0-9.]+)\)",

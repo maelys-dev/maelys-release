@@ -3369,13 +3369,13 @@ class MaterialisedMarkTest(unittest.TestCase):
     """
 
     def test_the_key_lives_in_the_clone_and_not_in_the_tree(self) -> None:
-        source = (ROOT / "bin" / "maelys-release").read_text(encoding="utf-8")
+        source = (ROOT / "bin" / "maelys_socle" / "checkouts.py").read_text(encoding="utf-8")
         self.assertIn('MATERIALISED = "maelys-release.materialised"', source)
         materialise = source.split("def materialise", 1)[1].split("\ndef ", 1)[0]
         self.assertIn('git("config", "--local", MATERIALISED, pin["name"], cwd=path)', materialise)
 
     def test_a_root_the_operator_chose_needs_the_mark(self) -> None:
-        state = source_state = (ROOT / "bin" / "maelys-release").read_text(encoding="utf-8")
+        state = source_state = (ROOT / "bin" / "maelys_socle" / "checkouts.py").read_text(encoding="utf-8")
         body = state.split("def checkout_state", 1)[1].split("\ndef ", 1)[0]
         self.assertIn("if not trusted:", body)
         self.assertIn("a working copy left detached by a build script", body)
@@ -3386,7 +3386,7 @@ class MaterialisedMarkTest(unittest.TestCase):
 
     def test_the_parent_of_the_product_is_refused(self) -> None:
         """`<parent>/<name>` is where the fleet's working copies live."""
-        body = (ROOT / "bin" / "maelys-release").read_text(encoding="utf-8")
+        body = (ROOT / "bin" / "maelys_socle" / "dependencies.py").read_text(encoding="utf-8")
         body = body.split("def handle_dependencies", 1)[1].split("\ndef ", 1)[0]
         self.assertIn("if directory == project.parent:", body)
 
