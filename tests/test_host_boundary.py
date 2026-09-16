@@ -40,6 +40,75 @@ class HostBoundaryTest(unittest.TestCase):
                     self.assertEqual(result.stdout, "")
                     self.assertIn("reserved for self-test", result.stderr)
                     self.assertIn("Unset _MAELYS_RELEASE_SELF_TEST", result.stderr)
+                    body = json.loads(result.stderr)
+                    self.assertEqual(body["contract"], "agent-cli/v2")
+                    self.assertEqual(body["schemaVersion"], 2)
+                    self.assertEqual(body["command"], "describe")
+                    self.assertFalse(body["ok"])
+                    self.assertEqual(body["exitCode"], result.returncode)
+                    self.assertEqual(body["error"]["code"], "PRECONDITION_FAILED")
+
+    def test_token_refusal_uses_the_resolved_command_and_output_format(self):
+        env = {**os.environ, "_MAELYS_RELEASE_SELF_TEST": "invalid", "MAELYS_CLI_FORMAT": "json"}
+        for argv, command, machine in (
+                (["version"], "version", True),
+                (["--version", "--json"], "version", True),
+                (["describe", "--format=json", "--compact"], "describe", True),
+                (["version", "--format", "jsonl", "--field", "version"], "version", True),
+                (["help", "--format", "text"], "help", False),
+        ):
+            with self.subTest(argv=argv):
+                result = subprocess.run([sys.executable, str(CLI), *argv], env=env,
+                                        text=True, capture_output=True, check=False)
+                self.assertEqual(result.returncode, 1)
+                self.assertEqual(result.stdout, "")
+                if machine:
+                    body = json.loads(result.stderr)
+                    self.assertEqual(body["command"], command)
+                    self.assertEqual(body["error"]["code"], "PRECONDITION_FAILED")
+                    self.assertEqual(body["exitCode"], 1)
+                    self.assertFalse(body["ok"])
+                else:
+                    self.assertIn("maelys-release: [PRECONDITION_FAILED]", result.stderr)
+                for name in ("_MAELYS_RELEASE_SELF_TEST", "_MAELYS_RELEASE_SELF_TEST_FILE", "_MAELYS_RELEASE_TEST_GH"):
+                    self.assertIn(name, result.stderr)
+                self.assertNotIn("Traceback", result.stderr)
+
+    def test_token_refusal_precedes_any_command_handler(self):
+        with tempfile.TemporaryDirectory() as directory:
+            env = {**os.environ, "_MAELYS_RELEASE_SELF_TEST": "invalid"}
+            result = subprocess.run([sys.executable, str(CLI), "adopt", directory, "--apply", "--format", "json"],
+                                    env=env, text=True, capture_output=True, check=False)
+            self.assertEqual(result.returncode, 1)
+            self.assertEqual(result.stdout, "")
+            body = json.loads(result.stderr)
+            self.assertEqual(body["command"], "adopt")
+            self.assertEqual(body["error"]["code"], "PRECONDITION_FAILED")
+            self.assertIn("reserved for self-test", body["error"]["message"])
+            self.assertEqual(list(pathlib.Path(directory).iterdir()), [])
+
+    def test_imported_host_refuses_an_invalid_environment_before_any_use(self):
+        code = '''import importlib.machinery, importlib.util, os, sys
+loader = importlib.machinery.SourceFileLoader("candidate", sys.argv[1])
+spec = importlib.util.spec_from_loader(loader.name, loader)
+module = importlib.util.module_from_spec(spec)
+loader.exec_module(module)
+for operation in (lambda: module.HOST.which("python3"),
+                  lambda: module.HOST.run(["/unreachable"]),
+                  lambda: module.HOST.stream(["/unreachable"], sys.stdout),
+                  lambda: module.HOST.exec("/unreachable", ["/unreachable"], dict(os.environ))):
+    try:
+        operation()
+    except module.Failure as failure:
+        assert failure.code == "PRECONDITION_FAILED"
+    else:
+        raise AssertionError("the invalid environment reached a host operation")
+'''
+        result = subprocess.run([sys.executable, "-c", code, str(CLI)],
+                                env={**os.environ, "_MAELYS_RELEASE_SELF_TEST": "invalid"},
+                                text=True, capture_output=True, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "")
 
     def test_a_self_test_token_is_unique_and_expires_with_its_context(self):
         with MODULE.Host.self_test_environment() as first, MODULE.Host.self_test_environment() as second:
@@ -54,6 +123,7 @@ class HostBoundaryTest(unittest.TestCase):
                                  env=first, text=True, capture_output=True, check=False)
         self.assertNotEqual(expired.returncode, 0)
         self.assertIn("reserved for self-test", expired.stderr)
+        self.assertEqual(json.loads(expired.stderr)["error"]["code"], "PRECONDITION_FAILED")
 
     def test_api_writes_and_process_calls_stay_inside_host(self):
         for path in [CLI, *sorted((ROOT / "bin" / "maelys_socle").rglob("*.py"))]:
