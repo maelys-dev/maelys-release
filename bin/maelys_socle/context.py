@@ -36,4 +36,3 @@ class Context:
     socle_impact: Callable[[str], list[tuple[str, str]]]
     socle_version: Callable[[], str]
     socle_root: Callable[[], pathlib.Path]
-    vanishing_contexts: Callable[[pathlib.Path], list[str]]
