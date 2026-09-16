@@ -187,7 +187,7 @@ def verify_inputs(inputs):
     ids = [case['id'] for case in manifest['cases']]
     if any(not re.fullmatch('[a-z0-9-]+', name) for name in ids) or len(set(ids)) != len(ids):
         raise RuntimeError('invalid or duplicate case id')
-    expected = {'responses.json', *(case['input'] for case in manifest['cases'])}
+    expected = {'responses.json', *SOCLE_INPUTS, *(case['input'] for case in manifest['cases'])}
     if set(manifest['sha256']) != expected:
         raise RuntimeError('every input must have a frozen digest')
     for relative, digest in manifest['sha256'].items():
@@ -197,6 +197,33 @@ def verify_inputs(inputs):
         if hashlib.sha256((inputs / relative).read_bytes()).hexdigest() != digest:
             raise RuntimeError(f'frozen input digest differs: {relative}')
     return manifest
+
+
+# What the candidate reads from its own root that is not code: the version and
+# the changelog are inputs of every command that says what a product is behind
+# on, and the header of a generated release.yml carries the version. Frozen at
+# recording, restored at replay -- otherwise the first `cut` after a recording
+# turned every fixture into a drift, and the self-test red on the release pull
+# request that no fix could make green.
+SOCLE_INPUTS = ('socle/VERSION', 'socle/CHANGELOG.md')
+
+
+def frozen_socle(source, inputs, work):
+    """A copy of the candidate's code with the recorded VERSION and CHANGELOG.md."""
+    candidate = work / 'socle'
+    candidate.mkdir()
+    # Code, and what the program reads as code: its own workflows give it its
+    # legs and their aliases (check_product_legs, check_product_aliases), so
+    # a copy without them told the adoption guard the old names had vanished.
+    for name in ('bin', 'share', '.github/workflows'):
+        shutil.copytree(source / name, candidate / name, ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
+    for name in ('WITHDRAWN', 'docs/cli.reference'):
+        if (source / name).is_file():
+            (candidate / name).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source / name, candidate / name)
+    for relative in SOCLE_INPUTS:
+        shutil.copy2(inputs / relative, candidate / pathlib.PurePosixPath(relative).name)
+    return candidate
 
 
 def main():
@@ -222,6 +249,7 @@ def main():
         work = pathlib.Path(directory).resolve()
         stage = work / 'output'
         stage.mkdir()
+        candidate = frozen_socle(source, inputs, work)
         # The candidate inherits no credentials, self-test switches or executable PATH.
         # The only processes are these fresh Python interpreters, started by the driver.
         environment = {'PATH': '', 'HOME': str(work), 'TMPDIR': str(work), 'XDG_CACHE_HOME': str(work / 'cache'),
@@ -229,7 +257,7 @@ def main():
                        'PYTHONDONTWRITEBYTECODE': '1', 'MAELYS_RELEASE_NO_RELOCATE': '1'}
         for case in selected:
             completed = subprocess.run([sys.executable, '-I', str(pathlib.Path(__file__).resolve()),
-                                       str(stage / (case['id'] + '.json')), '--source', str(source),
+                                       str(stage / (case['id'] + '.json')), '--source', str(candidate),
                                        '--inputs', str(inputs), '--worker', case['id']],
                                       env=environment, cwd=work, capture_output=True, text=True, timeout=60)
             if completed.returncode:
