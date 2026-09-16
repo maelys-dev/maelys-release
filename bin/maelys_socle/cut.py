@@ -283,7 +283,12 @@ def one_pull(project: pathlib.Path, repository: str, branch: str) -> dict | None
     if listed.returncode != 0:
         raise Failure("PROCESS_FAILED", f"gh pr list failed: {listed.stderr.strip()}",
                       "Check 'gh auth status', then run the command again.")
-    pulls = json.loads(listed.stdout or "[]")
+    # A pull request closed without a merge is not this release, whatever
+    # its branch: the hint below asked to close it, and it already was --
+    # 0.59.0's first attempt was closed after its checks refused, the branch
+    # deleted and cut again, and `cut --tag` then counted the closed one and
+    # refused to sign a release whose pull request was merged and green.
+    pulls = [pull for pull in json.loads(listed.stdout or "[]") if pull.get("state") != "CLOSED"]
     if len(pulls) > 1:
         raise Failure("PRECONDITION_FAILED",
                       f"{len(pulls)} pull requests come from {branch} in {repository}: "
