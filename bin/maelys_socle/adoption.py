@@ -9,6 +9,7 @@ from maelys_cli import EXIT_OK, Failure, Invocation
 
 from .constants import DECLARATION_FILE, FORMER_DECLARATION_FILE, PROGRAM, SOCLE_MECHANISM
 from .context import Context
+from .declarations import require_valid
 from .host import git, run
 from .inspection import pinned_socle
 from .project import project_of
@@ -38,7 +39,7 @@ def handle_adopt(invocation: Invocation, context: Context) -> tuple[dict, int]:
     project, product, mechanism = project_of(invocation)
     apply = invocation.flag("--apply")
     decl = context.read_declarations(project, product, mechanism)
-    context.require_valid(decl, "adopt")
+    require_valid(decl, "adopt")
     sha, tag = context.socle_identity(str(invocation.option("--socle-sha", "")), str(invocation.option("--socle-tag", "")))
     # A product pins releases of the socle: a commit without a tag has no
     # changelog entry, no trial and no compatibility promise. Trials of a

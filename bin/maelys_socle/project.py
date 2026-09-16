@@ -6,7 +6,7 @@ import pathlib
 import re
 
 from maelys_cli import Failure, Invocation
-from .constants import RELEASE_USES, SOCLE_MECHANISM
+from .constants import PROGRAM, RELEASE_USES, SOCLE_MECHANISM
 
 
 def declared_mechanism(project: pathlib.Path, requested: str = "") -> str:
@@ -59,3 +59,11 @@ def project_of(invocation: Invocation) -> tuple[pathlib.Path, str, str]:
         raise Failure("VALIDATION_FAILED", f"Product name must be [a-z0-9-]: {product}.",
                       "Pass --product NAME with a valid name.")
     return project, product, declared_mechanism(project, str(invocation.option("--mechanism", "")))
+
+
+def require_socle_mechanism(project: pathlib.Path, mechanism: str, action: str) -> None:
+    """rehearse and preflight replay the socle's release; nothing else does."""
+    if mechanism != SOCLE_MECHANISM:
+        raise Failure("PRECONDITION_FAILED",
+                      f"{project} publishes through a {mechanism} mechanism, so {action} does not apply to it.",
+                      f"'{PROGRAM} check {project}' verifies the conventions of a product the socle does not release.")

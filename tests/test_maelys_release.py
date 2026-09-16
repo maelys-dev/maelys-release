@@ -2691,7 +2691,7 @@ class RehearsalEnvironmentTest(unittest.TestCase):
         never set it, or a release would announce a publication that did not
         happen.
         """
-        source = CLI.read_text(encoding="utf-8")
+        source = (ROOT / "bin" / "maelys_socle" / "rehearse.py").read_text(encoding="utf-8")
         self.assertIn('"CHANNEL_DRY_RUN": "1"', source)
         channel = (ROOT / ".github" / "workflows" / "channel.yml").read_text(encoding="utf-8")
         self.assertNotIn("CHANNEL_DRY_RUN", channel)
@@ -3857,10 +3857,10 @@ class DependenciesApartTest(unittest.TestCase):
         self.assertEqual(cloning, 3)
         self.assertEqual(check_product.count("steps.socle.outputs.apart == ''"), cloning)
         self.assertEqual(check_product.count("steps.socle.outputs.apart != ''"), cloning)
-        source = CLI.read_text(encoding="utf-8")
+        source = (ROOT / "bin" / "maelys_socle" / "rehearse.py").read_text(encoding="utf-8")
         self.assertEqual(check_product.count('sh scripts/checkout-dependencies.sh'
                                             ' "$RUNNER_TEMP/dependencies" >>"$GITHUB_ENV"'), cloning)
-        source = CLI.read_text(encoding="utf-8")
+        source = (ROOT / "bin" / "maelys_socle" / "rehearse.py").read_text(encoding="utf-8")
         self.assertIn("DEPENDENCIES_APART", source)
         self.assertIn("checkout-dependencies.sh /work/dependencies", source)
 

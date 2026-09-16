@@ -79,6 +79,18 @@ def github_repository(project: pathlib.Path) -> str:
     return match.group(1) if match else ""
 
 
+def cut_repository(project: pathlib.Path) -> str:
+    repository = github_repository(project)
+    if not repository:
+        raise Failure("PRECONDITION_FAILED", f"origin of {project} is not on GitHub.",
+                      "cut opens a pull request and reads its checks through gh; publish by hand elsewhere.")
+    if not host.HOST.which("gh"):
+        raise Failure("NOT_FOUND", "gh is required to open the pull request and to read its checks.",
+                      "Install the GitHub CLI, or run the ceremony by hand.")
+    return repository
+
+
+
 def repository_visibility(project: pathlib.Path, visibility: str) -> bool | None:
     """Whether origin's repository has this visibility; None when GitHub cannot say."""
     repository = github_repository(project)

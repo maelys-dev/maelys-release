@@ -20,16 +20,19 @@ class PackageLayoutTest(unittest.TestCase):
         described = subprocess.run([sys.executable, "-I", str(CLI), "describe", "--format", "json"],
                                    env=product.env, text=True, capture_output=True, check=True)
         inspections = []
-        for command in ("declarations", "check", "dependencies"):
+        for command in ("declarations", "check", "dependencies", "rehearse"):
             for output in ("text", "json"):
                 args = [command, str(product.dir), "--format", output]
                 if command == "check":
                     args.extend([*Product.SOCLE, "--mechanism", "maelys-release"])
                 if command == "dependencies":
                     args.extend(["--directory", str(product.work / "materialised")])
+                if command == "rehearse":
+                    args.extend(Product.SOCLE)
                 result = subprocess.run([sys.executable, "-I", str(CLI), *args],
                                         env=product.env, text=True, capture_output=True, check=False)
-                self.assertEqual(result.returncode, 2 if command == "check" else 0, result.stderr)
+                expected_code = {"check": 2, "rehearse": 1}.get(command, 0)
+                self.assertEqual(result.returncode, expected_code, result.stderr)
                 inspections.append((args, result))
         for layout in ("checkout", "installed"):
             with self.subTest(layout=layout):
