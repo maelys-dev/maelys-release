@@ -449,3 +449,7 @@ def parse_cli_declarations(text: str) -> tuple[list[str], list[str], str]:
         else:
             sections["flags"].extend(line.split())
     return sections["programs"], sections["flags"], sections["build"]
+
+
+def version_tuple(version: str) -> tuple:
+    return tuple(int(part) for part in version.split("."))
