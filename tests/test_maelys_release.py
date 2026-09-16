@@ -21,6 +21,7 @@ import subprocess
 import tempfile
 import textwrap
 import unittest
+from contextlib import contextmanager
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 CLI = ROOT / "bin" / "maelys-release"
@@ -39,13 +40,104 @@ def load_module():
     return module
 
 
+# Also guard direct unittest runs and every CLI subprocess they start.
+os.environ["_MAELYS_RELEASE_SELF_TEST"] = "1"
 MODULE = load_module()
-# protect --apply reads the list of withdrawn versions from GitHub before
-# writing. The harnesses below answer the protection endpoints and nothing
-# else, so the reader is set aside for them; WithdrawnVersionTest exercises
-# the real one against its own answers.
-REAL_WITHDRAWN_FOR = MODULE.withdrawn_for
-MODULE.withdrawn_for = lambda command: None
+
+
+@contextmanager
+def using_host(host):
+    previous = MODULE.HOST
+    MODULE.HOST = host
+    try:
+        yield host
+    finally:
+        MODULE.HOST = previous
+
+
+class FakeHost(MODULE.Host):
+    """No shell or network fallback. Each write needs an explicit handler."""
+
+    def __init__(self, answers=None, *, read=None, write=None, run=None, gh=True):
+        self.answers = answers or {}
+        self.reader, self.writer, self.runner, self.gh = read, write, run, gh
+        self.reads, self.writes, self.commands = [], [], []
+
+    def which(self, name):
+        return "/fake/gh" if name == "gh" and self.gh else None
+
+    def read(self, path):
+        self.reads.append(path)
+        if self.reader:
+            return self.reader(path)
+        if path not in self.answers:
+            raise AssertionError(f"undeclared GitHub read: {path}")
+        state, body = self.answers[path]
+        return state, json.loads(json.dumps(body))
+
+    def write(self, method, endpoint, payload, cwd=None):
+        body = json.loads(payload.read_text())
+        self.writes.append((method, endpoint, body))
+        if self.writer is None:
+            raise AssertionError(f"undeclared GitHub write: {method} {endpoint}")
+        return self.writer(method, endpoint, body)
+
+    def run(self, command, cwd=None, env=None):
+        self.commands.append(command)
+        if self.runner:
+            return self.runner(command, cwd=cwd, env=env)
+        if command == ["git", "remote", "get-url", "origin"]:
+            return subprocess.CompletedProcess(command, 0, "https://github.com/o/r.git\n", "")
+        raise AssertionError(f"undeclared command: {command!r}")
+
+    def stream(self, command, log, cwd=None, env=None):
+        raise AssertionError(f"undeclared streaming command: {command!r}")
+
+    def exec(self, executable, command, env):
+        raise AssertionError(f"undeclared exec: {executable}")
+
+
+@contextmanager
+def workflow_project(caller="check", fuzz=False):
+    """Real workflow input for socle_check_contexts, including all three legs."""
+    with tempfile.TemporaryDirectory(prefix="maelys-host-") as directory:
+        project = pathlib.Path(directory) / "maelys-fixture"
+        ci = project / ".github" / "workflows" / "ci.yml"
+        ci.parent.mkdir(parents=True)
+        ci.write_text(f"jobs:\n  {caller}:\n"
+                      "    uses: maelys-dev/maelys-release/.github/workflows/check-product.yml@" + "f" * 40
+                      + " # v9.9.9\n    with:\n      sanitizer_command: ''\n"
+                      + ("      fuzz_command: make fuzz\n" if fuzz else ""))
+        yield project
+
+
+def protection_host(classic, *, rules=("ok", []), seen=(), open_pulls=(), write=None, read=None):
+    """API inputs for real repository, observation and withdrawal readers."""
+    answers = {
+        "repos/o/r": ("ok", {"default_branch": "main"}),
+        "repos/o/r/branches/main/protection": classic,
+        "repos/o/r/rules/branches/main": rules,
+        "repos/o/r/pulls?state=closed&per_page=30":
+            ("ok", [{"merged_at": "x", "head": {"sha": "abc"}}]),
+        "repos/o/r/commits/abc/check-runs?per_page=100":
+            ("ok", {"check_runs": [{"name": name, "conclusion": "success"} for name in seen]}),
+        "repos/o/r/pulls?state=open&base=main&per_page=50":
+            ("ok", [{"number": number} for number in open_pulls]),
+        f"repos/{MODULE.SOCLE_REPOSITORY}/contents/WITHDRAWN":
+            ("ok", {"encoding": "base64", "content": ""}),
+    }
+
+    def answer(path):
+        # Protection/rules callbacks own the same state the writer updates.
+        if read and path not in ("repos/o/r", f"repos/{MODULE.SOCLE_REPOSITORY}/contents/WITHDRAWN"):
+            return read(path)
+        if path not in answers:
+            raise AssertionError(f"undeclared GitHub read: {path}")
+        return json.loads(json.dumps(answers[path]))
+    return FakeHost(read=answer, write=write)
+
+
+ALL_LEGS = ["check / check (linux)", "check / check (linux-arm64)", "check / check (macos)"]
 
 
 class Product:
@@ -93,7 +185,7 @@ class Product:
 
     def git(self, cwd: pathlib.Path, *arguments: str) -> str:
         completed = subprocess.run(
-            ["git", "-c", "user.name=test", "-c", "user.email=test@example.invalid", "-c", "init.defaultBranch=main",
+            ["git", "-C", str(cwd.resolve()), "-c", "user.name=test", "-c", "user.email=test@example.invalid", "-c", "init.defaultBranch=main",
              *arguments], cwd=cwd, env=self.env, check=True, text=True, stdout=subprocess.PIPE)
         return completed.stdout.strip()
 
@@ -1974,7 +2066,10 @@ class CutTest(unittest.TestCase):
             "*) exit 1 ;;\n"
             "esac\n", encoding="utf-8")
         script.chmod(0o755)
+        self.addCleanup(os.environ.__setitem__, "PATH", os.environ["PATH"])
         os.environ["PATH"] = f"{directory}:{os.environ['PATH']}"
+        os.environ["_MAELYS_RELEASE_TEST_GH"] = str(script)
+        self.addCleanup(os.environ.pop, "_MAELYS_RELEASE_TEST_GH", None)
 
     def signing_key(self) -> bool:
         if not shutil.which("ssh-keygen"):
@@ -2319,13 +2414,10 @@ class GitHubReadingTest(unittest.TestCase):
             self.returncode, self.stdout, self.stderr = returncode, stdout, stderr
 
     def read(self, completed, gh=True):
-        original_run, original_which = MODULE.run, MODULE.shutil.which
-        MODULE.run = lambda *arguments, **keywords: completed
-        MODULE.shutil.which = lambda name: "/usr/bin/gh" if gh else None
-        try:
-            return MODULE.github_read("repos/x/y")
-        finally:
-            MODULE.run, MODULE.shutil.which = original_run, original_which
+        host = FakeHost(run=lambda *args, **kwargs: completed, gh=gh)
+        # Exercise Host.read itself, with only its process result replaced.
+        with using_host(host):
+            return MODULE.Host.read(host, "repos/x/y")
 
     def test_the_four_states(self) -> None:
         self.assertEqual(self.read(self.Completed(0, '{"a": 1}')), ("ok", {"a": 1}))
@@ -2341,12 +2433,10 @@ class GitHubReadingTest(unittest.TestCase):
         """The readers that act the same way on every absence keep their shape;
         a list is not a body for them, because they index it by name."""
         self.assertEqual(self.read(self.Completed(0, '[1, 2]')), ("ok", [1, 2]))
-        original_read = MODULE.github_read
-        MODULE.github_read = lambda path: ("ok", [1, 2])
-        try:
+        with using_host(FakeHost({"repos/x/y": ("ok", [1, 2])})):
             self.assertIsNone(MODULE.github_api("repos/x/y"))
-        finally:
-            MODULE.github_read = original_read
+            self.assertEqual(MODULE.github_list("repos/x/y"), [1, 2])
+
 
     def test_what_protects_a_branch_and_what_cannot_be_read(self) -> None:
         def verdict(classic, ruled, rules):
@@ -2753,17 +2843,9 @@ class VanishingContextTest(unittest.TestCase):
     """
 
     def read(self, required: list, produced: list, caller: str = "check"):
-        saved_api, saved_read, saved_contexts, saved_repo = (
-            MODULE.github_api, MODULE.github_read, MODULE.socle_check_contexts, MODULE.github_repository)
-        MODULE.github_api = lambda path: {"default_branch": "main"}
-        MODULE.github_read = lambda path: ("ok", {"required_status_checks": {"contexts": required}})
-        MODULE.socle_check_contexts = lambda project: (caller, produced)
-        MODULE.github_repository = lambda project: "o/r"
-        try:
-            return MODULE.vanishing_contexts(pathlib.Path("."))
-        finally:
-            (MODULE.github_api, MODULE.github_read, MODULE.socle_check_contexts,
-             MODULE.github_repository) = saved_api, saved_read, saved_contexts, saved_repo
+        host = protection_host(("ok", {"required_status_checks": {"contexts": required}}))
+        with workflow_project(caller, fuzz=f"{caller} / fuzz" in produced) as project, using_host(host):
+            return MODULE.vanishing_contexts(project)
 
     def test_a_required_leg_this_socle_no_longer_produces(self) -> None:
         # A name no alias covers: the 0.54.0 names are aliases since 0.57.0,
@@ -2780,43 +2862,16 @@ class VanishingContextTest(unittest.TestCase):
         self.assertEqual(self.read(["check / check (macos-15)"], ["check / check (macos-15)"]), [])
 
     def test_a_ruleset_protects_as_much_as_the_classic_endpoint(self) -> None:
-        """The mistake this socle corrected in 0.46.x, made again here.
-
-        A repository of the fleet is protected by a ruleset alone --
-        agent-cli-spec requires the three socle legs that way and has no
-        classic protection at all -- so reading one endpoint called it open
-        and would have let a rename lock it. Found while writing the plan
-        for that rename, by listing what each repository actually requires.
-        """
-        saved_api, saved_read, saved_contexts, saved_repo = (
-            MODULE.github_api, MODULE.github_read, MODULE.socle_check_contexts, MODULE.github_repository)
-        MODULE.github_api = lambda path: {"default_branch": "main"}
-        MODULE.github_read = lambda path: ("absent", None) if "/protection" in path else (
-            "ok", [{"type": "deletion"},
-                   {"type": "required_status_checks",
-                    "parameters": {"required_status_checks": [{"context": "check / check (ubuntu-24.04)"}]}}])
-        MODULE.socle_check_contexts = lambda project: ("check", ["check / check (linux)"])
-        MODULE.github_repository = lambda project: "o/r"
-        try:
-            self.assertEqual(MODULE.vanishing_contexts(pathlib.Path(".")),
-                             ["check / check (ubuntu-24.04)"])
-        finally:
-            (MODULE.github_api, MODULE.github_read, MODULE.socle_check_contexts,
-             MODULE.github_repository) = saved_api, saved_read, saved_contexts, saved_repo
+        rules = [{"type": "deletion"}, {"type": "required_status_checks",
+                  "parameters": {"required_status_checks": [{"context": "check / check (ubuntu-24.04)"}]}}]
+        with workflow_project() as project, using_host(protection_host(("absent", None), rules=("ok", rules))):
+            self.assertEqual(MODULE.vanishing_contexts(project), ["check / check (ubuntu-24.04)"])
 
     def test_a_refusal_to_answer_stops_the_check_and_not_the_adoption(self) -> None:
         """An adoption must not depend on the network to be possible."""
-        saved_read, saved_contexts, saved_repo, saved_api = (
-            MODULE.github_read, MODULE.socle_check_contexts, MODULE.github_repository, MODULE.github_api)
-        MODULE.github_api = lambda path: {"default_branch": "main"}
-        MODULE.github_read = lambda path: ("unreadable", None)
-        MODULE.socle_check_contexts = lambda project: ("check", ["check / check (linux)"])
-        MODULE.github_repository = lambda project: "o/r"
-        try:
-            self.assertEqual(MODULE.vanishing_contexts(pathlib.Path(".")), [])
-        finally:
-            (MODULE.github_read, MODULE.socle_check_contexts, MODULE.github_repository,
-             MODULE.github_api) = saved_read, saved_contexts, saved_repo, saved_api
+        with workflow_project() as project, using_host(protection_host(
+                ("unreadable", None), rules=("unreadable", None))):
+            self.assertEqual(MODULE.vanishing_contexts(project), [])
 
 
 class LinuxRunnersTest(unittest.TestCase):
@@ -2993,44 +3048,24 @@ class TagDeploymentsTest(unittest.TestCase):
     It read as an approval GitHub had lost.
     """
 
-    def read(self, runs: list, deployments: dict):
-        """The shapes GitHub actually sends, and not the ones I imagined.
-
-        `actions/runs` answers an OBJECT, `{total_count, workflow_runs}`;
-        `pending_deployments` answers an array. The first version of this
-        test stubbed both as arrays, so it passed while the command could
-        not name a single approval on any repository -- github_list hands
-        back [] for anything that is not a list, and the loop never ran.
-        """
-        saved_api, saved_list = MODULE.github_api, MODULE.github_list
-        MODULE.github_api = lambda path: {"total_count": len(runs), "workflow_runs": runs} \
-            if "actions/runs?" in path else None
-        MODULE.github_list = lambda path: deployments.get(path, [])
-        try:
+    def read(self, runs, deployments):
+        def answer(path):
+            if "actions/runs?" in path:
+                return "ok", {"total_count": len(runs), "workflow_runs": runs}
+            return "ok", deployments.get(path, [])
+        with using_host(FakeHost(read=answer)):
             return MODULE.tag_deployments("o/r", "v1.0.0")
-        finally:
-            MODULE.github_api, MODULE.github_list = saved_api, saved_list
 
     def test_the_runs_endpoint_is_read_as_an_object(self) -> None:
-        """The defect itself: which reader each endpoint goes through.
+        """An object for runs and an array for deployments must reach the result.
 
-        `actions/runs` answers `{total_count, workflow_runs}` and
-        `pending_deployments` answers an array. `github_list` hands back []
-        for anything that is not a list, so reading the first with it made
-        the command silently name nothing, on every repository, while the
-        changelog of 0.50.0 said it named the approval.
+        This fails if actions/runs is accidentally read through github_list:
+        the real readers run, instead of mocks asserting which was called.
         """
-        through = {}
-        saved_api, saved_list = MODULE.github_api, MODULE.github_list
-        MODULE.github_api = lambda path: through.setdefault(path, "object") and None
-        MODULE.github_list = lambda path: through.setdefault(path, "list") and []
-        try:
-            MODULE.tag_deployments("o/r", "v1.0.0")
-        finally:
-            MODULE.github_api, MODULE.github_list = saved_api, saved_list
-        runs = [path for path in through if "actions/runs?" in path]
-        self.assertEqual(len(runs), 1, through)
-        self.assertEqual(through[runs[0]], "object", through)
+        waiting = self.read([{"id": 7, "head_branch": "v1.0.0"}],
+                            {"repos/o/r/actions/runs/7/pending_deployments":
+                             [{"environment": {"name": "release", "id": 42}, "current_user_can_approve": True}]})
+        self.assertEqual([item["environment"] for item in waiting], ["release"])
 
     def test_it_names_the_environment_and_hands_over_the_command(self) -> None:
         waiting = self.read(
@@ -3842,7 +3877,7 @@ class DependenciesTest(unittest.TestCase):
         self.assertEqual(self.entries("--apply")[0]["action"], "clone")
         path = self.home / "maelys-system"
         self.assertEqual(self.product.git(path, "rev-parse", "HEAD"), self.product.pinned)
-        detached = subprocess.run(["git", "symbolic-ref", "-q", "HEAD"], cwd=path, check=False,
+        detached = subprocess.run(["git", "-C", str(path.resolve()), "symbolic-ref", "-q", "HEAD"], cwd=path, check=False,
                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         self.assertNotEqual(detached.returncode, 0, "a pinned checkout is detached, as the script leaves it")
         self.assertEqual(self.entries("--apply")[0]["action"], "same")
@@ -3969,22 +4004,33 @@ class ProtectByRulesetTest(unittest.TestCase):
                 "parameters": {"required_status_checks": [{"context": "check / check (macos-15)"}]}}]
 
     def run_protect(self, classic, ruleset, apply: bool = False):
-        saved = (MODULE.github_api, MODULE.github_read, MODULE.socle_check_contexts,
-                 MODULE.github_repository, MODULE.observed_contexts, MODULE.shutil.which)
-        MODULE.github_api = lambda path: {"default_branch": "main"}
-        MODULE.github_read = lambda path: classic if "/protection" in path else ruleset
-        MODULE.socle_check_contexts = lambda project: ("check", ["check / check (macos-15)"])
-        MODULE.github_repository = lambda project: "o/r"
-        MODULE.observed_contexts = lambda repository, branch, samples=3: ([], [], {"heads": 1, "ever": []})
-        MODULE.shutil.which = lambda name: "/usr/bin/" + name
-        invocation = type("I", (), {"operands": ["."], "flag": lambda self, name: apply and name == "--apply",
-                                    "option": lambda self, name, default="": default,
-                                    "format": "json"})()
-        try:
-            return MODULE.handle_protect(invocation)[0]
-        finally:
-            (MODULE.github_api, MODULE.github_read, MODULE.socle_check_contexts,
-             MODULE.github_repository, MODULE.observed_contexts, MODULE.shutil.which) = saved
+        ruleset = json.loads(json.dumps(ruleset))
+        for rule in ruleset[1] or []:
+            rule["ruleset_id"] = 7
+        stored = {"name": "main", "target": "branch", "enforcement": "active", "rules": ruleset[1]}
+        sent = []
+        def write(method, endpoint, body):
+            self.assertEqual((method, endpoint), ("PUT", "repos/o/r/rulesets/7"))
+            sent.append(body)
+            stored.update(body)
+            return subprocess.CompletedProcess([], 0, "", "")
+        host = protection_host(classic, rules=ruleset, write=write if apply else None)
+        original_read = host.reader
+        def read(path):
+            if path == "repos/o/r/rulesets/7":
+                return "ok", json.loads(json.dumps(stored))
+            if path == "repos/o/r/rules/branches/main" and sent:
+                return "ok", stored["rules"]
+            return original_read(path)
+        host.reader = read
+        with workflow_project() as project, using_host(host):
+            invocation = type("I", (), {"operands": [str(project)],
+                "flag": lambda self, name: apply and name == "--apply",
+                "option": lambda self, name, default="": default, "format": "json"})()
+            report = MODULE.handle_protect(invocation)[0]
+        if apply:
+            self.assertEqual(len(sent), 1)
+        return report
 
     def test_a_ruleset_is_a_protection(self) -> None:
         report = self.run_protect(("absent", None), ("ok", self.RULESET))
@@ -3995,18 +4041,9 @@ class ProtectByRulesetTest(unittest.TestCase):
         self.assertIn("check / check (macos-15)", report["required"])
 
     def test_apply_writes_the_ruleset_and_never_a_second_mechanism(self) -> None:
-        """Writing the classic protection on a ruled branch leaves two
-        places to keep true. agent-cli-spec worked that out from the output
-        before running it; 0.51.2 refused, and 0.54.0 writes the ruleset."""
-        written = []
-        saved = MODULE.write_ruleset
-        MODULE.write_ruleset = lambda repository, branch, rules, contexts: written.append(contexts) or True
-        try:
-            report = self.run_protect(("absent", None), ("ok", self.RULESET), apply=True)
-        finally:
-            MODULE.write_ruleset = saved
+        """The fake API applies the ruleset and serves the verification read."""
+        report = self.run_protect(("absent", None), ("ok", self.RULESET), apply=True)
         self.assertTrue(report["applied"])
-        self.assertEqual(len(written), 1)
 
     def test_a_ruleset_that_requires_nothing_of_ours_does_not_refuse(self) -> None:
         """One repository's ruleset requires a context of its own and
@@ -4095,16 +4132,15 @@ class FakeProtection:
     def read(self, path):
         return "ok", json.loads(json.dumps(self.body))
 
-    def run(self, command, cwd=None, env=None):
-        body = json.loads(pathlib.Path(command[-1]).read_text())
-        self.sent.append((command, body))
-        if command[3] == "PATCH":
+    def write(self, method, endpoint, body):
+        self.sent.append(((method, endpoint), body))
+        if method == "PATCH":
             self.body["required_status_checks"] = {"strict": body["strict"], "contexts": body["contexts"]}
         else:
             self.body = {key: ({"enabled": value} if isinstance(value, bool) else value)
                          for key, value in body.items()}
         self.body.update(self.drift)
-        return subprocess.CompletedProcess(command, 0, "", "")
+        return subprocess.CompletedProcess([], 0, "", "")
 
 
 class WidenAfterTheMergeTest(unittest.TestCase):
@@ -4116,28 +4152,17 @@ class WidenAfterTheMergeTest(unittest.TestCase):
     """
 
     def protect(self, absent: list, apply: bool = True, allow: bool = False, open_pulls=(), fake_writes=False):
-        saved = (MODULE.github_api, MODULE.github_read, MODULE.socle_check_contexts, MODULE.github_repository,
-                 MODULE.observed_contexts, MODULE.shutil.which, MODULE.github_list)
         fake = FakeProtection([])
-        MODULE.github_api = lambda path: {"default_branch": "main"}
-        MODULE.github_read = lambda path: fake.read(path) if "/protection" in path else ("ok", [])
-        MODULE.socle_check_contexts = lambda project: ("check", ["check / check (linux)"])
-        MODULE.github_repository = lambda project: "o/r"
-        seen = [] if absent else ["check / check (linux)"]
-        MODULE.observed_contexts = lambda repository, branch, samples=3: (
-            seen, [], {"heads": 3, "ever": ["check / check (ubuntu-26.04)"] if absent else seen})
-        MODULE.shutil.which = lambda name: "/usr/bin/" + name
-        MODULE.github_list = lambda path: [{"number": number} for number in open_pulls]
-        if fake_writes:
-            MODULE.run = fake.run
+        seen = ["check / check (ubuntu-26.04)"] if absent else ALL_LEGS
+        host = protection_host(fake.read(""), seen=seen, open_pulls=open_pulls,
+                               write=fake.write if fake_writes else None)
+        original_read = host.reader
+        host.reader = lambda path: fake.read(path) if path.endswith("/protection") else original_read(path)
         flags = {"--apply": apply, "--allow-lock": allow}
-        invocation = type("I", (), {"operands": ["."], "flag": lambda self, name: flags.get(name, False),
-                                    "option": lambda self, name, default="": default, "format": "json"})()
-        try:
+        with workflow_project() as project, using_host(host):
+            invocation = type("I", (), {"operands": [str(project)], "flag": lambda self, name: flags.get(name, False),
+                                        "option": lambda self, name, default="": default, "format": "json"})()
             return MODULE.handle_protect(invocation)[0]
-        finally:
-            (MODULE.github_api, MODULE.github_read, MODULE.socle_check_contexts, MODULE.github_repository,
-             MODULE.observed_contexts, MODULE.shutil.which, MODULE.github_list) = saved
 
     def test_widening_before_the_merge_is_refused_and_names_the_open_pulls(self) -> None:
         with self.assertRaises(MODULE.Failure) as refusal:
@@ -4147,12 +4172,7 @@ class WidenAfterTheMergeTest(unittest.TestCase):
         self.assertIn("#12, #15", refusal.exception.hint)
 
     def test_once_merged_it_widens(self) -> None:
-        saved = MODULE.run
-        try:
-            # The harness's fake protection is the one written and re-read.
-            report = self.protect(absent=False, fake_writes=True)
-        finally:
-            MODULE.run = saved
+        report = self.protect(absent=False, fake_writes=True)
         self.assertTrue(report["applied"])
 
     def test_a_job_gone_from_the_workflows_is_not_called_intermittent(self) -> None:
@@ -4171,7 +4191,7 @@ class WidenAfterTheMergeTest(unittest.TestCase):
         work = pathlib.Path(tempfile.mkdtemp(prefix="maelys-release-between."))
         self.addCleanup(shutil.rmtree, work, True)
         def git(*arguments):
-            subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid",
+            subprocess.run(["git", "-C", str(work.resolve()), "-c", "user.name=t", "-c", "user.email=t@example.invalid",
                             "-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false", *arguments],
                            cwd=work, check=True, capture_output=True)
         git("init", "-q"); (work / "VERSION").write_text("0.2.0\n")
@@ -4310,7 +4330,7 @@ class MovedPinNamedTest(unittest.TestCase):
         work = pathlib.Path(tempfile.mkdtemp(prefix="maelys-release-moved."))
         self.addCleanup(shutil.rmtree, work, True)
         def git(*arguments):
-            subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid",
+            subprocess.run(["git", "-C", str(work.resolve()), "-c", "user.name=t", "-c", "user.email=t@example.invalid",
                             "-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false", *arguments],
                            cwd=work, check=True, capture_output=True)
         git("init", "-q")
@@ -4395,32 +4415,25 @@ class LegRenameTest(unittest.TestCase):
 
     def write(self, contexts, applied=None, ruleset=None):
         sent = {}
-        saved_read, saved_run = MODULE.github_read, MODULE.run
         applied = applied or self.APPLIED
-
-        def fake_read(path):
+        def read(path):
             if "/rules/branches/" in path:
                 if "body" not in sent:
                     return "ok", json.loads(json.dumps(applied))
                 return "ok", [{"type": rule["type"], "ruleset_id": 7, "ruleset_source_type": "Repository",
                                "parameters": rule.get("parameters")} for rule in sent["body"]["rules"]]
             return "ok", json.loads(json.dumps(ruleset or self.RULESET))
-        MODULE.github_read = fake_read
-
-        def fake_run(command, cwd=None, env=None):
-            sent["command"] = command
-            sent["body"] = json.loads(pathlib.Path(command[-1]).read_text())
-            return subprocess.CompletedProcess(command, 0, "", "")
-        MODULE.run = fake_run
-        try:
+        def write(method, endpoint, body):
+            sent["request"] = (method, endpoint)
+            sent["body"] = body
+            return subprocess.CompletedProcess([], 0, "", "")
+        with using_host(FakeHost(read=read, write=write)):
             return MODULE.write_ruleset("o/r", "main", applied, contexts), sent
-        finally:
-            MODULE.github_read, MODULE.run = saved_read, saved_run
 
     def test_the_ruleset_is_written_whole_with_only_its_checks_changed(self) -> None:
         ok, sent = self.write(["check / check (linux)", "check / sanitizers"])
         self.assertTrue(ok)
-        self.assertEqual(sent["command"][:5], ["gh", "api", "-X", "PUT", "repos/o/r/rulesets/7"])
+        self.assertEqual(sent["request"], ("PUT", "repos/o/r/rulesets/7"))
         body = sent["body"]
         self.assertEqual(body["name"], "main requires green check")
         self.assertEqual(body["conditions"], self.RULESET["conditions"])
@@ -4491,12 +4504,12 @@ class OwnCiTest(unittest.TestCase):
 
     def test_a_reusable_workflow_describes_its_callers_not_its_repository(self) -> None:
         work = self.work()
-        subprocess.run(["git", "init", "-q"], cwd=work, check=True)
+        subprocess.run(["git", "-C", str(work.resolve()), "init", "-q"], cwd=work, check=True)
         (work / ".github" / "workflows" / "shared.yml").write_text(
             "on:\n  workflow_call:\njobs:\n  a:\n    steps:\n      - run: sh scripts/checkout-dependency.sh \"$name\"\n")
         (work / ".github" / "workflows" / "ci.yml").write_text(
             "on: [push]\njobs:\n  a:\n    steps:\n      - run: sh scripts/checkout-dependency.sh \"$name\"\n")
-        subprocess.run(["git", "add", "-A"], cwd=work, check=True)
+        subprocess.run(["git", "-C", str(work.resolve()), "add", "-A"], cwd=work, check=True)
         found = [path for path, *_ in MODULE.sibling_readers(work, ["x"])]
         self.assertEqual(found, [".github/workflows/ci.yml"])
 
@@ -4550,27 +4563,24 @@ class WardenAdoptionTest(unittest.TestCase):
                 MODULE.parse_release(text)
 
     def test_the_adoption_guard_counts_a_turned_off_job_as_reporting(self) -> None:
-        saved = (MODULE.socle_check_contexts, MODULE.required_contexts)
-        MODULE.socle_check_contexts = lambda project: ("check", ["check / check (linux)"])
-        MODULE.required_contexts = lambda project: ["check / check (linux)", "check / sanitizers", "check / gone"]
-        try:
-            self.assertEqual(MODULE.vanishing_contexts(pathlib.Path(".")), ["check / gone"])
-        finally:
-            MODULE.socle_check_contexts, MODULE.required_contexts = saved
+        required = ["check / check (linux)", "check / sanitizers", "check / gone"]
+        with workflow_project() as project, using_host(protection_host(
+                ("ok", {"required_status_checks": {"contexts": required}}))):
+            self.assertEqual(MODULE.vanishing_contexts(project), ["check / gone"])
 
 
 class WithdrawnVersionTest(unittest.TestCase):
     """protect --apply refuses from a socle version withdrawn for it (maelys-cli)."""
 
     def read_with(self, text: str | None):
-        saved = MODULE.github_read, MODULE.socle_version
-        MODULE.socle_version = lambda: "0.57.0"
-        MODULE.github_read = lambda path: ("unreadable", None) if text is None else (
+        # The fixture lists the version actually executing, not a replaced
+        # socle_version function. Historical contents are checked separately.
+        if text is not None:
+            text = text.replace("0.57.0", MODULE.socle_version())
+        answer = ("unreadable", None) if text is None else (
             "ok", {"encoding": "base64", "content": base64.b64encode(text.encode()).decode()})
-        try:
-            return REAL_WITHDRAWN_FOR("protect")
-        finally:
-            MODULE.github_read, MODULE.socle_version = saved
+        with using_host(FakeHost({f"repos/{MODULE.SOCLE_REPOSITORY}/contents/WITHDRAWN": answer})):
+            return MODULE.withdrawn_for("protect")
 
     def test_a_listed_version_is_withdrawn_for_its_command_alone(self) -> None:
         listed = "# comment\n0.57.0 protect writes the whole protection\n0.57.1 tap something\n"
@@ -4614,27 +4624,18 @@ class LegAliasTest(unittest.TestCase):
             self.assertIn('run: test "${{ needs.check.result }}" = success', job)
 
     def protect(self, required, seen, apply=False):
-        saved = (MODULE.github_api, MODULE.github_read, MODULE.socle_check_contexts, MODULE.github_repository,
-                 MODULE.observed_contexts, MODULE.shutil.which, MODULE.github_list, MODULE.run)
         fake = FakeProtection(required)
-        written = []
-        MODULE.github_api = lambda path: {"default_branch": "main"}
-        MODULE.github_read = lambda path: fake.read(path) if "/protection" in path else ("ok", [])
-        MODULE.socle_check_contexts = lambda project: ("check", ["check / check (linux)", "check / check (macos)"])
-        MODULE.github_repository = lambda project: "o/r"
-        MODULE.observed_contexts = lambda repository, branch, samples=3: (seen, [], {"heads": 3, "ever": seen})
-        MODULE.shutil.which = lambda name: "/usr/bin/" + name
-        MODULE.github_list = lambda path: []
-        MODULE.run = lambda command, cwd=None, env=None: written.append(
-            json.loads(pathlib.Path(command[-1]).read_text())) or fake.run(command)
-        flags = {"--apply": apply}
-        invocation = type("I", (), {"operands": ["."], "flag": lambda self, name: flags.get(name, False),
-                                    "option": lambda self, name, default="": default, "format": "json"})()
-        try:
-            return MODULE.handle_protect(invocation), written
-        finally:
-            (MODULE.github_api, MODULE.github_read, MODULE.socle_check_contexts, MODULE.github_repository,
-             MODULE.observed_contexts, MODULE.shutil.which, MODULE.github_list, MODULE.run) = saved
+        # The real workflow declares all three current legs. The old harness
+        # replaced that reader with a two-leg list.
+        seen = [*seen, "check / check (linux-arm64)"]
+        host = protection_host(fake.read(""), seen=seen, write=fake.write if apply else None)
+        original_read = host.reader
+        host.reader = lambda path: fake.read(path) if path.endswith("/protection") else original_read(path)
+        with workflow_project() as project, using_host(host):
+            invocation = type("I", (), {"operands": [str(project)],
+                "flag": lambda self, name: apply and name == "--apply",
+                "option": lambda self, name, default="": default, "format": "json"})()
+            return MODULE.handle_protect(invocation), [body for _, _, body in host.writes]
 
     def test_protect_swaps_each_alias_for_its_leg_in_one_write(self) -> None:
         old = ["check / check (ubuntu-26.04)", "check / check (macos-15)", "mine"]
@@ -4647,7 +4648,7 @@ class LegAliasTest(unittest.TestCase):
         self.assertEqual(code, MODULE.EXIT_OK)
         self.assertEqual(len(written), 1, "one write, never a narrowed protection in between")
         self.assertEqual(sorted(written[0]["contexts"]),
-                         ["check / check (linux)", "check / check (macos)", "mine"])
+                         ["check / check (linux)", "check / check (linux-arm64)", "check / check (macos)", "mine"])
         text = MODULE.text_protect(report)
         self.assertIn("replace  check / check (macos-15) -> check / check (macos)", text)
 
@@ -4657,16 +4658,12 @@ class LegAliasTest(unittest.TestCase):
         during the write is caught by the re-read, whatever the write was."""
         required = ["check / check (ubuntu-26.04)", "check / check (macos-15)"]
         seen = ["check / check (linux)", "check / check (macos)"]
-        saved = MODULE.github_read, MODULE.run
         for moved in ({"required_linear_history": {"enabled": False}},
                       {"required_status_checks": {"strict": False, "contexts": []}},
                       {"required_pull_request_reviews": {"required_approving_review_count": 0}}):
             fake = FakeProtection(required, strict=True, drift=moved)
-            try:
-                with self.assertRaises(MODULE.Failure) as refusal:
-                    self.protect_with_fake(fake, seen)
-            finally:
-                MODULE.github_read, MODULE.run = saved
+            with self.assertRaises(MODULE.Failure) as refusal:
+                self.protect_with_fake(fake, seen)
             self.assertIn("changed beyond what the plan said", refusal.exception.message, moved)
 
     def test_the_plan_names_every_setting_it_keeps_and_every_one_it_creates(self) -> None:
@@ -4682,26 +4679,15 @@ class LegAliasTest(unittest.TestCase):
         self.assertIn("create   required_linear_history=false", MODULE.text_protect(absent))
 
     def protect_with_fake(self, fake, seen, apply=True):
-        saved = (MODULE.github_api, MODULE.github_read, MODULE.socle_check_contexts, MODULE.github_repository,
-                 MODULE.observed_contexts, MODULE.shutil.which, MODULE.github_list, MODULE.run)
-        MODULE.github_api = lambda path: {"default_branch": "main"}
-        MODULE.github_read = lambda path: (fake.read(path) if fake else ("absent", None)) \
-            if path.endswith("/protection") else ("ok", [])
-        MODULE.socle_check_contexts = lambda project: ("check", ["check / check (linux)", "check / check (macos)"])
-        MODULE.github_repository = lambda project: "o/r"
-        MODULE.observed_contexts = lambda repository, branch, samples=3: (seen, [], {"heads": 3, "ever": seen})
-        MODULE.shutil.which = lambda name: "/usr/bin/" + name
-        MODULE.github_list = lambda path: []
-        if fake:
-            MODULE.run = fake.run
-        flags = {"--apply": apply}
-        invocation = type("I", (), {"operands": ["."], "flag": lambda self, name: flags.get(name, False),
-                                    "option": lambda self, name, default="": default, "format": "json"})()
-        try:
+        host = protection_host(fake.read("") if fake else ("absent", None),
+                               seen=[*seen, *ALL_LEGS], write=fake.write if fake and apply else None)
+        original_read = host.reader
+        host.reader = lambda path: fake.read(path) if fake and path.endswith("/protection") else original_read(path)
+        with workflow_project() as project, using_host(host):
+            invocation = type("I", (), {"operands": [str(project)],
+                "flag": lambda self, name: apply and name == "--apply",
+                "option": lambda self, name, default="": default, "format": "json"})()
             return MODULE.handle_protect(invocation)[0]
-        finally:
-            (MODULE.github_api, MODULE.github_read, MODULE.socle_check_contexts, MODULE.github_repository,
-             MODULE.observed_contexts, MODULE.shutil.which, MODULE.github_list, MODULE.run) = saved
 
     def test_a_yaml_comment_is_not_a_command(self) -> None:
         """agent-cli-spec: `sanitizer_command: ''   # no compiled code here`."""
@@ -4720,34 +4706,22 @@ class LegAliasTest(unittest.TestCase):
         self.assertEqual(report["kept"], ["check / sanitizers"])
         self.assertEqual(report["requiredButNeverRun"], [])
         self.assertEqual(sorted(written[0]["contexts"]),
-                         ["check / check (linux)", "check / check (macos)", "check / sanitizers"])
+                         ["check / check (linux)", "check / check (linux-arm64)", "check / check (macos)", "check / sanitizers"])
 
     def protect_with(self, reads, required, seen, flags=()):
-        """protect --apply with each GitHub read answered by `reads(path)`."""
-        saved = (MODULE.github_api, MODULE.github_read, MODULE.socle_check_contexts, MODULE.github_repository,
-                 MODULE.shutil.which, MODULE.github_list, MODULE.run)
+        """protect --apply with each GitHub read answered by the same host."""
         commands = []
-        MODULE.github_read = reads
-        MODULE.github_api = lambda path: {"default_branch": "main"}
-        MODULE.socle_check_contexts = lambda project: ("check", ["check / check (linux)"])
-        MODULE.github_repository = lambda project: "o/r"
-        MODULE.shutil.which = lambda name: "/usr/bin/" + name
-        MODULE.github_list = lambda path: []
-        def fake_run(command, cwd=None, env=None):
-            body = json.loads(pathlib.Path(command[-1]).read_text())
-            commands.append((command, body))
+        def write(method, endpoint, body):
+            commands.append(((method, endpoint), body))
             if hasattr(reads, "written"):
                 reads.written(body)
-            return subprocess.CompletedProcess(command, 0, "", "")
-        MODULE.run = fake_run
+            return subprocess.CompletedProcess([], 0, "", "")
+        host = protection_host(("absent", None), read=reads, write=write)
         on = {"--apply", *flags}
-        invocation = type("I", (), {"operands": ["."], "flag": lambda self, name: name in on,
-                                    "option": lambda self, name, default="": default, "format": "json"})()
-        try:
+        with workflow_project() as project, using_host(host):
+            invocation = type("I", (), {"operands": [str(project)], "flag": lambda self, name: name in on,
+                                        "option": lambda self, name, default="": default, "format": "json"})()
             return MODULE.handle_protect(invocation)[0], commands
-        finally:
-            (MODULE.github_api, MODULE.github_read, MODULE.socle_check_contexts, MODULE.github_repository,
-             MODULE.shutil.which, MODULE.github_list, MODULE.run) = saved
 
     @staticmethod
     def answers(required, seen, strict=True, timeout=()):
@@ -4763,7 +4737,7 @@ class LegAliasTest(unittest.TestCase):
             if "pulls?" in path:
                 return "ok", [{"merged_at": "x", "head": {"sha": "abc"}}]
             if "/check-runs" in path:
-                return "ok", {"check_runs": [{"name": name, "conclusion": "success"} for name in seen]}
+                return "ok", {"check_runs": [{"name": name, "conclusion": "success"} for name in [*seen, "check / check (linux-arm64)", "check / check (macos)"]]}
             return "ok", {}
         read.written = lambda body: held["required_status_checks"].update(body)
         return read
@@ -4794,29 +4768,19 @@ class LegAliasTest(unittest.TestCase):
         seen = ["check / check (linux)", "check / check (ubuntu-26.04)", "mutation"]
         report, commands = self.protect_with(self.answers(required, seen, strict=True), required, seen)
         command, body = commands[0]
-        self.assertEqual(command[:5], ["gh", "api", "-X", "PATCH",
-                                       "repos/o/r/branches/main/protection/required_status_checks"])
-        self.assertEqual(body, {"strict": True, "contexts": ["check / check (linux)", "mutation"]})
+        self.assertEqual(command, ("PATCH", "repos/o/r/branches/main/protection/required_status_checks"))
+        self.assertEqual(body, {"strict": True, "contexts": [*ALL_LEGS, "mutation"]})
 
     def test_before_the_adoption_merges_the_swap_is_still_refused(self) -> None:
         with self.assertRaises(MODULE.Failure):
             self.protect(["check / check (ubuntu-26.04)"], ["check / check (ubuntu-26.04)"], apply=True)
 
     def test_an_adoption_does_not_refuse_a_branch_requiring_the_old_names(self) -> None:
-        saved = (MODULE.socle_check_contexts, MODULE.github_repository, MODULE.shutil.which,
-                 MODULE.github_api, MODULE.github_read)
-        MODULE.socle_check_contexts = lambda project: ("check", ["check / check (linux)"])
-        MODULE.github_repository = lambda project: "o/r"
-        MODULE.shutil.which = lambda name: "/usr/bin/" + name
-        MODULE.github_api = lambda path: {"default_branch": "main"}
-        MODULE.github_read = lambda path: ("ok", {"required_status_checks": {"contexts": [
-            "check / check (ubuntu-26.04)", "check / check (ubuntu-26.04-arm)", "check / check (macos-15)",
-            "check / check (gone)"]}}) if "/protection" in path else ("ok", [])
-        try:
-            self.assertEqual(MODULE.vanishing_contexts(pathlib.Path(".")), ["check / check (gone)"])
-        finally:
-            (MODULE.socle_check_contexts, MODULE.github_repository, MODULE.shutil.which,
-             MODULE.github_api, MODULE.github_read) = saved
+        required = ["check / check (ubuntu-26.04)", "check / check (ubuntu-26.04-arm)",
+                    "check / check (macos-15)", "check / check (gone)"]
+        with workflow_project() as project, using_host(protection_host(
+                ("ok", {"required_status_checks": {"contexts": required}}))):
+            self.assertEqual(MODULE.vanishing_contexts(project), ["check / check (gone)"])
 
 
 class ProtectionContextsTest(unittest.TestCase):
@@ -4924,12 +4888,8 @@ class TapSecretsTest(unittest.TestCase):
                     (state, {"secrets": [{"name": n} for n in org]})}
 
     def read(self, contents: dict, formulas=("libmaelys-p",)):
-        saved = MODULE.github_read
-        MODULE.github_read = lambda path: contents.get(path, ("absent", None))
-        try:
+        with using_host(FakeHost(read=lambda path: contents.get(path, ("absent", None)))):
             return MODULE.tap_secrets("maelys-dev/p", list(formulas))
-        finally:
-            MODULE.github_read = saved
 
     def test_a_repository_that_sees_both_is_told_it_will_push(self) -> None:
         found = self.read(self.secrets([], ["HOMEBREW_TAP_TOKEN", "HOMEBREW_TAP_SIGNING_KEY"]))
@@ -4978,12 +4938,8 @@ class ChannelVisibilityTest(unittest.TestCase):
     PATH = "orgs/maelys-dev/packages?package_type=npm&per_page=100"
 
     def read(self, answer, channels=(("npm", "github-packages"),)):
-        saved = MODULE.github_read
-        MODULE.github_read = lambda path: answer if path == self.PATH else ("absent", None)
-        try:
+        with using_host(FakeHost({self.PATH: answer})):
             return MODULE.channel_visibility("maelys-dev/p", list(channels))
-        finally:
-            MODULE.github_read = saved
 
     def package(self, visibility: str, repository: str = "maelys-dev/p") -> dict:
         return {"name": "@maelys/p", "visibility": visibility,
@@ -5036,12 +4992,8 @@ class TapDriftTest(unittest.TestCase):
         return contents
 
     def drift(self, contents: dict, repository: str, declared: list):
-        saved = MODULE.github_read
-        MODULE.github_read = lambda path: contents.get(path, ("absent", None))
-        try:
+        with using_host(FakeHost(read=lambda path: contents.get(path, ("absent", None)))):
             return MODULE.tap_drift(repository, declared)
-        finally:
-            MODULE.github_read = saved
 
     def test_a_formula_nobody_declares_is_named_with_what_it_serves(self) -> None:
         contents = self.formulas(("maelys-datalog", "maelys-datalog", "v0.1.0-alpha.3"))
@@ -5306,12 +5258,12 @@ class RehearseChannelRefusalTest(unittest.TestCase):
 
     def test_the_token_is_the_operator_s_and_never_the_socle_s(self) -> None:
         """The socle never reads a token from a file and never supplies one."""
-        if not shutil.which("gh"):
-            self.skipTest("gh is needed to reach the token check")
-        error = self.product.json("rehearse", self.dir, "--channel", "npm", "--tag", "v1.2.3",
-                                  expect=1)["error"]
-        self.assertEqual(error["code"], "PRECONDITION_FAILED")
-        self.assertIn("never supplies it", error["message"])
+        decl = MODULE.read_declarations(self.product.dir, "maelys-fixture", "maelys-release")
+        invocation = CutTest.Stub(**{"--channel": "npm", "--tag": "v1.2.3"})
+        with using_host(FakeHost()), self.assertRaises(MODULE.Failure) as refusal:
+            MODULE.rehearse_channel(invocation, self.product.dir, "maelys-fixture", decl, io.StringIO())
+        self.assertEqual(refusal.exception.code, "PRECONDITION_FAILED")
+        self.assertIn("never supplies it", refusal.exception.message)
 
     def test_channel_and_tag_need_each_other(self) -> None:
         error = self.product.json("rehearse", self.dir, "--channel", "npm", expect=1)["error"]
@@ -5472,25 +5424,21 @@ class UnitTest(unittest.TestCase):
         import tempfile
         data = {"repository": "maelys-dev/maelys-docs",
                 "moving": [{"path": "docs/architecture.md"}]}
-        original = MODULE.destination_is_public
-        try:
-            for public, expected in ((True, True), (False, False), (None, False)):
-                MODULE.destination_is_public = lambda repository, value=public: value
-                with tempfile.TemporaryDirectory() as clone:
-                    readme = pathlib.Path(clone) / "README.md"
-                    readme.write_text("# P\n\nSee [architecture](docs/architecture.md).\n")
-                    report = MODULE.rewrite_readme(pathlib.Path(clone), "maelys-egress", data)
-                    written = readme.read_text()
-                    self.assertEqual("maelys-dev/maelys-docs" in written, expected, written)
-                    self.assertNotIn("docs/architecture.md", written)
-                    self.assertIn("Documentation", written)
-                    if not expected:
-                        # An unreachable destination is assumed private, and
-                        # the report says what a human must still do.
-                        self.assertIn("naming no repository", report)
-                        self.assertIn("site", report)
-        finally:
-            MODULE.destination_is_public = original
+        for public, expected in ((True, True), (False, False), (None, False)):
+            answer = ("unreadable", None) if public is None else ("ok", {"visibility": "public" if public else "private"})
+            with using_host(FakeHost({"repos/maelys-dev/maelys-docs": answer})), tempfile.TemporaryDirectory() as clone:
+                readme = pathlib.Path(clone) / "README.md"
+                readme.write_text("# P\n\nSee [architecture](docs/architecture.md).\n")
+                report = MODULE.rewrite_readme(pathlib.Path(clone), "maelys-egress", data)
+                written = readme.read_text()
+                self.assertEqual("maelys-dev/maelys-docs" in written, expected, written)
+                self.assertNotIn("docs/architecture.md", written)
+                self.assertIn("Documentation", written)
+                if not expected:
+                    # An unreachable destination is assumed private, and
+                    # the report says what a human must still do.
+                    self.assertIn("naming no repository", report)
+                    self.assertIn("site", report)
 
     def test_environment_gate_verifies_the_answer_a_repository_gave(self) -> None:
         """The socle checks the gate a repository asked for; it does not
