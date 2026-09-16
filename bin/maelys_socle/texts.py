@@ -94,3 +94,10 @@ def touches(relative: str, current: str, content: str) -> str:
     if uncommented(current) != uncommented(content):
         return "pin"
     return "prose"
+
+
+LABELS = {"ok": "ok", "note": "note", "warn": "WARN", "missing": "MISSING", "refused": "REFUSED", "fail": "FAIL"}
+
+
+def checks_text(checks: list[dict]) -> str:
+    return "".join(f"{LABELS.get(check['status'], check['status']):<8} {check['message']}\n" for check in checks)
