@@ -651,7 +651,12 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
 # the rule is written or the date is moved, in the open.
 COMING: tuple[tuple[str, str, str], ...] = (
     # 0.54.0 honoured the first announcement -- the leg rename -- after
-    # moving it once, from 0.53.0, in the open. Nothing is announced now.
+    # moving it once, from 0.53.0, in the open. The second is its epilogue:
+    # the aliases that made the rename survivable leave once nothing needs
+    # them, and on 2026-09-16 no branch of the fleet required an old name.
+    ("0.60.0", "socle", "the aliases check (ubuntu-26.04), check (ubuntu-26.04-arm) and check (macos-15)"
+                        " stop reporting; a branch protection naming one blocks every pull request from"
+                        " then on -- 'protect DIR' shows none is required here, or names the one to replace"),
 )
 
 

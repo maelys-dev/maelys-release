@@ -1,14 +1,23 @@
 # Changelog
 
-## Unreleased
+## 0.59.0 — 2026-09-16
 
 - **Refactoring.** The socle now separates parsing, workflow rendering and
   extracted commands into `bin/maelys_socle/`, beside the executable. One host
   carries the GitHub and process boundary; commands share an explicit context
   for the services still owned by the entry point. The command contract,
   protection settings and generated files are unchanged.
+- **Coming in 0.60.0: the leg aliases go.** `check (ubuntu-26.04)`,
+  `check (ubuntu-26.04-arm)` and `check (macos-15)` were kept since 0.57.0 so
+  that a rename never narrowed a protection; measured on the eight
+  repositories of the fleet, no branch requires an old name any more, and
+  each alias costs a job per pull request. Announced here, a version early,
+  as the conventions ask; `check` says it as a note to every product on the
+  shared CI, and the adoption guard would refuse a branch that still required
+  one.
 - **Impact.** [asks: nothing] No action for a product: the package travels
-  with the pinned socle checkout, without a build step or new dependency.
+  with the pinned socle checkout, without a build step or new dependency, and
+  the alias removal is an announcement, not a change.
 
 ## 0.58.0 — 2026-09-16
 
