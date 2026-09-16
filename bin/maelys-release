@@ -47,6 +47,7 @@ from maelys_socle.constants import (
     SOCLE_LINUX_PACKAGES, SOCLE_MANIFEST_PATTERNS, SOCLE_MECHANISM, SOCLE_REPOSITORY,
     SOCLE_RUNNER_KEYS, SOCLE_TARGETS, VERIFIED_MARK, WORKFLOW_EVENTS,
 )
+from maelys_socle.context import Context
 from maelys_socle.declarations import (
     Declarations, parse_cli_declarations, parse_packages, parse_pin, parse_release,
 )
@@ -1770,20 +1771,15 @@ def handle_adopt(invocation: Invocation) -> tuple[dict, int]:
 
 
 def check_data(invocation: Invocation) -> tuple[Declarations, dict]:
-    return inspection.check_data(
-        invocation, project_of=project_of, run_pinned_socle=run_pinned_socle,
-        read_declarations=read_declarations, socle_identity=socle_identity, socle_data=socle_data,
-        newest_known_version=newest_known_version, impact_for=impact_for, plan=plan, stage=stage,
-        socle_impact=socle_impact, version_tuple=version_tuple,
-    )
+    return inspection.check_data(invocation, CONTEXT)
 
 
 def handle_declarations(invocation: Invocation) -> tuple[dict, int]:
-    return inspection.handle_declarations(invocation, project_of=project_of, read_declarations=read_declarations)
+    return inspection.handle_declarations(invocation, CONTEXT)
 
 
 def handle_check(invocation: Invocation) -> tuple[dict, int]:
-    return inspection.handle_check(invocation, check_data=check_data)
+    return inspection.handle_check(invocation, CONTEXT)
 
 
 def tag_checks(project: pathlib.Path, version: str, between_releases: bool = False) -> list[tuple[str, str]]:
@@ -3409,7 +3405,7 @@ def text_dependencies(data: dict) -> str:
 
 def withdrawn_for(command: str) -> tuple[str, str] | None:
     """Read withdrawals with the version of this entry point's socle root."""
-    return github.withdrawn_for(command, socle_version)
+    return github.withdrawn_for(command, CONTEXT)
 
 
 def handle_protect(invocation: Invocation) -> tuple[dict, int]:
@@ -4236,6 +4232,23 @@ DOCS_CONTRACT_OPTION = cli.flag(
 MECHANISM_OPTION = cli.option(
     "--mechanism", "How the product publishes when it carries no release.yml yet.",
     cli.argument("MECHANISM", choices=list(MECHANISMS)))
+
+# Construct the shared services once; callbacks keep their reads lazy.
+CONTEXT = Context(
+    project_of=project_of,
+    run_pinned_socle=run_pinned_socle,
+    read_declarations=read_declarations,
+    socle_identity=socle_identity,
+    socle_data=socle_data,
+    newest_known_version=newest_known_version,
+    impact_for=impact_for,
+    plan=plan,
+    stage=stage,
+    socle_impact=socle_impact,
+    version_tuple=version_tuple,
+    socle_version=socle_version,
+)
+
 
 APP = SocleProgram(PROGRAM, PRODUCT, socle_version(), [
     cli.transaction("migrate", "migrate",

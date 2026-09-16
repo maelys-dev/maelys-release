@@ -1,15 +1,14 @@
 # SPDX-License-Identifier: MPL-2.0
 """Read the product's declarations and check its conventions and release files.
 
-The entry point supplies the shared declaration, socle and planning functions.
-They stay callable so each command keeps its original order of reads, including
-running the pinned socle before checking a product.
+The entry point supplies its shared services through one context. They stay
+callable so each command keeps its original order of reads, including running
+the pinned socle before checking a product.
 """
 from __future__ import annotations
 
 import pathlib
 import re
-from typing import Callable
 
 from maelys_cli import EXIT_OK, EXIT_VIOLATIONS, Failure, Invocation
 
@@ -17,6 +16,7 @@ from .constants import (
     CLI_REFERENCE, JOB_ID, LEGACY_CLI_REFERENCES, PROGRAM, SOCLE_MANIFEST_PATTERNS,
     SOCLE_REPOSITORY, SOCLE_TARGETS,
 )
+from .context import Context
 from .declarations import Declarations
 from .texts import checks_text
 from .workflows import block_list, file_runners, sub_block, top_block, workflow_events
@@ -118,24 +118,11 @@ def read_workflows(project: pathlib.Path) -> list:
     return observed
 
 
-def check_data(
-    invocation: Invocation, *,
-    project_of: Callable[[Invocation], tuple[pathlib.Path, str, str]],
-    run_pinned_socle: Callable[[Invocation, pathlib.Path], None],
-    read_declarations: Callable[[pathlib.Path, str, str], Declarations],
-    socle_identity: Callable[[str, str], tuple[str, str]],
-    socle_data: Callable[[str, str], dict],
-    newest_known_version: Callable[[], tuple],
-    impact_for: Callable[[Declarations, str], tuple[list[dict], bool | None]],
-    plan: Callable[..., list[dict]],
-    stage: Callable[[Declarations, str, str], dict[str, tuple[str, bool]]],
-    socle_impact: Callable[[str], list[tuple[str, str]]],
-    version_tuple: Callable[[str], tuple],
-) -> tuple[Declarations, dict]:
-    project, product, mechanism = project_of(invocation)
-    run_pinned_socle(invocation, project)
-    decl = read_declarations(project, product, mechanism)
-    sha, tag = socle_identity(str(invocation.option("--socle-sha", "")), str(invocation.option("--socle-tag", "")))
+def check_data(invocation: Invocation, context: Context) -> tuple[Declarations, dict]:
+    project, product, mechanism = context.project_of(invocation)
+    context.run_pinned_socle(invocation, project)
+    decl = context.read_declarations(project, product, mechanism)
+    sha, tag = context.socle_identity(str(invocation.option("--socle-sha", "")), str(invocation.option("--socle-tag", "")))
     pinned = pinned_socle(project)
     # A socle fetched by commit alone (a depth-1 fetch in CI) knows no tag;
     # the tag is only a label next to the pinned commit, so when the commits
@@ -147,7 +134,7 @@ def check_data(
     conventions: list[str] = []
     release: list[str] = []
     data: dict = {"product": product, "project": str(project), "mechanism": decl.mechanism,
-                  "socle": socle_data(sha, tag), "pinned": pinned, "checks": decl.applicable(),
+                  "socle": context.socle_data(sha, tag), "pinned": pinned, "checks": decl.applicable(),
                   "files": [], "violations": []}
     for check in decl.applicable():
         if check["status"] not in ("ok", "note"):
@@ -165,8 +152,8 @@ def check_data(
             # be vacuous rather than true.
             pinned_tag = data["pinned"]["tag"].lstrip("v")
             behind = re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", pinned_tag) \
-                and version_tuple(pinned_tag) <= newest_known_version()
-            if behind and impact_for(decl, data["pinned"]["tag"])[1] is True:
+                and context.version_tuple(pinned_tag) <= context.newest_known_version()
+            if behind and context.impact_for(decl, data["pinned"]["tag"])[1] is True:
                 decl.add("note", f"{mismatch}: nothing since {data['pinned']['tag']} asks this product a gesture,"
                                  " so it is current in the socle's sense", "release")
             else:
@@ -180,10 +167,10 @@ def check_data(
             # mechanism read identically. The plan is not drift -- the
             # product is conformant to the socle it pins -- so it is
             # reported beside the verdict and never counted as a violation.
-            data["files"] = plan(decl, stage(decl, sha, tag), apply=False)
-            data["ahead"] = len(socle_impact(data["pinned"]["tag"]))
+            data["files"] = context.plan(decl, context.stage(decl, sha, tag), apply=False)
+            data["ahead"] = len(context.socle_impact(data["pinned"]["tag"]))
         else:
-            data["files"] = plan(decl, stage(decl, sha, tag), apply=False)
+            data["files"] = context.plan(decl, context.stage(decl, sha, tag), apply=False)
             for entry in data["files"]:
                 if entry["action"] == "same":
                     continue
@@ -216,14 +203,10 @@ def check_data(
     return decl, data
 
 
-def handle_declarations(
-    invocation: Invocation, *,
-    project_of: Callable[[Invocation], tuple[pathlib.Path, str, str]],
-    read_declarations: Callable[[pathlib.Path, str, str], Declarations],
-) -> tuple[dict, int]:
+def handle_declarations(invocation: Invocation, context: Context) -> tuple[dict, int]:
     """The product contract as data, for a CI job that installs what it declares."""
-    project, product, mechanism = project_of(invocation)
-    decl = read_declarations(project, product, mechanism)
+    project, product, mechanism = context.project_of(invocation)
+    decl = context.read_declarations(project, product, mechanism)
     release_workflow_text = (project / ".github" / "workflows" / "release.yml")
     stamp = re.search(r"# Managed by maelys-release (\S+) \(([0-9.]+)\)",
                       release_workflow_text.read_text(encoding="utf-8")
@@ -258,11 +241,8 @@ def handle_declarations(
         EXIT_OK if decl.valid else EXIT_VIOLATIONS
 
 
-def handle_check(
-    invocation: Invocation, *,
-    check_data: Callable[[Invocation], tuple[Declarations, dict]],
-) -> tuple[dict, int]:
-    _, data = check_data(invocation)
+def handle_check(invocation: Invocation, context: Context) -> tuple[dict, int]:
+    _, data = check_data(invocation, context)
     return data, EXIT_OK if data["valid"] else EXIT_VIOLATIONS
 
 
