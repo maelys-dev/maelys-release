@@ -1,0 +1,6 @@
+{
+  "exitCode": 1,
+  "stdout": "",
+  "stderr": "{\n  \"schemaVersion\": 2,\n  \"contract\": \"agent-cli/v2\",\n  \"command\": \"adopt\",\n  \"ok\": false,\n  \"exitCode\": 1,\n  \"error\": {\n    \"code\": \"PRECONDITION_FAILED\",\n    \"message\": \"the default branch of maelys-system requires check / check (retired-golden), which this socle's check-product.yml no longer produces: after this adoption every pull request would wait for a check that never reports.\",\n    \"hint\": \"Narrow first: 'maelys-release protect <PRODUCT> --without-legs --apply' removes the socle's legs from the required list and nothing else; adopt, and merge the adoption; then 'maelys-release protect <PRODUCT> --apply' requires the new names. Or pass --allow-lock if the protection is being changed by hand in the same breath.\"\n  }\n}\n",
+  "changedFiles": {}
+}

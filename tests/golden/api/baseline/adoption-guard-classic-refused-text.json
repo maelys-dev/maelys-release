@@ -1,0 +1,6 @@
+{
+  "exitCode": 1,
+  "stdout": "",
+  "stderr": "maelys-release: [PRECONDITION_FAILED] the default branch of maelys-system requires check / check (retired-golden), which this socle's check-product.yml no longer produces: after this adoption every pull request would wait for a check that never reports.\nHint: Narrow first: 'maelys-release protect <PRODUCT> --without-legs --apply' removes the socle's legs from the required list and nothing else; adopt, and merge the adoption; then 'maelys-release protect <PRODUCT> --apply' requires the new names. Or pass --allow-lock if the protection is being changed by hand in the same breath.\n",
+  "changedFiles": {}
+}

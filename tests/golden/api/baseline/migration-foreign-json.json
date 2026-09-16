@@ -1,0 +1,6 @@
+{
+  "exitCode": 1,
+  "stdout": "",
+  "stderr": "{\n  \"schemaVersion\": 2,\n  \"contract\": \"agent-cli/v2\",\n  \"command\": \"migrate\",\n  \"ok\": false,\n  \"exitCode\": 1,\n  \"error\": {\n    \"code\": \"VALIDATION_FAILED\",\n    \"message\": \"The list carries documents of another-product, not maelys-system.\",\n    \"hint\": \"Pass 'maelys-platform docs --prose --only maelys-system --format jsonl'.\"\n  }\n}\n",
+  "changedFiles": {}
+}
