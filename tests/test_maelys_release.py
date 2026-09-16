@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import importlib.machinery
 import importlib.util
+import ast
 import atexit
 import io
 import base64
@@ -3237,23 +3238,34 @@ class OperatorIdentityTest(unittest.TestCase):
     three sites; this test is what holds the third.
     """
 
-    SOURCE = (ROOT / "bin" / "maelys-release").read_text(encoding="utf-8")
+    TREES = [ast.parse(path.read_text(encoding="utf-8"))
+             for path in [CLI, *sorted((ROOT / "bin" / "maelys_socle").glob("*.py"))]]
 
     def test_no_commit_switches_a_signature_off(self) -> None:
-        self.assertNotIn('"commit.gpgsign=false"', self.SOURCE)
+        self.assertNotIn("commit.gpgsign=false", [node.value for tree in self.TREES
+                         for node in ast.walk(tree) if isinstance(node, ast.Constant)])
 
     def test_a_machine_identity_is_written_in_one_place_only(self) -> None:
         """The floor inside `author_identity`, for a runner with no user, and
         nowhere else."""
-        writes = [number for number, line in enumerate(self.SOURCE.splitlines(), 1)
-                  if 'git("config", "user.name"' in line or 'git("config", "user.email"' in line]
-        floor = self.SOURCE.split("def author_identity", 1)[1].split("\ndef ", 1)[0]
-        self.assertEqual(len(writes), 2, writes)
-        self.assertEqual(floor.count('git("config", "user.'), 2)
+        helpers = [node for tree in self.TREES for node in tree.body
+                   if isinstance(node, ast.FunctionDef) and node.name == "author_identity"]
+        self.assertEqual(len(helpers), 1)
+        writes = [node for tree in self.TREES for node in ast.walk(tree)
+                  if isinstance(node, ast.Call) and getattr(node.func, "id", getattr(node.func, "attr", "")) == "git"
+                  and len(node.args) >= 3 and isinstance(node.args[0], ast.Constant)
+                  and node.args[0].value == "config" and isinstance(node.args[1], ast.Constant)
+                  and node.args[1].value in ("user.name", "user.email")]
+        self.assertEqual(len(writes), 2, [ast.dump(node) for node in writes])
+        self.assertEqual(sum(node in set(ast.walk(helpers[0])) for node in writes), 2)
 
     def test_every_site_goes_through_the_helper(self) -> None:
-        for where in ("author_identity(documents)", "author_identity(product_clone)", "author_identity(tap)"):
-            self.assertIn(where, self.SOURCE)
+        calls = [node for tree in self.TREES for node in ast.walk(tree)
+                 if isinstance(node, ast.Call)
+                 and getattr(node.func, "id", getattr(node.func, "attr", "")) == "author_identity"]
+        self.assertEqual(sorted(ast.dump(node.args[0]) for node in calls),
+                         sorted(ast.dump(ast.Name(where, ast.Load()))
+                                for where in ("documents", "product_clone", "tap")))
 
 
 class SocleAsADependencyTest(unittest.TestCase):
