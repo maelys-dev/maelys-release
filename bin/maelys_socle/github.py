@@ -2,6 +2,8 @@
 """GitHub readings and protection shapes through the single current host."""
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import base64
 import json
 import pathlib
@@ -102,13 +104,74 @@ def repository_visibility(project: pathlib.Path, visibility: str) -> bool | None
     return body["visibility"] == visibility
 
 
+@dataclass(frozen=True)
+class Protection:
+    """What protects a branch, read once, both mechanisms side by side.
+
+    A branch is protected by the classic protection, by a ruleset, or by
+    both, and GitHub applies them in union; the two answer on different
+    endpoints, and each has its own way of not answering. This socle learned
+    that three times over -- preflight in 0.46.x, the adoption guard in
+    0.51.1, protect in 0.51.2 -- each time in a reader of its own, and the
+    fourth reader was what a fix could miss. One reader now, and one parser
+    of the contexts a ruleset requires; each command still combines the two
+    lists the way it always did.
+    """
+
+    classic_state: str
+    classic_body: object
+    ruled_state: str
+    rules: object
+
+    @property
+    def classic(self) -> dict:
+        return self.classic_body if isinstance(self.classic_body, dict) else {}
+
+    @property
+    def classic_contexts(self) -> list[str]:
+        return list(((self.classic.get("required_status_checks") or {}).get("contexts")) or [])
+
+    @property
+    def rule_contexts(self) -> list[str]:
+        return rule_contexts(self.rules) if self.ruled_state == "ok" else []
+
+    @property
+    def unread(self) -> bool:
+        """Neither endpoint answered: not the same fact as a branch that requires nothing."""
+        return self.classic_state not in ("ok", "absent") and self.ruled_state not in ("ok", "absent")
+
+
+def rule_contexts(rules: object) -> list[str]:
+    """The contexts every required_status_checks rule of a branch names."""
+    found: list[str] = []
+    for rule in rules if isinstance(rules, list) else []:
+        if not isinstance(rule, dict) or rule.get("type") != "required_status_checks":
+            continue
+        for check in (rule.get("parameters") or {}).get("required_status_checks") or []:
+            if isinstance(check, dict) and check.get("context"):
+                found.append(str(check["context"]))
+    return found
+
+
+def read_protection(repository: str, branch: str, classic: bool = True, rulesets: bool = True) -> Protection:
+    """Read what protects BRANCH, the classic endpoint first, then the rulesets.
+
+    The two flags exist for the readers that need one side only -- the
+    selector that asks whether a classic protection exists, the re-reads
+    after a write -- so that no site reads more than it did.
+    """
+    state, body = github_read(f"repos/{repository}/branches/{branch}/protection") if classic else ("skipped", None)
+    ruled, rules = github_read(f"repos/{repository}/rules/branches/{branch}") if rulesets else ("skipped", None)
+    return Protection(state, body, ruled, rules)
+
+
 def classic_protection(project: pathlib.Path) -> bool | None:
     """Whether the default branch carries a classic protection; None when GitHub cannot say."""
     repository = github_repository(project)
     if not repository or not host.HOST.which("gh"):
         return None
     branch = (github_api(f"repos/{repository}") or {}).get("default_branch") or "main"
-    state, _ = github_read(f"repos/{repository}/branches/{branch}/protection")
+    state = read_protection(repository, branch, rulesets=False).classic_state
     return True if state == "ok" else False if state == "absent" else None
 
 
@@ -479,20 +542,10 @@ def required_contexts(project: pathlib.Path) -> list[str] | None:
     # corrected in 0.46.x and made again in the guard written to keep a rename
     # from locking a branch. agent-cli-spec requires the socle legs through a
     # ruleset and nothing else.
-    required: list[str] = []
-    state, body = github_read(f"repos/{repository}/branches/{branch}/protection")
-    if state == "ok" and isinstance(body, dict):
-        required += ((body.get("required_status_checks") or {}).get("contexts")) or []
-    ruled, rules = github_read(f"repos/{repository}/rules/branches/{branch}")
-    if ruled == "ok" and isinstance(rules, list):
-        for rule in rules:
-            if not isinstance(rule, dict) or rule.get("type") != "required_status_checks":
-                continue
-            for check in (rule.get("parameters") or {}).get("required_status_checks") or []:
-                if isinstance(check, dict) and check.get("context"):
-                    required.append(str(check["context"]))
-    if state not in ("ok", "absent") and ruled not in ("ok", "absent"):
+    protection = read_protection(repository, branch)
+    if protection.unread:
         return None
+    required = (protection.classic_contexts if protection.classic_state == "ok" else []) + protection.rule_contexts
     return [name for name in required if isinstance(name, str)]
 
 
@@ -539,7 +592,8 @@ def verify_protection(repository: str, branch: str, expected: dict, contexts: li
     is narrower since 0.57.1; this is the check that would have caught it,
     and that catches whatever the next write gets wrong.
     """
-    state, after = github_read(f"repos/{repository}/branches/{branch}/protection")
+    reread = read_protection(repository, branch, rulesets=False)
+    state, after = reread.classic_state, reread.classic_body
     if state != "ok" or not isinstance(after, dict):
         raise Failure("PROCESS_FAILED",
                       f"the protection of {branch} of {repository} was written, and GitHub did not answer its"

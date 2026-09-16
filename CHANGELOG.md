@@ -6,7 +6,16 @@
   release pull request was closed after its checks refused, the branch
   deleted and cut again; `cut --tag` then counted the closed one beside the
   merged one and refused to sign, asking to close what was already closed.
-- **Impact.** [asks: nothing] Nothing: `cut` runs at the checkout.
+- **One reader for what protects a branch.** The classic protection and
+  the rulesets were read and parsed at four places — the adoption guard,
+  `protect`, `preflight`, the `classic-protection` selector — and each fix
+  reached the readers it knew: 0.46.x, 0.51.1, 0.51.2 corrected one each,
+  and 0.57.1's fix to one left the guard refusing (0.57.2). `read_protection`
+  is the one reader now, `rule_contexts` the one parser of what a ruleset
+  requires, and every site reads exactly what it read before, in the same
+  order — the recorded API reference holds the call sequences.
+- **Impact.** [asks: nothing] Nothing: `cut` runs at the checkout, and the
+  reader changes no answer.
 
 ## 0.59.0 — 2026-09-16
 
