@@ -24,7 +24,7 @@ class PackageLayoutTest(unittest.TestCase):
         described = subprocess.run([sys.executable, "-I", str(CLI), "describe", "--format", "json"],
                                    env=product.env, text=True, capture_output=True, check=True)
         inspections = []
-        for command in ("declarations", "check", "dependencies", "rehearse", "migrate"):
+        for command in ("declarations", "check", "dependencies", "rehearse", "migrate", "cut"):
             for output in ("text", "json"):
                 args = [command, str(product.dir), "--format", output]
                 if command == "check":
@@ -35,9 +35,11 @@ class PackageLayoutTest(unittest.TestCase):
                     args.extend(Product.SOCLE)
                 if command == "migrate":
                     args.extend(["--documents", str(documents), "--documents-repository", "example/documents"])
+                if command == "cut":
+                    args.append("1.3.0")
                 result = subprocess.run([sys.executable, "-I", str(CLI), *args],
                                         env=product.env, text=True, capture_output=True, check=False)
-                expected_code = {"check": 2, "rehearse": 1}.get(command, 0)
+                expected_code = {"check": 2, "rehearse": 1, "cut": 1}.get(command, 0)
                 self.assertEqual(result.returncode, expected_code, result.stderr)
                 inspections.append((args, result))
         for layout in ("checkout", "installed"):
@@ -95,6 +97,8 @@ class RecordedHost(module.Host):
             b"99.98.97 protect installed-version\\n").decode()}
 module.host.HOST = RecordedHost()
 print(json.dumps({"root": str(module.socle_root()), "share": str(module.share_dir()),
+                  "identity": module.socle_data("f" * 40, "v99.98.97"),
+                  "otherIdentity": other.socle_data("e" * 40, "other"),
                   "withdrawal": module.withdrawn_for("protect"),
                   "otherRoot": str(other.socle_root()), "otherWithdrawal": other.withdrawn_for("protect"),
                   "modules": [value.__file__ for name, value in sys.modules.items()
@@ -105,6 +109,8 @@ print(json.dumps({"root": str(module.socle_root()), "share": str(module.share_di
                 data = json.loads(loaded.stdout)
                 self.assertEqual(data["root"], str(prefix.resolve()))
                 self.assertEqual(data["share"], str(share.resolve()))
+                self.assertEqual(data["identity"], {"version": "99.98.97", "tag": "v99.98.97", "sha": "f" * 40})
+                self.assertEqual(data["otherIdentity"]["version"], (ROOT / "VERSION").read_text().strip())
                 self.assertEqual(data["withdrawal"], ["withdrawn", "installed-version"])
                 self.assertEqual(data["otherRoot"], str(ROOT))
                 self.assertIsNone(data["otherWithdrawal"])
