@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import importlib.machinery
 import importlib.util
+import inspect
 import ast
 import atexit
 import io
@@ -3132,8 +3133,7 @@ class TagDeploymentsTest(unittest.TestCase):
         this line, which is how a reader that could not work shipped and was
         tagged. Nothing exercises `cut --tag` but a real release; the socle
         makes one most days, and now it exercises this."""
-        source = (ROOT / "bin" / "maelys-release").read_text(encoding="utf-8")
-        body = source.split("def cut_tag", 1)[1].split("\ndef ", 1)[0]
+        body = inspect.getsource(MODULE.cut_tag)
         self.assertIn("data[\"deployments\"] = tag_deployments(repository, tag)", body)
         self.assertNotIn('if decl.gate == "reviewer" or decl.channels:', body)
 
@@ -3143,9 +3143,8 @@ class TagDeploymentsTest(unittest.TestCase):
         workflow, so the pin governs what GitHub runs and nothing else. A
         product asked whether a fix to `cut` could only reach it through an
         adoption. It cannot."""
-        source = (ROOT / "bin" / "maelys-release").read_text(encoding="utf-8")
-        for handler in ("def handle_cut", "def cut_tag", "def cut_open"):
-            body = source.split(handler, 1)[1].split("\ndef ", 1)[0]
+        for handler in (MODULE.handle_cut, MODULE.cut.handle_cut, MODULE.cut_tag, MODULE.cut_open):
+            body = inspect.getsource(handler)
             self.assertNotIn("run_pinned_socle", body, handler)
         text = MODULE.text_cut({"stage": "open", "product": "p", "version": "1.0.0", "branch": "b",
                                 "base": "main", "repository": "o/r", "gate": [], "checks": [],
@@ -4908,11 +4907,12 @@ class RepositoryChecksTest(unittest.TestCase):
         was told under `cut` that nothing declared it, remedy inverted, at the
         moment of cutting a release. An optional parameter is a way to lose
         something quietly."""
-        source = CLI.read_text(encoding="utf-8")
+        source = "\n".join(path.read_text(encoding="utf-8") for path in
+                           [CLI, *sorted((ROOT / "bin" / "maelys_socle").glob("*.py"))])
         self.assertIn("def repository_checks(decl: Declarations)", source)
         callers = [line.strip() for line in source.splitlines() if "repository_checks(" in line
                    and not line.strip().startswith("def ")]
-        self.assertTrue(callers)
+        self.assertEqual(len(callers), 2)
         for caller in callers:
             self.assertIn("repository_checks(decl)", caller, caller)
 

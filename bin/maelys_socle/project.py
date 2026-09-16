@@ -6,7 +6,7 @@ import pathlib
 import re
 
 from maelys_cli import Failure, Invocation
-from .constants import PROGRAM, RELEASE_USES, SOCLE_MECHANISM
+from .constants import DECLARATION_FILE, PROGRAM, RELEASE_USES, SOCLE_MECHANISM
 
 
 def declared_mechanism(project: pathlib.Path, requested: str = "") -> str:
@@ -76,3 +76,20 @@ def engaged_documents(project: pathlib.Path) -> set[str]:
         return set()
     return {match.replace("./", "") for match in
             re.findall(r"\(([^)\s]*docs/[^)\s#]+)\)", licensing.read_text(encoding="utf-8"))}
+
+
+def declared_word(project: pathlib.Path, section: str, word: str) -> bool:
+    """Whether maelys-release.conf holds `word` under `[section]`."""
+    release = project / DECLARATION_FILE
+    if not release.is_file():
+        return False
+    current = ""
+    for raw in release.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("["):
+            current = line
+        elif current == f"[{section}]" and line == word:
+            return True
+    return False

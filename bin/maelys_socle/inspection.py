@@ -17,6 +17,7 @@ from .constants import (
     SOCLE_REPOSITORY, SOCLE_TARGETS,
 )
 from .context import Context
+from .identity import socle_data
 from .declarations import Declarations, version_tuple
 from .project import project_of
 from .texts import checks_text
@@ -135,7 +136,7 @@ def check_data(invocation: Invocation, context: Context) -> tuple[Declarations, 
     conventions: list[str] = []
     release: list[str] = []
     data: dict = {"product": product, "project": str(project), "mechanism": decl.mechanism,
-                  "socle": context.socle_data(sha, tag), "pinned": pinned, "checks": decl.applicable(),
+                  "socle": socle_data(sha, tag, context), "pinned": pinned, "checks": decl.applicable(),
                   "files": [], "violations": []}
     for check in decl.applicable():
         if check["status"] not in ("ok", "note"):

@@ -29,7 +29,6 @@ class Context:
     run_pinned_socle: Callable[[Invocation, pathlib.Path], None]
     read_declarations: Callable[[pathlib.Path, str, str], Declarations]
     socle_identity: Callable[[str, str], tuple[str, str]]
-    socle_data: Callable[[str, str], dict]
     newest_known_version: Callable[[], tuple]
     impact_for: Callable[[Declarations, str], tuple[list[dict], bool | None]]
     plan: Callable[..., list[dict]]

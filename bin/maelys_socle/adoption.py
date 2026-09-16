@@ -9,6 +9,7 @@ from maelys_cli import EXIT_OK, Failure, Invocation
 
 from .constants import DECLARATION_FILE, FORMER_DECLARATION_FILE, PROGRAM, SOCLE_MECHANISM
 from .context import Context
+from .identity import socle_data
 from .declarations import require_valid
 from .host import git, run
 from .inspection import pinned_socle
@@ -70,7 +71,7 @@ def handle_adopt(invocation: Invocation, context: Context) -> tuple[dict, int]:
     moved = move_declaration(project, apply)
     changed = moved != "" or any(entry["action"] != "same" for entry in files)
     data = {"mode": "apply" if apply else "plan", "product": product, "project": str(project),
-            "mechanism": mechanism, "socle": context.socle_data(sha, tag), "changed": changed,
+            "mechanism": mechanism, "socle": socle_data(sha, tag, context), "changed": changed,
             "impactFrom": (pinned or {}).get("tag", ""),
             "checks": decl.applicable(), "files": files}
     # Evaluated on the declarations read before this run wrote anything.
