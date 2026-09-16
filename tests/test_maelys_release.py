@@ -2733,7 +2733,7 @@ class WhatTheScriptRecordedTest(unittest.TestCase):
         name still present in older pull requests: the lock 0.43.0 was
         written to prevent, in the command written to prevent it.
         """
-        source = CLI.read_text(encoding="utf-8")
+        source = (ROOT / "bin" / "maelys_socle" / "protect.py").read_text(encoding="utf-8")
         body = source.split("PROTECTION_SHAPE, \"required_status_checks\"", 1)[1].split("}", 1)[0]
         self.assertIn("proposed", body)
         self.assertNotIn('"contexts": seen', source)
@@ -4498,7 +4498,7 @@ class LegRenameTest(unittest.TestCase):
 
     def test_the_adoption_guard_names_the_order(self) -> None:
         source = (ROOT / "bin" / "maelys_socle" / "adoption.py").read_text(encoding="utf-8")
-        body = source.split("vanishing = context.vanishing_contexts(project)", 1)[1].split("files = context.plan(", 1)[0]
+        body = source.split("vanishing = vanishing_contexts(project, context)", 1)[1].split("files = context.plan(", 1)[0]
         self.assertIn("--without-legs --apply", body)
         self.assertIn("then", body)
 

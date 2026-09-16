@@ -14,6 +14,7 @@ from .declarations import require_valid
 from .host import git, run
 from .inspection import pinned_socle
 from .project import project_of
+from .protect import vanishing_contexts
 from .texts import checks_text
 
 
@@ -56,7 +57,7 @@ def handle_adopt(invocation: Invocation, context: Context) -> tuple[dict, int]:
     # product that asked for it uses.
     pinned = pinned_socle(project)
     if apply:
-        vanishing = context.vanishing_contexts(project)
+        vanishing = vanishing_contexts(project, context)
         if vanishing and not invocation.flag("--allow-lock"):
             raise Failure("PRECONDITION_FAILED",
                           f"the default branch of {project.name} requires " + ", ".join(vanishing)

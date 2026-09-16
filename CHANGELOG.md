@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- **Refactoring.** The socle now separates parsing, workflow rendering and
+  extracted commands into `bin/maelys_socle/`, beside the executable. One host
+  carries the GitHub and process boundary; commands share an explicit context
+  for the services still owned by the entry point. The command contract,
+  protection settings and generated files are unchanged.
+- **Impact.** [asks: nothing] No action for a product: the package travels
+  with the pinned socle checkout, without a build step or new dependency.
+
 ## 0.58.0 — 2026-09-16
 
 - **The damage of the whole-protection write was wider than 0.57.1 said,
