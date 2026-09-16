@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **`cut` sets a closed, unmerged pull request aside.** 0.59.0's first
+  release pull request was closed after its checks refused, the branch
+  deleted and cut again; `cut --tag` then counted the closed one beside the
+  merged one and refused to sign, asking to close what was already closed.
+- **Impact.** [asks: nothing] Nothing: `cut` runs at the checkout.
+
 ## 0.59.0 — 2026-09-16
 
 - **Refactoring.** The socle now separates parsing, workflow rendering and
