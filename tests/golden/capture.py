@@ -11,6 +11,8 @@ Replay its pinned inputs against the current checkout:
 --record resolves main once for each fleet repository. Normal runs read the
 committed manifest; they never follow those branches again. --source selects
 another socle checkout to test, and --reference selects another capture.
+For an intentional behavior fix, --record --candidate FULL_COMMIT records the
+clean candidate's outputs while retaining the reference's original inputs.
 
 Fixtures are built by the ORIGINAL tests and executable at the recorded socle
 commit, even after those tests change. Every Product is observed on creation,
@@ -386,21 +388,27 @@ def main():
     parser.add_argument("--source", type=pathlib.Path, default=ROOT)
     parser.add_argument("--reference", type=pathlib.Path, default=pathlib.Path(__file__).parent / "baseline")
     parser.add_argument("--record", action="store_true", help="resolve initial inputs instead of replaying the manifest")
+    parser.add_argument("--candidate", help="with --record: explicitly record a committed behavior fix on the frozen inputs")
     args = parser.parse_args()
     source, output = args.source.resolve(), args.output.resolve()
     if output.exists():
         parser.error(f"refusing to overwrite {output}")
+    if args.candidate is not None:
+        if not args.record:
+            parser.error("--candidate requires --record; ordinary refactors only replay")
+        if len(args.candidate) != 40 or any(char not in "0123456789abcdef" for char in args.candidate):
+            parser.error("--candidate must be a full 40-character commit")
     if args.record:
         raw_env = dict(os.environ)
         commit = git(source, "rev-parse", "HEAD", env=raw_env)
-        main_commit = git(source, "rev-parse", "refs/remotes/origin/main", env=raw_env)
-        if commit != main_commit or git(source, "status", "--porcelain", "--", "bin", "share",
-                                      "tests/test_maelys_release.py", "VERSION", "CHANGELOG.md",
-                                      "WITHDRAWN", "docs", env=raw_env):
-            parser.error("--record requires the unchanged origin/main source")
-        manifest = {"schemaVersion": 1, "socle": {"commit": commit,
-                    "tag": "v" + (source / "VERSION").read_text().strip()}, "repositories": {}}
-    else:
+        expected = args.candidate or git(source, "rev-parse", "refs/remotes/origin/main", env=raw_env)
+        if commit != expected or git(source, "status", "--porcelain", env=raw_env):
+            parser.error("--record requires the unchanged origin/main source" if not args.candidate else
+                         "--candidate must name the exact clean HEAD commit of the behavior fix")
+        if not args.candidate:
+            manifest = {"schemaVersion": 1, "socle": {"commit": commit,
+                        "tag": "v" + (source / "VERSION").read_text().strip()}, "repositories": {}}
+    if not args.record or args.candidate:
         saved = json.loads((args.reference / "manifest.json").read_text(encoding="utf-8"))
         manifest = {key: saved[key] for key in ("schemaVersion", "socle", "repositories")}
     # Publish the directory only after every command and fixture completed.
@@ -419,7 +427,7 @@ def main():
         for name in FLEET:
             print(f"capture: {name}", file=sys.stderr, flush=True)
             url = f"https://github.com/maelys-dev/{name}.git"
-            pinned = "refs/heads/main" if args.record else manifest["repositories"][name]["commit"]
+            pinned = "refs/heads/main" if args.record and not args.candidate else manifest["repositories"][name]["commit"]
             clone, commit = checkout(work, name, url, pinned, env)
             capture.add_path(clone, f"<FLEET>/{name}")
             prepare_generator(clone, env)

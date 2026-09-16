@@ -237,9 +237,92 @@ def socle_version() -> str:
     raise Failure("NOT_FOUND", "VERSION of the socle not found.", "Run from a maelys-release checkout.")
 
 
+class Host:
+    """The current process's shell and GitHub boundary.
+
+    Tests replace this object, never the functions that read it. The private
+    self-test environment follows CLI subprocesses as well as in-process calls;
+    only an explicitly named fake gh may receive writes in that environment.
+    """
+
+    def which(self, name: str) -> str | None:
+        if name == "gh" and os.environ.get("_MAELYS_RELEASE_SELF_TEST"):
+            return os.environ.get("_MAELYS_RELEASE_TEST_GH") or None
+        return shutil.which(name)
+
+    def _command(self, command: list[str], cwd: pathlib.Path | None, env: dict[str, str] | None) -> list[str]:
+        environment = os.environ if env is None else env
+        if pathlib.Path(command[0]).name == "gh" and os.environ.get("_MAELYS_RELEASE_SELF_TEST"):
+            fake = environment.get("_MAELYS_RELEASE_TEST_GH")
+            executable = shutil.which(command[0], path=environment.get("PATH"))
+            if fake:
+                if not executable or pathlib.Path(executable).resolve() != pathlib.Path(fake).resolve():
+                    raise AssertionError("self-test gh is not the explicitly declared fake executable")
+                command = [fake, *command[1:]]
+            elif not (len(command) == 3 and command[1] == "api" and not command[2].startswith("-")
+                      or command[1:3] in (["pr", "list"], ["pr", "view"], ["release", "download"])):
+                raise AssertionError(f"self-test refused a real GitHub write: {command!r}")
+        if command[0] == "git":
+            if os.environ.get("_MAELYS_RELEASE_SELF_TEST") and "push" in command[1:]:
+                self._local_push(command, cwd, env)
+            command = ["git", "-C", str((cwd or pathlib.Path.cwd()).resolve()), *command[1:]]
+        return command
+
+    def _local_push(self, command: list[str], cwd: pathlib.Path | None, env: dict[str, str] | None) -> None:
+        # A test may push to its throwaway bare origin, never a network
+        # transport. Resolve push URLs (including insteadOf) before checking.
+        arguments = command[2:] if command[1] == "push" else []
+        while arguments and (arguments[0] in ("-q", "--quiet", "--force-with-lease")
+                             or arguments[0].startswith("--force-with-lease=")):
+            arguments = arguments[1:]
+        remote = arguments[0] if arguments and not arguments[0].startswith("-") else ""
+        if not remote:
+            raise AssertionError(f"self-test refused an undeclared git push: {command!r}")
+        resolved = self.run(["git", "remote", "get-url", "--push", "--all", remote], cwd=cwd, env=env)
+        urls = resolved.stdout.splitlines() if resolved.returncode == 0 else [remote]
+        roots = [pathlib.Path(tempfile.gettempdir()).resolve(), pathlib.Path("/tmp").resolve()]
+        for url in urls:
+            local = url.removeprefix("file://")
+            path = ((cwd or pathlib.Path.cwd()) / local).resolve()
+            if ":" in local or not path.exists() or not any(root in path.parents for root in roots):
+                raise AssertionError(f"self-test refused a non-local git push: {url}")
+
+    def run(self, command: list[str], cwd: pathlib.Path | None = None,
+            env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
+        return subprocess.run(self._command(command, cwd, env), cwd=cwd, env=env, check=False, text=True,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    def stream(self, command: list[str], log, cwd: pathlib.Path | None = None,
+               env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
+        return subprocess.run(self._command(command, cwd, env), cwd=cwd, env=env, check=False,
+                              stdout=log, stderr=subprocess.STDOUT)
+
+    def exec(self, executable: str, command: list[str], env: dict[str, str]) -> None:
+        self._command([executable, *command[1:]], None, env)
+        os.execve(executable, command, env)
+
+    def read(self, path: str) -> tuple[str, object]:
+        if not self.which("gh"):
+            return "no-gh", None
+        completed = self.run(["gh", "api", path])
+        if completed.returncode == 0:
+            try:
+                return "ok", json.loads(completed.stdout)
+            except json.JSONDecodeError:
+                return "unreadable", None
+        status = HTTP_STATUS.search(completed.stderr)
+        return ("absent" if status and status.group(1) == "404" else "unreadable"), None
+
+    def write(self, method: str, endpoint: str, payload: pathlib.Path,
+              cwd: pathlib.Path | None = None) -> subprocess.CompletedProcess:
+        return self.run(["gh", "api", "-X", method, endpoint, "--input", str(payload)], cwd=cwd)
+
+
+HOST = Host()
+
+
 def run(command: list[str], cwd: pathlib.Path | None = None, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
-    return subprocess.run(command, cwd=cwd, env=env, check=False, text=True,
-                          stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    return HOST.run(command, cwd=cwd, env=env)
 
 
 def git(*arguments: str, cwd: pathlib.Path | None = None, check: bool = True) -> str:
@@ -1934,7 +2017,7 @@ def impact_selectors(decl: "Declarations") -> dict:
 def repository_visibility(project: pathlib.Path, visibility: str) -> bool | None:
     """Whether origin's repository has this visibility; None when GitHub cannot say."""
     repository = github_repository(project)
-    if not repository or not shutil.which("gh"):
+    if not repository or not HOST.which("gh"):
         return None
     state, body = github_read(f"repos/{repository}")
     if state != "ok" or not isinstance(body, dict) or not body.get("visibility"):
@@ -1945,7 +2028,7 @@ def repository_visibility(project: pathlib.Path, visibility: str) -> bool | None
 def classic_protection(project: pathlib.Path) -> bool | None:
     """Whether the default branch carries a classic protection; None when GitHub cannot say."""
     repository = github_repository(project)
-    if not repository or not shutil.which("gh"):
+    if not repository or not HOST.which("gh"):
         return None
     branch = (github_api(f"repos/{repository}") or {}).get("default_branch") or "main"
     state, _ = github_read(f"repos/{repository}/branches/{branch}/protection")
@@ -2465,7 +2548,7 @@ def run_pinned_socle(invocation: Invocation, project: pathlib.Path) -> None:
         sys.stderr.flush()
     sys.stdout.flush()
     environment = {**os.environ, "MAELYS_RELEASE_NO_RELOCATE": "1"}
-    os.execve(str(checkout / "bin" / "maelys-release"), [PROGRAM, *sys.argv[1:]], environment)
+    HOST.exec(str(checkout / "bin" / "maelys-release"), [PROGRAM, *sys.argv[1:]], environment)
 
 
 # ---- handlers: each returns (data, exit code) ---------------------------------
@@ -3104,16 +3187,7 @@ def github_read(path: str) -> tuple[str, object]:
     refusing to say — measured while the organization was locked for an
     Actions billing overage, which rebates it to the free plan's abilities.
     """
-    if not shutil.which("gh"):
-        return "no-gh", None
-    completed = run(["gh", "api", path])
-    if completed.returncode == 0:
-        try:
-            return "ok", json.loads(completed.stdout)
-        except json.JSONDecodeError:
-            return "unreadable", None
-    status = HTTP_STATUS.search(completed.stderr)
-    return ("absent" if status and status.group(1) == "404" else "unreadable"), None
+    return HOST.read(path)
 
 
 def github_api(path: str) -> dict | None:
@@ -3460,7 +3534,7 @@ def repository_checks(decl: Declarations) -> list[tuple[str, str]]:
     repository = github_repository(project)
     if not repository:
         return [("note", "origin is not on GitHub: release environment not checked")]
-    if not shutil.which("gh"):
+    if not HOST.which("gh"):
         return [("note", f"gh is not installed: release environment of {repository} not checked")]
     repository_data = github_api(f"repos/{repository}") or {}
     if repository_data.get("visibility") == "public" and declared_word(project, "docs", "named"):
@@ -3672,7 +3746,7 @@ def cut_repository(project: pathlib.Path) -> str:
     if not repository:
         raise Failure("PRECONDITION_FAILED", f"origin of {project} is not on GitHub.",
                       "cut opens a pull request and reads its checks through gh; publish by hand elsewhere.")
-    if not shutil.which("gh"):
+    if not HOST.which("gh"):
         raise Failure("NOT_FOUND", "gh is required to open the pull request and to read its checks.",
                       "Install the GitHub CLI, or run the ceremony by hand.")
     return repository
@@ -4002,8 +4076,7 @@ def cut_open(invocation: Invocation, decl: Declarations, data: dict, log, timeou
         command = decl.verify_command.replace("TARGET", host_target())
         print(f"cut      {command}", file=log)
         log.flush()
-        verified = subprocess.run(["sh", "-c", command], cwd=project, check=False,
-                                  stdout=log, stderr=subprocess.STDOUT)
+        verified = HOST.stream(["sh", "-c", command], log, cwd=project)
         if verified.returncode != 0:
             raise Failure("PROCESS_FAILED", f"{command} failed with exit {verified.returncode}.",
                           "Read the log above; nothing has been written, no branch and no pull request exist.")
@@ -4434,8 +4507,7 @@ def rehearse_channel(invocation: Invocation, project: pathlib.Path, product: str
             data["command"] = command
             print(f"rehearse: {command}", file=log)
             log.flush()
-            published = subprocess.run(["bash", "-c", command], cwd=project, check=False,
-                                       stdout=log, stderr=subprocess.STDOUT,
+            published = HOST.stream(["bash", "-c", command], log, cwd=project,
                                        env={**os.environ, "TAG": tag, "CHANNEL": channel,
                                             "PRODUCT": product, "CHANNEL_RECORD": str(record),
                                             "CHANNEL_DRY_RUN": "1"})
@@ -4613,7 +4685,7 @@ def required_contexts(project: pathlib.Path) -> list[str] | None:
     answering -- which is not the same as a branch that requires nothing.
     """
     repository = github_repository(project)
-    if not repository or not shutil.which("gh"):
+    if not repository or not HOST.which("gh"):
         return None
     branch = (github_api(f"repos/{repository}") or {}).get("default_branch") or "main"
     # Both endpoints, as `branch_protection` reads them: a repository of the
@@ -5284,7 +5356,7 @@ def handle_protect(invocation: Invocation) -> tuple[dict, int]:
     if not repository:
         raise Failure("PRECONDITION_FAILED", f"{project} has no GitHub origin.",
                       "A branch protection is a GitHub setting; this reads and writes one.")
-    if not shutil.which("gh"):
+    if not HOST.which("gh"):
         raise Failure("PRECONDITION_FAILED", "gh is not installed.", "Install gh: this reads the GitHub API.")
     data = github_api(f"repos/{repository}") or {}
     branch = data.get("default_branch") or "main"
@@ -5497,7 +5569,7 @@ def handle_protect(invocation: Invocation) -> tuple[dict, int]:
         with tempfile.TemporaryDirectory(prefix="maelys-release-protect.") as temp:
             payload = pathlib.Path(temp) / "protection.json"
             payload.write_text(json.dumps(body), encoding="utf-8")
-            done = run(["gh", "api", "-X", method, endpoint, "--input", str(payload)], cwd=project)
+            done = HOST.write(method, endpoint, payload, cwd=project)
         if done.returncode != 0:
             raise Failure("PROCESS_FAILED", f"the protection of {branch} was refused: {done.stderr.strip()}",
                           "A private repository needs a paid plan for branch protection; read the message above.")
@@ -5624,8 +5696,7 @@ def write_ruleset(repository: str, branch: str, rules: object, contexts: list[st
     with tempfile.TemporaryDirectory(prefix="maelys-release-ruleset.") as temp:
         payload = pathlib.Path(temp) / "ruleset.json"
         payload.write_text(json.dumps(body), encoding="utf-8")
-        done = run(["gh", "api", "-X", "PUT", f"repos/{repository}/rulesets/{identifier}",
-                    "--input", str(payload)])
+        done = HOST.write("PUT", f"repos/{repository}/rulesets/{identifier}", payload)
     if done.returncode != 0:
         raise Failure("PROCESS_FAILED", f"ruleset {identifier} of {repository} was refused: {done.stderr.strip()}",
                       "Writing a ruleset needs administration of the repository.")
@@ -5726,7 +5797,7 @@ def handle_rehearse(invocation: Invocation) -> tuple[dict, int]:
                       " directory does not exist.",
                       "Run the rehearsal from a full clone.")
     target = invocation.operands[1]
-    if not shutil.which("docker"):
+    if not HOST.which("docker"):
         raise Failure("NOT_FOUND", "docker is required to rehearse a Linux build.", "Install Docker and retry.")
     decl = read_declarations(project, product, mechanism)
     require_valid(decl, "rehearse")
@@ -5754,7 +5825,7 @@ def handle_rehearse(invocation: Invocation) -> tuple[dict, int]:
     # moves to stderr when the envelope owns stdout.
     print(f"rehearse: {mode} {target} on {image} ({PLATFORMS[target]})", file=log)
     log.flush()
-    completed = subprocess.run(command, check=False, stdout=log, stderr=subprocess.STDOUT)
+    completed = HOST.stream(command, log)
     if completed.returncode != 0:
         raise Failure("PROCESS_FAILED", f"The rehearsal of {target} failed with exit {completed.returncode}.",
                       "Read the container log above; fix the product and retry.")
@@ -5832,7 +5903,7 @@ def handle_tap(invocation: Invocation) -> tuple[dict, int]:
         git("clone", "-q", url, str(tap))
         (tap / "Formula").mkdir(exist_ok=True)
         shutil.copyfile(formula, tap / "Formula" / f"{product}.rb")
-        if shutil.which("brew") and not invocation.flag("--skip-style"):
+        if HOST.which("brew") and not invocation.flag("--skip-style"):
             style = run(["brew", "style", str(tap / "Formula" / f"{product}.rb")])
             if style.returncode != 0:
                 raise Failure("VALIDATION_FAILED", f"brew style refused the formula: {style.stdout.strip()}",
@@ -5876,7 +5947,7 @@ def handle_self_test(invocation: Invocation) -> tuple[dict, int]:
         command.append("-v")
     log = sys.stderr if invocation.format != "text" else sys.stdout
     log.flush()
-    completed = subprocess.run(command, check=False, stdout=log, stderr=subprocess.STDOUT)
+    completed = HOST.stream(command, log, env={**os.environ, "_MAELYS_RELEASE_SELF_TEST": "1"})
     if completed.returncode != 0:
         raise Failure("PROCESS_FAILED", f"The self-test failed with exit {completed.returncode}.", "Read the report above.")
     return {"tests": str(tests), "passed": True}, EXIT_OK

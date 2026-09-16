@@ -36,6 +36,11 @@ jobs:
           bin/maelys-release version --json --compact
       - name: Self-test on a fixture
         run: bin/maelys-release self-test
+      - name: Refactoring preserves the recorded CLI behavior
+        if: startsWith(github.head_ref, 'refactor/')
+        run: |
+          python3 tests/golden/capture.py "$RUNNER_TEMP/maelys-golden-replay"
+          diff -ru tests/golden/baseline "$RUNNER_TEMP/maelys-golden-replay"
       - name: The socle follows its own conventions
         # What it verifies in every product, verified here: its managed
         # blocks, its declarations, its docs. It drifted from 0.16.0 to 0.57.0
