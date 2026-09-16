@@ -1,0 +1,6 @@
+{
+  "exitCode": 1,
+  "stdout": "",
+  "stderr": "{\n  \"schemaVersion\": 2,\n  \"contract\": \"agent-cli/v2\",\n  \"command\": \"migrate\",\n  \"ok\": false,\n  \"exitCode\": 1,\n  \"error\": {\n    \"code\": \"VALIDATION_FAILED\",\n    \"message\": \"The list does not describe this migration: docs/guide.md -> elsewhere/guide.md (expected golden-docs/maelys-system/guide.md).\",\n    \"hint\": \"Regenerate it with maelys-platform for this product.\"\n  }\n}\n",
+  "changedFiles": {}
+}

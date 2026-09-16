@@ -1,0 +1,151 @@
+{
+  "product": "maelys-system",
+  "files": {
+    ".claude/skills/maelys-release/SKILL.md": {
+      "text": "---\nname: maelys-release\ndescription: Release a Maelys product through the shared maelys-release socle, or change its release, packaging, dependency pins or Homebrew formula files, without breaking the signed-tag, attestation and tap contracts.\n---\n\n<!-- SPDX-License-Identifier: CC-BY-4.0\nCopyright 2026 David Bromberg.\nSource: https://github.com/maelys-dev/maelys-release/blob/main/share/agents/claude-skill.md\nLicense: https://creativecommons.org/licenses/by/4.0/\nWhen sharing adaptations, retain attribution and indicate your changes.\n-->\n\n# Releasing a Maelys product\n\nThe product is `maelys-system`; its release mechanics come from maelys-release\nat the version `.github/workflows/release.yml` pins (`docs/conventions.md`\nthere is normative).\n\n## Cut a release\n\n1. On `main`, up to date with `origin/main`: date the `CHANGELOG.md` entry\n   `## X.Y.Z — YYYY-MM-DD` (`check` reports a `VERSION` without one),\n   regenerate any generated documentation, and commit everything else.\n   `VERSION` is written by `cut`, whose commit carries the bump and\n   nothing else.\n2. Run `bin/maelys-release cut . X.Y.Z --apply` from a maelys-release\n   checkout at the version you want cutting it: `cut` runs as that\n   checkout, not as the socle this repository pins, and its first line\n   says which. It exits 2 on\n   anything the workflow would refuse (signing configuration, previous\n   tag, existing `vX.Y.Z`, `release` environment not limited to tags\n   `v*`) before writing anything, then commits `VERSION` signed on\n   `release/vX.Y.Z`, opens the pull request and waits for the checks of\n   that commit to exist and to finish. Without `--apply` it reports the\n   gate and writes nothing.\n3. Merge that pull request under this repository's own rules. `cut` never\n   merges its own: a command that did would work only where the default\n   branch is unprotected.\n4. Run `bin/maelys-release cut . X.Y.Z --tag --apply`. It verifies the\n   merge commit of that pull request is on `main` and carries `VERSION` =\n   `X.Y.Z`, waits for every check of that exact commit, then signs\n   `vX.Y.Z` on it — the merge commit, never `origin/main`, which another\n   merge can move between the two — and pushes it. The tag is annotated\n   and signed with a key registered on GitHub; the workflow refuses\n   anything else.\n5. Watch the `release` workflow; the `publish` job runs in the `release`\n   environment. Verify with `gh release view vX.Y.Z` and\n   `gh attestation verify <asset> --repo <owner>/<repo> --signer-repo maelys-dev/maelys-release`\n   (the attestation is signed by the socle's reusable workflow, so `gh` must\n   be told that signer; without it verification fails with \"verifying with\n   issuer sigstore.dev\").\n\n## Before the first tag, or after changing packaging\n\nRun `bin/maelys-release rehearse . linux-arm64` (and `linux-x86_64`,\nemulated) from a maelys-release checkout: it replays the Linux build job of the\nrelease in Docker on a copy of the working tree. The release must never be\nthe first Linux build of the product.\n\n## Change release or packaging files\n\n- `.github/workflows/release.yml` and the two `scripts/checkout-dependenc*.sh`:\n  never by hand. They are generated from `dependencies/*.pin`, `dependencies/packages`\n  and `packaging/homebrew/*.rb.in`; change those, then run\n  `bin/maelys-release adopt DIR --apply` from a maelys-release checkout at\n  the target tag; check drift with `bin/maelys-release check DIR`. Every\n  command answers `--format json` with an agent-cli/v2 envelope,\n  `describe --format json` returns the catalog, and `--field NAME` reads one\n  member of the result without a `jq` expression.\n- `dependencies/<name>.pin`: nearest tag on line 1, pinned commit on line 2.\n  `scripts/checkout-dependency.sh NAME` clones the dependency at that\n  commit; write no other checkout script.\n- `dependencies/packages`: the apt (`[linux]`) and brew (`[macos]`) packages the\n  build needs, one per line. Nothing else installs packages in a release\n  or in CI: `.github/workflows/ci.yml` calls the socle's\n  `check-product.yml`, which reads the declarations itself; keep that job,\n  add yours next to it. `adopt` updates its socle line, `check` warns when\n  it is missing.\n- `scripts/package-release.sh TARGET`: must leave every artifact and its\n  `.sha256` in `dist/`; keep it runnable locally.\n- packaging/homebrew/<name>.rb.in: placeholders `@URL@`, `@VERSION@`,\n  `@SHA256@`, plus any pin placeholder your renderer fills. Validate with\n  `brew style`, `brew audit --strict` through a temporary tap, and\n  `brew install --build-from-source` followed by `brew test`.\n- Bottles: the tap workflow builds them on the macOS runners listed in\n  `bottles`; the formula keeps its source URL so `--build-from-source`\n  always works for an open product.\n\n## Never\n\n- push a tag whose commit did not pass `make check`;\n- force-push or delete a published tag;\n- edit a generated file by hand: `release.yml`, either `checkout-dependenc*.sh`,\n  anything under `docs/generated/`;\n- install packages from a checkout script or from `package-release.sh`;\n  declare them in `dependencies/packages`;\n- put credentials in the repository; the tap secrets are\n  `HOMEBREW_TAP_TOKEN` and `HOMEBREW_TAP_SIGNING_KEY`;\n- narrow a protection to get an adoption through: the legs renamed in 0.54.0\n  keep reporting their old names as aliases, so adopt, merge, then\n  `protect . --apply` replaces each alias by its leg in one write.\n",
+      "executable": false
+    },
+    ".github/workflows/ci.yml": {
+      "text": "name: ci\n\n# Created by maelys-release v0.58.0 (0.58.0) and owned by this repository: add\n# jobs next to check; adopt keeps the socle line of check current.\non:\n  push:\n    branches: [main]\n  pull_request:\n\npermissions:\n  contents: read\n\njobs:\n  check:\n    uses: maelys-dev/maelys-release/.github/workflows/check-product.yml@0000000000000000000000000000000000000000 # v0.57.2\n    with:\n      product: maelys-system\n",
+      "executable": false
+    },
+    ".github/workflows/release.yml": {
+      "text": "name: release\n\n# Managed by maelys-release v0.58.0 (0.58.0). Regenerate with\n# 'maelys-release adopt' of maelys-release; do not edit by hand.\non:\n  push:\n    tags: [\"v*\"]\n  workflow_dispatch:\n    inputs:\n      tag:\n        description: Existing signed tag whose release and Homebrew publication are replayed\n        required: true\n        type: string\n\npermissions:\n  contents: write\n  id-token: write\n  attestations: write\n\njobs:\n  release:\n    uses: maelys-dev/maelys-release/.github/workflows/release.yml@0000000000000000000000000000000000000000 # v0.57.2\n    permissions:\n      contents: write\n      id-token: write\n      attestations: write\n    with:\n      product: maelys-system\n      tag: ${{ inputs.tag || github.ref_name }}\n",
+      "executable": false
+    },
+    "AGENTS.md": {
+      "text": "<!-- maelys-release:begin -->\n<!-- SPDX-License-Identifier: CC-BY-4.0\nCopyright 2026 David Bromberg.\nSource: https://github.com/maelys-dev/maelys-release/blob/main/share/agents/instructions-block.md\nLicense: https://creativecommons.org/licenses/by/4.0/\nWhen sharing adaptations, retain attribution and indicate your changes.\n-->\n\n# Maelys release socle (maelys-release)\n\nThis repository publishes through the shared maelys-release workflows. The\nrules below hold for every release-related change; the complete conventions\nare in `docs/conventions.md` of maelys-release. The first rules hold for\nevery repository on the socle; those after \"If this repository\" apply only\nwhen it has what they name.\n\n- `.github/workflows/release.yml` and the two `scripts/checkout-dependenc*.sh` are\n  generated by `bin/maelys-release adopt` of maelys-release from\n  `dependencies/*.pin`, `dependencies/packages` and `packaging/homebrew/*.rb.in`.\n  Never edit them by hand; change the declarations, then run\n  `maelys-release adopt DIR --apply` from a maelys-release checkout at the\n  wanted tag. `maelys-release check DIR` (exit 2 on any violation) verifies;\n  `maelys-release preflight DIR` checks the tag preconditions before a\n  release. `check`, `preflight` and `rehearse` run as the socle this\n  repository pins; `cut`, `adopt`, `protect` and `dependencies` run as the\n  checkout at hand, and `cut` says which. The command follows agent-cli/v2:\n  `--format json` everywhere, `describe` for the catalog, and `--field NAME`\n  to read one member of the result without a `jq` expression.\n- A release is a signed, annotated tag `vX.Y.Z` on `main` whose commit\n  carries `VERSION` = `X.Y.Z` and a dated `CHANGELOG.md` entry. Never push a\n  tag before `make check` passes on that exact commit, never move or force a\n  tag, never publish from a branch. `maelys-release cut DIR X.Y.Z --apply`\n  does exactly that in two stops: it writes `VERSION`, commits it signed on\n  `release/vX.Y.Z`, opens the pull request and waits for its checks; after\n  the merge, `cut DIR X.Y.Z --tag --apply` signs the tag on the merge commit\n  those checks ran on. It never merges its own pull request. **An adoption\n  does not have to be published**: it travels in the next release.\n- The checks `main` requires are derived, never typed: `maelys-release\n  protect DIR` computes them and `--apply` writes them, as a ruleset when a\n  ruleset protects the branch. When this repository still requires the\n  legs under their names before 0.54.0 (`check (ubuntu-26.04)`,\n  `check (ubuntu-26.04-arm)`, `check (macos-15)`): **adopt, merge, then\n  `protect DIR --apply`**. The socle keeps reporting those names as aliases,\n  so the adoption loses nothing, and `protect --apply` replaces each alias by\n  its leg in one write: the branch never requires less. It refuses before\n  the adoption is merged. Never narrow a protection to get an adoption\n  through; `--without-legs` exists for a rename that comes without aliases.\n- `adopt DIR` without `--apply` prints the plan and, for every socle version\n  between this repository's pin and the checkout, the line that says what\n  that version asks of a product. Read those lines, not the changelog.\n- A branch is named after the change it carries, with the prefix that\n  change would take in a commit message (`fix/`, `docs/`, `release/`…),\n  never after the tool that created it: a name says what changes, not who\n  typed. No list is closed; the commit prefixes this repository already\n  uses are its vocabulary.\n- A tag whose release or formula failed for a reason outside the code — a\n  cancelled job, an expired approval, a tap push lost to a race — is replayed\n  with `gh workflow run release.yml --ref vX.Y.Z -f tag=vX.Y.Z`. **`--ref`\n  names the tag**: the `release` environment only accepts tags `v*`, so a run\n  started from the default branch is refused at `publish`. A replay runs the\n  socle that tag pinned; when the socle is at fault, the remedy is a new patch\n  release carrying the corrected pin. A tag is never moved or recreated.\n- Never commit a secret or a key.\n- `docs/` carries what a machine writes and what this repository engages\n  publicly, and no other prose. Where the prose lives is not named from this\n  repository's files, which a public reader may see: do not name a\n  documentation repository here. A private repository that wants the name\n  declares `[docs] named` in `maelys-release.conf`.\n- The workflow verifies the tag through the GitHub API, builds on Linux\n  x86_64, Linux arm64 and macOS arm64 with `scripts/package-release.sh\n  TARGET` — or on the targets `[targets]` names, packaging only on those\n  `[package]` names when it names any — attests provenance, publishes the\n  GitHub release, renders packaging/homebrew/<name>.rb.in from the tag's own copy, builds bottles\n  when configured and pushes the formula to `maelys-dev/homebrew-tap`.\n- If this repository pins other Maelys repositories: a dependency is\n  `dependencies/<name>.pin` (tag on line 1, the commit that tag names on\n  line 2). A repository that declares `[dependencies] apart` reads\n  `$MAELYS_DEPENDENCIES_DIR` instead of a sibling, and the socle it pins from\n  `$MAELYS_RELEASE_DIR`; every job that builds runs `sh\n  scripts/checkout-dependencies.sh \"$RUNNER_TEMP/dependencies\" >>\"$GITHUB_ENV\"`\n  to get both — a variable reaches no other job, each running on another\n  machine. The packages the build needs on the runners are listed in\n  `dependencies/packages` under `[linux]` and `[macos]`; no script installs\n  them. `.github/workflows/ci.yml` calls the socle's `check-product.yml`,\n  which reads these declarations itself. `maelys-release rehearse DIR\n  TARGET` replays the Linux build job in Docker before a first tag.\n- If this repository publishes Homebrew formulas: a command is named after\n  its binary (`maelys-egress`), a library after its archive with a `lib`\n  prefix (`libmaelys-sys`). Dependency pins in a formula are copied from the\n  tag's `dependencies/` files, never typed. Tap credentials are the\n  repository secrets `HOMEBREW_TAP_TOKEN` and `HOMEBREW_TAP_SIGNING_KEY`;\n  without them the tap job renders, lints and reports instead of failing.\n- If this repository declares runners: `[runners]` names `macos`,\n  `linux-x86_64` and `linux-arm64`. A declared runner is honoured wherever\n  only a writer can start the workflow — the release, its channels, the tap\n  — and on the pull-request checks of a private repository only, since on a\n  public one anyone can open a pull request. `linux-x86_64` is also where the\n  release's write token runs.\n<!-- maelys-release:end -->\n",
+      "executable": false
+    },
+    "CHANGELOG.md": {
+      "text": "# Changelog\n\n## 1.2.3 — 2026-09-16\n\n- Fixture.\n",
+      "executable": false
+    },
+    "CLAUDE.md": {
+      "text": "<!-- maelys-release:begin -->\n<!-- SPDX-License-Identifier: CC-BY-4.0\nCopyright 2026 David Bromberg.\nSource: https://github.com/maelys-dev/maelys-release/blob/main/share/agents/instructions-block.md\nLicense: https://creativecommons.org/licenses/by/4.0/\nWhen sharing adaptations, retain attribution and indicate your changes.\n-->\n\n# Maelys release socle (maelys-release)\n\nThis repository publishes through the shared maelys-release workflows. The\nrules below hold for every release-related change; the complete conventions\nare in `docs/conventions.md` of maelys-release. The first rules hold for\nevery repository on the socle; those after \"If this repository\" apply only\nwhen it has what they name.\n\n- `.github/workflows/release.yml` and the two `scripts/checkout-dependenc*.sh` are\n  generated by `bin/maelys-release adopt` of maelys-release from\n  `dependencies/*.pin`, `dependencies/packages` and `packaging/homebrew/*.rb.in`.\n  Never edit them by hand; change the declarations, then run\n  `maelys-release adopt DIR --apply` from a maelys-release checkout at the\n  wanted tag. `maelys-release check DIR` (exit 2 on any violation) verifies;\n  `maelys-release preflight DIR` checks the tag preconditions before a\n  release. `check`, `preflight` and `rehearse` run as the socle this\n  repository pins; `cut`, `adopt`, `protect` and `dependencies` run as the\n  checkout at hand, and `cut` says which. The command follows agent-cli/v2:\n  `--format json` everywhere, `describe` for the catalog, and `--field NAME`\n  to read one member of the result without a `jq` expression.\n- A release is a signed, annotated tag `vX.Y.Z` on `main` whose commit\n  carries `VERSION` = `X.Y.Z` and a dated `CHANGELOG.md` entry. Never push a\n  tag before `make check` passes on that exact commit, never move or force a\n  tag, never publish from a branch. `maelys-release cut DIR X.Y.Z --apply`\n  does exactly that in two stops: it writes `VERSION`, commits it signed on\n  `release/vX.Y.Z`, opens the pull request and waits for its checks; after\n  the merge, `cut DIR X.Y.Z --tag --apply` signs the tag on the merge commit\n  those checks ran on. It never merges its own pull request. **An adoption\n  does not have to be published**: it travels in the next release.\n- The checks `main` requires are derived, never typed: `maelys-release\n  protect DIR` computes them and `--apply` writes them, as a ruleset when a\n  ruleset protects the branch. When this repository still requires the\n  legs under their names before 0.54.0 (`check (ubuntu-26.04)`,\n  `check (ubuntu-26.04-arm)`, `check (macos-15)`): **adopt, merge, then\n  `protect DIR --apply`**. The socle keeps reporting those names as aliases,\n  so the adoption loses nothing, and `protect --apply` replaces each alias by\n  its leg in one write: the branch never requires less. It refuses before\n  the adoption is merged. Never narrow a protection to get an adoption\n  through; `--without-legs` exists for a rename that comes without aliases.\n- `adopt DIR` without `--apply` prints the plan and, for every socle version\n  between this repository's pin and the checkout, the line that says what\n  that version asks of a product. Read those lines, not the changelog.\n- A branch is named after the change it carries, with the prefix that\n  change would take in a commit message (`fix/`, `docs/`, `release/`…),\n  never after the tool that created it: a name says what changes, not who\n  typed. No list is closed; the commit prefixes this repository already\n  uses are its vocabulary.\n- A tag whose release or formula failed for a reason outside the code — a\n  cancelled job, an expired approval, a tap push lost to a race — is replayed\n  with `gh workflow run release.yml --ref vX.Y.Z -f tag=vX.Y.Z`. **`--ref`\n  names the tag**: the `release` environment only accepts tags `v*`, so a run\n  started from the default branch is refused at `publish`. A replay runs the\n  socle that tag pinned; when the socle is at fault, the remedy is a new patch\n  release carrying the corrected pin. A tag is never moved or recreated.\n- Never commit a secret or a key.\n- `docs/` carries what a machine writes and what this repository engages\n  publicly, and no other prose. Where the prose lives is not named from this\n  repository's files, which a public reader may see: do not name a\n  documentation repository here. A private repository that wants the name\n  declares `[docs] named` in `maelys-release.conf`.\n- The workflow verifies the tag through the GitHub API, builds on Linux\n  x86_64, Linux arm64 and macOS arm64 with `scripts/package-release.sh\n  TARGET` — or on the targets `[targets]` names, packaging only on those\n  `[package]` names when it names any — attests provenance, publishes the\n  GitHub release, renders packaging/homebrew/<name>.rb.in from the tag's own copy, builds bottles\n  when configured and pushes the formula to `maelys-dev/homebrew-tap`.\n- If this repository pins other Maelys repositories: a dependency is\n  `dependencies/<name>.pin` (tag on line 1, the commit that tag names on\n  line 2). A repository that declares `[dependencies] apart` reads\n  `$MAELYS_DEPENDENCIES_DIR` instead of a sibling, and the socle it pins from\n  `$MAELYS_RELEASE_DIR`; every job that builds runs `sh\n  scripts/checkout-dependencies.sh \"$RUNNER_TEMP/dependencies\" >>\"$GITHUB_ENV\"`\n  to get both — a variable reaches no other job, each running on another\n  machine. The packages the build needs on the runners are listed in\n  `dependencies/packages` under `[linux]` and `[macos]`; no script installs\n  them. `.github/workflows/ci.yml` calls the socle's `check-product.yml`,\n  which reads these declarations itself. `maelys-release rehearse DIR\n  TARGET` replays the Linux build job in Docker before a first tag.\n- If this repository publishes Homebrew formulas: a command is named after\n  its binary (`maelys-egress`), a library after its archive with a `lib`\n  prefix (`libmaelys-sys`). Dependency pins in a formula are copied from the\n  tag's `dependencies/` files, never typed. Tap credentials are the\n  repository secrets `HOMEBREW_TAP_TOKEN` and `HOMEBREW_TAP_SIGNING_KEY`;\n  without them the tap job renders, lints and reports instead of failing.\n- If this repository declares runners: `[runners]` names `macos`,\n  `linux-x86_64` and `linux-arm64`. A declared runner is honoured wherever\n  only a writer can start the workflow — the release, its channels, the tap\n  — and on the pull-request checks of a private repository only, since on a\n  public one anyone can open a pull request. `linux-x86_64` is also where the\n  release's write token runs.\n<!-- maelys-release:end -->\n",
+      "executable": false
+    },
+    "LICENSING.md": {
+      "text": "# Licensing\n\nCopyright 2026 David Bromberg.\n\nThe socle wrote this file once because it was missing. It belongs to this\nrepository now: state below what each part is licensed under, and name every\ndocument this repository engages publicly. `bin/maelys-platform docs` reads\nthis file to tell a public engagement from prose that migrates elsewhere.\n\n## Source code: MPL-2.0\n\nThe source code of maelys-system is available under the Mozilla Public License\n2.0. The complete terms are in [`LICENSE`](LICENSE).\n\nThe MPL applies file by file. A program that links this code, statically or\notherwise, keeps its own license (section 3.3 of the MPL); only a modified\ncovered file must remain available in Source Code Form under MPL-2.0.\n\n## Installed agent texts: CC-BY-4.0\n\nThe managed blocks of `AGENTS.md` and `CLAUDE.md` are installed from the\nMaelys distributions' `share/agents/` texts under CC-BY-4.0, with attribution\nto David Bromberg. Their notices identify the source and link to the license:\nhttps://creativecommons.org/licenses/by/4.0/. Retain attribution and indicate\nchanges when sharing adaptations. This applies to the installed blocks,\nnot unrelated product-specific content outside them. When adopting another\ndistribution, check the actual notices of the texts it installs.\n\n## Redistributed material\n\n*List here the pinned sources linked into the released artifacts, with their\nlicenses, or state that this repository redistributes none.*\n\n## Documents engaged publicly\n\n*List here the documents of this repository that its published packages,\nsite or formula reference. A document named here stays in this repository;\nprose that is not engaged migrates to `maelys-docs/maelys-system/`.*\n",
+      "executable": false
+    },
+    "RELEASING.md": {
+      "text": "# Releasing maelys-system\n\nReleases go through the shared maelys-release socle, at the version\n`.github/workflows/release.yml` pins. The\nworkflow `.github/workflows/release.yml` and the two `scripts/checkout-dependenc*.sh`\nare generated by its `maelys-release adopt` from `VERSION`, `dependencies/*.pin`,\n`dependencies/packages` and `packaging/homebrew/*.rb.in`.\n\n1. On `main`, up to date with `origin/main`: the dated `CHANGELOG.md` entry\n   `## X.Y.Z — YYYY-MM-DD` written, generated documentation regenerated,\n   everything else committed. `VERSION` is written by `cut`, whose commit\n   carries the bump and nothing else. Before a first release or after a\n   packaging change, `maelys-release rehearse . linux-arm64` replays the\n   Linux build job in Docker.\n2. `maelys-release cut . X.Y.Z --apply` from any maelys-release checkout (it\n   runs as the pinned version). It holds the gate first — signing\n   configuration, previous tag, free `vX.Y.Z`, `release` environment, the\n   same one `maelys-release preflight .` reads without writing anything —\n   then commits `VERSION` signed on `release/vX.Y.Z`, opens the pull request\n   and waits for its checks (`ci.yml` runs the socle's `check-product.yml`\n   on the three release targets).\n3. Merge that pull request under this repository's own rules. `cut` never\n   merges its own.\n4. `maelys-release cut . X.Y.Z --tag --apply`: it verifies the merge commit\n   of that pull request is on `main` and carries `VERSION` = `X.Y.Z`, waits\n   for every check of that exact commit, then signs `vX.Y.Z` on it — the\n   merge commit, never the branch — and pushes it.\n5. The workflow verifies the signed annotated tag, clones the pinned\n   dependencies, installs the declared packages, builds the packages on\n   Linux x86_64, Linux arm64 and macOS arm64, attests their provenance\n   (public repository only: a private one ships the signed tag and\n   `SHA256SUMS`), publishes the GitHub release, then renders and publishes\n   the Homebrew formula with its bottles.\n6. Verify: `gh release view vX.Y.Z`, `gh attestation verify ASSET --repo\n   OWNER/REPO --signer-repo maelys-dev/maelys-release` (the attestation is\n   signed by the socle's reusable workflow), `brew install\n   maelys-dev/tap/maelys-system`.\n\nUpgrade the socle with `maelys-release adopt DIR --apply` from a maelys-release\ncheckout at the wanted tag; `maelys-release check DIR` reports drift with exit 2.\n\n## Replaying the release of a tag\n\nWhen a release or its tap jobs failed for a reason outside the code — a\ncancelled job, an expired approval, a tap push lost to a race — run the\n`release` workflow by hand on the tag itself:\n\n```sh\ngh workflow run release.yml --ref vX.Y.Z -f tag=vX.Y.Z\n```\n\nIt rebuilds that tag, publishes its verified assets, then renders, bottles and\npublishes the tap. **`--ref` names the tag and is not optional**: the `release`\nenvironment only accepts tags `v*`, so a run started from the default branch\nis refused at `publish`. The replay uses the workflow file at that tag, hence\nthe socle that tag pinned; when the socle is at fault, the remedy is a new\npatch release carrying the corrected pin, not a replay.\n",
+      "executable": false
+    },
+    "SECURITY.md": {
+      "text": "# Security policy\n\nThe socle wrote this file once because it was missing. It belongs to this\nrepository now: correct the contact and the supported versions below.\n\n## Reporting a vulnerability\n\nReport a suspected vulnerability privately, through the GitHub advisory form\nof this repository (`Security` tab, `Report a vulnerability`). Do not open a\npublic issue for it, and do not describe it in a pull request.\n\nExpect an acknowledgement within a few days. A confirmed report gets a fix,\na released version and a credit in `CHANGELOG.md` unless the reporter asks\notherwise.\n\n## Supported versions\n\nThe latest released `vX.Y.Z` receives fixes. Older versions do not: the fix\nlands in a new release, and a deployment upgrades to it.\n\n## Scope\n\nmaelys-system as published from this repository. A vulnerability in a pinned\nMaelys dependency belongs to that repository; report it there.\n",
+      "executable": false
+    },
+    "VERSION": {
+      "text": "1.2.3\n",
+      "executable": false
+    },
+    "maelys-release.conf": {
+      "text": "[gate]\nnone\n",
+      "executable": false
+    },
+    "scripts/package-release.sh": {
+      "text": "#!/bin/sh\nexit 0\n",
+      "executable": true
+    }
+  },
+  "argv": [
+    "adopt",
+    "<PRODUCT>",
+    "--socle-sha",
+    "a6a308b67c26ddd2a16dfffee25f7476f02a06d1",
+    "--socle-tag",
+    "v0.58.0",
+    "--format",
+    "json"
+  ],
+  "events": [
+    {
+      "call": {
+        "kind": "run",
+        "argv": [
+          "git",
+          "rev-parse",
+          "--abbrev-ref",
+          "HEAD"
+        ],
+        "cwd": "<PRODUCT>"
+      },
+      "result": {
+        "returncode": 0,
+        "stdout": "main\n",
+        "stderr": ""
+      }
+    },
+    {
+      "call": {
+        "kind": "run",
+        "argv": [
+          "git",
+          "remote",
+          "get-url",
+          "origin"
+        ],
+        "cwd": "<PRODUCT>"
+      },
+      "result": {
+        "returncode": 0,
+        "stdout": "https://github.com/maelys-dev/maelys-system.git\n",
+        "stderr": ""
+      }
+    },
+    {
+      "call": {
+        "kind": "which",
+        "name": "gh"
+      },
+      "result": "/opt/homebrew/bin/gh"
+    },
+    {
+      "call": {
+        "kind": "read",
+        "path": "repos/maelys-dev/maelys-system"
+      },
+      "response": "private-unreadable:repos/maelys-dev/maelys-system"
+    },
+    {
+      "call": {
+        "kind": "run",
+        "argv": [
+          "git",
+          "remote",
+          "get-url",
+          "origin"
+        ],
+        "cwd": "<PRODUCT>"
+      },
+      "result": {
+        "returncode": 0,
+        "stdout": "https://github.com/maelys-dev/maelys-system.git\n",
+        "stderr": ""
+      }
+    },
+    {
+      "call": {
+        "kind": "which",
+        "name": "gh"
+      },
+      "result": "/opt/homebrew/bin/gh"
+    },
+    {
+      "call": {
+        "kind": "read",
+        "path": "repos/maelys-dev/maelys-system"
+      },
+      "response": "private-unreadable:repos/maelys-dev/maelys-system"
+    },
+    {
+      "call": {
+        "kind": "read",
+        "path": "repos/maelys-dev/maelys-system/branches/main/protection"
+      },
+      "response": "private-unreadable:repos/maelys-dev/maelys-system/branches/main/protection"
+    }
+  ]
+}

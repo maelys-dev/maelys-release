@@ -1,0 +1,6 @@
+{
+  "exitCode": 0,
+  "stdout": "branch   main of maelys-dev/maelys-system could not be read\nUNREAD   GitHub did not answer for the branch protection: this plan is not a reading, and --apply refuses\nUNREAD   GitHub did not answer for the rulesets: this plan is not a reading, and --apply refuses\nnote     GitHub refused to say what protects main of maelys-dev/maelys-system, which a private repository of a free plan does. That is not the same fact as an open branch.\nsocle    called by the job 'check': check / check (linux), check / check (linux-arm64), check / check (macos), check / sanitizers\nadd      check / check (linux)\nadd      check / check (linux-arm64)\nadd      check / check (macos)\nadd      check / sanitizers\nadd      benchmark\nadd      linux (ubuntu-24.04, clang, clang++)\nadd      linux (ubuntu-24.04, gcc, g++)\nadd      linux (ubuntu-24.04-arm, clang, clang++)\nadd      linux (ubuntu-24.04-arm, gcc, g++)\nadd      macos (macos-15)\nadd      macos (macos-26)\nadd      macos-gates\nadd      mutation\nadd      package (ubuntu-24.04)\nadd      package (ubuntu-24.04-arm)\nadd      package-macos\nadd      sanitizers\nprotect: nothing written; add --apply\n",
+  "stderr": "",
+  "changedFiles": {}
+}

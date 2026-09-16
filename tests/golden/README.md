@@ -5,9 +5,11 @@ A refactoring PR replays the reference; it never records a new one:
 ```sh
 python3 tests/golden/capture.py /absolute/new/replay
 diff -ru tests/golden/baseline /absolute/new/replay
+python3 tests/golden/capture_api.py /absolute/new/api-replay
+diff -ru tests/golden/api/baseline /absolute/new/api-replay
 ```
 
-The `diff` must produce no output and exit 0. Paste the command, output and exit
+Both diffs must produce no output and exit 0. Paste the commands, output and exit
 code into every refactoring PR. `check.yml` also runs this comparison on Linux
 and macOS for PRs whose head branch starts with `refactor/`.
 
@@ -53,12 +55,96 @@ Plain `--record` remains the bootstrap operation: it requires unchanged
 that would conflate changing the implementation with changing the inputs.
 Refreshing fixture/fleet inputs is a separate, explicitly reviewed operation.
 
-## Coverage still to add
+## API and host reference
 
-This reference covers `describe`, `declarations`, `check` and the `adopt` plan.
-Before moving `protect`, record API responses through the host and add the
-`protect` and `preflight` plans. The pure extraction approved after stage 1
-precedes that additional coverage. Include the `public`
-and `classic-protection` selectors, the adoption guard and `current` behavior.
-Until then, the no-gh reference cannot prove those GitHub-dependent branches
-unchanged; the stateful host tests exercise writes and their verification reads.
+The original reference remains unchanged: 680 observations, 142 command triplets,
+eight pinned fleet repositories, without `gh`. The additional `api/` reference
+records the approved stage 4d implementation at
+`a6a308b67c26ddd2a16dfffee25f7476f02a06d1` (PR #117), before moving any further
+command. It contains 27 scenarios, each in JSON and text (54 CLI invocations):
+
+| Command | Recorded branches |
+| --- | --- |
+| `protect` plan | Classic settings, rulesets, open branch, unreadable protection, unreadable check runs, `--without-legs` |
+| `preflight` | Classic protection, ruleset, private visibility, open branch, absent release environment; signing configuration and tap drift reads |
+| `adopt` plan and `check` | Old pin with public/classic-protection selectors; `current` false, true and unknown, and the resulting `check` verdicts |
+| `adopt --apply` on throwaway files only | Classic and ruleset guards: allowed or refused due to a retired required context; unreadable protection |
+| `migrate` plan, without `--push` | A moving document and its references, generated/public/data/unlisted documents staying, foreign product and wrong destination refusals |
+
+The inputs contain 32 real GET responses read through `Host.read` on
+2026-09-16: `maelys-dev/maelys-system` (classic protection),
+`maelys-dev/agent-cli-spec` (ruleset), and the public `homebrew-tap` formula
+listing/files read by preflight. Each response retains its decoded body and
+state, endpoint and reading timestamp. The cache keeps the first reading of
+each endpoint; these independent GETs are not an atomic GitHub snapshot.
+The 15 derived responses explicitly name their original response and changes:
+private visibility, absent/unreadable protection, missing environment,
+unreadable check runs, or an added retired context. These are constructed
+branches, **not** claims about the repositories' actual settings. No real
+settings were changed to manufacture a failure.
+
+`inputs/` freezes the product files (including executable bits), command line,
+and ordered host calls. Git reads run only when recording inputs, in temporary
+local repositories; their stdout, stderr and exit codes become inputs too.
+The manifest hashes every input file. Current test fixture builders never run
+during replay. The local fixture commit seen by `migrate` is recorded, not
+recreated on another platform.
+
+`capture_api.py` launches each case in a fresh isolated interpreter with an
+empty PATH and no inherited credentials or private self-test switches. It runs
+the real CLI and replaces only `host.HOST`. Every `read`, `which` and `run` must
+match the next recorded call, and all calls must be consumed. There is no
+fallback to real GitHub or Git; `write`, `stream` and `exec` always fail. Plans
+must leave their files unchanged. Successful local adoptions capture the
+changed files as well as stdout, stderr and exit code. Only absolute product
+and socle paths are normalized; API metadata, messages and JSON fields remain.
+
+`test_api_golden.py` checks this boundary, fails a deliberately corrupted
+transcript, and checks that the reference actually reaches the branches above.
+Both full replays run in `check.yml` on Linux and macOS for `refactor/**` PRs.
+To inspect a single case, add `--case protect-classic-json` to `capture_api.py`.
+
+### Recording and intentional fixes
+
+Ordinary refactoring only replays. The initial API recording used the clean
+approved source above; `record_api.py` refuses a different HEAD, dirty source,
+an existing destination or a self-test environment. It is the only new tool
+that contacts GitHub, for reads only:
+
+```sh
+python3 tests/golden/record_api.py /absolute/new/api-inputs \
+  --source /absolute/clean/approved-socle --commit FULL_APPROVED_COMMIT \
+  --responses-cache /absolute/new/first-read-responses.json
+python3 tests/golden/capture_api.py /absolute/new/api-baseline \
+  --source /absolute/clean/approved-socle --inputs /absolute/new/api-inputs
+```
+
+The explicit cache path preserves first reads across interrupted recordings.
+A new cache means a deliberate live refresh, requiring a separately reviewed
+input diff. Review the complete provenance, input and output diff before
+copying the new directories into `api/inputs` and `api/baseline`.
+
+For an intentional behavior fix, follow the separate fix-PR procedure above,
+keep `api/inputs` unchanged, and replay those inputs with `--source` pointing
+to the clean committed fix. Explain the failing API diff as well as the
+original golden diff, then copy the reviewed outputs into `api/baseline` in a
+separate commit of that fix PR. Never rerun `record_api.py` to make a refactor
+pass. A changed host call sequence is itself a reviewable difference: updating
+inputs needs an explicit explanation, not a fallback or automatic recording.
+The replay manifest's `sourceCommit` identifies the implementation that
+recorded the **inputs**; it remains fixed while comparing candidate outputs.
+
+### Limits
+
+The new reference covers plans and local adoption, not the remote writes of
+`protect`, `cut`, `tap` or `migrate`. Stateful host tests remain responsible for
+writes and their verification reads; property tests still verify preservation
+of non-check protection settings. Neither reference covers every command or
+every API branch (pagination and all channel/gate combinations, for example).
+
+The recorded implementation allows local adoption when protection cannot be
+read: no lock was detected. This is captured explicitly, not endorsed by the
+reference. Changing it requires a behavior fix and an explained golden diff.
+Likewise, `protect` can return 0 with `unread` diagnostics; absence and unknown
+remain distinct recorded results. Approval of this extension is required before
+the deferred command extractions resume.

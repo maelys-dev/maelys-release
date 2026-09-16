@@ -1,0 +1,6 @@
+{
+  "exitCode": 2,
+  "stdout": "branch   main of maelys-dev/agent-cli-spec is protected by a ruleset\nruleset  requires check / check (linux), check / check (linux-arm64), check / check (macos), check / sanitizers — --apply writes this ruleset, never a classic protection beside it\nsocle    called by the job 'check': check / check (linux), check / check (linux-arm64), check / check (macos), check / sanitizers\nok       check / check (linux)\nok       check / check (linux-arm64)\nok       check / check (macos)\nok       check / sanitizers\nNOT YET  check / sanitizers is what this socle's check job produces and no recent pull request carries it: adopt this socle first, or its next pull request will be the first to run under that name\nprotect: nothing written; add --apply\n",
+  "stderr": "",
+  "changedFiles": {}
+}

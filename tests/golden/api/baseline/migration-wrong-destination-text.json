@@ -1,0 +1,6 @@
+{
+  "exitCode": 1,
+  "stdout": "",
+  "stderr": "maelys-release: [VALIDATION_FAILED] The list does not describe this migration: docs/guide.md -> elsewhere/guide.md (expected golden-docs/maelys-system/guide.md).\nHint: Regenerate it with maelys-platform for this product.\n",
+  "changedFiles": {}
+}

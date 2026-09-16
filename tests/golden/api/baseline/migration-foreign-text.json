@@ -1,0 +1,6 @@
+{
+  "exitCode": 1,
+  "stdout": "",
+  "stderr": "maelys-release: [VALIDATION_FAILED] The list carries documents of another-product, not maelys-system.\nHint: Pass 'maelys-platform docs --prose --only maelys-system --format jsonl'.\n",
+  "changedFiles": {}
+}
