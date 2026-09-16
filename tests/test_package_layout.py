@@ -20,11 +20,17 @@ class PackageLayoutTest(unittest.TestCase):
         documents = product.work / "documents.jsonl"
         documents.write_text(json.dumps({"repository": "maelys-fixture", "path": "docs/migration-fixture.md",
                                         "destination": "documents/maelys-fixture/migration-fixture.md"}) + "\n")
+        formula = product.work / "maelys-fixture.rb"
+        formula.write_text("class MaelysFixture < Formula\nend\n")
+        # A plan clones and stages locally but never pushes. Reuse a fixture's
+        # bare repository so all three layouts inspect the same input tree.
+        product.env["TAP_URL"] = f"file://{product.work / 'remotes/maelys-system.git'}"
+        product.env["TAP_REPOSITORY"] = "maelys-dev/homebrew-tap"
         reference = product.run("adopt", str(product.dir), "--format", "json", "--compact")
         described = subprocess.run([sys.executable, "-I", str(CLI), "describe", "--format", "json"],
                                    env=product.env, text=True, capture_output=True, check=True)
         inspections = []
-        for command in ("declarations", "check", "dependencies", "rehearse", "migrate", "cut"):
+        for command in ("declarations", "check", "dependencies", "rehearse", "migrate", "cut", "tap"):
             for output in ("text", "json"):
                 args = [command, str(product.dir), "--format", output]
                 if command == "check":
@@ -37,6 +43,8 @@ class PackageLayoutTest(unittest.TestCase):
                     args.extend(["--documents", str(documents), "--documents-repository", "example/documents"])
                 if command == "cut":
                     args.append("1.3.0")
+                if command == "tap":
+                    args = ["tap", "maelys-fixture", "v1.2.3", str(formula), "--skip-style", "--format", output]
                 result = subprocess.run([sys.executable, "-I", str(CLI), *args],
                                         env=product.env, text=True, capture_output=True, check=False)
                 expected_code = {"check": 2, "rehearse": 1, "cut": 1}.get(command, 0)
@@ -69,7 +77,7 @@ class PackageLayoutTest(unittest.TestCase):
                 self.assertEqual(adopted.stdout, reference.stdout)
                 self.assertEqual(adopted.stderr, reference.stderr)
                 for args, expected in inspections:
-                    with self.subTest(command=args[0], output=args[3]):
+                    with self.subTest(command=args[0], output=args[args.index("--format") + 1]):
                         inspected = subprocess.run([sys.executable, "-I", str(executable), *args],
                                                    cwd=product.work, env=product.env, text=True,
                                                    capture_output=True, check=False)
