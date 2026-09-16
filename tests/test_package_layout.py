@@ -19,6 +19,16 @@ class PackageLayoutTest(unittest.TestCase):
         reference = product.run("adopt", str(product.dir), "--format", "json", "--compact")
         described = subprocess.run([sys.executable, "-I", str(CLI), "describe", "--format", "json"],
                                    env=product.env, text=True, capture_output=True, check=True)
+        inspections = []
+        for command in ("declarations", "check"):
+            for output in ("text", "json"):
+                args = [command, str(product.dir), "--format", output]
+                if command == "check":
+                    args.extend([*Product.SOCLE, "--mechanism", "maelys-release"])
+                result = subprocess.run([sys.executable, "-I", str(CLI), *args],
+                                        env=product.env, text=True, capture_output=True, check=False)
+                self.assertEqual(result.returncode, 0 if command == "declarations" else 2, result.stderr)
+                inspections.append((args, result))
         for layout in ("checkout", "installed"):
             with self.subTest(layout=layout):
                 prefix = product.work / layout
@@ -45,6 +55,14 @@ class PackageLayoutTest(unittest.TestCase):
                 self.assertEqual(adopted.returncode, reference.returncode, adopted.stderr)
                 self.assertEqual(adopted.stdout, reference.stdout)
                 self.assertEqual(adopted.stderr, reference.stderr)
+                for args, expected in inspections:
+                    with self.subTest(command=args[0], output=args[3]):
+                        inspected = subprocess.run([sys.executable, "-I", str(executable), *args],
+                                                   cwd=product.work, env=product.env, text=True,
+                                                   capture_output=True, check=False)
+                        self.assertEqual(inspected.returncode, expected.returncode, inspected.stderr)
+                        self.assertEqual(inspected.stdout, expected.stdout)
+                        self.assertEqual(inspected.stderr, expected.stderr)
                 # The GitHub withdrawal reader must use this entry point's
                 # version, even though its implementation now lives in a package.
                 (prefix / "VERSION").write_text("99.98.97\n", encoding="utf-8")
