@@ -5,8 +5,10 @@ from __future__ import annotations
 import pathlib
 import re
 
+from maelys_cli import Failure
+
 from .constants import (
-    CHECK_PLATFORMS, DECLARATION_FILE, SOCLE_CHANNEL_KINDS, SOCLE_COMMIT_VERIFICATIONS,
+    CHECK_PLATFORMS, DECLARATION_FILE, PROGRAM, SOCLE_CHANNEL_KINDS, SOCLE_COMMIT_VERIFICATIONS,
     SOCLE_GATES, SOCLE_MANIFEST_PATTERNS, SOCLE_MECHANISM, SOCLE_RUNNER_KEYS, SOCLE_TARGETS,
 )
 
@@ -106,6 +108,14 @@ class Declarations:
 
     def add(self, status: str, message: str, scope: str = "release") -> None:
         self.checks.append({"status": status, "message": message, "scope": scope})
+
+
+def require_valid(decl: Declarations, action: str) -> None:
+    if not decl.valid:
+        problems = [check["message"] for check in decl.applicable() if check["status"] not in ("ok", "note")]
+        raise Failure("PRECONDITION_FAILED", f"{decl.project} does not meet the product contract, so {action} is refused: "
+                      + "; ".join(problems) + ".", f"Run '{PROGRAM} check {decl.project}' and fix every violation.")
+
 
 
 def parse_packages(text: str) -> tuple[str, str]:
