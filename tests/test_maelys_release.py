@@ -327,6 +327,33 @@ class AdoptTest(unittest.TestCase):
     def tearDown(self) -> None:
         self.product.close()
 
+    def test_the_shared_context_observes_a_replaced_host_before_adoption_writes(self) -> None:
+        self.product.run("adopt", self.dir, "--apply")
+        before = {str(path.relative_to(self.product.dir)): path.read_bytes()
+                  for path in self.product.dir.rglob("*") if path.is_file()}
+        fake = protection_host(("ok", {"required_status_checks": {"contexts": ["check / check (gone)"]}}))
+        def local_read(command, cwd=None, env=None):
+            if command == ["git", "remote", "get-url", "origin"]:
+                return subprocess.CompletedProcess(command, 0, "https://github.com/o/r.git\n", "")
+            self.assertEqual(cwd, self.product.dir.resolve())
+            self.assertIn(command[:2], (["git", "grep"], ["git", "rev-parse"]))
+            return MODULE.Host.run(fake, command, cwd=cwd, env=self.product.env)
+        fake.runner = local_read
+        invocation, _ = MODULE.APP.parse(["adopt", self.dir, *Product.SOCLE, "--apply"])
+        # MODULE and its context already exist when the host is replaced.
+        # The real declaration reader and lock guard must still reach it.
+        with using_host(fake), self.assertRaises(MODULE.Failure) as refused:
+            MODULE.handle_adopt(invocation)
+        self.assertEqual(refused.exception.code, "PRECONDITION_FAILED")
+        self.assertIn("check / check (gone)", refused.exception.message)
+        self.assertIn("--without-legs --apply", refused.exception.hint)
+        self.assertIn("then", refused.exception.hint)
+        self.assertIn("repos/o/r/branches/main/protection", fake.reads)
+        self.assertEqual(fake.writes, [])
+        after = {str(path.relative_to(self.product.dir)): path.read_bytes()
+                 for path in self.product.dir.rglob("*") if path.is_file()}
+        self.assertEqual(after, before)
+
     def test_contract_refusals(self) -> None:
         product = self.product
         cases = [
@@ -4459,8 +4486,8 @@ class LegRenameTest(unittest.TestCase):
         self.assertIn("ruleset of the organisation", refusal.exception.message)
 
     def test_the_adoption_guard_names_the_order(self) -> None:
-        source = (ROOT / "bin" / "maelys-release").read_text(encoding="utf-8")
-        body = source.split("vanishing = vanishing_contexts(project)", 1)[1].split("files = plan(", 1)[0]
+        source = (ROOT / "bin" / "maelys_socle" / "adoption.py").read_text(encoding="utf-8")
+        body = source.split("vanishing = context.vanishing_contexts(project)", 1)[1].split("files = context.plan(", 1)[0]
         self.assertIn("--without-legs --apply", body)
         self.assertIn("then", body)
 
