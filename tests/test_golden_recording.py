@@ -27,6 +27,10 @@ class GoldenRecordingTest(unittest.TestCase):
 
     def test_candidate_must_name_the_exact_committed_source(self):
         with tempfile.TemporaryDirectory() as directory:
+            for invalid in ("", "HEAD", "a" * 39):
+                with self.subTest(candidate=invalid):
+                    self.assertIn("full 40-character commit", self.refused(
+                        directory, "--record", "--candidate", invalid))
             self.assertIn("exact clean HEAD commit", self.refused(directory, "--record", "--candidate", "0" * 40))
 
     def test_a_correct_commit_does_not_authorize_dirty_source(self):

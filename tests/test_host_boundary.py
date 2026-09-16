@@ -22,8 +22,12 @@ class HostBoundaryTest(unittest.TestCase):
         source = CLI.read_text(encoding="utf-8")
         tree = ast.parse(source)
         host = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "Host")
-        outside = source.splitlines()[:host.lineno - 1] + source.splitlines()[host.end_lineno:]
-        self.assertNotIn('"-X"', "\n".join(outside))
+        # Search literal flags regardless of quoting, not the longer help
+        # strings that hand an API command to the operator without running it.
+        escaped = [node.lineno for node in ast.walk(tree)
+                   if isinstance(node, ast.Constant) and node.value == "-X"
+                   and not host.lineno <= node.lineno <= host.end_lineno]
+        self.assertEqual(escaped, [], "GitHub write flags outside Host")
         for node in ast.walk(tree):
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name):
                 if node.func.value.id == "subprocess" or (node.func.value.id, node.func.attr) in (

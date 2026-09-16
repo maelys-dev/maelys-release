@@ -393,8 +393,11 @@ def main():
     source, output = args.source.resolve(), args.output.resolve()
     if output.exists():
         parser.error(f"refusing to overwrite {output}")
-    if args.candidate and not args.record:
-        parser.error("--candidate requires --record; ordinary refactors only replay")
+    if args.candidate is not None:
+        if not args.record:
+            parser.error("--candidate requires --record; ordinary refactors only replay")
+        if len(args.candidate) != 40 or any(char not in "0123456789abcdef" for char in args.candidate):
+            parser.error("--candidate must be a full 40-character commit")
     if args.record:
         raw_env = dict(os.environ)
         commit = git(source, "rev-parse", "HEAD", env=raw_env)
