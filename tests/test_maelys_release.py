@@ -2925,7 +2925,7 @@ class VanishingContextTest(unittest.TestCase):
         self.assertEqual(self.read(["mbedtls (macos-15)", "check / fuzz"], ["check / fuzz"]), [])
 
     def test_nothing_vanishes_when_the_names_agree(self) -> None:
-        self.assertEqual(self.read(["check / check (macos-15)"], ["check / check (macos-15)"]), [])
+        self.assertEqual(self.read(["check / check (macos)"], ["check / check (macos)"]), [])
 
     def test_a_ruleset_protects_as_much_as_the_classic_endpoint(self) -> None:
         rules = [{"type": "deletion"}, {"type": "required_status_checks",
@@ -3517,9 +3517,13 @@ class ComingRuleTest(unittest.TestCase):
         does not is told nothing about a change to that workflow."""
         ci = self.product.dir / ".github" / "workflows" / "ci.yml"
         ci.write_text("name: ci\n\njobs:\n  mine:\n    runs-on: ubuntu-26.04\n", encoding="utf-8")
+        # Only the announcements that reach `socle`: one that reaches `all`
+        # (0.61.0's seeded-text rule) is told to every repository.
+        socle_only = [says for _, reaches, says in MODULE.COMING if reaches == "socle"]
         said = [check["message"] for check
                 in self.product.json("check", self.dir, expect=2)["data"]["checks"]
-                if check["message"].startswith("coming in ")]
+                if check["message"].startswith("coming in ")
+                and any(says in check["message"] for says in socle_only)]
         self.assertEqual(said, [])
 
     def test_a_version_already_shipped_says_nothing(self) -> None:
@@ -4076,7 +4080,7 @@ class ProtectByRulesetTest(unittest.TestCase):
 
     RULESET = [{"type": "deletion"},
                {"type": "required_status_checks",
-                "parameters": {"required_status_checks": [{"context": "check / check (macos-15)"}]}}]
+                "parameters": {"required_status_checks": [{"context": "check / check (macos)"}]}}]
 
     def run_protect(self, classic, ruleset, apply: bool = False):
         ruleset = json.loads(json.dumps(ruleset))
@@ -4111,9 +4115,9 @@ class ProtectByRulesetTest(unittest.TestCase):
         report = self.run_protect(("absent", None), ("ok", self.RULESET))
         self.assertTrue(report["protected"])
         self.assertEqual(report["protectedBy"], ["a ruleset"])
-        self.assertEqual(report["ruleset"], ["check / check (macos-15)"])
+        self.assertEqual(report["ruleset"], ["check / check (macos)"])
         # And what it already requires is not proposed as something to add.
-        self.assertIn("check / check (macos-15)", report["required"])
+        self.assertIn("check / check (macos)", report["required"])
 
     def test_apply_writes_the_ruleset_and_never_a_second_mechanism(self) -> None:
         """The fake API applies the ruleset and serves the verification read."""
@@ -4133,7 +4137,7 @@ class ProtectByRulesetTest(unittest.TestCase):
         classic = ("ok", {"required_status_checks": {"contexts": ["check / fuzz"]}})
         report = self.run_protect(classic, ("ok", self.RULESET))
         self.assertEqual(report["protectedBy"], ["branch protection", "a ruleset"])
-        self.assertEqual(sorted(report["required"]), ["check / check (macos-15)", "check / fuzz"])
+        self.assertEqual(sorted(report["required"]), ["check / check (macos)", "check / fuzz"])
 
 
 class PackageTargetsTest(unittest.TestCase):
@@ -4479,13 +4483,13 @@ class LegRenameTest(unittest.TestCase):
                           "parameters": {"strict_required_status_checks_policy": False,
                                          "do_not_enforce_on_create": False,
                                          "required_status_checks": [
-                                             {"context": "check / check (ubuntu-26.04)", "integration_id": 15368},
+                                             {"context": "check / check (linux)", "integration_id": 15368},
                                              {"context": "check / sanitizers", "integration_id": 15368}]}}]}
     # As rules/branches answers them: each rule with its parameters.
     APPLIED = [{"type": "deletion", "ruleset_id": 7, "ruleset_source_type": "Repository", "parameters": None},
                {"type": "required_status_checks", "ruleset_id": 7, "ruleset_source_type": "Repository",
                 "parameters": {"strict_required_status_checks_policy": False, "do_not_enforce_on_create": False,
-                               "required_status_checks": [{"context": "check / check (ubuntu-26.04)"},
+                               "required_status_checks": [{"context": "check / check (linux)"},
                                                           {"context": "check / sanitizers"}]}}]
 
     def write(self, contexts, applied=None, ruleset=None):

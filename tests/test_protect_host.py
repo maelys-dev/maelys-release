@@ -69,7 +69,7 @@ class ProtectHostTest(unittest.TestCase):
     def test_classic_apply_preserves_the_full_fixture_except_contexts(self):
         for strict in (False, True):
             with self.subTest(strict=strict):
-                before = FakeProtection(["check / check (ubuntu-26.04)"], strict=strict).body
+                before = FakeProtection(["check / check (linux)"], strict=strict).body
                 before.update(required_pull_request_reviews={"required_approving_review_count": 2,
                               "dismiss_stale_reviews": True, "require_code_owner_reviews": True,
                               "require_last_push_approval": True},
