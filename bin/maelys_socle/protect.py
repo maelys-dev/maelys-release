@@ -18,10 +18,7 @@ from . import host
 from .constants import CI_JOB, CI_USES, DECLARATION_FILE, LEGS_JOB
 from .context import Context
 from .declarations import parse_release
-from .github import (
-    github_api, github_list, github_read, github_repository, observed_contexts,
-    protection_settings, required_contexts, ruleset_shape, verify_protection, withdrawn_for,
-)
+from .github import (github_api, github_list, github_read, github_repository, observed_contexts, protection_settings, read_protection, required_contexts, ruleset_shape, verify_protection, withdrawn_for)
 from .project import project_of
 from .workflows import yaml_scalar
 
@@ -206,9 +203,10 @@ def handle_protect(invocation: Invocation, context: Context) -> tuple[dict, int]
     branch = data.get("default_branch") or "main"
     caller, derived = socle_check_contexts(project, context)
     seen, from_tag, partial = observed_contexts(repository, branch)
-    state, current = github_read(f"repos/{repository}/branches/{branch}/protection")
-    holds = current if isinstance(current, dict) else {}
-    required = list(((holds.get("required_status_checks") or {}).get("contexts") or []))
+    protection = read_protection(repository, branch)
+    state, current = protection.classic_state, protection.classic_body
+    holds = protection.classic
+    required = protection.classic_contexts
     # The other endpoint, and the third place this socle has had to learn
     # it. A branch is protected by the classic protection, by a ruleset, or
     # by both, and GitHub applies them in union. `preflight` learned it in
@@ -217,15 +215,8 @@ def handle_protect(invocation: Invocation, context: Context) -> tuple[dict, int]
     # what a branch requires -- was still reading one, and told a
     # ruleset-protected repository it was not protected while proposing to
     # add three contexts its ruleset already required.
-    ruled, rules = github_read(f"repos/{repository}/rules/branches/{branch}")
-    by_rule: list[str] = []
-    if ruled == "ok" and isinstance(rules, list):
-        for rule in rules:
-            if not isinstance(rule, dict) or rule.get("type") != "required_status_checks":
-                continue
-            for check in (rule.get("parameters") or {}).get("required_status_checks") or []:
-                if isinstance(check, dict) and check.get("context"):
-                    by_rule.append(str(check["context"]))
+    ruled, rules = protection.ruled_state, protection.rules
+    by_rule = protection.rule_contexts
     required += [name for name in by_rule if name not in required]
     # The socle's legs are computed, never observed: they come from the
     # check-product.yml this socle carries, so an adoption that renames them
@@ -471,7 +462,8 @@ def write_ruleset(repository: str, branch: str, rules: object, contexts: list[st
                       "Writing a ruleset needs administration of the repository.")
     # Re-read, as for a classic protection: every rule but the required
     # contexts must read back as it was, and the contexts as written.
-    state, after = github_read(f"repos/{repository}/rules/branches/{branch}")
+    reread = read_protection(repository, branch, classic=False)
+    state, after = reread.ruled_state, reread.rules
     if state != "ok" or not isinstance(after, list):
         raise Failure("PROCESS_FAILED",
                       f"ruleset {identifier} of {repository} was written, and GitHub did not answer its re-read.",
