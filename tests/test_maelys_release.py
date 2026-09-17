@@ -2978,7 +2978,7 @@ class LinuxRunnersTest(unittest.TestCase):
         runners still could not adopt."""
         self.assertEqual(self.WORKFLOW.count(
             "runs-on: ${{ fromJSON(github.event.repository.private && inputs.linux_x86_64_runner"
-            " || '\"ubuntu-26.04\"') }}"), 5)  # fuzz, sanitizers and the three aliases
+            " || '\"ubuntu-26.04\"') }}"), 2)  # fuzz and sanitizers; the aliases left in 0.60.0
         self.assertNotIn("\n    runs-on: ubuntu-26.04\n", self.WORKFLOW)
 
     def test_adopt_writes_one_line_per_declared_leg(self) -> None:
@@ -4675,28 +4675,25 @@ class WithdrawnVersionTest(unittest.TestCase):
 
 
 class LegAliasTest(unittest.TestCase):
-    """The old names, kept as aliases, so a rename never narrows a protection.
+    """The old names were aliases from 0.57.0 to 0.59.2, and left in 0.60.0.
 
     maelys-egress: narrow, adopt, merge, widen leaves main requiring less for
     a whole pull request, and begins with the gesture an agent's guard
-    refuses. With the old names still reported, the adoption loses nothing
-    and one write moves the protection from each alias to its leg.
+    refuses. With the old names still reported, the adoption lost nothing
+    and one write moved the protection from each alias to its leg. Once no
+    branch of the fleet required an old name -- measured on 2026-09-16 and
+    again the day of the cut -- they left, announced a version early; the
+    reader of `# alias:` lines stays, and finds none.
     """
 
     WORKFLOW = (ROOT / ".github" / "workflows" / "check-product.yml").read_text(encoding="utf-8")
 
-    def test_one_alias_per_leg_and_each_fails_unless_the_legs_succeeded(self) -> None:
-        aliases = MODULE.check_product_aliases()
-        self.assertEqual(aliases, [("ubuntu-26.04", "linux"), ("ubuntu-26.04-arm", "linux-arm64"),
-                                   ("macos-15", "macos")])
-        self.assertEqual([leg for _, leg in aliases], MODULE.check_product_legs())
-        for old, leg in aliases:
-            job = self.WORKFLOW.split(f"\n  alias-{leg}:\n", 1)[1].split("\n  # alias:", 1)[0]
-            self.assertIn(f"name: check ({old})", job)
-            self.assertIn("needs: check", job)
-            # Not !cancelled(): a skipped job passes a required check.
-            self.assertIn("if: always()", job)
-            self.assertIn('run: test "${{ needs.check.result }}" = success', job)
+    def test_no_alias_remains_and_the_reader_finds_none(self) -> None:
+        self.assertEqual(MODULE.check_product_aliases(), [])
+        self.assertNotIn("alias", self.WORKFLOW)
+        self.assertEqual(MODULE.check_product_legs(), ["linux", "linux-arm64", "macos"])
+        # The announcement did not outlive the version that honoured it.
+        self.assertFalse([entry for entry in MODULE.COMING if entry[0] == "0.60.0"])
 
     def protect(self, required, seen, apply=False):
         fake = FakeProtection(required)
@@ -4712,26 +4709,41 @@ class LegAliasTest(unittest.TestCase):
                 "option": lambda self, name, default="": default, "format": "json"})()
             return MODULE.handle_protect(invocation), [body for _, _, body in host.writes]
 
-    def test_protect_swaps_each_alias_for_its_leg_in_one_write(self) -> None:
+    def test_an_old_name_still_required_is_stale_and_never_dropped_silently(self) -> None:
+        # What the 0.60.0 Impact line says: a branch that still requires an
+        # old name blocks every pull request, protect names it, and --apply
+        # does not narrow by itself.
         old = ["check / check (ubuntu-26.04)", "check / check (macos-15)", "mine"]
-        seen = ["check / check (linux)", "check / check (macos)", "check / check (ubuntu-26.04)",
-                "check / check (macos-15)", "mine"]
-        (report, code), written = self.protect(old, seen, apply=True)
-        self.assertEqual(report["replaced"], [{"required": "check / check (ubuntu-26.04)", "by": "check / check (linux)"},
-                                              {"required": "check / check (macos-15)", "by": "check / check (macos)"}])
-        self.assertEqual(report["requiredButNeverRun"], [], "an alias with its successor is not stale")
-        self.assertEqual(code, MODULE.EXIT_OK)
-        self.assertEqual(len(written), 1, "one write, never a narrowed protection in between")
-        self.assertEqual(sorted(written[0]["contexts"]),
-                         ["check / check (linux)", "check / check (linux-arm64)", "check / check (macos)", "mine"])
+        seen = ["check / check (linux)", "check / check (macos)", "mine"]
+        (report, code), written = self.protect(old, seen)
+        self.assertEqual(report["replaced"], [])
+        self.assertEqual(sorted(report["requiredButNeverRun"]), ["check / check (macos-15)", "check / check (ubuntu-26.04)"])
+        self.assertEqual(sorted(report["dropping"]), ["check / check (macos-15)", "check / check (ubuntu-26.04)"])
+        self.assertEqual(written, [])
         text = MODULE.text_protect(report)
-        self.assertIn("replace  check / check (macos-15) -> check / check (macos)", text)
+        self.assertIn("STALE    check / check (ubuntu-26.04) is required and no run", text)
+        self.assertIn("DROP     check / check (macos-15) is required and this plan leaves it out", text)
+        with self.assertRaises(MODULE.Failure) as refused:
+            self.protect(old, seen, apply=True)
+        self.assertIn("--allow-narrow", refused.exception.hint)
+
+    def test_the_output_keeps_what_the_branch_required_before(self) -> None:
+        old = ["check / check (linux)", "mine"]
+        seen = ["check / check (linux)", "check / check (macos)", "mine"]
+        (report, _), _ = self.protect(old, seen)
+        self.assertEqual(report["before"]["required"], ["check / check (linux)", "mine"])
+        self.assertEqual(report["before"]["rulesets"], [])
+        self.assertIsInstance(report["before"]["classic"], dict)
+        self.assertIn("enforce_admins", report["before"]["classic"])
+        self.assertNotIn("before   ", MODULE.text_protect(report))
+        report["applied"] = True
+        self.assertIn('before   {"classic": {', MODULE.text_protect(report))
 
     def test_a_write_that_moves_any_other_setting_fails_loudly(self) -> None:
         """The property maelys-oci asked for: after --apply, no setting but the
         checks differs from before. A GitHub that turned linear history off
         during the write is caught by the re-read, whatever the write was."""
-        required = ["check / check (ubuntu-26.04)", "check / check (macos-15)"]
+        required = ["check / check (linux)", "check / check (macos)"]
         seen = ["check / check (linux)", "check / check (macos)"]
         for moved in ({"required_linear_history": {"enabled": False}},
                       {"required_status_checks": {"strict": False, "contexts": []}},
@@ -4775,7 +4787,7 @@ class LegAliasTest(unittest.TestCase):
         """The refusal agent-cli-spec met after merging its adoption: sanitizers
         never runs there, its ruleset requires it, and protect --apply said no
         merged pull request had run it."""
-        old = ["check / check (ubuntu-26.04)", "check / check (macos-15)", "check / sanitizers"]
+        old = ["check / check (linux)", "check / check (macos)", "check / sanitizers"]
         seen = ["check / check (linux)", "check / check (macos)"]
         (report, code), written = self.protect(old, seen, apply=True)
         self.assertEqual(report["kept"], ["check / sanitizers"])
@@ -4839,8 +4851,8 @@ class LegAliasTest(unittest.TestCase):
     def test_an_existing_protection_changes_in_its_checks_alone(self) -> None:
         """maelys-oci: "require branches to be up to date" went from true to
         false under a plan that named three replacements."""
-        required = ["check / check (ubuntu-26.04)", "mutation"]
-        seen = ["check / check (linux)", "check / check (ubuntu-26.04)", "mutation"]
+        required = ["check / check (linux)", "mutation"]
+        seen = ["check / check (linux)", "mutation"]
         report, commands = self.protect_with(self.answers(required, seen, strict=True), required, seen)
         command, body = commands[0]
         self.assertEqual(command, ("PATCH", "repos/o/r/branches/main/protection/required_status_checks"))
@@ -4850,12 +4862,16 @@ class LegAliasTest(unittest.TestCase):
         with self.assertRaises(MODULE.Failure):
             self.protect(["check / check (ubuntu-26.04)"], ["check / check (ubuntu-26.04)"], apply=True)
 
-    def test_an_adoption_does_not_refuse_a_branch_requiring_the_old_names(self) -> None:
+    def test_an_adoption_refuses_a_branch_requiring_an_old_name(self) -> None:
+        # Until 0.59.2 the aliases were produced and the guard let them be;
+        # since 0.60.0 nothing produces them, and the guard names each.
         required = ["check / check (ubuntu-26.04)", "check / check (ubuntu-26.04-arm)",
                     "check / check (macos-15)", "check / check (gone)"]
         with workflow_project() as project, using_host(protection_host(
                 ("ok", {"required_status_checks": {"contexts": required}}))):
-            self.assertEqual(MODULE.vanishing_contexts(project), ["check / check (gone)"])
+            self.assertEqual(MODULE.vanishing_contexts(project),
+                             ["check / check (gone)", "check / check (macos-15)", "check / check (ubuntu-26.04)",
+                              "check / check (ubuntu-26.04-arm)"])
 
 
 class ProtectionContextsTest(unittest.TestCase):
@@ -5843,3 +5859,67 @@ class NamingNoPrivateRepositoryTest(unittest.TestCase):
         self.assertEqual([(entry["path"], entry["line"]) for entry in remaining],
                          [("AGENTS.md", 1), ("README.md", 1)])
 
+
+
+class ImpactWritesTest(unittest.TestCase):
+    """`[writes: …]` after the selectors: what a version changes in the commands that write."""
+
+    def test_the_marker_is_read_and_nothing_means_an_empty_list(self) -> None:
+        line = "[asks: nothing] [writes: protect, tap] The plan says more."
+        marker = MODULE.IMPACT_ASKS.match(line)
+        self.assertEqual(marker.group(3), "protect, tap")
+        self.assertEqual(line[marker.end():], "The plan says more.")
+        self.assertEqual(MODULE.IMPACT_ASKS.match("[asks: old-legs] [writes: nothing] Text.").group(3), "nothing")
+        # Superseded-by keeps its place, before writes.
+        both = MODULE.IMPACT_ASKS.match("[asks: channels] [superseded-by: 0.57.0] [writes: tap] Text.")
+        self.assertEqual((both.group(2), both.group(3)), ("0.57.0", "tap"))
+        self.assertIsNone(MODULE.IMPACT_ASKS.match("[asks: nothing] Text.").group(3))
+
+    def test_adopt_prints_the_marker_beside_the_line(self) -> None:
+        data = {"mode": "plan", "files": [], "impactFrom": "v0.59.2", "checks": [], "changed": False,
+                "socle": {"tag": "v0.60.0"}, "mechanism": "custom", "project": "/p",
+                "impact": [{"version": "0.60.0", "says": "Text.", "asks": ["old-legs"], "asksThis": False,
+                            "supersededBy": None, "writes": ["protect"]},
+                           {"version": "0.60.1", "says": "More.", "asks": ["nothing"], "asksThis": False,
+                            "supersededBy": None, "writes": []}]}
+        text = MODULE.text_adopt(data)
+        self.assertIn("0.60.0   -    Text. [writes: protect]", text)
+        self.assertIn("0.60.1   -    More.\n", text)
+
+
+class SeededNamingRuleTest(unittest.TestCase):
+    """A seeded text naming the documentation repository is refused unless [docs] named.
+
+    The seed of 0.59.2 named it for every product, and the file is written
+    once: maelys-json found the line adopting. A written rule holds only
+    when a machine verifies it (maelys-system).
+    """
+
+    def named(self, decl) -> list:
+        return [c["message"] for c in decl.checks if "names the documentation repository" in c["message"]]
+
+    def test_the_name_in_a_seeded_text_is_a_violation_without_the_word(self) -> None:
+        product = Product()
+        self.addCleanup(product.close)
+        product.run("adopt", str(product.dir), "--apply")
+        product.write("LICENSING.md", product.read("LICENSING.md") + "\nProse moves to `maelys-docs/p/`.\n")
+        decl = MODULE.read_declarations(product.dir, "maelys-fixture", "custom")
+        found = self.named(decl)
+        self.assertEqual(len(found), 1, found)
+        self.assertTrue(found[0].startswith("LICENSING.md names"))
+        # A note in 0.60.0, a refusal from 0.61.0 -- announced, so that the
+        # line the socle itself wrote does not turn a CI red the day the
+        # rule arrives.
+        self.assertEqual([c["status"] for c in decl.checks if c["message"] == found[0]], ["note"])
+        self.assertIn("refuses it from maelys-release 0.61.0", found[0])
+        self.assertTrue([entry for entry in MODULE.COMING if entry[0] == "0.61.0" and entry[1] == "all"])
+        product.write("maelys-release.conf", product.read("maelys-release.conf") + "\n[docs]\nnamed\n")
+        self.assertEqual(self.named(MODULE.read_declarations(product.dir, "maelys-fixture", "custom")), [])
+
+    def test_a_seeded_text_naming_nothing_passes(self) -> None:
+        product = Product()
+        self.addCleanup(product.close)
+        product.run("adopt", str(product.dir), "--apply")
+        for name in ("RELEASING.md", "LICENSING.md", "SECURITY.md"):
+            self.assertNotIn("maelys-docs", product.read(name), name)
+        self.assertEqual(self.named(MODULE.read_declarations(product.dir, "maelys-fixture", "custom")), [])

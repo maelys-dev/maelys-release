@@ -1122,6 +1122,13 @@ A line a later version replaces also says so, as data after its selectors:
 the line asks nothing, and `adopt` prints only that it is superseded — never
 its instruction, which a reader going line by line would act on first.
 
+Since 0.60.0 a line also says what the version changes in the commands
+that write on GitHub — `protect`, `tap`, `cut`, `migrate` — as data after
+the selectors: `[writes: protect]`, or `[writes: nothing]` when the version
+was looked at and changes no write. `adopt` prints it beside the line, and
+a product that lets such a version mature a day before adopting it, as
+maelys-http does, reads the marker rather than the changelog.
+
 `adopt` marks each line for the product at hand — `ASKS`, `-`, or `?` when a
 selector cannot be evaluated or the line predates the marker — and returns
 `current` in its JSON: true when nothing since the pin asks this product a
@@ -1350,6 +1357,21 @@ commit that prepares it, never in a pull request of its own. The socle
 moves several times a week, and a dedicated pull request per product per
 version would be all the fleet ever reviewed. The changelog names what the
 product must change by hand, if anything.
+
+**Between two releases, a product adopts only when a line asks it to.**
+Every entry of the socle's changelog carries an Impact line, and `adopt`
+marks each line since the product's pin `asksThis`: true when the line
+asks this product a gesture, false when it asks nothing of it. `check`
+says the same as a note, "nothing since vX.Y.Z asks this product a
+gesture", and reports no drift for a pin that is behind. The rule five
+products wrote for themselves, and the socle holds with them: no adoption
+pull request for a version whose lines ask nothing; the upgrade rides with
+the next release. Two exceptions, both said by the line itself: a version
+that changes what the shared CI runs — a job removed, a job added — is
+worth adopting on its own, because every pull request pays for it until
+then; and a version whose line says `[writes: …]` changes what a command
+writes on GitHub, which a product may let mature for a day on the pilot
+repository and on the products that adopt first.
 
 ```sh
 git clone https://github.com/maelys-dev/maelys-release && git -C maelys-release checkout vX.Y.Z
@@ -1657,10 +1679,18 @@ result for all its legs, so each alias reports all three — stricter than the
 name it stands for, never more lenient — and runs under `always()`, because a
 skipped job passes a required check. The adoption then removes nothing a
 branch requires, and `protect --apply` replaces each alias by its leg in the
-same write, pair by pair in its report. A later version removes the aliases,
-announced a version before, and the adoption guard refuses it on a branch that
-still requires one. `protect --without-legs` stays for a rename that comes
-without aliases.
+same write, pair by pair in its report. `protect --without-legs` stays for a
+rename that comes without aliases.
+
+**Since 0.60.0 the aliases are gone**, announced by 0.59.0 a version before
+and measured on the fleet the day of the cut: no branch required
+`check / check (ubuntu-26.04)`, `(ubuntu-26.04-arm)` or `(macos-15)` — the
+jobs of a product's own that carry those runner names in their titles are
+the product's, and the socle never counted them. Three jobs fewer on every
+pull request. The adoption guard refuses 0.60.0 on a branch that still
+requires an old name, `protect DIR` names it `STALE`, and `protect --apply`
+does not drop it by itself: replace it first, then adopt. The reader of
+`# alias:` lines stays in `protect`, and finds none.
 
 The narrowing order, kept for the record of why the rest exists:
 

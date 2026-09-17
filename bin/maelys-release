@@ -398,6 +398,25 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
     elif declared_word(project, "docs", "unnamed"):
         decl.add("note", f"{DECLARATION_FILE} [docs] unnamed is the default since 0.58.0; the line can go",
                  "conventions")
+    # The seeded texts are written once and then the product's, so a name
+    # the socle put there stays after the socle stops writing it: 0.59.2's
+    # LICENSING.md seed named the documentation repository for every
+    # product, and only a machine reading the file catches it afterwards
+    # (maelys-system: a written rule holds only when a machine verifies it).
+    if not decl.docs_named:
+        for name in CONVENTION_SEEDED:
+            seeded = project / name
+            if seeded.is_file() and DEFAULT_DOCUMENTS.split("/")[-1] in seeded.read_text(encoding="utf-8",
+                                                                                          errors="replace"):
+                # A note in 0.60.0 and a refusal from 0.61.0, announced below:
+                # the line is one the socle wrote, and a refusal on the day the
+                # rule arrives would have turned red a CI for the socle's own
+                # words -- and the recorded API reference's fixtures carry it.
+                decl.add("note", f"{name} names the documentation repository, which this repository's files"
+                                 f" do not unless {DECLARATION_FILE} declares [docs] named: remove the name"
+                                 " (a public reader may see it), or declare the word on a private repository;"
+                                 " check refuses it from maelys-release 0.61.0",
+                         "conventions")
     # A repository whose CI is entirely its own calls no shared CI, and
     # `check` must not create a ci.yml for it nor warn that none calls
     # check-product.yml. The socle is the first: its CI lints the workflows
@@ -641,12 +660,15 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
 # the rule is written or the date is moved, in the open.
 COMING: tuple[tuple[str, str, str], ...] = (
     # 0.54.0 honoured the first announcement -- the leg rename -- after
-    # moving it once, from 0.53.0, in the open. The second is its epilogue:
-    # the aliases that made the rename survivable leave once nothing needs
-    # them, and on 2026-09-16 no branch of the fleet required an old name.
-    ("0.60.0", "socle", "the aliases check (ubuntu-26.04), check (ubuntu-26.04-arm) and check (macos-15)"
-                        " stop reporting; a branch protection naming one blocks every pull request from"
-                        " then on -- 'protect DIR' shows none is required here, or names the one to replace"),
+    # moving it once, from 0.53.0, in the open. 0.60.0 honoured the second,
+    # its epilogue: the aliases that made the rename survivable left once
+    # nothing needed them, measured on the fleet the day of the cut.
+    # The third: 0.60.0 notes a seeded text naming the documentation
+    # repository; 0.61.0 refuses it. The seed of 0.59.2 wrote that line for
+    # every product, so the refusal comes one version after the note.
+    ("0.61.0", "all", "a seeded text (RELEASING.md, LICENSING.md, SECURITY.md) naming the documentation"
+                      " repository is refused by check unless maelys-release.conf declares [docs] named:"
+                      " remove the name now, or declare the word on a private repository"),
 )
 
 
@@ -921,7 +943,12 @@ def render_cli_reference(decl: Declarations) -> tuple[str, str]:
 # A line says `[asks: nothing]` or names the readers it asks; the prose after
 # it says what. A selector over-approximates rather than misses: it names who
 # the line addresses, and the line says whether the case is theirs.
-IMPACT_ASKS = re.compile(r"^\[asks: ([a-z][a-z, -]*)\]\s*(?:\[superseded-by: ([0-9]+\.[0-9]+\.[0-9]+)\]\s*)?")
+IMPACT_ASKS = re.compile(r"^\[asks: ([a-z][a-z, -]*)\]\s*(?:\[superseded-by: ([0-9]+\.[0-9]+\.[0-9]+)\]\s*)?"
+                         # `[writes: protect, tap]`: the commands whose writes on GitHub this
+                         # version changes, for a product that lets such a version mature a
+                         # day before adopting it (maelys-http). `[writes: nothing]` says the
+                         # version was looked at and changes no write.
+                         r"(?:\[writes: ([a-z][a-z, -]*)\]\s*)?")
 # The legs' names before 0.54.0, which a branch may still require.
 OLD_LEGS = ("ubuntu-26.04", "ubuntu-26.04-arm", "macos-15")
 
@@ -1023,7 +1050,10 @@ def socle_impact_entries(pinned: str) -> list[dict]:
         entries.append({"version": version, "says": says[marker.end():] if marker else says,
                         "asks": [name.strip() for name in marker.group(1).split(",") if name.strip()]
                         if marker else None,
-                        "supersededBy": marker.group(2) if marker and marker.group(2) else None})
+                        "supersededBy": marker.group(2) if marker and marker.group(2) else None,
+                        "writes": [name.strip() for name in marker.group(3).split(",")
+                                   if name.strip() and name.strip() != "nothing"]
+                        if marker and marker.group(3) else []})
     return entries
 
 
@@ -1646,7 +1676,9 @@ APP = SocleProgram(PROGRAM, PRODUCT, socle_version(), [
                                                               "asks": {"type": ["array", "null"],
                                                                        "items": {"type": "string"}},
                                                               "asksThis": {"type": ["boolean", "null"]},
-                                                              "supersededBy": {"type": ["string", "null"]}}}},
+                                                              "supersededBy": {"type": ["string", "null"]},
+                                                              "writes": {"type": "array",
+                                                                         "items": {"type": "string"}}}}},
                                            "current": {"type": ["boolean", "null"]}}}),
     cli.read("check", "check",
              "Report the conventions of a product and, when it publishes through the socle, its release mechanism;"
@@ -1787,6 +1819,12 @@ APP = SocleProgram(PROGRAM, PRODUCT, socle_version(), [
                                        "kept": {"type": "array", "items": {"type": "string"}},
                                        "unread": {"type": "array", "items": {"type": "string"}},
                                        "keeps": {"type": "object"}, "creates": {"type": "object"},
+                                       "before": {"type": "object", "required": ["classic", "required", "rulesets"],
+                                                  "properties": {"classic": {"type": ["object", "null"]},
+                                                                 "required": {"type": "array",
+                                                                              "items": {"type": "string"}},
+                                                                 "rulesets": {"type": "array",
+                                                                              "items": {"type": "string"}}}},
                                        "dropping": {"type": "array", "items": {"type": "string"}},
                                        "replaced": {"type": "array", "items": {
                                            "type": "object", "required": ["required", "by"],

@@ -1,5 +1,45 @@
 # Changelog
 
+## Unreleased
+
+- **The aliases go.** `check (ubuntu-26.04)`, `check (ubuntu-26.04-arm)`
+  and `check (macos-15)` stop reporting, as 0.59.0 announced: they carried
+  the fleet's branches through the leg rename, and on the day of this cut
+  no branch of the fleet required an old name — measured again, not
+  assumed. Three jobs fewer on every pull request that calls the shared CI.
+  The adoption guard refuses this version on a branch that still requires
+  one, and `protect DIR` names the replacement.
+- **The Impact line says what a version writes.** `[writes: protect, tap]`
+  after the selectors names the commands whose writes on GitHub the version
+  changes; `[writes: nothing]` says it was looked at. `adopt` prints it, its
+  JSON carries `writes`, and a product that lets such a version mature a
+  day, as maelys-http does, reads the marker.
+- **`protect` keeps what it read before writing.** Its output carries
+  `before`: the classic settings, the contexts each mechanism required.
+  Nothing restores what 0.43.0 to 0.57.0 overwrote — nothing had read it —
+  but every write from here on leaves its before state in the terminal and
+  the logs, for a hand. A record, not a restore command.
+- **`check` notes a seeded text that names the documentation repository**
+  while `[docs]` is unnamed, and refuses it from 0.61.0, announced:
+  `RELEASING.md`, `LICENSING.md`, `SECURITY.md` are written once by the
+  socle and then the product's, and 0.59.2's seed had named it for every
+  product — a refusal the day the rule arrives would have turned a CI red
+  for the socle's own words. Measured on the fleet's main branches: one
+  repository carries the line, maelys-json, told the day before.
+- **Coming in 0.61.0: that note becomes a refusal.** Remove the name from
+  the seeded texts now, or declare `[docs] named` on a private repository.
+- **The conventions say when to adopt between releases.** Only when a line
+  asks; with two exceptions the line itself says, a version that changes
+  what the shared CI runs and a version marked `[writes: …]`. The rule five
+  products wrote, held by the socle with them.
+- **Impact.** [asks: old-legs, public] [writes: nothing] A branch that
+  still requires an old leg name blocks every pull request once this is
+  adopted: `protect DIR` shows it and `protect DIR --apply` replaces it by
+  its leg before adopting. A public product whose seeded `LICENSING.md`
+  names the documentation repository removes the line before 0.61.0
+  refuses it (one measured: maelys-json). Every other product: adopt with
+  its next release, or now, for three jobs fewer per pull request.
+
 ## 0.59.2 — 2026-09-17
 
 - **The seed and `migrate` name no private repository either.** 0.58.0
