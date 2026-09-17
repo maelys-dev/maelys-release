@@ -47,9 +47,12 @@ changes. Never update the reference to make a pure refactor pass.
 
    `--candidate` requires `--record`, the exact full HEAD hash, and clean source.
    It preserves the old manifest's fixture commit, fleet commits and comparison
-   identity. It does not re-resolve the fleet's main branches or silently replace
-   the fixture builders with the tests just edited. `--reference` can select a
-   different existing reference explicitly.
+   identity, and the frozen `socle/VERSION` and `socle/CHANGELOG.md` of the
+   reference: the fixtures were built under that version, and their managed
+   headers carry it. It does not re-resolve the fleet's main branches or silently
+   replace the fixture builders with the tests just edited. `--reference` can
+   select a different existing reference explicitly. Only the plain `--record`
+   bootstrap freezes the source's own VERSION and CHANGELOG.
 4. Review the complete diff. Copy the accepted capture into `tests/golden/baseline`
    as a separate commit in the **same fix PR**, removing obsolete snapshot files
    if necessary. Include both the behavior explanation and the reviewed diff.

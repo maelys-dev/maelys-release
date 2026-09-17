@@ -447,7 +447,7 @@ def main():
         staging = work / "output"
         staging.mkdir()
         env = isolated_environment(work)
-        if args.record:
+        if args.record and not args.candidate:
             # Frozen from the source being recorded, so the replay of any
             # later candidate reads the version and changelog of this moment.
             for relative in SOCLE_INPUTS:
@@ -457,6 +457,12 @@ def main():
         else:
             # A replay reproduces the whole reference, its frozen inputs
             # included, so that a diff against it is empty when nothing moved.
+            # A candidate re-record keeps them too: the fixtures were built
+            # by the builders pinned in the reference, whose managed headers
+            # carry the version frozen with them, and recording the
+            # candidate's own VERSION over them made every fixture's `check`
+            # read `update` on release.yml -- exit 2 on 53 observations, at
+            # the 0.60.0 re-record. A version bump is not a behaviour.
             frozen_from = args.reference.resolve()
             for relative in SOCLE_INPUTS:
                 (staging / relative).parent.mkdir(parents=True, exist_ok=True)
