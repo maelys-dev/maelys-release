@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.59.2 — 2026-09-17
 
 - **The seed and `migrate` name no private repository either.** 0.58.0
   stopped the managed blocks from naming the documentation repository in a
