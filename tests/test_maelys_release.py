@@ -1228,14 +1228,17 @@ class NewTest(unittest.TestCase):
 
     def test_apply_creates_a_repository_check_accepts(self) -> None:
         data = self.run_new("--apply")["data"]
-        self.assertEqual(data["version"], "0.1.0")
+        # What was published last, and nothing was: the first release is
+        # cut as 0.1.0, which a scaffold saying 0.1.0 made cut refuse.
+        self.assertEqual(data["version"], "0.0.0")
         self.assertEqual(data["mechanism"], "maelys-release")
         written = {entry["path"] for entry in data["adopted"]}
         self.assertIn(".github/workflows/release.yml", written)
         self.assertIn("AGENTS.md", written)
-        self.assertEqual((self.target / "VERSION").read_text(), "0.1.0\n")
+        self.assertEqual((self.target / "VERSION").read_text(), "0.0.0\n")
         self.assertIn("Mozilla Public License", (self.target / "LICENSE").read_text().split("\n", 1)[0])
-        self.assertRegex((self.target / "CHANGELOG.md").read_text(), r"## 0\.1\.0 — \d{4}-\d{2}-\d{2}")
+        self.assertRegex((self.target / "CHANGELOG.md").read_text(), r"## 0\.0\.0 — \d{4}-\d{2}-\d{2}")
+        self.assertIn("cut as 0.1.0", (self.target / "CHANGELOG.md").read_text())
         self.assertTrue(os.access(self.target / "scripts" / "package-release.sh", os.X_OK))
         verdicts = self.product.json("check", str(self.target), "--product", "maelys-widget")["data"]
         self.assertTrue(verdicts["valid"], verdicts["violations"])
@@ -1980,10 +1983,18 @@ class CutTest(unittest.TestCase):
         return raised.exception
 
     def test_a_published_version_is_never_cut_twice(self) -> None:
+        # No tag names 1.2.3 yet: the hint says VERSION was never published
+        # and what to set -- a scaffold said 0.1.0 and its first cut of
+        # 0.1.0 was refused on the pilot, with the hint of a published one.
         for version in ("1.2.3", "1.2.2"):
             failure = self.refusal(version)
             self.assertEqual(failure.code, "VALIDATION_FAILED")
             self.assertIn("1.2.3", failure.message)
+            self.assertIn("No tag v1.2.3 exists", failure.hint)
+        self.product.git(self.dir, "tag", "v1.2.3")
+        failure = self.refusal("1.2.3")
+        self.assertIn("never cut twice", failure.hint)
+        self.assertNotIn("No tag", failure.hint)
 
     def test_only_the_bump_may_be_uncommitted(self) -> None:
         self.product.write("AGENTS.md", "# Agent instructions\n\nEdited.\n")

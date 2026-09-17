@@ -395,8 +395,13 @@ def cut_open(invocation: Invocation, decl: Declarations, data: dict, log, timeou
         raise Failure("PRECONDITION_FAILED", f"{project} carries no VERSION of the form X.Y.Z.",
                       "Write VERSION before cutting a release.")
     if version_tuple(version) <= version_tuple(decl.version):
+        # A VERSION that no tag ever published is a scaffold's, or a bump
+        # written by hand: saying which is what unblocks the first release.
+        published = bool(git("tag", "--list", f"v{decl.version}", cwd=project, check=False))
         raise Failure("VALIDATION_FAILED", f"{version} does not come after the current version {decl.version}.",
-                      "Pass the version this release carries; a published version is never cut twice.")
+                      "Pass the version this release carries; a published version is never cut twice." if published
+                      else f"No tag v{decl.version} exists: VERSION says what was published last. Set it to the"
+                           f" version last published (0.0.0 when none), commit, and cut {version} with its dated entry.")
     data["previousVersion"] = decl.version
     # The bump in progress is the only change the release commit may carry:
     # anything else in the worktree would ride into a tagged commit unread.
