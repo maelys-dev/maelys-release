@@ -1215,8 +1215,15 @@ def scaffold(project: pathlib.Path, product: str, dependencies: list[tuple[str, 
                       "Run this from a maelys-release checkout.")
     files = {
         "LICENSE": license_text,
-        "VERSION": "0.1.0\n",
-        "CHANGELOG.md": f"# Changelog\n\n## 0.1.0 — {today}\n\n- First release of {product}.\n",
+        # VERSION says what was published last, and a scaffold has published
+        # nothing: 0.0.0, with the dated entry `check` requires of it. The
+        # scaffold used to say 0.1.0, and `cut DIR 0.1.0` then refused the
+        # first release of every new product as not coming after the
+        # current version -- found on the pilot's first day.
+        "VERSION": "0.0.0\n",
+        "CHANGELOG.md": f"# Changelog\n\n## 0.0.0 — {today}\n\n- Created by maelys-release new. Nothing is published"
+                        f" yet: VERSION says what was published last, and the first release of {product}"
+                        f" is cut as 0.1.0 once its dated entry is written above this one.\n",
         "README.md": f"# {product}\n\n*One paragraph: what this repository is, and what it is not.*\n\n"
                      f"## Install\n\n*How a user gets it.*\n\n## Build\n\n```sh\nmake check\n```\n",
         # A release must not silently publish nothing: the stub fails until
@@ -1272,7 +1279,7 @@ def handle_new(invocation: Invocation) -> tuple[dict, int]:
                 path.chmod(path.stat().st_mode | 0o111)
         written.append(entry)
     data: dict = {"mode": "apply" if apply else "plan", "product": product, "project": str(directory),
-                  "mechanism": mechanism, "version": "0.1.0",
+                  "mechanism": mechanism, "version": "0.0.0",
                   "dependencies": [{"name": name, "tag": tag, "commit": commit}
                                    for name, tag, commit in dependencies],
                   "files": written, "adopted": []}

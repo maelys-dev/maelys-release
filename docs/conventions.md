@@ -1324,8 +1324,10 @@ maelys-release new DIR --product NAME --depends maelys-system@v0.9.1 --apply
 then calls `adopt` for the rest, so the two can never disagree on what a
 repository holds:
 
-1. `LICENSE` (the MPL-2.0 text this socle carries), `VERSION` at `0.1.0`,
-   `CHANGELOG.md` with its dated `## 0.1.0` entry, a `README.md` skeleton,
+1. `LICENSE` (the MPL-2.0 text this socle carries), `VERSION` at `0.0.0`
+   — what was published last, and nothing was; the first release is `cut
+   DIR 0.1.0` once its dated entry is written — `CHANGELOG.md` with the
+   dated `## 0.0.0` entry `check` requires of VERSION, a `README.md` skeleton,
    and `scripts/package-release.sh` as a stub that **fails** until the
    product says how it packages: a release must not publish nothing.
 2. One `dependencies/<name>.pin` per `--depends NAME@vX.Y.Z`, the tag on

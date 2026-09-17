@@ -15,8 +15,18 @@
   Measured on the fleet's main branches: one repository carries the seeded
   line, maelys-json, and removes it by hand; the seed is written once and
   never rewritten.
+- **A scaffold has published nothing: `new` seeds VERSION 0.0.0.** It
+  seeded 0.1.0 with a dated entry, and `cut DIR 0.1.0` then refused the
+  first release of every new product: "0.1.0 does not come after the
+  current version 0.1.0". Found on the pilot repository's first day, at its
+  first cut. VERSION says what was published last; the scaffold says 0.0.0
+  with its own dated entry, whose text says how the first release is cut.
+  `cut`'s refusal now tells a VERSION no tag ever published from one that
+  was, and says what to set.
 - **Impact.** [asks: nothing] A product already carrying the seeded line
-  edits it by hand; `adopt` writes no LICENSING.md that exists.
+  edits it by hand; `adopt` writes no LICENSING.md that exists. A
+  repository created by `new` before this cuts its first release after
+  setting VERSION to 0.0.0 with a dated entry, as the pilot did.
 
 ## 0.59.1 — 2026-09-17
 
