@@ -8,8 +8,7 @@ import re
 from . import host
 from .constants import DECLARATION_FILE
 from .declarations import Declarations
-from .github import (branch_protection, channel_visibility, environment_gate, github_api,
-                     github_read, github_repository, tap_drift, tap_secrets)
+from .github import (branch_protection, channel_visibility, environment_gate, github_api, github_read, github_repository, read_protection, tap_drift, tap_secrets)
 from .host import git, run
 from .project import declared_word
 
@@ -144,8 +143,7 @@ def repository_checks(decl: Declarations) -> list[tuple[str, str]]:
     found.extend(tap_secrets(repository, decl_formulas))
     found.extend(channel_visibility(repository, decl.channels))
     branch = repository_data.get("default_branch") or "main"
-    found.append(branch_protection(repository, branch,
-                                   *github_read(f"repos/{repository}/branches/{branch}/protection")[:1],
-                                   *github_read(f"repos/{repository}/rules/branches/{branch}"),
-                                   decl.commit_verification))
+    protection = read_protection(repository, branch)
+    found.append(branch_protection(repository, branch, protection.classic_state, protection.ruled_state,
+                                   protection.rules, decl.commit_verification))
     return found
