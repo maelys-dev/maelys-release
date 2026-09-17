@@ -15,6 +15,7 @@ from maelys_cli import EXIT_OK, Failure, Invocation
 from .checkouts import author_identity
 from .constants import CLI_CONTRACT, CLI_REFERENCE, DEFAULT_DOCUMENTS
 from .context import Context
+from .declarations import Declarations
 from .github import destination_is_public
 from .host import git, run
 from .project import declared_mechanism, engaged_documents, project_of
@@ -57,6 +58,11 @@ def referencing_files(project: pathlib.Path, relative: str) -> list[str]:
 
 
 def migration_plan(invocation: Invocation, context: Context) -> dict:
+    return plan_with_declarations(invocation, context)[0]
+
+
+def plan_with_declarations(invocation: Invocation, context: Context) -> tuple[dict, Declarations]:
+    """The plan, and the declarations it was read with: `--apply` needs one word of them."""
     project, product, _ = project_of(invocation)
     records = read_prose_records(str(invocation.option("--documents", "-")))
     foreign = sorted({record["repository"] for record in records} - {product})
@@ -106,7 +112,7 @@ def migration_plan(invocation: Invocation, context: Context) -> dict:
     commit = git("rev-parse", "HEAD", cwd=project, check=False)
     return {"mode": "plan", "product": product, "project": str(project), "repository": repository,
             "version": version, "tag": tag, "commit": commit,
-            "moving": moving, "staying": staying, "documents": len(moving)}
+            "moving": moving, "staying": staying, "documents": len(moving)}, decl
 
 
 def push_branch(clone: pathlib.Path, remote: str, branch: str) -> None:
@@ -126,13 +132,18 @@ def push_branch(clone: pathlib.Path, remote: str, branch: str) -> None:
 BUILD_FILES = ("Makefile", "makefile", "GNUmakefile", "CMakeLists.txt", "meson.build")
 
 
-def surviving_references(clone: pathlib.Path, data: dict) -> tuple[list[dict], list[dict]]:
+def surviving_references(clone: pathlib.Path, data: dict, named: bool = True) -> tuple[list[dict], list[dict]]:
     """What still names a moved document, and what names docs/ as a whole.
 
     The socle rewrites Markdown, and nothing else: a header, a Makefile or a
     script says what it says for reasons the socle does not know. It reports
     them instead, with file and line, because a reported problem half fixed
     is worse than either extreme.
+
+    When the destination is not named (`named` false), the Markdown keeps
+    the paths it named too, and those are reported the same way: the
+    reviewer, not the socle, chooses the words that point outside a public
+    repository without naming the private one.
     """
     moved = [entry["path"] for entry in data["moving"]]
     references, globs = [], []
@@ -148,7 +159,7 @@ def surviving_references(clone: pathlib.Path, data: dict) -> tuple[list[dict], l
             continue
         for number, line in enumerate(lines, 1):
             for document in moved:
-                if document in line and path.suffix.lower() != ".md":
+                if document in line and (path.suffix.lower() != ".md" or not named):
                     references.append({"path": relative, "line": number, "names": document})
             # A build or packaging rule that names docs/ as a whole installs
             # or copies whatever it matches, and that set is about to shrink.
@@ -158,12 +169,17 @@ def surviving_references(clone: pathlib.Path, data: dict) -> tuple[list[dict], l
     return references, globs
 
 
-def rewrite_markdown(clone: pathlib.Path, product: str, data: dict) -> list[str]:
+def rewrite_markdown(clone: pathlib.Path, product: str, data: dict, named: bool = True) -> list[str]:
     """Point every Markdown file of the product away from what left.
 
     A link whose target leaves keeps its text and loses its link: the
     destination is a private repository, so there is nothing to link to. A
-    path named in prose becomes the path it now has. Files that are
+    path named in prose becomes the path it now has -- when the product
+    declares `[docs] named`. Otherwise the path stays as it was and is
+    reported for the reviewer's hand: the destination's name is what the
+    rule of 0.58.0 keeps out of a public repository's files, and this
+    rewrite wrote it into the AGENTS.md of a public one (maelys-cli), beside
+    the managed block that had just stopped naming it. Files that are
     themselves moving keep their own relative links, which stay valid where
     they land.
     """
@@ -178,7 +194,8 @@ def rewrite_markdown(clone: pathlib.Path, product: str, data: dict) -> list[str]
         for document in moved:
             destination = f"{data['repository'].split('/')[-1]}/{product}/{document[len('docs/'):]}"
             text = re.sub(rf"\[([^\]]*)\]\({re.escape(document)}\)", r"\1", text)
-            text = text.replace(document, destination)
+            if named:
+                text = text.replace(document, destination)
         if text != original:
             path.write_text(text, encoding="utf-8")
             rewritten.append(relative)
@@ -252,7 +269,7 @@ def handle_migrate(invocation: Invocation, context: Context) -> tuple[dict, int]
     the rewritten history; the product receives a pull request, never a
     direct write.
     """
-    data = migration_plan(invocation, context)
+    data, decl = plan_with_declarations(invocation, context)
     if not invocation.flag("--apply"):
         return data, EXIT_OK
     data["mode"] = "apply"
@@ -316,8 +333,8 @@ def handle_migrate(invocation: Invocation, context: Context) -> tuple[dict, int]
         for entry in data["moving"]:
             git("rm", "-q", "--", entry["path"], cwd=product_clone)
         data["readme"] = rewrite_readme(product_clone, product, data)
-        data["rewritten"] = rewrite_markdown(product_clone, product, data)
-        data["remaining"], data["globs"] = surviving_references(product_clone, data)
+        data["rewritten"] = rewrite_markdown(product_clone, product, data, decl.docs_named)
+        data["remaining"], data["globs"] = surviving_references(product_clone, data, decl.docs_named)
         git("add", "-A", cwd=product_clone)
         git("commit", "-q", "-m",
             f"docs: the prose moves to {data['repository']}/{product}/\n\n"

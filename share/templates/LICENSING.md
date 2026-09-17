@@ -35,4 +35,4 @@ licenses, or state that this repository redistributes none.*
 
 *List here the documents of this repository that its published packages,
 site or formula reference. A document named here stays in this repository;
-prose that is not engaged migrates to `maelys-docs/@PRODUCT@/`.*
+prose that is not engaged moves out of it, with `maelys-release migrate`.*
