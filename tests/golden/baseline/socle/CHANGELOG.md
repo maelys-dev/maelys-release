@@ -1,27 +1,5 @@
 # Changelog
 
-## Unreleased
-
-- **`cut` sets a closed, unmerged pull request aside.** 0.59.0's first
-  release pull request was closed after its checks refused, the branch
-  deleted and cut again; `cut --tag` then counted the closed one beside the
-  merged one and refused to sign, asking to close what was already closed.
-- **One reader for what protects a branch.** The classic protection and
-  the rulesets were read and parsed at four places — the adoption guard,
-  `protect`, `preflight`, the `classic-protection` selector — and each fix
-  reached the readers it knew: 0.46.x, 0.51.1, 0.51.2 corrected one each,
-  and 0.57.1's fix to one left the guard refusing (0.57.2). `read_protection`
-  is the one reader now, `rule_contexts` the one parser of what a ruleset
-  requires, and every site reads exactly what it read before, in the same
-  order — the recorded API reference holds the call sequences.
-- **The initial golden freezes VERSION and CHANGELOG.md too.** The same
-  coupling #125 removed from the API reference: after the 0.59.0 cut, 150 of
-  its 153 files differed on `0.58.0 -> 0.59.0` and nothing else. The replay
-  runs the candidate's code from a copy carrying the recorded version and
-  changelog, `baseline/socle/`, written by `--record`.
-- **Impact.** [asks: nothing] Nothing: `cut` runs at the checkout, and the
-  reader changes no answer.
-
 ## 0.59.0 — 2026-09-16
 
 - **Refactoring.** The socle now separates parsing, workflow rendering and

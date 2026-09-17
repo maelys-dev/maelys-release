@@ -382,6 +382,35 @@ def process_environment(env, work, capture):
         os.environ.update(old_env)
 
 
+# What the candidate reads from its own root that is not code. The version is
+# in the header of every generated release.yml and in `socle.version` of every
+# answer; the changelog is what adopt and check read to say what a product is
+# behind on. Frozen at recording, restored at replay: the first cut after the
+# recording turned 150 of 153 files of this reference into a diff of
+# "0.58.0 -> 0.59.0" and nothing else.
+SOCLE_INPUTS = ("socle/VERSION", "socle/CHANGELOG.md")
+
+
+def frozen_candidate(source, reference, work):
+    """A copy of the candidate's code with the recorded VERSION and CHANGELOG.md.
+
+    Code, and what the program reads as code: its own workflows give it its
+    legs and their aliases. Not a symlink: socle_root() resolves the
+    executable's real path, and would find the source's VERSION again.
+    """
+    candidate = work / "candidate"
+    candidate.mkdir()
+    for name in ("bin", "share", ".github/workflows"):
+        shutil.copytree(source / name, candidate / name, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    for name in ("WITHDRAWN", "docs/cli.reference"):
+        if (source / name).is_file():
+            (candidate / name).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source / name, candidate / name)
+    for relative in SOCLE_INPUTS:
+        shutil.copy2(reference / relative, candidate / pathlib.PurePosixPath(relative).name)
+    return candidate
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("output", type=pathlib.Path, help="new output directory (must not exist)")
@@ -418,9 +447,25 @@ def main():
         staging = work / "output"
         staging.mkdir()
         env = isolated_environment(work)
-        capture = Capture(source, staging, work, env, manifest)
+        if args.record:
+            # Frozen from the source being recorded, so the replay of any
+            # later candidate reads the version and changelog of this moment.
+            for relative in SOCLE_INPUTS:
+                (staging / relative).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source / pathlib.PurePosixPath(relative).name, staging / relative)
+            frozen_from = staging
+        else:
+            # A replay reproduces the whole reference, its frozen inputs
+            # included, so that a diff against it is empty when nothing moved.
+            frozen_from = args.reference.resolve()
+            for relative in SOCLE_INPUTS:
+                (staging / relative).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(frozen_from / relative, staging / relative)
+        candidate = frozen_candidate(source, frozen_from, work)
+        capture = Capture(candidate, staging, work, env, manifest)
+        capture.add_path(source, "<SOCLE>")
         reference, _ = checkout(work, "reference", str(source), manifest["socle"]["commit"], env)
-        write_json(staging / "describe.json", capture.command(["describe", "--format", "json"], source, env))
+        write_json(staging / "describe.json", capture.command(["describe", "--format", "json"], candidate, env))
         (staging / "cli-contract.json").write_bytes((source / "docs/cli-contract.json").read_bytes())
         with process_environment(env, work, capture):
             capture.fixtures(reference)

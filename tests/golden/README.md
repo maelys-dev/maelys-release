@@ -18,6 +18,13 @@ Changing the current tests cannot change these inputs. The capture compares the
 candidate's CLI as a subprocess, with no `gh`, and never applies the candidate
 to a product. See `capture.py` for the normalization and isolation rules.
 
+`baseline/socle/VERSION` and `baseline/socle/CHANGELOG.md` are inputs of the
+reference, written by `--record` and restored into a copy of the candidate at
+replay: the version is in every generated header and every `socle.version`,
+the changelog is what `adopt` and `check` read. A candidate at any version
+replays the same reference; a changelog edit is a behavior change and follows
+the fix ritual below.
+
 ## An intentional behavior fix
 
 A fix takes precedence over the next refactoring stage. Give it its own fix PR:
