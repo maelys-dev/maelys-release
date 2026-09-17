@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.59.1 — 2026-09-17
 
 - **`cut` sets a closed, unmerged pull request aside.** 0.59.0's first
   release pull request was closed after its checks refused, the branch
