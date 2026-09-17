@@ -187,7 +187,13 @@ class ApiGoldenCoverageTest(unittest.TestCase):
         self.assertTrue(classic['protected'])
         self.assertTrue(classic['keeps'])
         self.assertTrue(classic['observed'])
-        self.assertTrue(classic['replaced'])
+        # The aliases left in 0.60.0: nothing is replaced pair by pair any
+        # more, and what the branch required before the command is kept in
+        # the output for a hand.
+        self.assertEqual(classic['replaced'], [])
+        self.assertTrue(classic['before']['required'])
+        self.assertIsInstance(classic['before']['classic'], dict)
+        self.assertIn('enforce_admins', classic['before']['classic'])
         ruleset = envelope('protect-ruleset')['data']
         self.assertEqual(ruleset['protectedBy'], ['a ruleset'])
         self.assertTrue(ruleset['ruleset'])
