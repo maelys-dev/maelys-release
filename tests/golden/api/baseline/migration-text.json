@@ -1,6 +1,6 @@
 {
   "exitCode": 0,
-  "stdout": "move     docs/guide.md -> golden-docs/maelys-system/guide.md  (still named by README.md, documents.jsonl)\nstays    docs/data.json  (data, not prose)\nstays    docs/generated.md  (generated: its head says so)\nstays    docs/public.md  (LICENSING.md engages it publicly)\nstays    docs/unlisted.md  (not in the list maelys-platform produced)\nmigrate: plan only; 1 documents of maelys-system 46c4207 would move to example/golden-docs/maelys-system/, with their history\nmigrate: add --apply to write both sides, --push to send the two branches\n",
+  "stdout": "move     docs/guide.md -> golden-docs/maelys-system/guide.md  (still named by README.md, documents.jsonl)\nstays    docs/data.json  (data, not prose)\nstays    docs/generated.md  (generated: its head says so)\nstays    docs/public.md  (LICENSING.md engages it publicly)\nstays    docs/unlisted.md  (not in the list maelys-platform produced)\nmigrate: plan only; 1 documents of maelys-system e8e95f8 would move to example/golden-docs/maelys-system/, with their history\nmigrate: add --apply to write both sides, --push to send the two branches\n",
   "stderr": "",
   "changedFiles": {}
 }

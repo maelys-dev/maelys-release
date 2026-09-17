@@ -55,7 +55,7 @@
     "<PRODUCT>",
     "--apply",
     "--socle-sha",
-    "86cfeb1ccf93dcb522666ea1aee412269f369901",
+    "89ead0fbe82ac1e6dce7d1c21225140c6e70a83b",
     "--socle-tag",
     "v0.59.2",
     "--format",
@@ -123,6 +123,37 @@
         "path": "repos/maelys-dev/maelys-system/rules/branches/main"
       },
       "response": "repos/maelys-dev/maelys-system/rules/branches/main"
+    },
+    {
+      "call": {
+        "kind": "run",
+        "argv": [
+          "git",
+          "remote",
+          "get-url",
+          "origin"
+        ],
+        "cwd": "<PRODUCT>"
+      },
+      "result": {
+        "returncode": 0,
+        "stdout": "https://github.com/maelys-dev/maelys-system.git\n",
+        "stderr": ""
+      }
+    },
+    {
+      "call": {
+        "kind": "which",
+        "name": "gh"
+      },
+      "result": "/opt/homebrew/bin/gh"
+    },
+    {
+      "call": {
+        "kind": "read",
+        "path": "repos/maelys-dev/maelys-system"
+      },
+      "response": "repos/maelys-dev/maelys-system"
     }
   ]
 }
