@@ -89,6 +89,9 @@ class Declarations:
         self.readme_held: list[str] = []
         # [ci] own: no shared CI is called, and no ci.yml is written.
         self.own_ci = False
+        # [docs] named: the managed blocks name the documentation repository.
+        # Both words are read by declared_word() in read_declarations, once.
+        self.docs_named = False
         self.checks: list[dict] = []
 
     @property
@@ -259,8 +262,8 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
             docs_unnamed = True
             continue
         if section == "ci":
-            # Read by own_ci(), which the ci.yml rule needs before the rest of
-            # the file is parsed; validated here with everything else.
+            # Read by declared_word(), which the ci.yml rule needs before the
+            # rest of the file is parsed; validated here with everything else.
             if line != "own":
                 raise ValueError(f"[ci] holds the single word 'own', not {line!r}, at line {number}")
             own_ci = True

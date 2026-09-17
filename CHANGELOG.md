@@ -25,6 +25,12 @@
   spellings of the fallback branch and two readings of a refusal.
   `read_repository` is the one reader now; every site still reads once,
   where it read before, and the recorded API reference holds the sequences.
+- **One reader for `[ci] own` and `[docs] named`.** Three parsers read the
+  declaration file for its two early words — `parse_release`, which
+  validates them, a copy of the tolerant scan for one word, and
+  `declared_word`, the same scan for any — and `[docs] named` was read
+  from the file again at every render of the managed block and at every
+  preflight. The scan is `declared_word`, read once into the declaration.
 - **Impact.** [asks: nothing] Nothing: `cut` runs at the checkout, and the
   readers change no answer.
 

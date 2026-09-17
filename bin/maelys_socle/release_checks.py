@@ -10,7 +10,6 @@ from .constants import DECLARATION_FILE
 from .declarations import Declarations
 from .github import (branch_protection, channel_visibility, environment_gate, github_api, github_read, github_repository, read_protection, read_repository, tap_drift, tap_secrets)
 from .host import git, run
-from .project import declared_word
 
 
 def tag_checks(project: pathlib.Path, version: str, between_releases: bool = False) -> list[tuple[str, str]]:
@@ -99,7 +98,7 @@ def repository_checks(decl: Declarations) -> list[tuple[str, str]]:
     if not host.HOST.which("gh"):
         return [("note", f"gh is not installed: release environment of {repository} not checked")]
     repository_data = read_repository(repository)
-    if repository_data.visibility == "public" and declared_word(project, "docs", "named"):
+    if repository_data.visibility == "public" and decl.docs_named:
         found.append(("fail", f"{repository} is public and {DECLARATION_FILE} declares [docs] named: AGENTS.md and"
                               " CLAUDE.md name the private documentation repository to anyone. Remove the"
                               " declaration and adopt"))

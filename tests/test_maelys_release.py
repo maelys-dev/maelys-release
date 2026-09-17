@@ -5732,3 +5732,39 @@ class RepositoryReaderTest(unittest.TestCase):
             self.assertFalse(MODULE.destination_is_public("o/r"))
             self.assertEqual(MODULE.read_repository("o/r").visibility, "")
 
+
+class DeclaredWordsTest(unittest.TestCase):
+    """[ci] own and [docs] named are read once, by the one tolerant scan.
+
+    Three parsers of maelys-release.conf read the two words: parse_release,
+    which validates them; own_ci, a copy of the scan for one word; and
+    declared_word, the same scan for any. The entry point kept the copy and
+    re-read the file for [docs] named at every render and every preflight.
+    """
+
+    def work(self, text: str) -> pathlib.Path:
+        work = pathlib.Path(tempfile.mkdtemp(prefix="maelys-release-words."))
+        self.addCleanup(shutil.rmtree, work, True)
+        (work / ".github" / "workflows").mkdir(parents=True)
+        (work / "maelys-release.conf").write_text(text)
+        return work
+
+    def test_the_declaration_carries_both_words(self) -> None:
+        decl = MODULE.read_declarations(self.work("[ci]\nown\n[docs]\nnamed\n"), "p", "custom")
+        self.assertTrue(decl.own_ci)
+        self.assertTrue(decl.docs_named)
+        decl = MODULE.read_declarations(self.work("[docs]\nunnamed\n"), "p", "custom")
+        self.assertFalse(decl.own_ci)
+        self.assertFalse(decl.docs_named)
+
+    def test_the_words_hold_when_a_later_section_is_refused(self) -> None:
+        # What the scan is for: the ci.yml rule and the managed block need
+        # the words even when parse_release refuses the rest of the file.
+        decl = MODULE.read_declarations(self.work("[ci]\nown\n[docs]\nnamed\n[cut]\nnonsense\n"), "p", "custom")
+        self.assertTrue(decl.own_ci)
+        self.assertTrue(decl.docs_named)
+        self.assertTrue([c for c in decl.checks if c["status"] == "missing" and "[cut]" in c["message"]])
+
+    def test_the_copy_of_the_scan_is_gone(self) -> None:
+        self.assertFalse(hasattr(MODULE, "own_ci"))
+
