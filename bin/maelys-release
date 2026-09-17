@@ -100,7 +100,7 @@ from maelys_socle.github import (
     FORMULA_REPOSITORY, FORMULA_VERSIONS, TAG_WORKFLOWS, TAP_SECRETS, WITHDRAWN_FILE,
     branch_protection, channel_visibility, check_runs, classic_protection, cut_repository, default_branch,
     destination_is_public, environment_gate, github_api, github_list, github_read,
-    github_repository, observed_contexts, protection_settings, repository_visibility,
+    github_repository, observed_contexts, protection_settings, read_repository, repository_visibility,
     required_contexts, ruleset_shape, tag_deployments, tap_drift, tap_secrets,
     verify_protection,
 )

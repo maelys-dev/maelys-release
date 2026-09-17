@@ -5691,3 +5691,44 @@ class OnePullTest(unittest.TestCase):
             MODULE.one_pull(pathlib.Path("."), "o/r", "release/v0.59.0")
         self.assertIn("2 pull requests", refusal.exception.message)
 
+
+class RepositoryReaderTest(unittest.TestCase):
+    """One reader of `repos/{repository}`, and the three ways it did not answer.
+
+    Seven sites read the endpoint and parsed it each for itself; the reader
+    keeps what each of them did -- a refusal is not a public repository, an
+    absent default branch is `main` -- and does it once.
+    """
+
+    def test_an_answer_carries_its_facts(self) -> None:
+        # No origin/HEAD at the checkout: cut's reader falls back to GitHub.
+        no_head = lambda command, cwd=None, env=None: subprocess.CompletedProcess(command, 1, "", "")
+        answered = FakeHost({"repos/o/r": ("ok", {"visibility": "public", "private": False,
+                                                    "default_branch": "trunk"})}, run=no_head)
+        with using_host(answered):
+            found = MODULE.read_repository("o/r")
+            self.assertTrue(found.read)
+            self.assertEqual((found.visibility, found.private, found.default_branch), ("public", False, "trunk"))
+            self.assertTrue(MODULE.destination_is_public("o/r"))
+            self.assertEqual(MODULE.default_branch(pathlib.Path("."), "o/r"), "trunk")
+        # Three readers, three GETs: each site still reads once, where it did.
+        self.assertEqual(answered.reads, ["repos/o/r"] * 3)
+
+    def test_what_github_did_not_say_is_not_an_answer(self) -> None:
+        for state in ("absent", "unreadable", "no-gh"):
+            with using_host(FakeHost({"repos/o/r": (state, None)})):
+                found = MODULE.read_repository("o/r")
+                self.assertFalse(found.read, state)
+                self.assertEqual((found.visibility, found.private, found.default_branch), ("", False, "main"))
+                # The migration asks whether a stranger can read the prose's
+                # destination; a refusal is neither yes nor no.
+                self.assertIsNone(MODULE.destination_is_public("o/r"))
+
+    def test_a_repository_that_names_no_visibility_answers_nobody(self) -> None:
+        # The `public` selector says nothing rather than something on an
+        # answer without the field; the migration's reader says False, as
+        # both always did.
+        with using_host(FakeHost({"repos/o/r": ("ok", {"default_branch": "main"})})):
+            self.assertFalse(MODULE.destination_is_public("o/r"))
+            self.assertEqual(MODULE.read_repository("o/r").visibility, "")
+

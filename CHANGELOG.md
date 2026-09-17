@@ -19,8 +19,14 @@
   its 153 files differed on `0.58.0 -> 0.59.0` and nothing else. The replay
   runs the candidate's code from a copy carrying the recorded version and
   changelog, `baseline/socle/`, written by `--record`.
+- **One reader for what GitHub says of a repository.** Its visibility and its
+  default branch were read at seven sites — `protect`, `preflight`, the
+  adoption guard, `cut`, the two selectors, the migration — with two
+  spellings of the fallback branch and two readings of a refusal.
+  `read_repository` is the one reader now; every site still reads once,
+  where it read before, and the recorded API reference holds the sequences.
 - **Impact.** [asks: nothing] Nothing: `cut` runs at the checkout, and the
-  reader changes no answer.
+  readers change no answer.
 
 ## 0.59.0 — 2026-09-16
 
