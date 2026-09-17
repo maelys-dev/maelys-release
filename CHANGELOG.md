@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+- **The seed and `migrate` name no private repository either.** 0.58.0
+  stopped the managed blocks from naming the documentation repository in a
+  public product's files, and two neighbours kept doing it: the seeded
+  `LICENSING.md` named it under "Documents engaged publicly" in every new
+  product (maelys-json found the line adopting), and `migrate` rewrote each
+  moved path into `maelys-docs/<product>/...` in every Markdown file, the
+  AGENTS.md of public maelys-cli included (maelys-cli#83 removed it). The
+  seed names none; `migrate` names the destination only when the product
+  declares `[docs] named`, and otherwise leaves the path as it was and
+  reports it `BY HAND` with the other files the socle does not rewrite.
+  Measured on the fleet's main branches: one repository carries the seeded
+  line, maelys-json, and removes it by hand; the seed is written once and
+  never rewritten.
+- **Impact.** [asks: nothing] A product already carrying the seeded line
+  edits it by hand; `adopt` writes no LICENSING.md that exists.
+
 ## 0.59.1 — 2026-09-17
 
 - **`cut` sets a closed, unmerged pull request aside.** 0.59.0's first

@@ -1381,10 +1381,11 @@ class MigrateTest(unittest.TestCase):
         self.assertEqual(error["code"], "PRECONDITION_FAILED")
         self.assertIn("no tag", error["message"])
 
-    def test_every_markdown_of_the_product_is_pointed_away(self) -> None:
+    def test_every_markdown_of_the_product_is_pointed_away_when_the_destination_is_named(self) -> None:
         # The first shape rewrote README.md alone, and a product had to
         # repoint examples/README.md by hand: reporting a problem and fixing
         # half of it is worse than either extreme.
+        self.product.write("maelys-release.conf", "[docs]\nnamed\n" + APART)
         self.product.write("examples/README.md", "See [the guide](docs/guide.md) and `docs/guide.md`.\n")
         self.product.write("docs/other.md", "Also [guide](guide.md), which travels with it.\n")
         self.commit()
@@ -1395,6 +1396,24 @@ class MigrateTest(unittest.TestCase):
         self.assertNotIn("docs/guide.md", example)
         self.assertIn("the guide", example)                                   # the text stays
         self.assertIn("maelys-docs/maelys-fixture/guide.md", example)         # the path is repointed
+        self.assertEqual(data["remaining"], [])
+
+    def test_the_markdown_names_no_destination_unless_declared(self) -> None:
+        # The rewrite above wrote `maelys-docs/...` into the AGENTS.md of a
+        # public product, beside the managed block that had just stopped
+        # naming it (maelys-cli#83). Without [docs] named the link goes, the
+        # path stays, and the file is reported for a hand.
+        self.product.write("examples/README.md", "See [the guide](docs/guide.md) and `docs/guide.md`.\n")
+        self.commit()
+        data = self.migrate("--apply", names=("guide.md",))["data"]
+        kept = pathlib.Path(data["kept"]) / "product"
+        self.assertIn("examples/README.md", data["rewritten"])
+        example = (kept / "examples" / "README.md").read_text()
+        self.assertEqual(example, "See the guide and `docs/guide.md`.\n")
+        self.assertNotIn("maelys-docs", example)
+        self.assertEqual([(entry["path"], entry["line"]) for entry in data["remaining"]],
+                         [("examples/README.md", 1)])
+        self.assertIn("BY HAND  examples/README.md:1 still names docs/guide.md", MODULE.text_migrate(data))
 
     def test_a_document_that_moves_keeps_its_own_relative_links(self) -> None:
         self.product.write("docs/other.md", "Also [guide](guide.md), which travels with it.\n")
@@ -5767,4 +5786,49 @@ class DeclaredWordsTest(unittest.TestCase):
 
     def test_the_copy_of_the_scan_is_gone(self) -> None:
         self.assertFalse(hasattr(MODULE, "own_ci"))
+
+
+class NamingNoPrivateRepositoryTest(unittest.TestCase):
+    """The rule of 0.58.0 held for the managed blocks and leaked twice beside them.
+
+    The seeded LICENSING.md named the documentation repository in every new
+    product, public or not (maelys-json found it adopting); and `migrate`
+    rewrote every path it moved into `maelys-docs/<product>/...` in every
+    Markdown file, the AGENTS.md of public maelys-cli included, beside the
+    managed block that had just stopped naming it.
+    """
+
+    def test_the_seeded_texts_name_no_documentation_repository(self) -> None:
+        for path in sorted((MODULE.share_dir() / "templates").glob("*.md")):
+            self.assertNotIn("maelys-docs", path.read_text(encoding="utf-8"), path.name)
+
+    def clone(self) -> pathlib.Path:
+        clone = pathlib.Path(tempfile.mkdtemp(prefix="maelys-release-naming."))
+        self.addCleanup(shutil.rmtree, clone, True)
+        (clone / "docs").mkdir()
+        (clone / "docs" / "guide.md").write_text("# Guide\n", encoding="utf-8")
+        (clone / "AGENTS.md").write_text("Read [the guide](docs/guide.md); it is docs/guide.md.\n", encoding="utf-8")
+        (clone / "README.md").write_text("See docs/guide.md.\n", encoding="utf-8")
+        return clone
+
+    DATA = {"repository": "maelys-dev/maelys-docs", "moving": [{"path": "docs/guide.md"}]}
+
+    def test_a_named_destination_is_written_as_before(self) -> None:
+        clone = self.clone()
+        self.assertEqual(MODULE.rewrite_markdown(clone, "p", self.DATA, True), ["AGENTS.md"])
+        self.assertEqual((clone / "AGENTS.md").read_text(encoding="utf-8"),
+                         "Read the guide; it is maelys-docs/p/guide.md.\n")
+        # Markdown is what the socle rewrites: named, none of it is reported.
+        remaining, _ = MODULE.surviving_references(clone, self.DATA, True)
+        self.assertEqual(remaining, [])
+
+    def test_an_unnamed_destination_keeps_the_path_and_reports_it(self) -> None:
+        clone = self.clone()
+        self.assertEqual(MODULE.rewrite_markdown(clone, "p", self.DATA, False), ["AGENTS.md"])
+        text = (clone / "AGENTS.md").read_text(encoding="utf-8")
+        self.assertEqual(text, "Read the guide; it is docs/guide.md.\n")
+        self.assertNotIn("maelys-docs", text)
+        remaining, _ = MODULE.surviving_references(clone, self.DATA, False)
+        self.assertEqual([(entry["path"], entry["line"]) for entry in remaining],
+                         [("AGENTS.md", 1), ("README.md", 1)])
 
