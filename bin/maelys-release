@@ -191,29 +191,6 @@ DOCS_UNNAMED_BULLET = (
     "  declares `[docs] named` in `maelys-release.conf`.\n")
 
 
-def own_ci(project: pathlib.Path) -> bool:
-    """Whether maelys-release.conf declares `[ci] own`.
-
-    A repository whose CI is entirely its own calls no shared CI, and `check`
-    must not create a ci.yml for it nor warn that none calls check-product.yml.
-    The socle is the first: its CI lints the workflows it ships and runs its
-    own tests, and three `make check` legs mean nothing to a Python program
-    with no Makefile. A declaration, and not an exception for one name.
-    """
-    release = project / DECLARATION_FILE
-    if not release.is_file():
-        return False
-    section = ""
-    for raw in release.read_text(encoding="utf-8").splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#"):
-            continue
-        if line.startswith("["):
-            section = line
-        elif section == "[ci]" and line == "own":
-            return True
-    return False
-
 
 def read_fuzz(decl: Declarations) -> None:
     """Observe the harnesses and who runs them; never refuse either answer.
@@ -408,13 +385,26 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
                  " scripts/checkout-dependency.sh NAME and"
                  " scripts/checkout-dependencies.sh DESTINATION; delete these")
     ci = project / ".github" / "workflows" / "ci.yml"
-    if declared_word(project, "docs", "named"):
+    # The two words the declaration carries before the rest of it parses:
+    # a ci.yml rule and the managed block need them even when a later
+    # section is refused, so they are read by the tolerant scan and not by
+    # parse_release, which validates them with everything else. Read once
+    # here; what renders the block and what preflight refuses read the
+    # declaration, not the file again.
+    decl.docs_named = declared_word(project, "docs", "named")
+    if decl.docs_named:
         decl.add("ok", f"{DECLARATION_FILE} [docs] named: the managed blocks name maelys-dev/maelys-docs;"
                  " preflight refuses it on a public repository", "conventions")
     elif declared_word(project, "docs", "unnamed"):
         decl.add("note", f"{DECLARATION_FILE} [docs] unnamed is the default since 0.58.0; the line can go",
                  "conventions")
-    decl.own_ci = own_ci(project)
+    # A repository whose CI is entirely its own calls no shared CI, and
+    # `check` must not create a ci.yml for it nor warn that none calls
+    # check-product.yml. The socle is the first: its CI lints the workflows
+    # it ships and runs its own tests, and three `make check` legs mean
+    # nothing to a Python program with no Makefile. A declaration, and not
+    # an exception for one name.
+    decl.own_ci = declared_word(project, "ci", "own")
     if decl.own_ci:
         if ci.is_file() and CI_USES.search(ci.read_text(encoding="utf-8")):
             decl.add("missing", f"{DECLARATION_FILE} declares [ci] own and .github/workflows/ci.yml calls the"
@@ -817,7 +807,7 @@ def stage(decl: Declarations, sha: str, tag: str) -> dict[str, tuple[str, bool]]
     # each carried the name in two public files, under a bullet forbidding
     # it. A default that leaks unless someone thinks to declare is the wrong
     # way round for a private name.
-    if not declared_word(decl.project, "docs", "named"):
+    if not decl.docs_named:
         block = DOCS_BULLET.sub(DOCS_UNNAMED_BULLET, block, count=1)
     for name in CONVENTION_MANAGED:
         path = decl.project / name
