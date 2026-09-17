@@ -8,7 +8,7 @@ import re
 from . import host
 from .constants import DECLARATION_FILE
 from .declarations import Declarations
-from .github import (branch_protection, channel_visibility, environment_gate, github_api, github_read, github_repository, read_protection, tap_drift, tap_secrets)
+from .github import (branch_protection, channel_visibility, environment_gate, github_api, github_read, github_repository, read_protection, read_repository, tap_drift, tap_secrets)
 from .host import git, run
 from .project import declared_word
 
@@ -98,12 +98,12 @@ def repository_checks(decl: Declarations) -> list[tuple[str, str]]:
         return [("note", "origin is not on GitHub: release environment not checked")]
     if not host.HOST.which("gh"):
         return [("note", f"gh is not installed: release environment of {repository} not checked")]
-    repository_data = github_api(f"repos/{repository}") or {}
-    if repository_data.get("visibility") == "public" and declared_word(project, "docs", "named"):
+    repository_data = read_repository(repository)
+    if repository_data.visibility == "public" and declared_word(project, "docs", "named"):
         found.append(("fail", f"{repository} is public and {DECLARATION_FILE} declares [docs] named: AGENTS.md and"
                               " CLAUDE.md name the private documentation repository to anyone. Remove the"
                               " declaration and adopt"))
-    if repository_data.get("private"):
+    if repository_data.private:
         found.append(("note", f"{repository} is private: the release ships no provenance attestation (GitHub reserves"
                               " them to paid plans); the signed tag and SHA256SUMS remain"))
         if decl_sbom:
@@ -142,7 +142,7 @@ def repository_checks(decl: Declarations) -> list[tuple[str, str]]:
     found.extend(tap_drift(repository, decl_formulas))
     found.extend(tap_secrets(repository, decl_formulas))
     found.extend(channel_visibility(repository, decl.channels))
-    branch = repository_data.get("default_branch") or "main"
+    branch = repository_data.default_branch
     protection = read_protection(repository, branch)
     found.append(branch_protection(repository, branch, protection.classic_state, protection.ruled_state,
                                    protection.rules, decl.commit_verification))

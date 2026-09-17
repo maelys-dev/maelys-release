@@ -18,7 +18,7 @@ from . import host
 from .constants import CI_JOB, CI_USES, DECLARATION_FILE, LEGS_JOB
 from .context import Context
 from .declarations import parse_release
-from .github import (github_api, github_list, github_read, github_repository, observed_contexts, protection_settings, read_protection, required_contexts, ruleset_shape, verify_protection, withdrawn_for)
+from .github import (github_api, github_list, github_read, github_repository, observed_contexts, protection_settings, read_protection, read_repository, required_contexts, ruleset_shape, verify_protection, withdrawn_for)
 from .project import project_of
 from .workflows import yaml_scalar
 
@@ -199,8 +199,7 @@ def handle_protect(invocation: Invocation, context: Context) -> tuple[dict, int]
                       "A branch protection is a GitHub setting; this reads and writes one.")
     if not host.HOST.which("gh"):
         raise Failure("PRECONDITION_FAILED", "gh is not installed.", "Install gh: this reads the GitHub API.")
-    data = github_api(f"repos/{repository}") or {}
-    branch = data.get("default_branch") or "main"
+    branch = read_repository(repository).default_branch
     caller, derived = socle_check_contexts(project, context)
     seen, from_tag, partial = observed_contexts(repository, branch)
     protection = read_protection(repository, branch)

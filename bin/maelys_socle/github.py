@@ -93,15 +93,57 @@ def cut_repository(project: pathlib.Path) -> str:
 
 
 
+@dataclass(frozen=True)
+class Repository:
+    """What GitHub says of a repository, read once: its visibility and its default branch.
+
+    Seven sites read `repos/{repository}` and each parsed the answer for
+    itself -- `protect`, `preflight`, the adoption guard, `cut`, the
+    `public` and `classic-protection` selectors, the migration -- with two
+    ways of not answering and two spellings of the fallback branch. Same
+    lesson as `Protection`: a fact read in several places is a fact that a
+    fix reaches in some of them. The reader stays one GET at each site,
+    where that site read it; what changes is that the answer is parsed here.
+    """
+
+    state: str
+    body: object
+
+    @property
+    def data(self) -> dict:
+        return self.body if self.state == "ok" and isinstance(self.body, dict) else {}
+
+    @property
+    def read(self) -> bool:
+        """Whether GitHub answered with a repository; the properties below fall back otherwise."""
+        return self.state == "ok" and isinstance(self.body, dict)
+
+    @property
+    def visibility(self) -> str:
+        return str(self.data.get("visibility") or "")
+
+    @property
+    def private(self) -> bool:
+        return bool(self.data.get("private"))
+
+    @property
+    def default_branch(self) -> str:
+        return str(self.data.get("default_branch") or "main")
+
+
+def read_repository(repository: str) -> Repository:
+    """Read `repos/{repository}` once; every reader of its answer goes through here."""
+    state, body = github_read(f"repos/{repository}")
+    return Repository(state, body)
+
+
 def repository_visibility(project: pathlib.Path, visibility: str) -> bool | None:
     """Whether origin's repository has this visibility; None when GitHub cannot say."""
     repository = github_repository(project)
     if not repository or not host.HOST.which("gh"):
         return None
-    state, body = github_read(f"repos/{repository}")
-    if state != "ok" or not isinstance(body, dict) or not body.get("visibility"):
-        return None
-    return body["visibility"] == visibility
+    found = read_repository(repository).visibility
+    return found == visibility if found else None
 
 
 @dataclass(frozen=True)
@@ -170,15 +212,15 @@ def classic_protection(project: pathlib.Path) -> bool | None:
     repository = github_repository(project)
     if not repository or not host.HOST.which("gh"):
         return None
-    branch = (github_api(f"repos/{repository}") or {}).get("default_branch") or "main"
+    branch = read_repository(repository).default_branch
     state = read_protection(repository, branch, rulesets=False).classic_state
     return True if state == "ok" else False if state == "absent" else None
 
 
 def destination_is_public(repository: str) -> bool | None:
     """Whether the prose's destination can be read by a stranger; None if unknown."""
-    data = github_api(f"repos/{repository}")
-    return None if data is None else data.get("visibility") == "public"
+    found = read_repository(repository)
+    return found.visibility == "public" if found.read else None
 
 
 def environment_gate(repository: str, environment: dict | None, declared: str = "") -> list[tuple[str, str]]:
@@ -426,7 +468,7 @@ def default_branch(project: pathlib.Path, repository: str) -> str:
     head = git("symbolic-ref", "--quiet", "refs/remotes/origin/HEAD", cwd=project, check=False)
     if head:
         return head.rpartition("/")[2]
-    return (github_api(f"repos/{repository}") or {}).get("default_branch") or "main"
+    return read_repository(repository).default_branch
 
 
 def tag_deployments(repository: str, tag: str) -> list[dict]:
@@ -535,7 +577,7 @@ def required_contexts(project: pathlib.Path) -> list[str] | None:
     repository = github_repository(project)
     if not repository or not host.HOST.which("gh"):
         return None
-    branch = (github_api(f"repos/{repository}") or {}).get("default_branch") or "main"
+    branch = read_repository(repository).default_branch
     # Both endpoints, as `branch_protection` reads them: a repository of the
     # fleet is protected by a ruleset alone, and reading the classic
     # protection by itself called it open -- the very mistake this socle
