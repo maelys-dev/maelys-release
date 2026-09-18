@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- **A text naming the documentation repository is refused.** The note of
+  0.60.0 becomes the violation it announced: `check` exits 2 on a prose
+  file — Markdown or plain text, `CHANGELOG.md` and the managed block
+  apart — naming the repository in a product that does not declare
+  `[docs] named`. Measured the day of the cut on nine main branches.
+- **The socle's texts carry no private name.** A public socle that spelled
+  a private repository's name in its conventions, its command reference
+  and its block texts was the leak its own rule forbids. `[docs] named`
+  now carries the repository it names, `named OWNER/NAME`, and the managed
+  block renders what the declaration says; the bare word is refused with
+  the reason (no product declared it: measured on nine repositories, so
+  nothing was announced). `migrate` requires `--documents-repository`,
+  which maelys-platform names with the list it produces; the conventions
+  describe the migration without spelling its destination. The name stays
+  in one place, a constant in code: the checker's knowledge, which the
+  reading end needs to check anything at all. Measured: zero notes on the
+  socle's own repository, held to the rule with no exception.
+
 - **`check` says when it detects no fuzzing.** A product with no harness
   in `tests/fuzz/` or `fuzz/` and no fuzz job was told nothing; maelys-cli
   named the blind spot. It is a note, worded for what the reader can see —

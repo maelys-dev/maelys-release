@@ -305,7 +305,6 @@
                   "type": "string"
                 },
                 "conflictsWith": [],
-                "default": "maelys-dev/maelys-docs",
                 "long": "--documents-repository",
                 "repeatable": false,
                 "required": false,
@@ -495,7 +494,7 @@
           "pattern": [
             "migrate"
           ],
-          "purpose": "Move a product's prose into maelys-docs with its history and out of the product; plan without --apply.",
+          "purpose": "Move a product's prose into the documentation repository with its history and out of the product; plan without --apply.",
           "usage": "migrate DIR [--product NAME] [--documents FILE] [--documents-repository REPOSITORY] [--push] [--apply]"
         },
         {
