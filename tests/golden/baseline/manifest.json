@@ -2054,7 +2054,7 @@
         "when": "before check",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0039.json"
+        "snapshot": "fixtures/0042.json"
       },
       {
         "test": "DeclarationHomeTest.test_the_former_home_is_still_read_and_reported",
@@ -2062,7 +2062,7 @@
         "when": "before declarations",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0039.json"
+        "snapshot": "fixtures/0042.json"
       },
       {
         "test": "DeclarationHomeTest.test_the_former_home_is_still_read_and_reported",
@@ -2070,86 +2070,10 @@
         "when": "close",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0039.json"
-      },
-      {
-        "test": "DependenciesApartTest.test_a_file_that_reads_the_root_is_left_alone",
-        "event": 1,
-        "when": "created",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "DependenciesApartTest.test_a_file_that_reads_the_root_is_left_alone",
-        "event": 2,
-        "when": "before adopt",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "DependenciesApartTest.test_a_file_that_reads_the_root_is_left_alone",
-        "event": 3,
-        "when": "before check",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
-        "snapshot": "fixtures/0001.json"
-      },
-      {
-        "test": "DependenciesApartTest.test_a_file_that_reads_the_root_is_left_alone",
-        "event": 4,
-        "when": "close",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
-        "snapshot": "fixtures/0001.json"
-      },
-      {
-        "test": "DependenciesApartTest.test_a_job_that_still_clones_beside_the_product_is_named",
-        "event": 1,
-        "when": "created",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "DependenciesApartTest.test_a_job_that_still_clones_beside_the_product_is_named",
-        "event": 2,
-        "when": "before adopt",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "DependenciesApartTest.test_a_job_that_still_clones_beside_the_product_is_named",
-        "event": 3,
-        "when": "before check",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
         "snapshot": "fixtures/0042.json"
       },
       {
-        "test": "DependenciesApartTest.test_a_job_that_still_clones_beside_the_product_is_named",
-        "event": 4,
-        "when": "close",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
-        "snapshot": "fixtures/0042.json"
-      },
-      {
-        "test": "DependenciesApartTest.test_a_neighbour_whose_name_only_starts_the_same_is_not_a_pin",
+        "test": "DependenciesApartTest.test_a_file_that_reads_the_root_is_left_alone",
         "event": 1,
         "when": "created",
         "project": "<FIXTURE>/maelys-fixture",
@@ -2160,7 +2084,7 @@
         "snapshot": "fixtures/0000.json"
       },
       {
-        "test": "DependenciesApartTest.test_a_neighbour_whose_name_only_starts_the_same_is_not_a_pin",
+        "test": "DependenciesApartTest.test_a_file_that_reads_the_root_is_left_alone",
         "event": 2,
         "when": "before adopt",
         "project": "<FIXTURE>/maelys-fixture",
@@ -2171,7 +2095,7 @@
         "snapshot": "fixtures/0000.json"
       },
       {
-        "test": "DependenciesApartTest.test_a_neighbour_whose_name_only_starts_the_same_is_not_a_pin",
+        "test": "DependenciesApartTest.test_a_file_that_reads_the_root_is_left_alone",
         "event": 3,
         "when": "before check",
         "project": "<FIXTURE>/maelys-fixture",
@@ -2179,7 +2103,7 @@
         "snapshot": "fixtures/0001.json"
       },
       {
-        "test": "DependenciesApartTest.test_a_neighbour_whose_name_only_starts_the_same_is_not_a_pin",
+        "test": "DependenciesApartTest.test_a_file_that_reads_the_root_is_left_alone",
         "event": 4,
         "when": "close",
         "project": "<FIXTURE>/maelys-fixture",
@@ -2187,7 +2111,7 @@
         "snapshot": "fixtures/0001.json"
       },
       {
-        "test": "DependenciesApartTest.test_a_product_with_no_pin_is_not_asked_to_declare",
+        "test": "DependenciesApartTest.test_a_job_that_still_clones_beside_the_product_is_named",
         "event": 1,
         "when": "created",
         "project": "<FIXTURE>/maelys-fixture",
@@ -2198,7 +2122,7 @@
         "snapshot": "fixtures/0000.json"
       },
       {
-        "test": "DependenciesApartTest.test_a_product_with_no_pin_is_not_asked_to_declare",
+        "test": "DependenciesApartTest.test_a_job_that_still_clones_beside_the_product_is_named",
         "event": 2,
         "when": "before adopt",
         "project": "<FIXTURE>/maelys-fixture",
@@ -2209,69 +2133,99 @@
         "snapshot": "fixtures/0000.json"
       },
       {
-        "test": "DependenciesApartTest.test_a_product_with_no_pin_is_not_asked_to_declare",
+        "test": "DependenciesApartTest.test_a_job_that_still_clones_beside_the_product_is_named",
         "event": 3,
-        "when": "before adopt",
+        "when": "before check",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
         "snapshot": "fixtures/0043.json"
       },
       {
-        "test": "DependenciesApartTest.test_a_product_with_no_pin_is_not_asked_to_declare",
+        "test": "DependenciesApartTest.test_a_job_that_still_clones_beside_the_product_is_named",
         "event": 4,
+        "when": "close",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
+        "snapshot": "fixtures/0043.json"
+      },
+      {
+        "test": "DependenciesApartTest.test_a_neighbour_whose_name_only_starts_the_same_is_not_a_pin",
+        "event": 1,
+        "when": "created",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "DependenciesApartTest.test_a_neighbour_whose_name_only_starts_the_same_is_not_a_pin",
+        "event": 2,
+        "when": "before adopt",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "DependenciesApartTest.test_a_neighbour_whose_name_only_starts_the_same_is_not_a_pin",
+        "event": 3,
         "when": "before check",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
+        "snapshot": "fixtures/0001.json"
+      },
+      {
+        "test": "DependenciesApartTest.test_a_neighbour_whose_name_only_starts_the_same_is_not_a_pin",
+        "event": 4,
+        "when": "close",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
+        "snapshot": "fixtures/0001.json"
+      },
+      {
+        "test": "DependenciesApartTest.test_a_product_with_no_pin_is_not_asked_to_declare",
+        "event": 1,
+        "when": "created",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "DependenciesApartTest.test_a_product_with_no_pin_is_not_asked_to_declare",
+        "event": 2,
+        "when": "before adopt",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "DependenciesApartTest.test_a_product_with_no_pin_is_not_asked_to_declare",
+        "event": 3,
+        "when": "before adopt",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
         "snapshot": "fixtures/0044.json"
       },
       {
         "test": "DependenciesApartTest.test_a_product_with_no_pin_is_not_asked_to_declare",
-        "event": 5,
-        "when": "close",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
-        "snapshot": "fixtures/0044.json"
-      },
-      {
-        "test": "DependenciesApartTest.test_adopt_renders_the_layout_the_declaration_asks_for",
-        "event": 1,
-        "when": "created",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "DependenciesApartTest.test_adopt_renders_the_layout_the_declaration_asks_for",
-        "event": 2,
-        "when": "before adopt",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "DependenciesApartTest.test_adopt_renders_the_layout_the_declaration_asks_for",
-        "event": 3,
-        "when": "before adopt",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
-        "snapshot": "fixtures/0001.json"
-      },
-      {
-        "test": "DependenciesApartTest.test_adopt_renders_the_layout_the_declaration_asks_for",
         "event": 4,
-        "when": "before adopt",
+        "when": "before check",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
         "snapshot": "fixtures/0045.json"
       },
       {
-        "test": "DependenciesApartTest.test_adopt_renders_the_layout_the_declaration_asks_for",
+        "test": "DependenciesApartTest.test_a_product_with_no_pin_is_not_asked_to_declare",
         "event": 5,
         "when": "close",
         "project": "<FIXTURE>/maelys-fixture",
@@ -2279,7 +2233,7 @@
         "snapshot": "fixtures/0045.json"
       },
       {
-        "test": "DependenciesApartTest.test_an_occupied_destination_is_refused_and_not_replaced",
+        "test": "DependenciesApartTest.test_adopt_renders_the_layout_the_declaration_asks_for",
         "event": 1,
         "when": "created",
         "project": "<FIXTURE>/maelys-fixture",
@@ -2290,7 +2244,7 @@
         "snapshot": "fixtures/0000.json"
       },
       {
-        "test": "DependenciesApartTest.test_an_occupied_destination_is_refused_and_not_replaced",
+        "test": "DependenciesApartTest.test_adopt_renders_the_layout_the_declaration_asks_for",
         "event": 2,
         "when": "before adopt",
         "project": "<FIXTURE>/maelys-fixture",
@@ -2301,99 +2255,31 @@
         "snapshot": "fixtures/0000.json"
       },
       {
-        "test": "DependenciesApartTest.test_an_occupied_destination_is_refused_and_not_replaced",
+        "test": "DependenciesApartTest.test_adopt_renders_the_layout_the_declaration_asks_for",
         "event": 3,
-        "when": "close",
+        "when": "before adopt",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
         "snapshot": "fixtures/0001.json"
       },
       {
-        "test": "DependenciesApartTest.test_every_tracked_file_is_searched_and_not_ci_yml_alone",
-        "event": 1,
-        "when": "created",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "DependenciesApartTest.test_every_tracked_file_is_searched_and_not_ci_yml_alone",
-        "event": 2,
+        "test": "DependenciesApartTest.test_adopt_renders_the_layout_the_declaration_asks_for",
+        "event": 4,
         "when": "before adopt",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "DependenciesApartTest.test_every_tracked_file_is_searched_and_not_ci_yml_alone",
-        "event": 3,
-        "when": "before check",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
         "snapshot": "fixtures/0046.json"
       },
       {
-        "test": "DependenciesApartTest.test_every_tracked_file_is_searched_and_not_ci_yml_alone",
-        "event": 4,
-        "when": "close",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
-        "snapshot": "fixtures/0046.json"
-      },
-      {
-        "test": "DependenciesApartTest.test_it_is_managed_and_not_a_stray_script",
-        "event": 1,
-        "when": "created",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "DependenciesApartTest.test_it_is_managed_and_not_a_stray_script",
-        "event": 2,
-        "when": "before adopt",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "DependenciesApartTest.test_it_is_managed_and_not_a_stray_script",
-        "event": 3,
-        "when": "before adopt",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
-        "snapshot": "fixtures/0001.json"
-      },
-      {
-        "test": "DependenciesApartTest.test_it_is_managed_and_not_a_stray_script",
-        "event": 4,
-        "when": "before check",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
-        "snapshot": "fixtures/0001.json"
-      },
-      {
-        "test": "DependenciesApartTest.test_it_is_managed_and_not_a_stray_script",
+        "test": "DependenciesApartTest.test_adopt_renders_the_layout_the_declaration_asks_for",
         "event": 5,
         "when": "close",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0001.json"
+        "snapshot": "fixtures/0046.json"
       },
       {
-        "test": "DependenciesApartTest.test_naming_the_root_is_not_reading_it",
+        "test": "DependenciesApartTest.test_an_occupied_destination_is_refused_and_not_replaced",
         "event": 1,
         "when": "created",
         "project": "<FIXTURE>/maelys-fixture",
@@ -2404,7 +2290,7 @@
         "snapshot": "fixtures/0000.json"
       },
       {
-        "test": "DependenciesApartTest.test_naming_the_root_is_not_reading_it",
+        "test": "DependenciesApartTest.test_an_occupied_destination_is_refused_and_not_replaced",
         "event": 2,
         "when": "before adopt",
         "project": "<FIXTURE>/maelys-fixture",
@@ -2415,7 +2301,37 @@
         "snapshot": "fixtures/0000.json"
       },
       {
-        "test": "DependenciesApartTest.test_naming_the_root_is_not_reading_it",
+        "test": "DependenciesApartTest.test_an_occupied_destination_is_refused_and_not_replaced",
+        "event": 3,
+        "when": "close",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
+        "snapshot": "fixtures/0001.json"
+      },
+      {
+        "test": "DependenciesApartTest.test_every_tracked_file_is_searched_and_not_ci_yml_alone",
+        "event": 1,
+        "when": "created",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "DependenciesApartTest.test_every_tracked_file_is_searched_and_not_ci_yml_alone",
+        "event": 2,
+        "when": "before adopt",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "DependenciesApartTest.test_every_tracked_file_is_searched_and_not_ci_yml_alone",
         "event": 3,
         "when": "before check",
         "project": "<FIXTURE>/maelys-fixture",
@@ -2423,6 +2339,90 @@
         "snapshot": "fixtures/0047.json"
       },
       {
+        "test": "DependenciesApartTest.test_every_tracked_file_is_searched_and_not_ci_yml_alone",
+        "event": 4,
+        "when": "close",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
+        "snapshot": "fixtures/0047.json"
+      },
+      {
+        "test": "DependenciesApartTest.test_it_is_managed_and_not_a_stray_script",
+        "event": 1,
+        "when": "created",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "DependenciesApartTest.test_it_is_managed_and_not_a_stray_script",
+        "event": 2,
+        "when": "before adopt",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "DependenciesApartTest.test_it_is_managed_and_not_a_stray_script",
+        "event": 3,
+        "when": "before adopt",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
+        "snapshot": "fixtures/0001.json"
+      },
+      {
+        "test": "DependenciesApartTest.test_it_is_managed_and_not_a_stray_script",
+        "event": 4,
+        "when": "before check",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
+        "snapshot": "fixtures/0001.json"
+      },
+      {
+        "test": "DependenciesApartTest.test_it_is_managed_and_not_a_stray_script",
+        "event": 5,
+        "when": "close",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
+        "snapshot": "fixtures/0001.json"
+      },
+      {
+        "test": "DependenciesApartTest.test_naming_the_root_is_not_reading_it",
+        "event": 1,
+        "when": "created",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "DependenciesApartTest.test_naming_the_root_is_not_reading_it",
+        "event": 2,
+        "when": "before adopt",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "DependenciesApartTest.test_naming_the_root_is_not_reading_it",
+        "event": 3,
+        "when": "before check",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
+        "snapshot": "fixtures/0048.json"
+      },
+      {
         "test": "DependenciesApartTest.test_naming_the_root_is_not_reading_it",
         "event": 4,
         "when": "before check",
@@ -2466,7 +2466,7 @@
         "when": "before check",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0048.json"
+        "snapshot": "fixtures/0049.json"
       },
       {
         "test": "DependenciesApartTest.test_naming_the_script_is_not_calling_it",
@@ -2474,7 +2474,7 @@
         "when": "close",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0048.json"
+        "snapshot": "fixtures/0049.json"
       },
       {
         "test": "DependenciesApartTest.test_outside_a_repository_the_search_says_nothing",
@@ -2542,7 +2542,7 @@
         "when": "before check",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0045.json"
+        "snapshot": "fixtures/0046.json"
       },
       {
         "test": "DependenciesApartTest.test_pins_without_the_declaration_are_a_violation",
@@ -2550,7 +2550,7 @@
         "when": "before adopt",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0045.json"
+        "snapshot": "fixtures/0046.json"
       },
       {
         "test": "DependenciesApartTest.test_pins_without_the_declaration_are_a_violation",
@@ -2558,7 +2558,7 @@
         "when": "close",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0045.json"
+        "snapshot": "fixtures/0046.json"
       },
       {
         "test": "DependenciesApartTest.test_prose_and_the_managed_scripts_are_exempt",
@@ -2686,190 +2686,18 @@
         "when": "before check",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0049.json"
-      },
-      {
-        "test": "DependenciesApartTest.test_the_fallback_kept_beside_the_root_is_still_named",
-        "event": 4,
-        "when": "close",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
-        "snapshot": "fixtures/0049.json"
-      },
-      {
-        "test": "DependenciesApartTest.test_the_plural_script_clones_every_pin_and_prints_one_line",
-        "event": 1,
-        "when": "created",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "DependenciesApartTest.test_the_plural_script_clones_every_pin_and_prints_one_line",
-        "event": 2,
-        "when": "before adopt",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "DependenciesApartTest.test_the_plural_script_clones_every_pin_and_prints_one_line",
-        "event": 3,
-        "when": "close",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
-        "snapshot": "fixtures/0001.json"
-      },
-      {
-        "test": "DependenciesApartTest.test_the_release_workflow_gives_the_root_without_listing_the_pins",
-        "event": 1,
-        "when": "created",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "DependenciesApartTest.test_the_release_workflow_gives_the_root_without_listing_the_pins",
-        "event": 2,
-        "when": "before adopt",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "DependenciesApartTest.test_the_release_workflow_gives_the_root_without_listing_the_pins",
-        "event": 3,
-        "when": "close",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
-        "snapshot": "fixtures/0001.json"
-      },
-      {
-        "test": "DependenciesApartTest.test_the_rule_is_read_after_the_declaration_and_not_with_the_pins",
-        "event": 1,
-        "when": "created",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "DependenciesApartTest.test_the_rule_is_read_after_the_declaration_and_not_with_the_pins",
-        "event": 2,
-        "when": "before adopt",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "DependenciesApartTest.test_the_rule_is_read_after_the_declaration_and_not_with_the_pins",
-        "event": 3,
-        "when": "before check",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
-        "snapshot": "fixtures/0001.json"
-      },
-      {
-        "test": "DependenciesApartTest.test_the_rule_is_read_after_the_declaration_and_not_with_the_pins",
-        "event": 4,
-        "when": "close",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
-        "snapshot": "fixtures/0001.json"
-      },
-      {
-        "test": "DependenciesApartTest.test_the_workflow_is_told_which_layout_to_make",
-        "event": 1,
-        "when": "created",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "DependenciesApartTest.test_the_workflow_is_told_which_layout_to_make",
-        "event": 2,
-        "when": "before adopt",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "DependenciesApartTest.test_the_workflow_is_told_which_layout_to_make",
-        "event": 3,
-        "when": "close",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
-        "snapshot": "fixtures/0001.json"
-      },
-      {
-        "test": "DependenciesTest.test_a_broken_pin_materialises_nothing",
-        "event": 1,
-        "when": "created",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "DependenciesTest.test_a_broken_pin_materialises_nothing",
-        "event": 2,
-        "when": "close",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
         "snapshot": "fixtures/0050.json"
       },
       {
-        "test": "DependenciesTest.test_a_disagreement_between_pins_is_noted_and_changes_nothing",
-        "event": 1,
-        "when": "created",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "DependenciesTest.test_a_disagreement_between_pins_is_noted_and_changes_nothing",
-        "event": 2,
+        "test": "DependenciesApartTest.test_the_fallback_kept_beside_the_root_is_still_named",
+        "event": 4,
         "when": "close",
         "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
+        "options": [],
+        "snapshot": "fixtures/0050.json"
       },
       {
-        "test": "DependenciesTest.test_a_foreign_pin_is_cloned_from_its_repository_line",
+        "test": "DependenciesApartTest.test_the_plural_script_clones_every_pin_and_prints_one_line",
         "event": 1,
         "when": "created",
         "project": "<FIXTURE>/maelys-fixture",
@@ -2880,7 +2708,135 @@
         "snapshot": "fixtures/0000.json"
       },
       {
-        "test": "DependenciesTest.test_a_foreign_pin_is_cloned_from_its_repository_line",
+        "test": "DependenciesApartTest.test_the_plural_script_clones_every_pin_and_prints_one_line",
+        "event": 2,
+        "when": "before adopt",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "DependenciesApartTest.test_the_plural_script_clones_every_pin_and_prints_one_line",
+        "event": 3,
+        "when": "close",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
+        "snapshot": "fixtures/0001.json"
+      },
+      {
+        "test": "DependenciesApartTest.test_the_release_workflow_gives_the_root_without_listing_the_pins",
+        "event": 1,
+        "when": "created",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "DependenciesApartTest.test_the_release_workflow_gives_the_root_without_listing_the_pins",
+        "event": 2,
+        "when": "before adopt",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "DependenciesApartTest.test_the_release_workflow_gives_the_root_without_listing_the_pins",
+        "event": 3,
+        "when": "close",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
+        "snapshot": "fixtures/0001.json"
+      },
+      {
+        "test": "DependenciesApartTest.test_the_rule_is_read_after_the_declaration_and_not_with_the_pins",
+        "event": 1,
+        "when": "created",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "DependenciesApartTest.test_the_rule_is_read_after_the_declaration_and_not_with_the_pins",
+        "event": 2,
+        "when": "before adopt",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "DependenciesApartTest.test_the_rule_is_read_after_the_declaration_and_not_with_the_pins",
+        "event": 3,
+        "when": "before check",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
+        "snapshot": "fixtures/0001.json"
+      },
+      {
+        "test": "DependenciesApartTest.test_the_rule_is_read_after_the_declaration_and_not_with_the_pins",
+        "event": 4,
+        "when": "close",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
+        "snapshot": "fixtures/0001.json"
+      },
+      {
+        "test": "DependenciesApartTest.test_the_workflow_is_told_which_layout_to_make",
+        "event": 1,
+        "when": "created",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "DependenciesApartTest.test_the_workflow_is_told_which_layout_to_make",
+        "event": 2,
+        "when": "before adopt",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "DependenciesApartTest.test_the_workflow_is_told_which_layout_to_make",
+        "event": 3,
+        "when": "close",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
+        "snapshot": "fixtures/0001.json"
+      },
+      {
+        "test": "DependenciesTest.test_a_broken_pin_materialises_nothing",
+        "event": 1,
+        "when": "created",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "DependenciesTest.test_a_broken_pin_materialises_nothing",
         "event": 2,
         "when": "close",
         "project": "<FIXTURE>/maelys-fixture",
@@ -2891,7 +2847,7 @@
         "snapshot": "fixtures/0051.json"
       },
       {
-        "test": "DependenciesTest.test_a_moved_pin_is_fetched_without_losing_anything",
+        "test": "DependenciesTest.test_a_disagreement_between_pins_is_noted_and_changes_nothing",
         "event": 1,
         "when": "created",
         "project": "<FIXTURE>/maelys-fixture",
@@ -2902,7 +2858,7 @@
         "snapshot": "fixtures/0000.json"
       },
       {
-        "test": "DependenciesTest.test_a_moved_pin_is_fetched_without_losing_anything",
+        "test": "DependenciesTest.test_a_disagreement_between_pins_is_noted_and_changes_nothing",
         "event": 2,
         "when": "close",
         "project": "<FIXTURE>/maelys-fixture",
@@ -2913,7 +2869,7 @@
         "snapshot": "fixtures/0000.json"
       },
       {
-        "test": "DependenciesTest.test_a_plan_writes_nothing_and_names_one_directory_per_product",
+        "test": "DependenciesTest.test_a_foreign_pin_is_cloned_from_its_repository_line",
         "event": 1,
         "when": "created",
         "project": "<FIXTURE>/maelys-fixture",
@@ -2924,185 +2880,9 @@
         "snapshot": "fixtures/0000.json"
       },
       {
-        "test": "DependenciesTest.test_a_plan_writes_nothing_and_names_one_directory_per_product",
+        "test": "DependenciesTest.test_a_foreign_pin_is_cloned_from_its_repository_line",
         "event": 2,
         "when": "close",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "DependenciesTest.test_a_symbolic_link_to_a_working_copy_is_refused",
-        "event": 1,
-        "when": "created",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "DependenciesTest.test_a_symbolic_link_to_a_working_copy_is_refused",
-        "event": 2,
-        "when": "close",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "DependenciesTest.test_a_tracked_change_blocks_and_is_not_reverted",
-        "event": 1,
-        "when": "created",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "DependenciesTest.test_a_tracked_change_blocks_and_is_not_reverted",
-        "event": 2,
-        "when": "close",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "DependenciesTest.test_a_working_copy_is_refused_before_anything_is_written",
-        "event": 1,
-        "when": "created",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "DependenciesTest.test_a_working_copy_is_refused_before_anything_is_written",
-        "event": 2,
-        "when": "close",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "DependenciesTest.test_apply_clones_at_the_pin_detached_and_a_second_run_does_nothing",
-        "event": 1,
-        "when": "created",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "DependenciesTest.test_apply_clones_at_the_pin_detached_and_a_second_run_does_nothing",
-        "event": 2,
-        "when": "close",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "DependenciesTest.test_the_clone_is_the_managed_script_s_clone",
-        "event": 1,
-        "when": "created",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "DependenciesTest.test_the_clone_is_the_managed_script_s_clone",
-        "event": 2,
-        "when": "close",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "DependenciesTest.test_the_product_is_not_a_home_for_its_own_pins",
-        "event": 1,
-        "when": "created",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "DependenciesTest.test_the_product_is_not_a_home_for_its_own_pins",
-        "event": 2,
-        "when": "close",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "DependenciesTest.test_untracked_files_are_left_in_place_and_noted",
-        "event": 1,
-        "when": "created",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "DependenciesTest.test_untracked_files_are_left_in_place_and_noted",
-        "event": 2,
-        "when": "close",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "DocsContractTest.test_a_build_tree_per_platform_names_every_one_of_them",
-        "event": 1,
-        "when": "created",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "DocsContractTest.test_a_build_tree_per_platform_names_every_one_of_them",
-        "event": 2,
-        "when": "before adopt",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [
           "--mechanism",
@@ -3111,23 +2891,7 @@
         "snapshot": "fixtures/0052.json"
       },
       {
-        "test": "DocsContractTest.test_a_build_tree_per_platform_names_every_one_of_them",
-        "event": 3,
-        "when": "before check",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
-        "snapshot": "fixtures/0053.json"
-      },
-      {
-        "test": "DocsContractTest.test_a_build_tree_per_platform_names_every_one_of_them",
-        "event": 4,
-        "when": "close",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
-        "snapshot": "fixtures/0053.json"
-      },
-      {
-        "test": "DocsContractTest.test_a_document_licensing_engages_stays",
+        "test": "DependenciesTest.test_a_moved_pin_is_fetched_without_losing_anything",
         "event": 1,
         "when": "created",
         "project": "<FIXTURE>/maelys-fixture",
@@ -3138,7 +2902,205 @@
         "snapshot": "fixtures/0000.json"
       },
       {
-        "test": "DocsContractTest.test_a_document_licensing_engages_stays",
+        "test": "DependenciesTest.test_a_moved_pin_is_fetched_without_losing_anything",
+        "event": 2,
+        "when": "close",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "DependenciesTest.test_a_plan_writes_nothing_and_names_one_directory_per_product",
+        "event": 1,
+        "when": "created",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "DependenciesTest.test_a_plan_writes_nothing_and_names_one_directory_per_product",
+        "event": 2,
+        "when": "close",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "DependenciesTest.test_a_symbolic_link_to_a_working_copy_is_refused",
+        "event": 1,
+        "when": "created",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "DependenciesTest.test_a_symbolic_link_to_a_working_copy_is_refused",
+        "event": 2,
+        "when": "close",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "DependenciesTest.test_a_tracked_change_blocks_and_is_not_reverted",
+        "event": 1,
+        "when": "created",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "DependenciesTest.test_a_tracked_change_blocks_and_is_not_reverted",
+        "event": 2,
+        "when": "close",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "DependenciesTest.test_a_working_copy_is_refused_before_anything_is_written",
+        "event": 1,
+        "when": "created",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "DependenciesTest.test_a_working_copy_is_refused_before_anything_is_written",
+        "event": 2,
+        "when": "close",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "DependenciesTest.test_apply_clones_at_the_pin_detached_and_a_second_run_does_nothing",
+        "event": 1,
+        "when": "created",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "DependenciesTest.test_apply_clones_at_the_pin_detached_and_a_second_run_does_nothing",
+        "event": 2,
+        "when": "close",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "DependenciesTest.test_the_clone_is_the_managed_script_s_clone",
+        "event": 1,
+        "when": "created",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "DependenciesTest.test_the_clone_is_the_managed_script_s_clone",
+        "event": 2,
+        "when": "close",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "DependenciesTest.test_the_product_is_not_a_home_for_its_own_pins",
+        "event": 1,
+        "when": "created",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "DependenciesTest.test_the_product_is_not_a_home_for_its_own_pins",
+        "event": 2,
+        "when": "close",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "DependenciesTest.test_untracked_files_are_left_in_place_and_noted",
+        "event": 1,
+        "when": "created",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "DependenciesTest.test_untracked_files_are_left_in_place_and_noted",
+        "event": 2,
+        "when": "close",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "DocsContractTest.test_a_build_tree_per_platform_names_every_one_of_them",
+        "event": 1,
+        "when": "created",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "DocsContractTest.test_a_build_tree_per_platform_names_every_one_of_them",
         "event": 2,
         "when": "before adopt",
         "project": "<FIXTURE>/maelys-fixture",
@@ -3146,15 +3108,53 @@
           "--mechanism",
           "maelys-release"
         ],
+        "snapshot": "fixtures/0053.json"
+      },
+      {
+        "test": "DocsContractTest.test_a_build_tree_per_platform_names_every_one_of_them",
+        "event": 3,
+        "when": "before check",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
+        "snapshot": "fixtures/0054.json"
+      },
+      {
+        "test": "DocsContractTest.test_a_build_tree_per_platform_names_every_one_of_them",
+        "event": 4,
+        "when": "close",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
         "snapshot": "fixtures/0054.json"
       },
       {
         "test": "DocsContractTest.test_a_document_licensing_engages_stays",
+        "event": 1,
+        "when": "created",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "DocsContractTest.test_a_document_licensing_engages_stays",
+        "event": 2,
+        "when": "before adopt",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0055.json"
+      },
+      {
+        "test": "DocsContractTest.test_a_document_licensing_engages_stays",
         "event": 3,
         "when": "before check",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0055.json"
+        "snapshot": "fixtures/0056.json"
       },
       {
         "test": "DocsContractTest.test_a_document_licensing_engages_stays",
@@ -3162,37 +3162,37 @@
         "when": "close",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0055.json"
-      },
-      {
-        "test": "DocsContractTest.test_a_library_is_told_nothing_about_a_reference_it_cannot_have",
-        "event": 1,
-        "when": "created",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "DocsContractTest.test_a_library_is_told_nothing_about_a_reference_it_cannot_have",
-        "event": 2,
-        "when": "before adopt",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
         "snapshot": "fixtures/0056.json"
       },
       {
         "test": "DocsContractTest.test_a_library_is_told_nothing_about_a_reference_it_cannot_have",
+        "event": 1,
+        "when": "created",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "DocsContractTest.test_a_library_is_told_nothing_about_a_reference_it_cannot_have",
+        "event": 2,
+        "when": "before adopt",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0057.json"
+      },
+      {
+        "test": "DocsContractTest.test_a_library_is_told_nothing_about_a_reference_it_cannot_have",
         "event": 3,
         "when": "before check",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0057.json"
+        "snapshot": "fixtures/0058.json"
       },
       {
         "test": "DocsContractTest.test_a_library_is_told_nothing_about_a_reference_it_cannot_have",
@@ -3200,7 +3200,7 @@
         "when": "close",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0057.json"
+        "snapshot": "fixtures/0058.json"
       },
       {
         "test": "DocsContractTest.test_a_malformed_declaration_is_refused",
@@ -3222,7 +3222,7 @@
           "--mechanism",
           "maelys-release"
         ],
-        "snapshot": "fixtures/0058.json"
+        "snapshot": "fixtures/0059.json"
       },
       {
         "test": "DocsContractTest.test_a_malformed_declaration_is_refused",
@@ -3233,7 +3233,7 @@
           "--mechanism",
           "maelys-release"
         ],
-        "snapshot": "fixtures/0058.json"
+        "snapshot": "fixtures/0059.json"
       },
       {
         "test": "DocsContractTest.test_a_product_without_a_framework_command_line_generates_nothing",
@@ -3255,7 +3255,7 @@
           "--mechanism",
           "maelys-release"
         ],
-        "snapshot": "fixtures/0059.json"
+        "snapshot": "fixtures/0060.json"
       },
       {
         "test": "DocsContractTest.test_a_product_without_a_framework_command_line_generates_nothing",
@@ -3266,7 +3266,7 @@
           "--mechanism",
           "maelys-release"
         ],
-        "snapshot": "fixtures/0059.json"
+        "snapshot": "fixtures/0060.json"
       },
       {
         "test": "DocsContractTest.test_a_stale_reference_is_a_drift",
@@ -3288,7 +3288,7 @@
           "--mechanism",
           "maelys-release"
         ],
-        "snapshot": "fixtures/0052.json"
+        "snapshot": "fixtures/0053.json"
       },
       {
         "test": "DocsContractTest.test_a_stale_reference_is_a_drift",
@@ -3296,7 +3296,7 @@
         "when": "before check",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0060.json"
+        "snapshot": "fixtures/0061.json"
       },
       {
         "test": "DocsContractTest.test_a_stale_reference_is_a_drift",
@@ -3304,56 +3304,10 @@
         "when": "close",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0060.json"
-      },
-      {
-        "test": "DocsContractTest.test_a_verified_reference_stays",
-        "event": 1,
-        "when": "created",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "DocsContractTest.test_a_verified_reference_stays",
-        "event": 2,
-        "when": "before adopt",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
         "snapshot": "fixtures/0061.json"
       },
       {
         "test": "DocsContractTest.test_a_verified_reference_stays",
-        "event": 3,
-        "when": "before check",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
-        "snapshot": "fixtures/0062.json"
-      },
-      {
-        "test": "DocsContractTest.test_a_verified_reference_stays",
-        "event": 4,
-        "when": "before check",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
-        "snapshot": "fixtures/0062.json"
-      },
-      {
-        "test": "DocsContractTest.test_a_verified_reference_stays",
-        "event": 5,
-        "when": "close",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
-        "snapshot": "fixtures/0062.json"
-      },
-      {
-        "test": "DocsContractTest.test_an_unavailable_generator_leaves_the_reference_alone",
         "event": 1,
         "when": "created",
         "project": "<FIXTURE>/maelys-fixture",
@@ -3364,7 +3318,7 @@
         "snapshot": "fixtures/0000.json"
       },
       {
-        "test": "DocsContractTest.test_an_unavailable_generator_leaves_the_reference_alone",
+        "test": "DocsContractTest.test_a_verified_reference_stays",
         "event": 2,
         "when": "before adopt",
         "project": "<FIXTURE>/maelys-fixture",
@@ -3372,15 +3326,61 @@
           "--mechanism",
           "maelys-release"
         ],
+        "snapshot": "fixtures/0062.json"
+      },
+      {
+        "test": "DocsContractTest.test_a_verified_reference_stays",
+        "event": 3,
+        "when": "before check",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
+        "snapshot": "fixtures/0063.json"
+      },
+      {
+        "test": "DocsContractTest.test_a_verified_reference_stays",
+        "event": 4,
+        "when": "before check",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
+        "snapshot": "fixtures/0063.json"
+      },
+      {
+        "test": "DocsContractTest.test_a_verified_reference_stays",
+        "event": 5,
+        "when": "close",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
         "snapshot": "fixtures/0063.json"
       },
       {
         "test": "DocsContractTest.test_an_unavailable_generator_leaves_the_reference_alone",
+        "event": 1,
+        "when": "created",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "DocsContractTest.test_an_unavailable_generator_leaves_the_reference_alone",
+        "event": 2,
+        "when": "before adopt",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0064.json"
+      },
+      {
+        "test": "DocsContractTest.test_an_unavailable_generator_leaves_the_reference_alone",
         "event": 3,
         "when": "before check",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0064.json"
+        "snapshot": "fixtures/0065.json"
       },
       {
         "test": "DocsContractTest.test_an_unavailable_generator_leaves_the_reference_alone",
@@ -3388,40 +3388,10 @@
         "when": "close",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0064.json"
-      },
-      {
-        "test": "DocsContractTest.test_declared_programs_and_flags_replace_a_makefile_variable",
-        "event": 1,
-        "when": "created",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "DocsContractTest.test_declared_programs_and_flags_replace_a_makefile_variable",
-        "event": 2,
-        "when": "before adopt",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
         "snapshot": "fixtures/0065.json"
       },
       {
         "test": "DocsContractTest.test_declared_programs_and_flags_replace_a_makefile_variable",
-        "event": 3,
-        "when": "close",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
-        "snapshot": "fixtures/0066.json"
-      },
-      {
-        "test": "DocsContractTest.test_prose_a_readme_links_is_named_and_never_refused",
         "event": 1,
         "when": "created",
         "project": "<FIXTURE>/maelys-fixture",
@@ -3432,7 +3402,7 @@
         "snapshot": "fixtures/0000.json"
       },
       {
-        "test": "DocsContractTest.test_prose_a_readme_links_is_named_and_never_refused",
+        "test": "DocsContractTest.test_declared_programs_and_flags_replace_a_makefile_variable",
         "event": 2,
         "when": "before adopt",
         "project": "<FIXTURE>/maelys-fixture",
@@ -3440,34 +3410,18 @@
           "--mechanism",
           "maelys-release"
         ],
+        "snapshot": "fixtures/0066.json"
+      },
+      {
+        "test": "DocsContractTest.test_declared_programs_and_flags_replace_a_makefile_variable",
+        "event": 3,
+        "when": "close",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
         "snapshot": "fixtures/0067.json"
       },
       {
         "test": "DocsContractTest.test_prose_a_readme_links_is_named_and_never_refused",
-        "event": 3,
-        "when": "before check",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
-        "snapshot": "fixtures/0068.json"
-      },
-      {
-        "test": "DocsContractTest.test_prose_a_readme_links_is_named_and_never_refused",
-        "event": 4,
-        "when": "before check",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
-        "snapshot": "fixtures/0068.json"
-      },
-      {
-        "test": "DocsContractTest.test_prose_a_readme_links_is_named_and_never_refused",
-        "event": 5,
-        "when": "close",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
-        "snapshot": "fixtures/0068.json"
-      },
-      {
-        "test": "DocsContractTest.test_prose_is_a_note_by_default_and_a_violation_on_demand",
         "event": 1,
         "when": "created",
         "project": "<FIXTURE>/maelys-fixture",
@@ -3478,7 +3432,7 @@
         "snapshot": "fixtures/0000.json"
       },
       {
-        "test": "DocsContractTest.test_prose_is_a_note_by_default_and_a_violation_on_demand",
+        "test": "DocsContractTest.test_prose_a_readme_links_is_named_and_never_refused",
         "event": 2,
         "when": "before adopt",
         "project": "<FIXTURE>/maelys-fixture",
@@ -3486,15 +3440,61 @@
           "--mechanism",
           "maelys-release"
         ],
+        "snapshot": "fixtures/0068.json"
+      },
+      {
+        "test": "DocsContractTest.test_prose_a_readme_links_is_named_and_never_refused",
+        "event": 3,
+        "when": "before check",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
+        "snapshot": "fixtures/0069.json"
+      },
+      {
+        "test": "DocsContractTest.test_prose_a_readme_links_is_named_and_never_refused",
+        "event": 4,
+        "when": "before check",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
+        "snapshot": "fixtures/0069.json"
+      },
+      {
+        "test": "DocsContractTest.test_prose_a_readme_links_is_named_and_never_refused",
+        "event": 5,
+        "when": "close",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
         "snapshot": "fixtures/0069.json"
       },
       {
         "test": "DocsContractTest.test_prose_is_a_note_by_default_and_a_violation_on_demand",
+        "event": 1,
+        "when": "created",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "DocsContractTest.test_prose_is_a_note_by_default_and_a_violation_on_demand",
+        "event": 2,
+        "when": "before adopt",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0070.json"
+      },
+      {
+        "test": "DocsContractTest.test_prose_is_a_note_by_default_and_a_violation_on_demand",
         "event": 3,
         "when": "before check",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0070.json"
+        "snapshot": "fixtures/0071.json"
       },
       {
         "test": "DocsContractTest.test_prose_is_a_note_by_default_and_a_violation_on_demand",
@@ -3502,7 +3502,7 @@
         "when": "before check",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0070.json"
+        "snapshot": "fixtures/0071.json"
       },
       {
         "test": "DocsContractTest.test_prose_is_a_note_by_default_and_a_violation_on_demand",
@@ -3510,48 +3510,10 @@
         "when": "close",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0070.json"
-      },
-      {
-        "test": "DocsContractTest.test_prose_is_noted_with_its_destination_and_nothing_else_is",
-        "event": 1,
-        "when": "created",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "DocsContractTest.test_prose_is_noted_with_its_destination_and_nothing_else_is",
-        "event": 2,
-        "when": "before adopt",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
         "snapshot": "fixtures/0071.json"
       },
       {
         "test": "DocsContractTest.test_prose_is_noted_with_its_destination_and_nothing_else_is",
-        "event": 3,
-        "when": "before check",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
-        "snapshot": "fixtures/0072.json"
-      },
-      {
-        "test": "DocsContractTest.test_prose_is_noted_with_its_destination_and_nothing_else_is",
-        "event": 4,
-        "when": "close",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
-        "snapshot": "fixtures/0072.json"
-      },
-      {
-        "test": "DocsContractTest.test_the_build_directory_is_declared_not_guessed",
         "event": 1,
         "when": "created",
         "project": "<FIXTURE>/maelys-fixture",
@@ -3562,7 +3524,7 @@
         "snapshot": "fixtures/0000.json"
       },
       {
-        "test": "DocsContractTest.test_the_build_directory_is_declared_not_guessed",
+        "test": "DocsContractTest.test_prose_is_noted_with_its_destination_and_nothing_else_is",
         "event": 2,
         "when": "before adopt",
         "project": "<FIXTURE>/maelys-fixture",
@@ -3570,27 +3532,57 @@
           "--mechanism",
           "maelys-release"
         ],
-        "snapshot": "fixtures/0052.json"
+        "snapshot": "fixtures/0072.json"
       },
       {
-        "test": "DocsContractTest.test_the_build_directory_is_declared_not_guessed",
+        "test": "DocsContractTest.test_prose_is_noted_with_its_destination_and_nothing_else_is",
         "event": 3,
-        "when": "before adopt",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
-        "snapshot": "fixtures/0053.json"
-      },
-      {
-        "test": "DocsContractTest.test_the_build_directory_is_declared_not_guessed",
-        "event": 4,
         "when": "before check",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
         "snapshot": "fixtures/0073.json"
       },
       {
+        "test": "DocsContractTest.test_prose_is_noted_with_its_destination_and_nothing_else_is",
+        "event": 4,
+        "when": "close",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
+        "snapshot": "fixtures/0073.json"
+      },
+      {
         "test": "DocsContractTest.test_the_build_directory_is_declared_not_guessed",
-        "event": 5,
+        "event": 1,
+        "when": "created",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "DocsContractTest.test_the_build_directory_is_declared_not_guessed",
+        "event": 2,
+        "when": "before adopt",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0053.json"
+      },
+      {
+        "test": "DocsContractTest.test_the_build_directory_is_declared_not_guessed",
+        "event": 3,
+        "when": "before adopt",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
+        "snapshot": "fixtures/0054.json"
+      },
+      {
+        "test": "DocsContractTest.test_the_build_directory_is_declared_not_guessed",
+        "event": 4,
         "when": "before check",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
@@ -3598,7 +3590,7 @@
       },
       {
         "test": "DocsContractTest.test_the_build_directory_is_declared_not_guessed",
-        "event": 6,
+        "event": 5,
         "when": "before check",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
@@ -3606,11 +3598,19 @@
       },
       {
         "test": "DocsContractTest.test_the_build_directory_is_declared_not_guessed",
+        "event": 6,
+        "when": "before check",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
+        "snapshot": "fixtures/0076.json"
+      },
+      {
+        "test": "DocsContractTest.test_the_build_directory_is_declared_not_guessed",
         "event": 7,
         "when": "close",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0075.json"
+        "snapshot": "fixtures/0076.json"
       },
       {
         "test": "DocsContractTest.test_the_conditions_are_maelys_platforms",
@@ -3654,7 +3654,7 @@
           "--mechanism",
           "maelys-release"
         ],
-        "snapshot": "fixtures/0076.json"
+        "snapshot": "fixtures/0077.json"
       },
       {
         "test": "DocsContractTest.test_the_earlier_reference_paths_are_named_with_their_git_mv",
@@ -3662,7 +3662,7 @@
         "when": "before check",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0077.json"
+        "snapshot": "fixtures/0078.json"
       },
       {
         "test": "DocsContractTest.test_the_earlier_reference_paths_are_named_with_their_git_mv",
@@ -3670,7 +3670,7 @@
         "when": "before check",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0077.json"
+        "snapshot": "fixtures/0078.json"
       },
       {
         "test": "DocsContractTest.test_the_earlier_reference_paths_are_named_with_their_git_mv",
@@ -3678,7 +3678,7 @@
         "when": "before check",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0077.json"
+        "snapshot": "fixtures/0078.json"
       },
       {
         "test": "DocsContractTest.test_the_earlier_reference_paths_are_named_with_their_git_mv",
@@ -3686,37 +3686,37 @@
         "when": "close",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0077.json"
-      },
-      {
-        "test": "DocsContractTest.test_the_framework_itself_carries_the_generator_instead_of_pinning_it",
-        "event": 1,
-        "when": "created",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "DocsContractTest.test_the_framework_itself_carries_the_generator_instead_of_pinning_it",
-        "event": 2,
-        "when": "before adopt",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
         "snapshot": "fixtures/0078.json"
       },
       {
         "test": "DocsContractTest.test_the_framework_itself_carries_the_generator_instead_of_pinning_it",
+        "event": 1,
+        "when": "created",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "DocsContractTest.test_the_framework_itself_carries_the_generator_instead_of_pinning_it",
+        "event": 2,
+        "when": "before adopt",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0079.json"
+      },
+      {
+        "test": "DocsContractTest.test_the_framework_itself_carries_the_generator_instead_of_pinning_it",
         "event": 3,
         "when": "before check",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0079.json"
+        "snapshot": "fixtures/0080.json"
       },
       {
         "test": "DocsContractTest.test_the_framework_itself_carries_the_generator_instead_of_pinning_it",
@@ -3724,37 +3724,37 @@
         "when": "close",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0079.json"
-      },
-      {
-        "test": "DocsContractTest.test_the_generated_mark_is_read_in_the_head_not_on_one_line",
-        "event": 1,
-        "when": "created",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "DocsContractTest.test_the_generated_mark_is_read_in_the_head_not_on_one_line",
-        "event": 2,
-        "when": "before adopt",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
         "snapshot": "fixtures/0080.json"
       },
       {
         "test": "DocsContractTest.test_the_generated_mark_is_read_in_the_head_not_on_one_line",
+        "event": 1,
+        "when": "created",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "DocsContractTest.test_the_generated_mark_is_read_in_the_head_not_on_one_line",
+        "event": 2,
+        "when": "before adopt",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0081.json"
+      },
+      {
+        "test": "DocsContractTest.test_the_generated_mark_is_read_in_the_head_not_on_one_line",
         "event": 3,
         "when": "before check",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0081.json"
+        "snapshot": "fixtures/0082.json"
       },
       {
         "test": "DocsContractTest.test_the_generated_mark_is_read_in_the_head_not_on_one_line",
@@ -3762,37 +3762,37 @@
         "when": "close",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0081.json"
-      },
-      {
-        "test": "DocsContractTest.test_the_note_says_which_directories_were_tried",
-        "event": 1,
-        "when": "created",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "DocsContractTest.test_the_note_says_which_directories_were_tried",
-        "event": 2,
-        "when": "before adopt",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
         "snapshot": "fixtures/0082.json"
       },
       {
         "test": "DocsContractTest.test_the_note_says_which_directories_were_tried",
+        "event": 1,
+        "when": "created",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "DocsContractTest.test_the_note_says_which_directories_were_tried",
+        "event": 2,
+        "when": "before adopt",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0083.json"
+      },
+      {
+        "test": "DocsContractTest.test_the_note_says_which_directories_were_tried",
         "event": 3,
         "when": "before check",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0083.json"
+        "snapshot": "fixtures/0084.json"
       },
       {
         "test": "DocsContractTest.test_the_note_says_which_directories_were_tried",
@@ -3800,7 +3800,7 @@
         "when": "close",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0083.json"
+        "snapshot": "fixtures/0084.json"
       },
       {
         "test": "DocsContractTest.test_the_socle_generates_the_reference_itself",
@@ -3822,7 +3822,7 @@
           "--mechanism",
           "maelys-release"
         ],
-        "snapshot": "fixtures/0052.json"
+        "snapshot": "fixtures/0053.json"
       },
       {
         "test": "DocsContractTest.test_the_socle_generates_the_reference_itself",
@@ -3830,7 +3830,7 @@
         "when": "before check",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0053.json"
+        "snapshot": "fixtures/0054.json"
       },
       {
         "test": "DocsContractTest.test_the_socle_generates_the_reference_itself",
@@ -3838,7 +3838,7 @@
         "when": "close",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0053.json"
+        "snapshot": "fixtures/0054.json"
       },
       {
         "test": "GoldenTest.test_check_conformant",
@@ -3944,7 +3944,7 @@
         "when": "before check",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0084.json"
+        "snapshot": "fixtures/0085.json"
       },
       {
         "test": "GoldenTest.test_check_pinned_elsewhere",
@@ -3952,7 +3952,7 @@
         "when": "before check",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0084.json"
+        "snapshot": "fixtures/0085.json"
       },
       {
         "test": "GoldenTest.test_check_pinned_elsewhere",
@@ -3960,7 +3960,7 @@
         "when": "close",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0084.json"
+        "snapshot": "fixtures/0085.json"
       },
       {
         "test": "GoldenTest.test_preflight_not_ready",
@@ -4050,7 +4050,7 @@
         "when": "before check",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0085.json"
+        "snapshot": "fixtures/0086.json"
       },
       {
         "test": "GoldenTest.test_the_half_adoption_says_which_lines_and_which_command",
@@ -4058,7 +4058,7 @@
         "when": "close",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0085.json"
+        "snapshot": "fixtures/0086.json"
       },
       {
         "test": "ImpactLinesTest.test_a_changelog_title_present_twice_is_refused",
@@ -4084,44 +4084,6 @@
       },
       {
         "test": "ImpactLinesTest.test_a_changelog_title_present_twice_is_refused",
-        "event": 3,
-        "when": "before check",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
-        "snapshot": "fixtures/0086.json"
-      },
-      {
-        "test": "ImpactLinesTest.test_a_changelog_title_present_twice_is_refused",
-        "event": 4,
-        "when": "close",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
-        "snapshot": "fixtures/0086.json"
-      },
-      {
-        "test": "ImpactLinesTest.test_a_pin_nothing_since_asks_about_is_a_note_not_a_failure",
-        "event": 1,
-        "when": "created",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "ImpactLinesTest.test_a_pin_nothing_since_asks_about_is_a_note_not_a_failure",
-        "event": 2,
-        "when": "before adopt",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "ImpactLinesTest.test_a_pin_nothing_since_asks_about_is_a_note_not_a_failure",
         "event": 3,
         "when": "before check",
         "project": "<FIXTURE>/maelys-fixture",
@@ -4129,8 +4091,38 @@
         "snapshot": "fixtures/0087.json"
       },
       {
-        "test": "ImpactLinesTest.test_a_pin_nothing_since_asks_about_is_a_note_not_a_failure",
+        "test": "ImpactLinesTest.test_a_changelog_title_present_twice_is_refused",
         "event": 4,
+        "when": "close",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
+        "snapshot": "fixtures/0087.json"
+      },
+      {
+        "test": "ImpactLinesTest.test_a_pin_nothing_since_asks_about_is_a_note_not_a_failure",
+        "event": 1,
+        "when": "created",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "ImpactLinesTest.test_a_pin_nothing_since_asks_about_is_a_note_not_a_failure",
+        "event": 2,
+        "when": "before adopt",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "ImpactLinesTest.test_a_pin_nothing_since_asks_about_is_a_note_not_a_failure",
+        "event": 3,
         "when": "before check",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
@@ -4138,82 +4130,14 @@
       },
       {
         "test": "ImpactLinesTest.test_a_pin_nothing_since_asks_about_is_a_note_not_a_failure",
-        "event": 5,
-        "when": "close",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
-        "snapshot": "fixtures/0088.json"
-      },
-      {
-        "test": "ImpactLinesTest.test_a_selector_that_holds_asks_and_an_unknown_one_does_not_hide_it",
-        "event": 1,
-        "when": "created",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "ImpactLinesTest.test_a_selector_that_holds_asks_and_an_unknown_one_does_not_hide_it",
-        "event": 2,
-        "when": "before adopt",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "ImpactLinesTest.test_a_selector_that_holds_asks_and_an_unknown_one_does_not_hide_it",
-        "event": 3,
-        "when": "close",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
-        "snapshot": "fixtures/0089.json"
-      },
-      {
-        "test": "ImpactLinesTest.test_a_superseded_line_asks_nothing_and_its_instruction_is_not_printed",
-        "event": 1,
-        "when": "created",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "ImpactLinesTest.test_a_superseded_line_asks_nothing_and_its_instruction_is_not_printed",
-        "event": 2,
-        "when": "before adopt",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "ImpactLinesTest.test_a_superseded_line_asks_nothing_and_its_instruction_is_not_printed",
-        "event": 3,
-        "when": "before adopt",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
-        "snapshot": "fixtures/0089.json"
-      },
-      {
-        "test": "ImpactLinesTest.test_a_superseded_line_asks_nothing_and_its_instruction_is_not_printed",
         "event": 4,
-        "when": "before adopt",
+        "when": "before check",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
         "snapshot": "fixtures/0089.json"
       },
       {
-        "test": "ImpactLinesTest.test_a_superseded_line_asks_nothing_and_its_instruction_is_not_printed",
+        "test": "ImpactLinesTest.test_a_pin_nothing_since_asks_about_is_a_note_not_a_failure",
         "event": 5,
         "when": "close",
         "project": "<FIXTURE>/maelys-fixture",
@@ -4221,6 +4145,82 @@
         "snapshot": "fixtures/0089.json"
       },
       {
+        "test": "ImpactLinesTest.test_a_selector_that_holds_asks_and_an_unknown_one_does_not_hide_it",
+        "event": 1,
+        "when": "created",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "ImpactLinesTest.test_a_selector_that_holds_asks_and_an_unknown_one_does_not_hide_it",
+        "event": 2,
+        "when": "before adopt",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "ImpactLinesTest.test_a_selector_that_holds_asks_and_an_unknown_one_does_not_hide_it",
+        "event": 3,
+        "when": "close",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
+        "snapshot": "fixtures/0090.json"
+      },
+      {
+        "test": "ImpactLinesTest.test_a_superseded_line_asks_nothing_and_its_instruction_is_not_printed",
+        "event": 1,
+        "when": "created",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "ImpactLinesTest.test_a_superseded_line_asks_nothing_and_its_instruction_is_not_printed",
+        "event": 2,
+        "when": "before adopt",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "ImpactLinesTest.test_a_superseded_line_asks_nothing_and_its_instruction_is_not_printed",
+        "event": 3,
+        "when": "before adopt",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
+        "snapshot": "fixtures/0090.json"
+      },
+      {
+        "test": "ImpactLinesTest.test_a_superseded_line_asks_nothing_and_its_instruction_is_not_printed",
+        "event": 4,
+        "when": "before adopt",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
+        "snapshot": "fixtures/0090.json"
+      },
+      {
+        "test": "ImpactLinesTest.test_a_superseded_line_asks_nothing_and_its_instruction_is_not_printed",
+        "event": 5,
+        "when": "close",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
+        "snapshot": "fixtures/0090.json"
+      },
+      {
         "test": "ImpactLinesTest.test_an_empty_list_says_which_kind_of_empty",
         "event": 1,
         "when": "created",
@@ -4248,7 +4248,7 @@
         "when": "before adopt",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0090.json"
+        "snapshot": "fixtures/0091.json"
       },
       {
         "test": "ImpactLinesTest.test_an_empty_list_says_which_kind_of_empty",
@@ -4256,7 +4256,7 @@
         "when": "close",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0090.json"
+        "snapshot": "fixtures/0091.json"
       },
       {
         "test": "ImpactLinesTest.test_apply_says_it_too_and_not_the_plan_alone",
@@ -4286,7 +4286,7 @@
         "when": "before adopt",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0089.json"
+        "snapshot": "fixtures/0090.json"
       },
       {
         "test": "ImpactLinesTest.test_apply_says_it_too_and_not_the_plan_alone",
@@ -4324,7 +4324,7 @@
         "when": "before adopt",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0089.json"
+        "snapshot": "fixtures/0090.json"
       },
       {
         "test": "ImpactLinesTest.test_each_line_says_whether_it_asks_this_product_anything",
@@ -4332,7 +4332,7 @@
         "when": "before adopt",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0089.json"
+        "snapshot": "fixtures/0090.json"
       },
       {
         "test": "ImpactLinesTest.test_each_line_says_whether_it_asks_this_product_anything",
@@ -4340,7 +4340,7 @@
         "when": "close",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0089.json"
+        "snapshot": "fixtures/0090.json"
       },
       {
         "test": "ImpactLinesTest.test_every_marker_names_selectors_the_socle_evaluates",
@@ -4370,7 +4370,7 @@
         "when": "close",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0089.json"
+        "snapshot": "fixtures/0090.json"
       },
       {
         "test": "MechanismTest.test_a_mechanism_contradicting_the_carried_workflow_is_refused",
@@ -4392,7 +4392,7 @@
           "--mechanism",
           "maelys-release"
         ],
-        "snapshot": "fixtures/0091.json"
+        "snapshot": "fixtures/0092.json"
       },
       {
         "test": "MechanismTest.test_a_mechanism_contradicting_the_carried_workflow_is_refused",
@@ -4400,7 +4400,7 @@
         "when": "close",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0092.json"
+        "snapshot": "fixtures/0093.json"
       },
       {
         "test": "MechanismTest.test_a_release_workflow_of_its_own_declares_a_custom_mechanism",
@@ -4419,7 +4419,7 @@
         "when": "before adopt",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0092.json"
+        "snapshot": "fixtures/0093.json"
       },
       {
         "test": "MechanismTest.test_a_release_workflow_of_its_own_declares_a_custom_mechanism",
@@ -4427,7 +4427,7 @@
         "when": "close",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0092.json"
+        "snapshot": "fixtures/0093.json"
       },
       {
         "test": "MechanismTest.test_a_seeded_file_is_a_note_never_a_violation",
@@ -4446,7 +4446,7 @@
         "when": "before adopt",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0092.json"
+        "snapshot": "fixtures/0093.json"
       },
       {
         "test": "MechanismTest.test_a_seeded_file_is_a_note_never_a_violation",
@@ -4454,7 +4454,7 @@
         "when": "before check",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0093.json"
+        "snapshot": "fixtures/0094.json"
       },
       {
         "test": "MechanismTest.test_a_seeded_file_is_a_note_never_a_violation",
@@ -4462,7 +4462,7 @@
         "when": "close",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0093.json"
+        "snapshot": "fixtures/0094.json"
       },
       {
         "test": "MechanismTest.test_adopt_leaves_the_products_own_workflow_alone",
@@ -4481,7 +4481,7 @@
         "when": "before adopt",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0092.json"
+        "snapshot": "fixtures/0093.json"
       },
       {
         "test": "MechanismTest.test_adopt_leaves_the_products_own_workflow_alone",
@@ -4489,7 +4489,7 @@
         "when": "close",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0094.json"
+        "snapshot": "fixtures/0095.json"
       },
       {
         "test": "MechanismTest.test_check_passes_without_a_word_about_the_workflows",
@@ -4508,7 +4508,7 @@
         "when": "before adopt",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0092.json"
+        "snapshot": "fixtures/0093.json"
       },
       {
         "test": "MechanismTest.test_check_passes_without_a_word_about_the_workflows",
@@ -4516,7 +4516,7 @@
         "when": "before check",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0094.json"
+        "snapshot": "fixtures/0095.json"
       },
       {
         "test": "MechanismTest.test_check_passes_without_a_word_about_the_workflows",
@@ -4524,7 +4524,7 @@
         "when": "before check",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0094.json"
+        "snapshot": "fixtures/0095.json"
       },
       {
         "test": "MechanismTest.test_check_passes_without_a_word_about_the_workflows",
@@ -4532,7 +4532,7 @@
         "when": "close",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0094.json"
+        "snapshot": "fixtures/0095.json"
       },
       {
         "test": "MechanismTest.test_no_release_workflow_means_the_socle_does_not_release_it",
@@ -4565,7 +4565,7 @@
           "--mechanism",
           "none"
         ],
-        "snapshot": "fixtures/0095.json"
+        "snapshot": "fixtures/0096.json"
       },
       {
         "test": "MechanismTest.test_no_release_workflow_means_the_socle_does_not_release_it",
@@ -4595,7 +4595,7 @@
         "when": "close",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0092.json"
+        "snapshot": "fixtures/0093.json"
       },
       {
         "test": "MechanismTest.test_the_block_states_the_conventions_not_the_socle_release",
@@ -4614,7 +4614,7 @@
         "when": "before adopt",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0092.json"
+        "snapshot": "fixtures/0093.json"
       },
       {
         "test": "MechanismTest.test_the_block_states_the_conventions_not_the_socle_release",
@@ -4622,7 +4622,7 @@
         "when": "close",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0094.json"
+        "snapshot": "fixtures/0095.json"
       },
       {
         "test": "MechanismTest.test_the_exit_code_never_contradicts_the_verdict_shown",
@@ -4641,7 +4641,7 @@
         "when": "before adopt",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0092.json"
+        "snapshot": "fixtures/0093.json"
       },
       {
         "test": "MechanismTest.test_the_exit_code_never_contradicts_the_verdict_shown",
@@ -4649,7 +4649,7 @@
         "when": "before check",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0096.json"
+        "snapshot": "fixtures/0097.json"
       },
       {
         "test": "MechanismTest.test_the_exit_code_never_contradicts_the_verdict_shown",
@@ -4657,7 +4657,7 @@
         "when": "close",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0096.json"
+        "snapshot": "fixtures/0097.json"
       },
       {
         "test": "MechanismTest.test_the_pin_is_read_from_the_ci_when_the_release_is_the_products_own",
@@ -4676,7 +4676,7 @@
         "when": "before adopt",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0092.json"
+        "snapshot": "fixtures/0093.json"
       },
       {
         "test": "MechanismTest.test_the_pin_is_read_from_the_ci_when_the_release_is_the_products_own",
@@ -4684,7 +4684,7 @@
         "when": "before check",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0094.json"
+        "snapshot": "fixtures/0095.json"
       },
       {
         "test": "MechanismTest.test_the_pin_is_read_from_the_ci_when_the_release_is_the_products_own",
@@ -4692,7 +4692,7 @@
         "when": "close",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0094.json"
+        "snapshot": "fixtures/0095.json"
       },
       {
         "test": "MechanismTest.test_the_shared_ci_is_installed_whatever_publishes_the_product",
@@ -4711,7 +4711,7 @@
         "when": "before adopt",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0092.json"
+        "snapshot": "fixtures/0093.json"
       },
       {
         "test": "MechanismTest.test_the_shared_ci_is_installed_whatever_publishes_the_product",
@@ -4719,7 +4719,7 @@
         "when": "close",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0094.json"
+        "snapshot": "fixtures/0095.json"
       },
       {
         "test": "MechanismTest.test_the_socle_commit_is_readable_from_the_ci_that_calls_it",
@@ -4738,7 +4738,7 @@
         "when": "before adopt",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0092.json"
+        "snapshot": "fixtures/0093.json"
       },
       {
         "test": "MechanismTest.test_the_socle_commit_is_readable_from_the_ci_that_calls_it",
@@ -4746,7 +4746,7 @@
         "when": "close",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0094.json"
+        "snapshot": "fixtures/0095.json"
       },
       {
         "test": "NewTest.test_a_dependency_is_pinned_at_the_commit_its_tag_names",
@@ -4856,7 +4856,7 @@
           "--product",
           "maelys-widget"
         ],
-        "snapshot": "fixtures/0097.json"
+        "snapshot": "fixtures/0098.json"
       },
       {
         "test": "NewTest.test_apply_creates_a_repository_check_accepts",
@@ -4941,7 +4941,7 @@
         "when": "close",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0098.json"
+        "snapshot": "fixtures/0099.json"
       },
       {
         "test": "PreflightTest.test_signing_configuration_and_tags",
@@ -5001,7 +5001,7 @@
         "when": "before declarations",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0099.json"
+        "snapshot": "fixtures/0100.json"
       },
       {
         "test": "ProductNeedsTest.test_a_channel_without_its_script_is_a_violation",
@@ -5009,7 +5009,7 @@
         "when": "close",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0099.json"
+        "snapshot": "fixtures/0100.json"
       },
       {
         "test": "ProductNeedsTest.test_a_dependency_declares_the_submodules_its_build_needs",
@@ -5031,7 +5031,7 @@
           "--mechanism",
           "maelys-release"
         ],
-        "snapshot": "fixtures/0051.json"
+        "snapshot": "fixtures/0052.json"
       },
       {
         "test": "ProductNeedsTest.test_a_dependency_declares_the_submodules_its_build_needs",
@@ -5042,7 +5042,7 @@
           "--mechanism",
           "maelys-release"
         ],
-        "snapshot": "fixtures/0100.json"
+        "snapshot": "fixtures/0101.json"
       },
       {
         "test": "ProductNeedsTest.test_a_dependency_declares_the_submodules_its_build_needs",
@@ -5053,7 +5053,7 @@
           "--mechanism",
           "maelys-release"
         ],
-        "snapshot": "fixtures/0100.json"
+        "snapshot": "fixtures/0101.json"
       },
       {
         "test": "ProductNeedsTest.test_a_dependency_outside_maelys_dev_declares_where_it_lives",
@@ -5075,7 +5075,7 @@
           "--mechanism",
           "maelys-release"
         ],
-        "snapshot": "fixtures/0101.json"
+        "snapshot": "fixtures/0102.json"
       },
       {
         "test": "ProductNeedsTest.test_a_dependency_outside_maelys_dev_declares_where_it_lives",
@@ -5086,7 +5086,7 @@
           "--mechanism",
           "maelys-release"
         ],
-        "snapshot": "fixtures/0101.json"
+        "snapshot": "fixtures/0102.json"
       },
       {
         "test": "ProductNeedsTest.test_a_product_adds_an_archive_kind_to_the_manifest",
@@ -5108,7 +5108,7 @@
           "--mechanism",
           "maelys-release"
         ],
-        "snapshot": "fixtures/0102.json"
+        "snapshot": "fixtures/0103.json"
       },
       {
         "test": "ProductNeedsTest.test_a_product_adds_an_archive_kind_to_the_manifest",
@@ -5116,7 +5116,7 @@
         "when": "close",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0103.json"
+        "snapshot": "fixtures/0104.json"
       },
       {
         "test": "ProductNeedsTest.test_a_product_declares_a_publication_channel",
@@ -5168,7 +5168,7 @@
           "--mechanism",
           "maelys-release"
         ],
-        "snapshot": "fixtures/0104.json"
+        "snapshot": "fixtures/0105.json"
       },
       {
         "test": "ProductNeedsTest.test_a_product_declares_the_targets_it_builds",
@@ -5176,7 +5176,7 @@
         "when": "close",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0105.json"
+        "snapshot": "fixtures/0106.json"
       },
       {
         "test": "ProductNeedsTest.test_a_release_declaration_the_socle_cannot_honour_is_a_violation",
@@ -5206,7 +5206,7 @@
         "when": "before declarations",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0106.json"
+        "snapshot": "fixtures/0107.json"
       },
       {
         "test": "ProductNeedsTest.test_a_release_declaration_the_socle_cannot_honour_is_a_violation",
@@ -5214,7 +5214,7 @@
         "when": "close",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0106.json"
+        "snapshot": "fixtures/0107.json"
       },
       {
         "test": "ProductNeedsTest.test_a_repository_line_that_is_not_an_https_url_is_refused",
@@ -5231,77 +5231,6 @@
         "test": "ProductNeedsTest.test_a_repository_line_that_is_not_an_https_url_is_refused",
         "event": 2,
         "when": "before declarations",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0107.json"
-      },
-      {
-        "test": "ProductNeedsTest.test_a_repository_line_that_is_not_an_https_url_is_refused",
-        "event": 3,
-        "when": "close",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0107.json"
-      },
-      {
-        "test": "ProductNeedsTest.test_a_repository_without_harnesses_is_told_nothing",
-        "event": 1,
-        "when": "created",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "ProductNeedsTest.test_a_repository_without_harnesses_is_told_nothing",
-        "event": 2,
-        "when": "before adopt",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "ProductNeedsTest.test_a_repository_without_harnesses_is_told_nothing",
-        "event": 3,
-        "when": "before declarations",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
-        "snapshot": "fixtures/0001.json"
-      },
-      {
-        "test": "ProductNeedsTest.test_a_repository_without_harnesses_is_told_nothing",
-        "event": 4,
-        "when": "close",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
-        "snapshot": "fixtures/0001.json"
-      },
-      {
-        "test": "ProductNeedsTest.test_a_runner_is_a_label_or_a_label_set",
-        "event": 1,
-        "when": "created",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "ProductNeedsTest.test_a_runner_is_a_label_or_a_label_set",
-        "event": 2,
-        "when": "before adopt",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [
           "--mechanism",
@@ -5310,12 +5239,83 @@
         "snapshot": "fixtures/0108.json"
       },
       {
+        "test": "ProductNeedsTest.test_a_repository_line_that_is_not_an_https_url_is_refused",
+        "event": 3,
+        "when": "close",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0108.json"
+      },
+      {
+        "test": "ProductNeedsTest.test_a_repository_without_harnesses_is_told_nothing",
+        "event": 1,
+        "when": "created",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "ProductNeedsTest.test_a_repository_without_harnesses_is_told_nothing",
+        "event": 2,
+        "when": "before adopt",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "ProductNeedsTest.test_a_repository_without_harnesses_is_told_nothing",
+        "event": 3,
+        "when": "before declarations",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
+        "snapshot": "fixtures/0001.json"
+      },
+      {
+        "test": "ProductNeedsTest.test_a_repository_without_harnesses_is_told_nothing",
+        "event": 4,
+        "when": "close",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
+        "snapshot": "fixtures/0001.json"
+      },
+      {
+        "test": "ProductNeedsTest.test_a_runner_is_a_label_or_a_label_set",
+        "event": 1,
+        "when": "created",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "ProductNeedsTest.test_a_runner_is_a_label_or_a_label_set",
+        "event": 2,
+        "when": "before adopt",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0109.json"
+      },
+      {
         "test": "ProductNeedsTest.test_a_runner_is_a_label_or_a_label_set",
         "event": 3,
         "when": "close",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0109.json"
+        "snapshot": "fixtures/0110.json"
       },
       {
         "test": "ProductNeedsTest.test_a_script_without_its_declaration_publishes_nothing",
@@ -5345,7 +5345,7 @@
         "when": "before declarations",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0110.json"
+        "snapshot": "fixtures/0111.json"
       },
       {
         "test": "ProductNeedsTest.test_a_script_without_its_declaration_publishes_nothing",
@@ -5353,7 +5353,7 @@
         "when": "close",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0110.json"
+        "snapshot": "fixtures/0111.json"
       },
       {
         "test": "ProductNeedsTest.test_a_verify_script_is_run_before_packaging_at_the_tag",
@@ -5375,7 +5375,7 @@
           "--mechanism",
           "maelys-release"
         ],
-        "snapshot": "fixtures/0111.json"
+        "snapshot": "fixtures/0112.json"
       },
       {
         "test": "ProductNeedsTest.test_a_verify_script_is_run_before_packaging_at_the_tag",
@@ -5383,7 +5383,7 @@
         "when": "close",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0112.json"
+        "snapshot": "fixtures/0113.json"
       },
       {
         "test": "ProductNeedsTest.test_an_unknown_submodules_mode_is_refused",
@@ -5405,34 +5405,12 @@
           "--mechanism",
           "maelys-release"
         ],
-        "snapshot": "fixtures/0113.json"
+        "snapshot": "fixtures/0114.json"
       },
       {
         "test": "ProductNeedsTest.test_an_unknown_submodules_mode_is_refused",
         "event": 3,
         "when": "close",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0113.json"
-      },
-      {
-        "test": "ProductNeedsTest.test_harnesses_a_job_of_the_product_runs_are_reported",
-        "event": 1,
-        "when": "created",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "ProductNeedsTest.test_harnesses_a_job_of_the_product_runs_are_reported",
-        "event": 2,
-        "when": "before adopt",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [
           "--mechanism",
@@ -5442,11 +5420,33 @@
       },
       {
         "test": "ProductNeedsTest.test_harnesses_a_job_of_the_product_runs_are_reported",
+        "event": 1,
+        "when": "created",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "ProductNeedsTest.test_harnesses_a_job_of_the_product_runs_are_reported",
+        "event": 2,
+        "when": "before adopt",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0115.json"
+      },
+      {
+        "test": "ProductNeedsTest.test_harnesses_a_job_of_the_product_runs_are_reported",
         "event": 3,
         "when": "before declarations",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0115.json"
+        "snapshot": "fixtures/0116.json"
       },
       {
         "test": "ProductNeedsTest.test_harnesses_a_job_of_the_product_runs_are_reported",
@@ -5454,7 +5454,7 @@
         "when": "close",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0115.json"
+        "snapshot": "fixtures/0116.json"
       },
       {
         "test": "ProductNeedsTest.test_harnesses_no_job_runs_are_a_note_and_never_a_violation",
@@ -5476,7 +5476,7 @@
           "--mechanism",
           "maelys-release"
         ],
-        "snapshot": "fixtures/0116.json"
+        "snapshot": "fixtures/0117.json"
       },
       {
         "test": "ProductNeedsTest.test_harnesses_no_job_runs_are_a_note_and_never_a_violation",
@@ -5484,7 +5484,7 @@
         "when": "before declarations",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0117.json"
+        "snapshot": "fixtures/0118.json"
       },
       {
         "test": "ProductNeedsTest.test_harnesses_no_job_runs_are_a_note_and_never_a_violation",
@@ -5492,7 +5492,7 @@
         "when": "before check",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0117.json"
+        "snapshot": "fixtures/0118.json"
       },
       {
         "test": "ProductNeedsTest.test_harnesses_no_job_runs_are_a_note_and_never_a_violation",
@@ -5500,37 +5500,37 @@
         "when": "close",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
+        "snapshot": "fixtures/0118.json"
+      },
+      {
+        "test": "ProductNeedsTest.test_harnesses_the_socle_job_replays_are_reported",
+        "event": 1,
+        "when": "created",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "ProductNeedsTest.test_harnesses_the_socle_job_replays_are_reported",
+        "event": 2,
+        "when": "before adopt",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
         "snapshot": "fixtures/0117.json"
       },
       {
         "test": "ProductNeedsTest.test_harnesses_the_socle_job_replays_are_reported",
-        "event": 1,
-        "when": "created",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "ProductNeedsTest.test_harnesses_the_socle_job_replays_are_reported",
-        "event": 2,
-        "when": "before adopt",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0116.json"
-      },
-      {
-        "test": "ProductNeedsTest.test_harnesses_the_socle_job_replays_are_reported",
         "event": 3,
         "when": "before declarations",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0118.json"
+        "snapshot": "fixtures/0119.json"
       },
       {
         "test": "ProductNeedsTest.test_harnesses_the_socle_job_replays_are_reported",
@@ -5538,7 +5538,7 @@
         "when": "close",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0118.json"
+        "snapshot": "fixtures/0119.json"
       },
       {
         "test": "ProductNeedsTest.test_only_the_publishing_job_may_write_and_it_runs_no_product_code",
@@ -5590,7 +5590,7 @@
         "when": "before declarations",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0119.json"
+        "snapshot": "fixtures/0120.json"
       },
       {
         "test": "ProductNeedsTest.test_runners_are_read_through_a_matrix_and_never_guessed",
@@ -5598,37 +5598,37 @@
         "when": "close",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0119.json"
-      },
-      {
-        "test": "ProductNeedsTest.test_the_block_says_where_the_prose_lives_and_names_the_product",
-        "event": 1,
-        "when": "created",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "ProductNeedsTest.test_the_block_says_where_the_prose_lives_and_names_the_product",
-        "event": 2,
-        "when": "before adopt",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
         "snapshot": "fixtures/0120.json"
       },
       {
         "test": "ProductNeedsTest.test_the_block_says_where_the_prose_lives_and_names_the_product",
+        "event": 1,
+        "when": "created",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "ProductNeedsTest.test_the_block_says_where_the_prose_lives_and_names_the_product",
+        "event": 2,
+        "when": "before adopt",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0121.json"
+      },
+      {
+        "test": "ProductNeedsTest.test_the_block_says_where_the_prose_lives_and_names_the_product",
         "event": 3,
         "when": "close",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0121.json"
+        "snapshot": "fixtures/0122.json"
       },
       {
         "test": "ProductNeedsTest.test_the_channel_marker_is_written_by_a_job_that_runs_no_product_code",
@@ -5734,7 +5734,7 @@
         "when": "before declarations",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0122.json"
+        "snapshot": "fixtures/0123.json"
       },
       {
         "test": "ProductNeedsTest.test_the_contract_separates_what_is_declared_from_what_is_default",
@@ -5742,7 +5742,7 @@
         "when": "close",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0122.json"
+        "snapshot": "fixtures/0123.json"
       },
       {
         "test": "ProductNeedsTest.test_the_generated_caller_grants_every_scope_its_workflows_declare",
@@ -5794,7 +5794,7 @@
           "--mechanism",
           "maelys-release"
         ],
-        "snapshot": "fixtures/0123.json"
+        "snapshot": "fixtures/0124.json"
       },
       {
         "test": "ProductNeedsTest.test_the_managed_script_clones_the_declared_repository",
@@ -5802,39 +5802,39 @@
         "when": "close",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0124.json"
-      },
-      {
-        "test": "ProductNeedsTest.test_the_managed_script_initialises_only_what_is_declared",
-        "event": 1,
-        "when": "created",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "ProductNeedsTest.test_the_managed_script_initialises_only_what_is_declared",
-        "event": 2,
-        "when": "before adopt",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
         "snapshot": "fixtures/0125.json"
       },
       {
         "test": "ProductNeedsTest.test_the_managed_script_initialises_only_what_is_declared",
-        "event": 3,
-        "when": "close",
+        "event": 1,
+        "when": "created",
         "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "ProductNeedsTest.test_the_managed_script_initialises_only_what_is_declared",
+        "event": 2,
+        "when": "before adopt",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
         "snapshot": "fixtures/0126.json"
       },
       {
+        "test": "ProductNeedsTest.test_the_managed_script_initialises_only_what_is_declared",
+        "event": 3,
+        "when": "close",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
+        "snapshot": "fixtures/0127.json"
+      },
+      {
         "test": "ProductNeedsTest.test_the_reusable_workflows_carry_the_new_inputs",
         "event": 1,
         "when": "created",
@@ -5882,358 +5882,20 @@
         "test": "ProductNeedsTest.test_the_socle_serves_no_registry_it_cannot_reach",
         "event": 3,
         "when": "before declarations",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
-        "snapshot": "fixtures/0127.json"
-      },
-      {
-        "test": "ProductNeedsTest.test_the_socle_serves_no_registry_it_cannot_reach",
-        "event": 4,
-        "when": "close",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
-        "snapshot": "fixtures/0127.json"
-      },
-      {
-        "test": "ProductNeedsTest.test_without_that_file_the_release_workflow_asks_for_neither",
-        "event": 1,
-        "when": "created",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "ProductNeedsTest.test_without_that_file_the_release_workflow_asks_for_neither",
-        "event": 2,
-        "when": "before adopt",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "ProductNeedsTest.test_without_that_file_the_release_workflow_asks_for_neither",
-        "event": 3,
-        "when": "before declarations",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
-        "snapshot": "fixtures/0001.json"
-      },
-      {
-        "test": "ProductNeedsTest.test_without_that_file_the_release_workflow_asks_for_neither",
-        "event": 4,
-        "when": "close",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
-        "snapshot": "fixtures/0001.json"
-      },
-      {
-        "test": "ProductNeedsTest.test_without_that_script_the_release_workflow_asks_for_no_verification",
-        "event": 1,
-        "when": "created",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "ProductNeedsTest.test_without_that_script_the_release_workflow_asks_for_no_verification",
-        "event": 2,
-        "when": "before adopt",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "ProductNeedsTest.test_without_that_script_the_release_workflow_asks_for_no_verification",
-        "event": 3,
-        "when": "close",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
-        "snapshot": "fixtures/0001.json"
-      },
-      {
-        "test": "RehearseChannelRefusalTest.test_a_channel_the_product_does_not_declare",
-        "event": 1,
-        "when": "created",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "RehearseChannelRefusalTest.test_a_channel_the_product_does_not_declare",
-        "event": 2,
-        "when": "before adopt",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0026.json"
-      },
-      {
-        "test": "RehearseChannelRefusalTest.test_a_channel_the_product_does_not_declare",
-        "event": 3,
-        "when": "close",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
-        "snapshot": "fixtures/0027.json"
-      },
-      {
-        "test": "RehearseChannelRefusalTest.test_a_rehearse_with_neither_a_target_nor_a_channel",
-        "event": 1,
-        "when": "created",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "RehearseChannelRefusalTest.test_a_rehearse_with_neither_a_target_nor_a_channel",
-        "event": 2,
-        "when": "before adopt",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0026.json"
-      },
-      {
-        "test": "RehearseChannelRefusalTest.test_a_rehearse_with_neither_a_target_nor_a_channel",
-        "event": 3,
-        "when": "close",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
-        "snapshot": "fixtures/0027.json"
-      },
-      {
-        "test": "RehearseChannelRefusalTest.test_a_tag_that_is_not_one",
-        "event": 1,
-        "when": "created",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "RehearseChannelRefusalTest.test_a_tag_that_is_not_one",
-        "event": 2,
-        "when": "before adopt",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0026.json"
-      },
-      {
-        "test": "RehearseChannelRefusalTest.test_a_tag_that_is_not_one",
-        "event": 3,
-        "when": "close",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
-        "snapshot": "fixtures/0027.json"
-      },
-      {
-        "test": "RehearseChannelRefusalTest.test_channel_and_tag_need_each_other",
-        "event": 1,
-        "when": "created",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "RehearseChannelRefusalTest.test_channel_and_tag_need_each_other",
-        "event": 2,
-        "when": "before adopt",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0026.json"
-      },
-      {
-        "test": "RehearseChannelRefusalTest.test_channel_and_tag_need_each_other",
-        "event": 3,
-        "when": "close",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
-        "snapshot": "fixtures/0027.json"
-      },
-      {
-        "test": "RehearseChannelRefusalTest.test_the_token_is_the_operator_s_and_never_the_socle_s",
-        "event": 1,
-        "when": "created",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "RehearseChannelRefusalTest.test_the_token_is_the_operator_s_and_never_the_socle_s",
-        "event": 2,
-        "when": "before adopt",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0026.json"
-      },
-      {
-        "test": "RehearseChannelRefusalTest.test_the_token_is_the_operator_s_and_never_the_socle_s",
-        "event": 3,
-        "when": "close",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
-        "snapshot": "fixtures/0027.json"
-      },
-      {
-        "test": "RehearseRefusalTest.test_a_worktree_is_refused_with_its_cause",
-        "event": 1,
-        "when": "created",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "RehearseRefusalTest.test_a_worktree_is_refused_with_its_cause",
-        "event": 2,
-        "when": "before adopt",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "RehearseRefusalTest.test_a_worktree_is_refused_with_its_cause",
-        "event": 3,
-        "when": "close",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
-        "snapshot": "fixtures/0001.json"
-      },
-      {
-        "test": "RenderAndTapTest.test_render",
-        "event": 1,
-        "when": "created",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "RenderAndTapTest.test_render",
-        "event": 2,
-        "when": "close",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "RenderAndTapTest.test_tap_plan_and_apply",
-        "event": 1,
-        "when": "created",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "RenderAndTapTest.test_tap_plan_and_apply",
-        "event": 2,
-        "when": "close",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "SaidWhereItIsReadTest.test_a_custom_render_is_told_it_runs_on_another_platform",
-        "event": 1,
-        "when": "created",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "SaidWhereItIsReadTest.test_a_custom_render_is_told_it_runs_on_another_platform",
-        "event": 2,
-        "when": "before adopt",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "SaidWhereItIsReadTest.test_a_custom_render_is_told_it_runs_on_another_platform",
-        "event": 3,
-        "when": "before adopt",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
         "snapshot": "fixtures/0128.json"
       },
       {
-        "test": "SaidWhereItIsReadTest.test_a_custom_render_is_told_it_runs_on_another_platform",
+        "test": "ProductNeedsTest.test_the_socle_serves_no_registry_it_cannot_reach",
         "event": 4,
-        "when": "before check",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
-        "snapshot": "fixtures/0129.json"
-      },
-      {
-        "test": "SaidWhereItIsReadTest.test_a_custom_render_is_told_it_runs_on_another_platform",
-        "event": 5,
         "when": "close",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0129.json"
+        "snapshot": "fixtures/0128.json"
       },
       {
-        "test": "SaidWhereItIsReadTest.test_a_render_that_downloads_the_tag_archive_is_told_it_is_right",
+        "test": "ProductNeedsTest.test_without_that_file_the_release_workflow_asks_for_neither",
         "event": 1,
         "when": "created",
         "project": "<FIXTURE>/maelys-fixture",
@@ -6244,7 +5906,7 @@
         "snapshot": "fixtures/0000.json"
       },
       {
-        "test": "SaidWhereItIsReadTest.test_a_render_that_downloads_the_tag_archive_is_told_it_is_right",
+        "test": "ProductNeedsTest.test_without_that_file_the_release_workflow_asks_for_neither",
         "event": 2,
         "when": "before adopt",
         "project": "<FIXTURE>/maelys-fixture",
@@ -6255,31 +5917,233 @@
         "snapshot": "fixtures/0000.json"
       },
       {
-        "test": "SaidWhereItIsReadTest.test_a_render_that_downloads_the_tag_archive_is_told_it_is_right",
+        "test": "ProductNeedsTest.test_without_that_file_the_release_workflow_asks_for_neither",
         "event": 3,
+        "when": "before declarations",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
+        "snapshot": "fixtures/0001.json"
+      },
+      {
+        "test": "ProductNeedsTest.test_without_that_file_the_release_workflow_asks_for_neither",
+        "event": 4,
+        "when": "close",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
+        "snapshot": "fixtures/0001.json"
+      },
+      {
+        "test": "ProductNeedsTest.test_without_that_script_the_release_workflow_asks_for_no_verification",
+        "event": 1,
+        "when": "created",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "ProductNeedsTest.test_without_that_script_the_release_workflow_asks_for_no_verification",
+        "event": 2,
         "when": "before adopt",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "ProductNeedsTest.test_without_that_script_the_release_workflow_asks_for_no_verification",
+        "event": 3,
+        "when": "close",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
+        "snapshot": "fixtures/0001.json"
+      },
+      {
+        "test": "RehearseChannelRefusalTest.test_a_channel_the_product_does_not_declare",
+        "event": 1,
+        "when": "created",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "RehearseChannelRefusalTest.test_a_channel_the_product_does_not_declare",
+        "event": 2,
+        "when": "before adopt",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0026.json"
+      },
+      {
+        "test": "RehearseChannelRefusalTest.test_a_channel_the_product_does_not_declare",
+        "event": 3,
+        "when": "close",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
+        "snapshot": "fixtures/0129.json"
+      },
+      {
+        "test": "RehearseChannelRefusalTest.test_a_rehearse_with_neither_a_target_nor_a_channel",
+        "event": 1,
+        "when": "created",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "RehearseChannelRefusalTest.test_a_rehearse_with_neither_a_target_nor_a_channel",
+        "event": 2,
+        "when": "before adopt",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0026.json"
+      },
+      {
+        "test": "RehearseChannelRefusalTest.test_a_rehearse_with_neither_a_target_nor_a_channel",
+        "event": 3,
+        "when": "close",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
+        "snapshot": "fixtures/0129.json"
+      },
+      {
+        "test": "RehearseChannelRefusalTest.test_a_tag_that_is_not_one",
+        "event": 1,
+        "when": "created",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "RehearseChannelRefusalTest.test_a_tag_that_is_not_one",
+        "event": 2,
+        "when": "before adopt",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0026.json"
+      },
+      {
+        "test": "RehearseChannelRefusalTest.test_a_tag_that_is_not_one",
+        "event": 3,
+        "when": "close",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
+        "snapshot": "fixtures/0129.json"
+      },
+      {
+        "test": "RehearseChannelRefusalTest.test_channel_and_tag_need_each_other",
+        "event": 1,
+        "when": "created",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "RehearseChannelRefusalTest.test_channel_and_tag_need_each_other",
+        "event": 2,
+        "when": "before adopt",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0026.json"
+      },
+      {
+        "test": "RehearseChannelRefusalTest.test_channel_and_tag_need_each_other",
+        "event": 3,
+        "when": "close",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
+        "snapshot": "fixtures/0129.json"
+      },
+      {
+        "test": "RehearseChannelRefusalTest.test_the_token_is_the_operator_s_and_never_the_socle_s",
+        "event": 1,
+        "when": "created",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "RehearseChannelRefusalTest.test_the_token_is_the_operator_s_and_never_the_socle_s",
+        "event": 2,
+        "when": "before adopt",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0026.json"
+      },
+      {
+        "test": "RehearseChannelRefusalTest.test_the_token_is_the_operator_s_and_never_the_socle_s",
+        "event": 3,
+        "when": "close",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
+        "snapshot": "fixtures/0129.json"
+      },
+      {
+        "test": "RehearseRefusalTest.test_a_worktree_is_refused_with_its_cause",
+        "event": 1,
+        "when": "created",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "RehearseRefusalTest.test_a_worktree_is_refused_with_its_cause",
+        "event": 2,
+        "when": "before adopt",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "RehearseRefusalTest.test_a_worktree_is_refused_with_its_cause",
+        "event": 3,
+        "when": "close",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
         "snapshot": "fixtures/0130.json"
       },
       {
-        "test": "SaidWhereItIsReadTest.test_a_render_that_downloads_the_tag_archive_is_told_it_is_right",
-        "event": 4,
-        "when": "before check",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
-        "snapshot": "fixtures/0131.json"
-      },
-      {
-        "test": "SaidWhereItIsReadTest.test_a_render_that_downloads_the_tag_archive_is_told_it_is_right",
-        "event": 5,
-        "when": "close",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
-        "snapshot": "fixtures/0131.json"
-      },
-      {
-        "test": "SaidWhereItIsReadTest.test_a_render_that_hashes_a_release_asset_is_recognised_too",
+        "test": "RenderAndTapTest.test_render",
         "event": 1,
         "when": "created",
         "project": "<FIXTURE>/maelys-fixture",
@@ -6290,7 +6154,51 @@
         "snapshot": "fixtures/0000.json"
       },
       {
-        "test": "SaidWhereItIsReadTest.test_a_render_that_hashes_a_release_asset_is_recognised_too",
+        "test": "RenderAndTapTest.test_render",
+        "event": 2,
+        "when": "close",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "RenderAndTapTest.test_tap_plan_and_apply",
+        "event": 1,
+        "when": "created",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "RenderAndTapTest.test_tap_plan_and_apply",
+        "event": 2,
+        "when": "close",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "SaidWhereItIsReadTest.test_a_custom_render_is_told_it_runs_on_another_platform",
+        "event": 1,
+        "when": "created",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "SaidWhereItIsReadTest.test_a_custom_render_is_told_it_runs_on_another_platform",
         "event": 2,
         "when": "before adopt",
         "project": "<FIXTURE>/maelys-fixture",
@@ -6301,20 +6209,112 @@
         "snapshot": "fixtures/0000.json"
       },
       {
-        "test": "SaidWhereItIsReadTest.test_a_render_that_hashes_a_release_asset_is_recognised_too",
+        "test": "SaidWhereItIsReadTest.test_a_custom_render_is_told_it_runs_on_another_platform",
         "event": 3,
         "when": "before adopt",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
+        "snapshot": "fixtures/0131.json"
+      },
+      {
+        "test": "SaidWhereItIsReadTest.test_a_custom_render_is_told_it_runs_on_another_platform",
+        "event": 4,
+        "when": "before check",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
         "snapshot": "fixtures/0132.json"
       },
       {
+        "test": "SaidWhereItIsReadTest.test_a_custom_render_is_told_it_runs_on_another_platform",
+        "event": 5,
+        "when": "close",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
+        "snapshot": "fixtures/0132.json"
+      },
+      {
+        "test": "SaidWhereItIsReadTest.test_a_render_that_downloads_the_tag_archive_is_told_it_is_right",
+        "event": 1,
+        "when": "created",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "SaidWhereItIsReadTest.test_a_render_that_downloads_the_tag_archive_is_told_it_is_right",
+        "event": 2,
+        "when": "before adopt",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "SaidWhereItIsReadTest.test_a_render_that_downloads_the_tag_archive_is_told_it_is_right",
+        "event": 3,
+        "when": "before adopt",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
+        "snapshot": "fixtures/0133.json"
+      },
+      {
+        "test": "SaidWhereItIsReadTest.test_a_render_that_downloads_the_tag_archive_is_told_it_is_right",
+        "event": 4,
+        "when": "before check",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
+        "snapshot": "fixtures/0134.json"
+      },
+      {
+        "test": "SaidWhereItIsReadTest.test_a_render_that_downloads_the_tag_archive_is_told_it_is_right",
+        "event": 5,
+        "when": "close",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
+        "snapshot": "fixtures/0134.json"
+      },
+      {
+        "test": "SaidWhereItIsReadTest.test_a_render_that_hashes_a_release_asset_is_recognised_too",
+        "event": 1,
+        "when": "created",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "SaidWhereItIsReadTest.test_a_render_that_hashes_a_release_asset_is_recognised_too",
+        "event": 2,
+        "when": "before adopt",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "SaidWhereItIsReadTest.test_a_render_that_hashes_a_release_asset_is_recognised_too",
+        "event": 3,
+        "when": "before adopt",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
+        "snapshot": "fixtures/0135.json"
+      },
+      {
         "test": "SaidWhereItIsReadTest.test_a_render_that_hashes_a_release_asset_is_recognised_too",
         "event": 4,
         "when": "before check",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0133.json"
+        "snapshot": "fixtures/0136.json"
       },
       {
         "test": "SaidWhereItIsReadTest.test_a_render_that_hashes_a_release_asset_is_recognised_too",
@@ -6322,7 +6322,7 @@
         "when": "close",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0133.json"
+        "snapshot": "fixtures/0136.json"
       },
       {
         "test": "SaidWhereItIsReadTest.test_commit_verification_is_reachable_by_a_product",
@@ -6352,7 +6352,7 @@
         "when": "before adopt",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0134.json"
+        "snapshot": "fixtures/0137.json"
       },
       {
         "test": "SaidWhereItIsReadTest.test_commit_verification_is_reachable_by_a_product",
@@ -6360,7 +6360,7 @@
         "when": "before declarations",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0135.json"
+        "snapshot": "fixtures/0138.json"
       },
       {
         "test": "SaidWhereItIsReadTest.test_commit_verification_is_reachable_by_a_product",
@@ -6368,287 +6368,287 @@
         "when": "close",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0135.json"
-      },
-      {
-        "test": "SaidWhereItIsReadTest.test_the_commit_section_takes_what_the_workflow_accepts",
-        "event": 1,
-        "when": "created",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "SaidWhereItIsReadTest.test_the_commit_section_takes_what_the_workflow_accepts",
-        "event": 2,
-        "when": "before adopt",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "SaidWhereItIsReadTest.test_the_commit_section_takes_what_the_workflow_accepts",
-        "event": 3,
-        "when": "close",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
-        "snapshot": "fixtures/0001.json"
-      },
-      {
-        "test": "SaidWhereItIsReadTest.test_the_note_says_what_it_does_not_know_and_never_asserts",
-        "event": 1,
-        "when": "created",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "SaidWhereItIsReadTest.test_the_note_says_what_it_does_not_know_and_never_asserts",
-        "event": 2,
-        "when": "before adopt",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "SaidWhereItIsReadTest.test_the_note_says_what_it_does_not_know_and_never_asserts",
-        "event": 3,
-        "when": "before adopt",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
-        "snapshot": "fixtures/0128.json"
-      },
-      {
-        "test": "SaidWhereItIsReadTest.test_the_note_says_what_it_does_not_know_and_never_asserts",
-        "event": 4,
-        "when": "before check",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
-        "snapshot": "fixtures/0129.json"
-      },
-      {
-        "test": "SaidWhereItIsReadTest.test_the_note_says_what_it_does_not_know_and_never_asserts",
-        "event": 5,
-        "when": "close",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
-        "snapshot": "fixtures/0129.json"
-      },
-      {
-        "test": "SaidWhereItIsReadTest.test_the_tap_says_on_the_release_that_it_pushed_nothing",
-        "event": 1,
-        "when": "created",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "SaidWhereItIsReadTest.test_the_tap_says_on_the_release_that_it_pushed_nothing",
-        "event": 2,
-        "when": "before adopt",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "SaidWhereItIsReadTest.test_the_tap_says_on_the_release_that_it_pushed_nothing",
-        "event": 3,
-        "when": "close",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
-        "snapshot": "fixtures/0001.json"
-      },
-      {
-        "test": "SaidWhereItIsReadTest.test_the_url_the_socle_looks_for_is_the_one_its_own_tap_downloads",
-        "event": 1,
-        "when": "created",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "SaidWhereItIsReadTest.test_the_url_the_socle_looks_for_is_the_one_its_own_tap_downloads",
-        "event": 2,
-        "when": "before adopt",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "SaidWhereItIsReadTest.test_the_url_the_socle_looks_for_is_the_one_its_own_tap_downloads",
-        "event": 3,
-        "when": "close",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
-        "snapshot": "fixtures/0001.json"
-      },
-      {
-        "test": "SaidWhereItIsReadTest.test_verify_command_says_that_cut_replays_it_on_the_branch",
-        "event": 1,
-        "when": "created",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "SaidWhereItIsReadTest.test_verify_command_says_that_cut_replays_it_on_the_branch",
-        "event": 2,
-        "when": "before adopt",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "SaidWhereItIsReadTest.test_verify_command_says_that_cut_replays_it_on_the_branch",
-        "event": 3,
-        "when": "close",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
-        "snapshot": "fixtures/0001.json"
-      },
-      {
-        "test": "SocleAsADependencyTest.test_a_pin_for_the_socle_is_refused",
-        "event": 1,
-        "when": "created",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "SocleAsADependencyTest.test_a_pin_for_the_socle_is_refused",
-        "event": 2,
-        "when": "before adopt",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "SocleAsADependencyTest.test_a_pin_for_the_socle_is_refused",
-        "event": 3,
-        "when": "before check",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
-        "snapshot": "fixtures/0136.json"
-      },
-      {
-        "test": "SocleAsADependencyTest.test_a_pin_for_the_socle_is_refused",
-        "event": 4,
-        "when": "close",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
-        "snapshot": "fixtures/0136.json"
-      },
-      {
-        "test": "SocleAsADependencyTest.test_the_search_learns_the_name_under_its_own_root",
-        "event": 1,
-        "when": "created",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "SocleAsADependencyTest.test_the_search_learns_the_name_under_its_own_root",
-        "event": 2,
-        "when": "before adopt",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "SocleAsADependencyTest.test_the_search_learns_the_name_under_its_own_root",
-        "event": 3,
-        "when": "before check",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
-        "snapshot": "fixtures/0137.json"
-      },
-      {
-        "test": "SocleAsADependencyTest.test_the_search_learns_the_name_under_its_own_root",
-        "event": 4,
-        "when": "close",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
-        "snapshot": "fixtures/0137.json"
-      },
-      {
-        "test": "StrategyNoteTest.test_a_filtered_push_and_a_tag_push_are_not",
-        "event": 1,
-        "when": "created",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "StrategyNoteTest.test_a_filtered_push_and_a_tag_push_are_not",
-        "event": 2,
-        "when": "before adopt",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [
-          "--mechanism",
-          "maelys-release"
-        ],
-        "snapshot": "fixtures/0000.json"
-      },
-      {
-        "test": "StrategyNoteTest.test_a_filtered_push_and_a_tag_push_are_not",
-        "event": 3,
-        "when": "before check",
-        "project": "<FIXTURE>/maelys-fixture",
-        "options": [],
         "snapshot": "fixtures/0138.json"
       },
       {
+        "test": "SaidWhereItIsReadTest.test_the_commit_section_takes_what_the_workflow_accepts",
+        "event": 1,
+        "when": "created",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "SaidWhereItIsReadTest.test_the_commit_section_takes_what_the_workflow_accepts",
+        "event": 2,
+        "when": "before adopt",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "SaidWhereItIsReadTest.test_the_commit_section_takes_what_the_workflow_accepts",
+        "event": 3,
+        "when": "close",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
+        "snapshot": "fixtures/0001.json"
+      },
+      {
+        "test": "SaidWhereItIsReadTest.test_the_note_says_what_it_does_not_know_and_never_asserts",
+        "event": 1,
+        "when": "created",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "SaidWhereItIsReadTest.test_the_note_says_what_it_does_not_know_and_never_asserts",
+        "event": 2,
+        "when": "before adopt",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "SaidWhereItIsReadTest.test_the_note_says_what_it_does_not_know_and_never_asserts",
+        "event": 3,
+        "when": "before adopt",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
+        "snapshot": "fixtures/0131.json"
+      },
+      {
+        "test": "SaidWhereItIsReadTest.test_the_note_says_what_it_does_not_know_and_never_asserts",
+        "event": 4,
+        "when": "before check",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
+        "snapshot": "fixtures/0132.json"
+      },
+      {
+        "test": "SaidWhereItIsReadTest.test_the_note_says_what_it_does_not_know_and_never_asserts",
+        "event": 5,
+        "when": "close",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
+        "snapshot": "fixtures/0132.json"
+      },
+      {
+        "test": "SaidWhereItIsReadTest.test_the_tap_says_on_the_release_that_it_pushed_nothing",
+        "event": 1,
+        "when": "created",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "SaidWhereItIsReadTest.test_the_tap_says_on_the_release_that_it_pushed_nothing",
+        "event": 2,
+        "when": "before adopt",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "SaidWhereItIsReadTest.test_the_tap_says_on_the_release_that_it_pushed_nothing",
+        "event": 3,
+        "when": "close",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
+        "snapshot": "fixtures/0001.json"
+      },
+      {
+        "test": "SaidWhereItIsReadTest.test_the_url_the_socle_looks_for_is_the_one_its_own_tap_downloads",
+        "event": 1,
+        "when": "created",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "SaidWhereItIsReadTest.test_the_url_the_socle_looks_for_is_the_one_its_own_tap_downloads",
+        "event": 2,
+        "when": "before adopt",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "SaidWhereItIsReadTest.test_the_url_the_socle_looks_for_is_the_one_its_own_tap_downloads",
+        "event": 3,
+        "when": "close",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
+        "snapshot": "fixtures/0001.json"
+      },
+      {
+        "test": "SaidWhereItIsReadTest.test_verify_command_says_that_cut_replays_it_on_the_branch",
+        "event": 1,
+        "when": "created",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "SaidWhereItIsReadTest.test_verify_command_says_that_cut_replays_it_on_the_branch",
+        "event": 2,
+        "when": "before adopt",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "SaidWhereItIsReadTest.test_verify_command_says_that_cut_replays_it_on_the_branch",
+        "event": 3,
+        "when": "close",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
+        "snapshot": "fixtures/0001.json"
+      },
+      {
+        "test": "SocleAsADependencyTest.test_a_pin_for_the_socle_is_refused",
+        "event": 1,
+        "when": "created",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "SocleAsADependencyTest.test_a_pin_for_the_socle_is_refused",
+        "event": 2,
+        "when": "before adopt",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "SocleAsADependencyTest.test_a_pin_for_the_socle_is_refused",
+        "event": 3,
+        "when": "before check",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
+        "snapshot": "fixtures/0139.json"
+      },
+      {
+        "test": "SocleAsADependencyTest.test_a_pin_for_the_socle_is_refused",
+        "event": 4,
+        "when": "close",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
+        "snapshot": "fixtures/0139.json"
+      },
+      {
+        "test": "SocleAsADependencyTest.test_the_search_learns_the_name_under_its_own_root",
+        "event": 1,
+        "when": "created",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "SocleAsADependencyTest.test_the_search_learns_the_name_under_its_own_root",
+        "event": 2,
+        "when": "before adopt",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "SocleAsADependencyTest.test_the_search_learns_the_name_under_its_own_root",
+        "event": 3,
+        "when": "before check",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
+        "snapshot": "fixtures/0140.json"
+      },
+      {
+        "test": "SocleAsADependencyTest.test_the_search_learns_the_name_under_its_own_root",
+        "event": 4,
+        "when": "close",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
+        "snapshot": "fixtures/0140.json"
+      },
+      {
+        "test": "StrategyNoteTest.test_a_filtered_push_and_a_tag_push_are_not",
+        "event": 1,
+        "when": "created",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "StrategyNoteTest.test_a_filtered_push_and_a_tag_push_are_not",
+        "event": 2,
+        "when": "before adopt",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [
+          "--mechanism",
+          "maelys-release"
+        ],
+        "snapshot": "fixtures/0000.json"
+      },
+      {
+        "test": "StrategyNoteTest.test_a_filtered_push_and_a_tag_push_are_not",
+        "event": 3,
+        "when": "before check",
+        "project": "<FIXTURE>/maelys-fixture",
+        "options": [],
+        "snapshot": "fixtures/0141.json"
+      },
+      {
         "test": "StrategyNoteTest.test_a_filtered_push_and_a_tag_push_are_not",
         "event": 4,
         "when": "before check",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0139.json"
+        "snapshot": "fixtures/0142.json"
       },
       {
         "test": "StrategyNoteTest.test_a_filtered_push_and_a_tag_push_are_not",
@@ -6656,7 +6656,7 @@
         "when": "close",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0139.json"
+        "snapshot": "fixtures/0142.json"
       },
       {
         "test": "StrategyNoteTest.test_push_with_no_branch_beside_pull_request_is_noted",
@@ -6686,7 +6686,7 @@
         "when": "before check",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0140.json"
+        "snapshot": "fixtures/0143.json"
       },
       {
         "test": "StrategyNoteTest.test_push_with_no_branch_beside_pull_request_is_noted",
@@ -6694,7 +6694,7 @@
         "when": "close",
         "project": "<FIXTURE>/maelys-fixture",
         "options": [],
-        "snapshot": "fixtures/0140.json"
+        "snapshot": "fixtures/0143.json"
       },
       {
         "test": "MigrateTest.setUp",
@@ -6716,7 +6716,7 @@
           "--mechanism",
           "maelys-release"
         ],
-        "snapshot": "fixtures/0141.json"
+        "snapshot": "fixtures/0144.json"
       }
     ]
   }

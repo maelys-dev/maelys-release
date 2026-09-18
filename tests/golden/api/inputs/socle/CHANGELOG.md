@@ -11,10 +11,35 @@
   command runs nothing, and the note says so. Measured at four ends on the
   fleet: a product the socle fuzzes, one that fuzzes in its own job, one
   with neither, and a fixture with an empty command; no false verdict.
-- **Impact.** [asks: nothing] [writes: nothing] A note, on the three
+- **The conventions say what `before` is not.** 0.60.0's record of what
+  `protect` read before writing is a diagnosis, not a restorable backup:
+  rulesets reduced to their contexts, classic settings normalised, nothing
+  recorded by the versions before. The conventions say so, and how to put
+  a protection back by hand — read the full state through the API, compare
+  with `before`, write only what moved. No `restore`, and none planned.
+- **One rule for the documentation repository's name, at both ends.** The
+  rule — a repository that does not declare `[docs] named` carries the
+  name in none of its files — was applied site by site over three
+  versions, the managed blocks (0.58.0), the seed and `migrate` (0.59.2),
+  the seeded texts (0.60.0), each after a product found the next site. One
+  search over every tracked file of the fleet, done once, found two more:
+  maelys-egress's `examples/README.md` and maelys-cli's `AGENTS.md`, both
+  rewritten by `migrate` before 0.59.2. Now one predicate, read at the two
+  ends there are: `check` scans every tracked file (the managed block and
+  `CHANGELOG.md` apart) and notes each file with its lines — the note that
+  becomes a refusal in 0.61.0, as announced; and `plan` and `migrate`
+  refuse to write a file carrying the name into a repository that does not
+  declare the word, naming the socle's own template or rewrite as the
+  fault.
+- **Impact.** [asks: public] [writes: nothing] A note, on the three
   repositories of the fleet without a harness (agent-cli-spec,
   maelys-system, the pilot); nothing to do unless one of them fuzzes
-  somewhere the conventions cannot see.
+  somewhere the conventions cannot see. The `before` paragraph changes no
+  output. A public repository whose tracked files name the documentation
+  repository sees each in a note (measured on nine main branches: one
+  file each on maelys-egress and maelys-json, none on the seven others —
+  maelys-cli removed its line with its 0.60.0 adoption) and removes them
+  before 0.61.0 refuses.
 
 ## 0.60.0 — 2026-09-18
 
