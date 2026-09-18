@@ -11,10 +11,17 @@
   command runs nothing, and the note says so. Measured at four ends on the
   fleet: a product the socle fuzzes, one that fuzzes in its own job, one
   with neither, and a fixture with an empty command; no false verdict.
+- **The conventions say what `before` is not.** 0.60.0's record of what
+  `protect` read before writing is a diagnosis, not a restorable backup:
+  rulesets reduced to their contexts, classic settings normalised, nothing
+  recorded by the versions before. The conventions say so, and how to put
+  a protection back by hand — read the full state through the API, compare
+  with `before`, write only what moved. No `restore`, and none planned.
 - **Impact.** [asks: nothing] [writes: nothing] A note, on the three
   repositories of the fleet without a harness (agent-cli-spec,
   maelys-system, the pilot); nothing to do unless one of them fuzzes
-  somewhere the conventions cannot see.
+  somewhere the conventions cannot see. The `before` paragraph changes no
+  output.
 
 ## 0.60.0 — 2026-09-18
 
