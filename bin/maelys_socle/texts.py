@@ -101,3 +101,34 @@ LABELS = {"ok": "ok", "note": "note", "warn": "WARN", "missing": "MISSING", "ref
 
 def checks_text(checks: list[dict]) -> str:
     return "".join(f"{LABELS.get(check['status'], check['status']):<8} {check['message']}\n" for check in checks)
+
+
+def documentation_name_lines(text: str) -> list[int]:
+    """The lines of TEXT that name the documentation repository, outside a managed block.
+
+    One predicate for one rule -- a repository that does not declare
+    `[docs] named` carries the name in none of its files -- read at both
+    ends: `check` on what is on disk, `plan` and `migrate` on what the socle
+    is about to write. The rule was applied site by site over three versions
+    (the managed blocks, the seed, `migrate`, the seeded texts), each after a
+    product found the next site; one search over every tracked file, done
+    once, found two more. The managed block is left out: the socle rewrites
+    it at adoption, and its own writes are held by the same predicate.
+    """
+    from .constants import DEFAULT_DOCUMENTS
+    name = DEFAULT_DOCUMENTS.split("/")[-1]
+    found: list[int] = []
+    inside = False
+    for number, line in enumerate(text.splitlines(), 1):
+        stripped = line.strip()
+        if stripped == BEGIN:
+            inside = True
+        elif stripped == END:
+            inside = False
+        elif not inside and name in line:
+            found.append(number)
+    return found
+
+
+def names_documentation(text: str) -> bool:
+    return bool(documentation_name_lines(text))

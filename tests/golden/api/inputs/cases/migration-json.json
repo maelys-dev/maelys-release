@@ -6,11 +6,11 @@
       "executable": false
     },
     ".github/workflows/ci.yml": {
-      "text": "name: ci\n\n# Created by maelys-release v0.60.0 (0.60.0) and owned by this repository: add\n# jobs next to check; adopt keeps the socle line of check current.\non:\n  push:\n    branches: [main]\n  pull_request:\n\npermissions:\n  contents: read\n\njobs:\n  check:\n    uses: maelys-dev/maelys-release/.github/workflows/check-product.yml@7af9bab52edcf8e5335da09bd4ec431910791559 # v0.60.0\n    with:\n      product: maelys-system\n",
+      "text": "name: ci\n\n# Created by maelys-release v0.60.0 (0.60.0) and owned by this repository: add\n# jobs next to check; adopt keeps the socle line of check current.\non:\n  push:\n    branches: [main]\n  pull_request:\n\npermissions:\n  contents: read\n\njobs:\n  check:\n    uses: maelys-dev/maelys-release/.github/workflows/check-product.yml@9c941fc9f2fe5c6dca20e0752c9ca6a4cbff5a70 # v0.60.0\n    with:\n      product: maelys-system\n",
       "executable": false
     },
     ".github/workflows/release.yml": {
-      "text": "name: release\n\n# Managed by maelys-release v0.60.0 (0.60.0). Regenerate with\n# 'maelys-release adopt' of maelys-release; do not edit by hand.\non:\n  push:\n    tags: [\"v*\"]\n  workflow_dispatch:\n    inputs:\n      tag:\n        description: Existing signed tag whose release and Homebrew publication are replayed\n        required: true\n        type: string\n\npermissions:\n  contents: write\n  id-token: write\n  attestations: write\n\njobs:\n  release:\n    uses: maelys-dev/maelys-release/.github/workflows/release.yml@7af9bab52edcf8e5335da09bd4ec431910791559 # v0.60.0\n    permissions:\n      contents: write\n      id-token: write\n      attestations: write\n    with:\n      product: maelys-system\n      tag: ${{ inputs.tag || github.ref_name }}\n",
+      "text": "name: release\n\n# Managed by maelys-release v0.60.0 (0.60.0). Regenerate with\n# 'maelys-release adopt' of maelys-release; do not edit by hand.\non:\n  push:\n    tags: [\"v*\"]\n  workflow_dispatch:\n    inputs:\n      tag:\n        description: Existing signed tag whose release and Homebrew publication are replayed\n        required: true\n        type: string\n\npermissions:\n  contents: write\n  id-token: write\n  attestations: write\n\njobs:\n  release:\n    uses: maelys-dev/maelys-release/.github/workflows/release.yml@9c941fc9f2fe5c6dca20e0752c9ca6a4cbff5a70 # v0.60.0\n    permissions:\n      contents: write\n      id-token: write\n      attestations: write\n    with:\n      product: maelys-system\n      tag: ${{ inputs.tag || github.ref_name }}\n",
       "executable": false
     },
     "AGENTS.md": {
@@ -113,6 +113,22 @@
         "kind": "run",
         "argv": [
           "git",
+          "ls-files",
+          "-z"
+        ],
+        "cwd": "<PRODUCT>"
+      },
+      "result": {
+        "returncode": 0,
+        "stdout": ".claude/skills/maelys-release/SKILL.md\u0000.github/workflows/ci.yml\u0000.github/workflows/release.yml\u0000AGENTS.md\u0000CHANGELOG.md\u0000CLAUDE.md\u0000LICENSING.md\u0000README.md\u0000RELEASING.md\u0000SECURITY.md\u0000VERSION\u0000docs/data.json\u0000docs/generated.md\u0000docs/guide.md\u0000docs/public.md\u0000docs/unlisted.md\u0000documents.jsonl\u0000maelys-release.conf\u0000scripts/package-release.sh\u0000",
+        "stderr": ""
+      }
+    },
+    {
+      "call": {
+        "kind": "run",
+        "argv": [
+          "git",
           "remote",
           "get-url",
           "origin"
@@ -171,7 +187,7 @@
       },
       "result": {
         "returncode": 0,
-        "stdout": "25c628321e9e3d446aaf57c1e4b42c7896e01adf\n",
+        "stdout": "0ca1023d583139e90134c1abcb6523b5c1e1ff1d\n",
         "stderr": ""
       }
     }

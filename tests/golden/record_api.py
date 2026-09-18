@@ -38,7 +38,7 @@ def git(project, *args):
 
 def safe_git(command):
     prefixes = (['git', 'remote', 'get-url', 'origin'], ['git', 'config', '--get'],
-                ['git', 'tag', '--list'], ['git', 'rev-parse'], ['git', 'grep'],
+                ['git', 'tag', '--list'], ['git', 'rev-parse'], ['git', 'grep'], ['git', 'ls-files'],
                 ['git', 'describe', '--tags', '--abbrev=0'], ['git', 'cat-file', '-t'],
                 ['git', 'cat-file', '-p'], ['git', 'merge-base', '--is-ancestor'])
     return any(command[:len(prefix)] == prefix for prefix in prefixes)

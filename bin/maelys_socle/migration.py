@@ -19,7 +19,7 @@ from .declarations import Declarations
 from .github import destination_is_public
 from .host import git, run
 from .project import declared_mechanism, engaged_documents, project_of
-from .texts import is_generated
+from .texts import is_generated, names_documentation
 
 
 def read_prose_records(source: str) -> list[dict]:
@@ -335,6 +335,19 @@ def handle_migrate(invocation: Invocation, context: Context) -> tuple[dict, int]
         data["readme"] = rewrite_readme(product_clone, product, data)
         data["rewritten"] = rewrite_markdown(product_clone, product, data, decl.docs_named)
         data["remaining"], data["globs"] = surviving_references(product_clone, data, decl.docs_named)
+        # The same predicate as plan's, on what this side is about to commit:
+        # a rewrite that names the destination in a repository that does not
+        # declare the word is refused here, whatever produced it.
+        if not decl.docs_named:
+            for path in sorted(product_clone.rglob("*.md")):
+                relative = path.relative_to(product_clone).as_posix()
+                if ".git/" in path.as_posix() or relative in {entry["path"] for entry in data["moving"]}:
+                    continue
+                if relative in (*data["rewritten"], "README.md") and names_documentation(path.read_text(encoding="utf-8")):
+                    raise Failure("PRECONDITION_FAILED",
+                                  f"the migration would write the name of the documentation repository into"
+                                  f" {relative}, and {product} does not declare [docs] named.",
+                                  "This is a defect of the socle's rewriting, not of the product: report it.")
         git("add", "-A", cwd=product_clone)
         git("commit", "-q", "-m",
             f"docs: the prose moves to {data['repository']}/{product}/\n\n"
