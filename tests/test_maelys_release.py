@@ -5927,3 +5927,61 @@ class SeededNamingRuleTest(unittest.TestCase):
         for name in ("RELEASING.md", "LICENSING.md", "SECURITY.md"):
             self.assertNotIn("maelys-docs", product.read(name), name)
         self.assertEqual(self.named(MODULE.read_declarations(product.dir, "maelys-fixture", "custom")), [])
+
+
+class FuzzNoteTest(unittest.TestCase):
+    """What the conventions can see of fuzzing, at four ends, and never a false verdict.
+
+    maelys-cli named the blind spot: a product with no harness and no
+    command was told nothing. The reader looks at tests/fuzz/ and fuzz/,
+    and at ci.yml; it says "detected by the conventions", because a
+    harness elsewhere or a fuzzer run outside ci.yml is invisible to it --
+    and it reads the value of fuzz_command, not its presence.
+    """
+
+    def product(self, ci: str, harness: bool = True) -> "Product":
+        product = Product()
+        self.addCleanup(product.close)
+        if harness:
+            product.write("tests/fuzz/harness.c", "int main(void) { return 0; }\n")
+        product.write(".github/workflows/ci.yml", ci)
+        return product
+
+    def fuzz(self, product) -> tuple[str, list[str]]:
+        decl = MODULE.read_declarations(product.dir, "maelys-fixture", "custom")
+        return decl.fuzz_runs, [c["status"] + ": " + c["message"] for c in decl.checks
+                                if "fuzz" in c["message"].lower()]
+
+    SOCLE = "jobs:\n  check:\n    uses: maelys-dev/maelys-release/.github/workflows/check-product.yml@" + "a" * 40 \
+            + " # v1\n    with:\n      product: p\n      fuzz_command: make fuzz-smoke\n"
+    OWN = "jobs:\n  fuzz:\n    runs-on: ubuntu-26.04\n    steps:\n      - run: make fuzz-smoke\n"
+    EMPTY = SOCLE.replace("fuzz_command: make fuzz-smoke", "fuzz_command: ''   # no harness worth running")
+    NONE = "jobs:\n  build:\n    runs-on: ubuntu-26.04\n    steps:\n      - run: make check\n"
+
+    def test_the_socle_runs_it(self) -> None:
+        runs, said = self.fuzz(self.product(self.SOCLE))
+        self.assertEqual(runs, "socle")
+        self.assertEqual(said, ["ok: tests/fuzz/: the socle's fuzz job runs it"])
+
+    def test_a_job_of_the_repository_runs_it(self) -> None:
+        runs, said = self.fuzz(self.product(self.OWN))
+        self.assertEqual(runs, "own")
+        self.assertEqual(said, ["ok: tests/fuzz/: a job of this repository runs it"])
+
+    def test_an_empty_or_commented_command_runs_nothing(self) -> None:
+        runs, said = self.fuzz(self.product(self.EMPTY))
+        self.assertEqual(runs, "none")
+        self.assertEqual(len(said), 1)
+        self.assertTrue(said[0].startswith("note: tests/fuzz/: no job of .github/workflows/ci.yml runs it (fuzz_command is empty)"))
+
+    def test_no_harness_and_no_job_is_said_as_not_detected(self) -> None:
+        runs, said = self.fuzz(self.product(self.NONE, harness=False))
+        self.assertEqual(runs, "none")
+        self.assertEqual(said, ["note: no fuzzing detected by the conventions: neither tests/fuzz/ nor fuzz/ exists,"
+                                " and no job of .github/workflows/ci.yml runs a fuzz target"])
+
+    def test_a_command_without_a_known_harness_is_said_too(self) -> None:
+        runs, said = self.fuzz(self.product(self.SOCLE, harness=False))
+        self.assertEqual(runs, "none")
+        self.assertEqual(said, ["note: no fuzzing detected by the conventions: neither tests/fuzz/ nor fuzz/ exists,"
+                                " though ci.yml runs make fuzz-smoke; the harnesses the conventions know live there"])
