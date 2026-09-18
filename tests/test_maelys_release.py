@@ -939,11 +939,15 @@ class ProductNeedsTest(unittest.TestCase):
         # check exits 2 on anything but ok and note, so this must stay green.
         self.assertTrue(self.product.json("check", self.dir)["data"]["valid"])
 
-    def test_a_repository_without_harnesses_is_told_nothing(self) -> None:
+    def test_a_repository_without_harnesses_is_told_no_fuzzing_was_detected(self) -> None:
+        # Until 0.60.0 it was told nothing at all: the blind spot maelys-cli
+        # named. A note, worded for what the reader can see.
         self.product.run("adopt", self.dir, "--apply")
         data = self.product.json("declarations", self.dir)["data"]
         self.assertEqual(data["fuzz"], {"harnesses": "", "runs": "none"})
-        self.assertEqual([c for c in data["checks"] if "fuzz" in c["message"]], [])
+        said = [c for c in data["checks"] if "fuzz" in c["message"]]
+        self.assertEqual([c["status"] for c in said], ["note"])
+        self.assertTrue(said[0]["message"].startswith("no fuzzing detected by the conventions"))
 
     def test_the_contract_separates_what_is_declared_from_what_is_default(self) -> None:
         self.product.run("adopt", self.dir, "--apply")
@@ -1725,6 +1729,7 @@ class GoldenTest(unittest.TestCase):
         ok       .github/workflows/ci.yml calls check-product.yml of the socle
         ok       dependencies/packages: linux [pkg-config libjansson-dev] macos [jansson]
         ok       maelys-release.conf [dependencies] apart: the pins are materialised under $MAELYS_DEPENDENCIES_DIR, never beside the product
+        note     no fuzzing detected by the conventions: neither tests/fuzz/ nor fuzz/ exists, and no job of .github/workflows/ci.yml runs a fuzz target
         """) + ("note     " + COMING_NOTE + "\n" if COMING_NOTE else "")
     FILES = textwrap.dedent("""\
         same     .github/workflows/release.yml
