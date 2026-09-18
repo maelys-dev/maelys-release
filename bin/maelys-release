@@ -429,7 +429,14 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
     # product does not rewrite; everything else is the product's, said with
     # its lines. A note in 0.60.0 and a refusal from 0.61.0, announced.
     if not decl.docs_named:
-        tracked = git("ls-files", "-z", cwd=project, check=False).split("\0") if (project / ".git").exists() else []
+        # The tracked files of a repository; every file of a directory that
+        # is not one yet, .git apart -- a check that read nothing without a
+        # repository would have said nothing where it had said something.
+        if (project / ".git").exists():
+            tracked = git("ls-files", "-z", cwd=project, check=False).split("\0")
+        else:
+            tracked = [path.relative_to(project).as_posix() for path in project.rglob("*")
+                       if path.is_file() and ".git/" not in path.as_posix()]
         for relative in sorted(name for name in tracked if name and name != "CHANGELOG.md"):
             path = project / relative
             if not path.is_file():
