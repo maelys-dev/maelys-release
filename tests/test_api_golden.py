@@ -250,3 +250,28 @@ class ApiGoldenCoverageTest(unittest.TestCase):
         for name in ('migration-foreign', 'migration-wrong-destination'):
             self.assertEqual(envelope(name)['error']['code'], 'VALIDATION_FAILED')
             self.assertEqual(snapshot(name)['changedFiles'], {})
+
+
+class ApiGoldenSeededNameTest(unittest.TestCase):
+    """The seeded line naming the documentation repository, recorded at each stage.
+
+    0.60.0 notes it; 0.61.0 refuses it, announced. This case is where the
+    reference records the note today and, at the activation, what a refusal
+    does to preflight -- which stops on a conventions violation before its
+    GitHub reads. The activation commit changes both recordings, reviewed.
+    """
+
+    NOTE = 'LICENSING.md names the documentation repository'
+
+    def test_check_notes_the_line_and_stays_valid(self):
+        data = envelope('seeded-name-check')['data']
+        said = [item for item in data['checks'] if item['message'].startswith(self.NOTE)]
+        self.assertEqual([item['status'] for item in said], ['note'])
+        self.assertIn('refuses it from maelys-release 0.61.0', said[0]['message'])
+        self.assertTrue(data['conventions']['valid'])
+
+    def test_preflight_still_reaches_github_with_the_note(self):
+        data = envelope('seeded-name-preflight')['data']
+        self.assertTrue(any(item['message'].startswith(self.NOTE) for item in data['checks']))
+        self.assertTrue(data['valid'])
+        self.assertTrue(data['preflight'], 'the API checks ran: a note is not a violation')

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.60.0 — 2026-09-18
 
 - **The aliases go.** `check (ubuntu-26.04)`, `check (ubuntu-26.04-arm)`
   and `check (macos-15)` stop reporting, as 0.59.0 announced: they carried
