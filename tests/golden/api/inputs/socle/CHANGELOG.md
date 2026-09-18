@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+- **`check` says when it detects no fuzzing.** A product with no harness
+  in `tests/fuzz/` or `fuzz/` and no fuzz job was told nothing; maelys-cli
+  named the blind spot. It is a note, worded for what the reader can see —
+  "no fuzzing detected by the conventions" — because a harness elsewhere or
+  a fuzzer run outside `ci.yml` is invisible to it. The reader also reads
+  the value of `fuzz_command`, not its presence: an empty or commented
+  command runs nothing, and the note says so. Measured at four ends on the
+  fleet: a product the socle fuzzes, one that fuzzes in its own job, one
+  with neither, and a fixture with an empty command; no false verdict.
+- **Impact.** [asks: nothing] [writes: nothing] A note, on the three
+  repositories of the fleet without a harness (agent-cli-spec,
+  maelys-system, the pilot); nothing to do unless one of them fuzzes
+  somewhere the conventions cannot see.
+
 ## 0.60.0 — 2026-09-18
 
 - **The aliases go.** `check (ubuntu-26.04)`, `check (ubuntu-26.04-arm)`

@@ -206,19 +206,40 @@ def read_fuzz(decl: Declarations) -> None:
         if directory.is_dir() and any(directory.iterdir()):
             decl.fuzz_harnesses = name
             break
-    else:
-        return
     ci = decl.project / ".github" / "workflows" / "ci.yml"
     text = ci.read_text(encoding="utf-8") if ci.is_file() else ""
-    if "fuzz_command:" in text:
+    # The value of fuzz_command, not its presence: `fuzz_command: ''` and a
+    # commented value turn the socle's job off, as a sanitizer_command of
+    # the same shape taught protect (agent-cli-spec).
+    declared = re.search(r"^\s+fuzz_command:(.*)$", text, re.MULTILINE)
+    command = yaml_scalar(declared.group(1)) if declared else ""
+    socle_runs = command in ("|", "|-", ">", ">-") or command.strip("'\"") != ""
+    own = FUZZ_TARGET.search(text)
+    known = " nor ".join(f"{name}/" for name in FUZZ_DIRECTORIES)
+    if not decl.fuzz_harnesses:
+        # What the conventions can see, and no more: a harness elsewhere, or
+        # a fuzzer run outside ci.yml, is invisible here, so this says
+        # "detected" and never "none". maelys-cli named the blind spot: a
+        # product without harness nor command was told nothing at all.
+        decl.fuzz_runs = "none"
+        if socle_runs or own:
+            runs = f"ci.yml runs {command.strip()}" if socle_runs else "a job of ci.yml runs a fuzz target"
+            decl.add("note", f"no fuzzing detected by the conventions: neither {known} exists, though {runs};"
+                             " the harnesses the conventions know live there", "conventions")
+        else:
+            decl.add("note", f"no fuzzing detected by the conventions: neither {known} exists, and no job of"
+                             " .github/workflows/ci.yml runs a fuzz target", "conventions")
+        return
+    if socle_runs:
         decl.fuzz_runs = "socle"
         decl.add("ok", f"{decl.fuzz_harnesses}/: the socle's fuzz job runs it", "conventions")
-    elif FUZZ_TARGET.search(text):
+    elif own:
         decl.fuzz_runs = "own"
         decl.add("ok", f"{decl.fuzz_harnesses}/: a job of this repository runs it", "conventions")
     else:
         decl.fuzz_runs = "none"
-        decl.add("note", f"{decl.fuzz_harnesses}/: no job of .github/workflows/ci.yml runs it."
+        decl.add("note", f"{decl.fuzz_harnesses}/: no job of .github/workflows/ci.yml runs it"
+                         + (" (fuzz_command is empty)" if declared else "") + "."
                          " 'fuzz_command: make fuzz-smoke' on the socle's check job would,"
                          " and the socle schedules nothing beyond a pull request", "conventions")
 

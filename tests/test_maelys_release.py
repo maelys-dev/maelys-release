@@ -939,11 +939,15 @@ class ProductNeedsTest(unittest.TestCase):
         # check exits 2 on anything but ok and note, so this must stay green.
         self.assertTrue(self.product.json("check", self.dir)["data"]["valid"])
 
-    def test_a_repository_without_harnesses_is_told_nothing(self) -> None:
+    def test_a_repository_without_harnesses_is_told_no_fuzzing_was_detected(self) -> None:
+        # Until 0.60.0 it was told nothing at all: the blind spot maelys-cli
+        # named. A note, worded for what the reader can see.
         self.product.run("adopt", self.dir, "--apply")
         data = self.product.json("declarations", self.dir)["data"]
         self.assertEqual(data["fuzz"], {"harnesses": "", "runs": "none"})
-        self.assertEqual([c for c in data["checks"] if "fuzz" in c["message"]], [])
+        said = [c for c in data["checks"] if "fuzz" in c["message"]]
+        self.assertEqual([c["status"] for c in said], ["note"])
+        self.assertTrue(said[0]["message"].startswith("no fuzzing detected by the conventions"))
 
     def test_the_contract_separates_what_is_declared_from_what_is_default(self) -> None:
         self.product.run("adopt", self.dir, "--apply")
@@ -1725,6 +1729,7 @@ class GoldenTest(unittest.TestCase):
         ok       .github/workflows/ci.yml calls check-product.yml of the socle
         ok       dependencies/packages: linux [pkg-config libjansson-dev] macos [jansson]
         ok       maelys-release.conf [dependencies] apart: the pins are materialised under $MAELYS_DEPENDENCIES_DIR, never beside the product
+        note     no fuzzing detected by the conventions: neither tests/fuzz/ nor fuzz/ exists, and no job of .github/workflows/ci.yml runs a fuzz target
         """) + ("note     " + COMING_NOTE + "\n" if COMING_NOTE else "")
     FILES = textwrap.dedent("""\
         same     .github/workflows/release.yml
@@ -5927,3 +5932,61 @@ class SeededNamingRuleTest(unittest.TestCase):
         for name in ("RELEASING.md", "LICENSING.md", "SECURITY.md"):
             self.assertNotIn("maelys-docs", product.read(name), name)
         self.assertEqual(self.named(MODULE.read_declarations(product.dir, "maelys-fixture", "custom")), [])
+
+
+class FuzzNoteTest(unittest.TestCase):
+    """What the conventions can see of fuzzing, at four ends, and never a false verdict.
+
+    maelys-cli named the blind spot: a product with no harness and no
+    command was told nothing. The reader looks at tests/fuzz/ and fuzz/,
+    and at ci.yml; it says "detected by the conventions", because a
+    harness elsewhere or a fuzzer run outside ci.yml is invisible to it --
+    and it reads the value of fuzz_command, not its presence.
+    """
+
+    def product(self, ci: str, harness: bool = True) -> "Product":
+        product = Product()
+        self.addCleanup(product.close)
+        if harness:
+            product.write("tests/fuzz/harness.c", "int main(void) { return 0; }\n")
+        product.write(".github/workflows/ci.yml", ci)
+        return product
+
+    def fuzz(self, product) -> tuple[str, list[str]]:
+        decl = MODULE.read_declarations(product.dir, "maelys-fixture", "custom")
+        return decl.fuzz_runs, [c["status"] + ": " + c["message"] for c in decl.checks
+                                if "fuzz" in c["message"].lower()]
+
+    SOCLE = "jobs:\n  check:\n    uses: maelys-dev/maelys-release/.github/workflows/check-product.yml@" + "a" * 40 \
+            + " # v1\n    with:\n      product: p\n      fuzz_command: make fuzz-smoke\n"
+    OWN = "jobs:\n  fuzz:\n    runs-on: ubuntu-26.04\n    steps:\n      - run: make fuzz-smoke\n"
+    EMPTY = SOCLE.replace("fuzz_command: make fuzz-smoke", "fuzz_command: ''   # no harness worth running")
+    NONE = "jobs:\n  build:\n    runs-on: ubuntu-26.04\n    steps:\n      - run: make check\n"
+
+    def test_the_socle_runs_it(self) -> None:
+        runs, said = self.fuzz(self.product(self.SOCLE))
+        self.assertEqual(runs, "socle")
+        self.assertEqual(said, ["ok: tests/fuzz/: the socle's fuzz job runs it"])
+
+    def test_a_job_of_the_repository_runs_it(self) -> None:
+        runs, said = self.fuzz(self.product(self.OWN))
+        self.assertEqual(runs, "own")
+        self.assertEqual(said, ["ok: tests/fuzz/: a job of this repository runs it"])
+
+    def test_an_empty_or_commented_command_runs_nothing(self) -> None:
+        runs, said = self.fuzz(self.product(self.EMPTY))
+        self.assertEqual(runs, "none")
+        self.assertEqual(len(said), 1)
+        self.assertTrue(said[0].startswith("note: tests/fuzz/: no job of .github/workflows/ci.yml runs it (fuzz_command is empty)"))
+
+    def test_no_harness_and_no_job_is_said_as_not_detected(self) -> None:
+        runs, said = self.fuzz(self.product(self.NONE, harness=False))
+        self.assertEqual(runs, "none")
+        self.assertEqual(said, ["note: no fuzzing detected by the conventions: neither tests/fuzz/ nor fuzz/ exists,"
+                                " and no job of .github/workflows/ci.yml runs a fuzz target"])
+
+    def test_a_command_without_a_known_harness_is_said_too(self) -> None:
+        runs, said = self.fuzz(self.product(self.SOCLE, harness=False))
+        self.assertEqual(runs, "none")
+        self.assertEqual(said, ["note: no fuzzing detected by the conventions: neither tests/fuzz/ nor fuzz/ exists,"
+                                " though ci.yml runs make fuzz-smoke; the harnesses the conventions know live there"])
