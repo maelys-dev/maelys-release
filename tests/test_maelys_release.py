@@ -5912,6 +5912,10 @@ class SeededNamingRuleTest(unittest.TestCase):
         self.addCleanup(product.close)
         product.run("adopt", str(product.dir), "--apply")
         product.write("LICENSING.md", product.read("LICENSING.md") + "\nProse moves to `maelys-docs/p/`.\n")
+        # The reading end searches the tracked files: a repository, not a directory.
+        product.git(product.dir, "init", "-q")
+        product.git(product.dir, "add", "-A")
+        product.git(product.dir, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "fixture")
         decl = MODULE.read_declarations(product.dir, "maelys-fixture", "custom")
         found = self.named(decl)
         self.assertEqual(len(found), 1, found)
@@ -5990,3 +5994,67 @@ class FuzzNoteTest(unittest.TestCase):
         self.assertEqual(runs, "none")
         self.assertEqual(said, ["note: no fuzzing detected by the conventions: neither tests/fuzz/ nor fuzz/ exists,"
                                 " though ci.yml runs make fuzz-smoke; the harnesses the conventions know live there"])
+
+
+class DocumentationNameRuleTest(unittest.TestCase):
+    """One predicate for one rule, read at both ends: what is on disk, what the socle writes.
+
+    The rule was applied site by site over three versions, each after a
+    product found the next site; one search over every tracked file, done
+    once, found two more (maelys-egress, maelys-cli). Now `check` does that
+    search, and `plan` and `migrate` refuse to write what it would find.
+    """
+
+    def repository(self) -> "Product":
+        product = Product()
+        self.addCleanup(product.close)
+        product.run("adopt", str(product.dir), "--apply")
+        product.git(product.dir, "init", "-q")
+        product.git(product.dir, "add", "-A")
+        product.git(product.dir, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "fixture")
+        return product
+
+    def notes(self, product) -> list[str]:
+        decl = MODULE.read_declarations(product.dir, "maelys-fixture", "custom")
+        return [c["status"] + ": " + c["message"] for c in decl.checks if "names the documentation repository" in c["message"]]
+
+    def test_the_predicate_reads_lines_outside_the_managed_block(self) -> None:
+        text = "a\n" + MODULE.BEGIN + "\nlives in maelys-dev/maelys-docs\n" + MODULE.END + "\nsee maelys-docs/p/x.md\nplain\n"
+        self.assertEqual(MODULE.documentation_name_lines(text), [5])
+        self.assertTrue(MODULE.names_documentation("x maelys-docs y"))
+        self.assertFalse(MODULE.names_documentation(MODULE.BEGIN + "\nmaelys-docs\n" + MODULE.END + "\n"))
+
+    def test_check_searches_every_tracked_file_and_names_the_lines(self) -> None:
+        product = self.repository()
+        self.assertEqual(self.notes(product), [])
+        product.write("examples/README.md", "# Examples\n\nSee `maelys-docs/maelys-fixture/guide.md`.\n\nAnd maelys-docs again.\n")
+        product.write("CHANGELOG.md", product.read("CHANGELOG.md") + "\n- moved to maelys-docs (history)\n")
+        product.write("notes.txt", "untracked, and naming maelys-docs\n")
+        product.git(product.dir, "add", "examples/README.md", "CHANGELOG.md")
+        product.git(product.dir, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "more")
+        said = self.notes(product)
+        self.assertEqual(len(said), 1, said)
+        self.assertTrue(said[0].startswith("note: examples/README.md names the documentation repository at lines 3, 5,"), said[0])
+        self.assertIn("refuses it from maelys-release 0.61.0", said[0])
+        product.write("maelys-release.conf", product.read("maelys-release.conf") + "\n[docs]\nnamed\n")
+        self.assertEqual(self.notes(product), [])
+
+    def test_plan_refuses_to_write_the_name_into_an_undeclared_repository(self) -> None:
+        product = self.repository()
+        decl = MODULE.read_declarations(product.dir, "maelys-fixture", "custom")
+        with self.assertRaises(MODULE.Failure) as refusal:
+            MODULE.plan(decl, {"SECURITY.md": ("Report to maelys-docs/maelys-fixture/.\n", False)}, apply=False)
+        self.assertIn("would write the name of the documentation repository into SECURITY.md", refusal.exception.message)
+        self.assertIn("defect of the socle", refusal.exception.hint)
+        self.assertFalse((product.dir / "SECURITY.md").read_text().startswith("Report to maelys-docs"))
+        decl.docs_named = True
+        MODULE.plan(decl, {"SECURITY.md": ("Report to maelys-docs/maelys-fixture/.\n", False)}, apply=False)
+
+    def test_nothing_the_socle_writes_today_trips_the_guard(self) -> None:
+        # Measured on what adopt stages for an undeclared product: the
+        # templates of this version carry no name.
+        product = self.repository()
+        decl = MODULE.read_declarations(product.dir, "maelys-fixture", "custom")
+        staged = MODULE.stage(decl, "a" * 40, "v9.9.9")
+        for relative, (content, _) in staged.items():
+            self.assertFalse(MODULE.names_documentation(content), relative)

@@ -51,7 +51,8 @@ from maelys_socle.declarations import (
     Declarations, parse_cli_declarations, parse_packages, parse_pin, parse_release, require_valid, version_tuple,
 )
 from maelys_socle.texts import (
-    LABELS, checks_text, is_generated, managed_block, readme_links, touches, verified_by,
+    LABELS, checks_text, documentation_name_lines, is_generated, managed_block, names_documentation, readme_links,
+    touches, verified_by,
 )
 from maelys_socle.workflows import (
     block_list, ci_legs, ci_macos_runner, ci_workflow, file_runners, legs_job,
@@ -419,25 +420,31 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
     elif declared_word(project, "docs", "unnamed"):
         decl.add("note", f"{DECLARATION_FILE} [docs] unnamed is the default since 0.58.0; the line can go",
                  "conventions")
-    # The seeded texts are written once and then the product's, so a name
-    # the socle put there stays after the socle stops writing it: 0.59.2's
-    # LICENSING.md seed named the documentation repository for every
-    # product, and only a machine reading the file catches it afterwards
-    # (maelys-system: a written rule holds only when a machine verifies it).
+    # The rule at the reading end, on every tracked file: a repository that
+    # does not declare [docs] named carries the name of the documentation
+    # repository in none of them. 0.60.0 read the three seeded texts only,
+    # and one search over the fleet found two more files, both rewritten by
+    # migrate before 0.59.2 and never looked for on disk. The managed block
+    # is the socle's to rewrite at adoption, and CHANGELOG.md is history a
+    # product does not rewrite; everything else is the product's, said with
+    # its lines. A note in 0.60.0 and a refusal from 0.61.0, announced.
     if not decl.docs_named:
-        for name in CONVENTION_SEEDED:
-            seeded = project / name
-            if seeded.is_file() and DEFAULT_DOCUMENTS.split("/")[-1] in seeded.read_text(encoding="utf-8",
-                                                                                          errors="replace"):
-                # A note in 0.60.0 and a refusal from 0.61.0, announced below:
-                # the line is one the socle wrote, and a refusal on the day the
-                # rule arrives would have turned red a CI for the socle's own
-                # words -- and the recorded API reference's fixtures carry it.
-                decl.add("note", f"{name} names the documentation repository, which this repository's files"
-                                 f" do not unless {DECLARATION_FILE} declares [docs] named: remove the name"
-                                 " (a public reader may see it), or declare the word on a private repository;"
-                                 " check refuses it from maelys-release 0.61.0",
-                         "conventions")
+        tracked = git("ls-files", "-z", cwd=project, check=False).split("\0") if (project / ".git").exists() else []
+        for relative in sorted(name for name in tracked if name and name != "CHANGELOG.md"):
+            path = project / relative
+            if not path.is_file():
+                continue
+            try:
+                lines = documentation_name_lines(path.read_text(encoding="utf-8"))
+            except (UnicodeDecodeError, OSError):
+                continue
+            if lines:
+                decl.add("note", f"{relative} names the documentation repository at line"
+                                 f"{'s' if len(lines) > 1 else ''} {', '.join(str(n) for n in lines[:8])}"
+                                 f"{', …' if len(lines) > 8 else ''}, which this repository's files do not unless"
+                                 f" {DECLARATION_FILE} declares [docs] named: remove the name (a public reader may"
+                                 " see it), or declare the word on a private repository; check refuses it from"
+                                 " maelys-release 0.61.0", "conventions")
     # A repository whose CI is entirely its own calls no shared CI, and
     # `check` must not create a ci.yml for it nor warn that none calls
     # check-product.yml. The socle is the first: its CI lints the workflows
@@ -852,6 +859,15 @@ def stage(decl: Declarations, sha: str, tag: str) -> dict[str, tuple[str, bool]]
     # way round for a private name.
     if not decl.docs_named:
         block = DOCS_BULLET.sub(DOCS_UNNAMED_BULLET, block, count=1)
+        # The socle's part of the managed files, held by the same predicate
+        # as everything else it writes: the block of 0.57.x named the
+        # repository for every public product, and this is where it would
+        # have been refused.
+        if names_documentation(block):
+            raise Failure("PRECONDITION_FAILED",
+                          f"the managed block would name the documentation repository in {decl.project.name},"
+                          " which does not declare [docs] named.",
+                          "This is a defect of the socle's block texts, not of the product: report it.")
     for name in CONVENTION_MANAGED:
         path = decl.project / name
         existing = path.read_text(encoding="utf-8") if path.is_file() else None
@@ -1111,6 +1127,24 @@ def plan(decl: Declarations, staged: dict[str, tuple[str, bool]], apply: bool) -
         if relative not in staged:
             continue
         content, executable = staged[relative]
+        # The rule at the writing end: nothing the socle stages for a
+        # repository that does not declare [docs] named carries the name of
+        # the documentation repository. The seed of 0.58.0 to 0.59.1 did,
+        # and this is where it would have been refused before a product saw
+        # it -- and where the next template written without the rule will.
+        # A managed file carries the product's own prose around the block;
+        # the block, the socle's part, is held in stage() where it is built.
+        # The generated reference is the product's own program rendered,
+        # not a template of the socle: the socle's own says
+        # `--documents-repository` and its default, and the reading end
+        # notes it like any other file.
+        if relative not in CONVENTION_MANAGED + (CLI_REFERENCE, CLI_CONTRACT) and not decl.docs_named \
+                and names_documentation(content):
+            raise Failure("PRECONDITION_FAILED",
+                          f"the socle would write the name of the documentation repository into {relative},"
+                          f" and {decl.project.name} does not declare [docs] named.",
+                          "This is a defect of the socle's templates or rewriting, not of the product: report it."
+                          " A private repository that wants the name declares the word in maelys-release.conf.")
         path = decl.project / relative
         entry: dict = {"path": relative,
                        "scope": "conventions" if relative in CONVENTION_MANAGED + CONVENTION_SEEDED
