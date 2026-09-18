@@ -89,9 +89,12 @@ class Declarations:
         self.readme_held: list[str] = []
         # [ci] own: no shared CI is called, and no ci.yml is written.
         self.own_ci = False
-        # [docs] named: the managed blocks name the documentation repository.
-        # Both words are read by declared_word() in read_declarations, once.
+        # [docs] named OWNER/NAME: the managed blocks name that documentation
+        # repository. Both words are read by declared_value() in
+        # read_declarations, once; `documents` is the repository named, or
+        # "" for an unnamed product.
         self.docs_named = False
+        self.documents = ""
         self.checks: list[dict] = []
 
     @property
@@ -254,11 +257,23 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
             after_version = command.strip()
             continue
         if section == "docs":
-            # Read by declared_word(), which rendering the managed block needs.
-            if line not in ("unnamed", "named"):
-                raise ValueError(f"[docs] holds 'named' or 'unnamed', not {line!r}, at line {number}")
+            # Read by declared_value(), which rendering the managed block needs.
+            # `named` carries the repository it names, OWNER/NAME: the socle
+            # spelled it for every named product until 0.60.0, and a public
+            # socle that spells a private name in its texts is the leak its
+            # own rule forbids. No product declared the bare word when it
+            # went (measured on nine repositories), so nothing is announced.
+            word, _, value = line.partition(" ")
+            if word == "named" and re.fullmatch(r"[A-Za-z0-9._-]+/[A-Za-z0-9._-]+", value.strip()):
+                pass
+            elif word == "named":
+                raise ValueError(f"[docs] named takes the repository it names, OWNER/NAME, at line {number}"
+                                 + (": the bare word spelled the socle's default until 0.60.0" if not value.strip()
+                                    else f": not {value.strip()!r}"))
+            elif line != "unnamed":
+                raise ValueError(f"[docs] holds 'named OWNER/NAME' or 'unnamed', not {line!r}, at line {number}")
             if docs_unnamed:
-                raise ValueError(f"[docs] holds one word, at line {number}")
+                raise ValueError(f"[docs] holds one line, at line {number}")
             docs_unnamed = True
             continue
         if section == "ci":

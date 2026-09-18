@@ -115,8 +115,8 @@ def documentation_name_lines(text: str) -> list[int]:
     once, found two more. The managed block is left out: the socle rewrites
     it at adoption, and its own writes are held by the same predicate.
     """
-    from .constants import DEFAULT_DOCUMENTS
-    name = DEFAULT_DOCUMENTS.split("/")[-1]
+    from .constants import DOCUMENTS_REPOSITORY
+    name = DOCUMENTS_REPOSITORY.split("/")[-1]
     found: list[int] = []
     inside = False
     for number, line in enumerate(text.splitlines(), 1):

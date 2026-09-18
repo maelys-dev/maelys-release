@@ -12,7 +12,12 @@ SOCLE_REPOSITORY = "maelys-dev/maelys-release"
 
 DEFAULT_TAP = "maelys-dev/homebrew-tap"
 
-DEFAULT_DOCUMENTS = "maelys-dev/maelys-docs"
+DOCUMENTS_REPOSITORY = "maelys-dev/maelys-docs"
+
+# The files a reader reads, where the documentation repository's name is a
+# leak: every one the fleet found was Markdown. Code and data that carry it
+# are the checker's own knowledge, or a fixture of it.
+PROSE_SUFFIXES = (".md", ".markdown", ".txt", ".rst")
 
 DEFAULT_IMAGE = "ubuntu:26.04"
 

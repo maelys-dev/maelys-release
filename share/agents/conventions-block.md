@@ -44,8 +44,8 @@ rules below hold whatever that mechanism is; the complete conventions are in
 - `LICENSING.md` states what each part of this repository is licensed under,
   and names every document it engages publicly. `SECURITY.md` states how to
   report a vulnerability.
-- The prose of this repository lives in `maelys-dev/maelys-docs`, directory
-  `@PRODUCT@/`, with a neighbouring checkout at `../maelys-docs`.
+- The prose of this repository lives in `@DOCUMENTS@`, directory
+  `@PRODUCT@/`, with a neighbouring checkout at `../@DOCUMENTS_NAME@`.
   Documenting means opening a pull request there, not writing in `docs/`
   here, which carries what a machine writes and what this repository engages
   publicly. An agent that finds prose in `docs/` moves it rather than

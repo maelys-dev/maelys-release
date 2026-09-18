@@ -1002,12 +1002,12 @@ jobs:
         files each, under a bullet forbidding it."""
         existing = self.product.dir / "maelys-release.conf"
         conf = existing.read_text() if existing.is_file() else ""
-        self.product.write("maelys-release.conf", conf + "\n[docs]\nnamed\n")
+        self.product.write("maelys-release.conf", conf + "\n[docs]\nnamed example/docs-fixture\n")
         self.product.run("adopt", self.dir, "--apply")
         for name in ("AGENTS.md", "CLAUDE.md"):
             text = self.product.read(name)
-            self.assertIn("`maelys-dev/maelys-docs`", text)
-            self.assertIn("../maelys-docs", text)
+            self.assertIn("`example/docs-fixture`", text)
+            self.assertIn("../docs-fixture", text)
             self.assertIn("never name it from a public README", text)
             # the directory is the product's, not a placeholder left behind
             self.assertIn("`maelys-fixture/`", text)
@@ -1392,7 +1392,7 @@ class MigrateTest(unittest.TestCase):
         # The first shape rewrote README.md alone, and a product had to
         # repoint examples/README.md by hand: reporting a problem and fixing
         # half of it is worse than either extreme.
-        self.product.write("maelys-release.conf", "[docs]\nnamed\n" + APART)
+        self.product.write("maelys-release.conf", "[docs]\nnamed example/docs-fixture\n" + APART)
         self.product.write("examples/README.md", "See [the guide](docs/guide.md) and `docs/guide.md`.\n")
         self.product.write("docs/other.md", "Also [guide](guide.md), which travels with it.\n")
         self.commit()
@@ -4634,15 +4634,15 @@ class WardenAdoptionTest(unittest.TestCase):
     def test_the_block_names_no_documentation_repository_unless_declared(self) -> None:
         for mechanism in ("custom", "maelys-release"):
             default = MODULE.stage(self.product("[dependencies]\napart\n", mechanism), "a" * 40, "v9.9.9")["AGENTS.md"][0]
-            named = MODULE.stage(self.product("[dependencies]\napart\n\n[docs]\nnamed\n", mechanism),
+            named = MODULE.stage(self.product("[dependencies]\napart\n\n[docs]\nnamed example/docs-fixture\n", mechanism),
                                  "a" * 40, "v9.9.9")["AGENTS.md"][0]
             self.assertNotIn("maelys-docs", default, mechanism)
             self.assertIn("declares `[docs] named`", default, mechanism)
-            self.assertIn("`maelys-dev/maelys-docs`", named, mechanism)
+            self.assertIn("`example/docs-fixture`", named, mechanism)
         # unnamed, the 0.57.2 spelling, still reads and says the line can go.
         decl = self.product("[dependencies]\napart\n\n[docs]\nunnamed\n")
         self.assertTrue([c for c in decl.checks if "is the default since 0.58.0" in c["message"]])
-        for text in ("[docs]\npublic\n", "[docs]\nnamed\nunnamed\n"):
+        for text in ("[docs]\npublic\n", "[docs]\nnamed example/docs-fixture\nunnamed\n"):
             with self.assertRaises(ValueError):
                 MODULE.parse_release(text)
 
@@ -5805,7 +5805,7 @@ class DeclaredWordsTest(unittest.TestCase):
         return work
 
     def test_the_declaration_carries_both_words(self) -> None:
-        decl = MODULE.read_declarations(self.work("[ci]\nown\n[docs]\nnamed\n"), "p", "custom")
+        decl = MODULE.read_declarations(self.work("[ci]\nown\n[docs]\nnamed example/docs-fixture\n"), "p", "custom")
         self.assertTrue(decl.own_ci)
         self.assertTrue(decl.docs_named)
         decl = MODULE.read_declarations(self.work("[docs]\nunnamed\n"), "p", "custom")
@@ -5815,7 +5815,7 @@ class DeclaredWordsTest(unittest.TestCase):
     def test_the_words_hold_when_a_later_section_is_refused(self) -> None:
         # What the scan is for: the ci.yml rule and the managed block need
         # the words even when parse_release refuses the rest of the file.
-        decl = MODULE.read_declarations(self.work("[ci]\nown\n[docs]\nnamed\n[cut]\nnonsense\n"), "p", "custom")
+        decl = MODULE.read_declarations(self.work("[ci]\nown\n[docs]\nnamed example/docs-fixture\n[cut]\nnonsense\n"), "p", "custom")
         self.assertTrue(decl.own_ci)
         self.assertTrue(decl.docs_named)
         self.assertTrue([c for c in decl.checks if c["status"] == "missing" and "[cut]" in c["message"]])
@@ -5923,10 +5923,10 @@ class SeededNamingRuleTest(unittest.TestCase):
         # A note in 0.60.0, a refusal from 0.61.0 -- announced, so that the
         # line the socle itself wrote does not turn a CI red the day the
         # rule arrives.
-        self.assertEqual([c["status"] for c in decl.checks if c["message"] == found[0]], ["note"])
-        self.assertIn("refuses it from maelys-release 0.61.0", found[0])
-        self.assertTrue([entry for entry in MODULE.COMING if entry[0] == "0.61.0" and entry[1] == "all"])
-        product.write("maelys-release.conf", product.read("maelys-release.conf") + "\n[docs]\nnamed\n")
+        # A note in 0.60.0, a refusal since 0.61.0, as announced.
+        self.assertEqual([c["status"] for c in decl.checks if c["message"] == found[0]], ["missing"])
+        self.assertFalse([entry for entry in MODULE.COMING if entry[0] == "0.61.0"])
+        product.write("maelys-release.conf", product.read("maelys-release.conf") + "\n[docs]\nnamed example/docs-fixture\n")
         self.assertEqual(self.named(MODULE.read_declarations(product.dir, "maelys-fixture", "custom")), [])
 
     def test_a_seeded_text_naming_nothing_passes(self) -> None:
@@ -6034,9 +6034,8 @@ class DocumentationNameRuleTest(unittest.TestCase):
         product.git(product.dir, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "more")
         said = self.notes(product)
         self.assertEqual(len(said), 1, said)
-        self.assertTrue(said[0].startswith("note: examples/README.md names the documentation repository at lines 3, 5,"), said[0])
-        self.assertIn("refuses it from maelys-release 0.61.0", said[0])
-        product.write("maelys-release.conf", product.read("maelys-release.conf") + "\n[docs]\nnamed\n")
+        self.assertTrue(said[0].startswith("missing: examples/README.md names the documentation repository at lines 3, 5,"), said[0])
+        product.write("maelys-release.conf", product.read("maelys-release.conf") + "\n[docs]\nnamed example/docs-fixture\n")
         self.assertEqual(self.notes(product), [])
 
     def test_plan_refuses_to_write_the_name_into_an_undeclared_repository(self) -> None:
@@ -6058,3 +6057,74 @@ class DocumentationNameRuleTest(unittest.TestCase):
         staged = MODULE.stage(decl, "a" * 40, "v9.9.9")
         for relative, (content, _) in staged.items():
             self.assertFalse(MODULE.names_documentation(content), relative)
+
+
+class DocumentationNameGrammarTest(unittest.TestCase):
+    """`[docs] named OWNER/NAME`, the option that lost its default, and what the reading end skips.
+
+    A public socle that spelled a private repository's name in its own
+    texts was the leak its rule forbids. The name stays in one place, a
+    constant in code -- the checker's knowledge -- and nowhere in prose.
+    """
+
+    def test_named_carries_the_repository_and_the_bare_word_is_refused(self) -> None:
+        MODULE.parse_release("[docs]\nnamed example/docs-fixture\n")
+        with self.assertRaises(ValueError) as bare:
+            MODULE.parse_release("[docs]\nnamed\n")
+        self.assertIn("takes the repository it names", str(bare.exception))
+        self.assertIn("bare word spelled the socle's default until 0.60.0", str(bare.exception))
+        with self.assertRaises(ValueError) as wrong:
+            MODULE.parse_release("[docs]\nnamed not-a-repository\n")
+        self.assertIn("not 'not-a-repository'", str(wrong.exception))
+
+    def test_the_tolerant_scan_reads_the_value(self) -> None:
+        work = pathlib.Path(tempfile.mkdtemp(prefix="maelys-release-value."))
+        self.addCleanup(shutil.rmtree, work, True)
+        (work / "maelys-release.conf").write_text("[gate]\nnone\n\n[docs]\nnamed example/docs-fixture   \n")
+        self.assertEqual(MODULE.declared_value(work, "docs", "named"), "example/docs-fixture")
+        self.assertIsNone(MODULE.declared_value(work, "docs", "unnamed"))
+        (work / "maelys-release.conf").write_text("[docs]\nnamed\n")
+        self.assertEqual(MODULE.declared_value(work, "docs", "named"), "")
+
+    def test_the_block_renders_the_declared_repository_and_no_other(self) -> None:
+        product = Product()
+        self.addCleanup(product.close)
+        product.write("maelys-release.conf", "[dependencies]\napart\n\n[docs]\nnamed example/docs-fixture\n")
+        decl = MODULE.read_declarations(product.dir, "maelys-fixture", "custom")
+        self.assertEqual((decl.docs_named, decl.documents), (True, "example/docs-fixture"))
+        agents = MODULE.stage(decl, "a" * 40, "v9.9.9")["AGENTS.md"][0]
+        self.assertIn("lives in `example/docs-fixture`, directory", agents)
+        self.assertIn("../docs-fixture", agents)
+        self.assertNotIn("maelys-docs", agents)
+        # And the socle's own texts spell no name: every template and block
+        # text, and the conventions.
+        for path in sorted((MODULE.share_dir() / "agents").glob("*.md")) + sorted((MODULE.share_dir() / "templates").glob("*.md")):
+            self.assertNotIn("maelys-docs", path.read_text(encoding="utf-8"), path.name)
+        self.assertNotIn("maelys-docs", (ROOT / "docs" / "conventions.md").read_text(encoding="utf-8"))
+
+    def test_migrate_requires_the_destination(self) -> None:
+        product = Product()
+        self.addCleanup(product.close)
+        product.write("docs/guide.md", "# Guide\n")
+        records = product.work / "documents.jsonl"
+        records.write_text(json.dumps({"repository": "maelys-fixture", "path": "docs/guide.md",
+                                       "destination": "docs-fixture/maelys-fixture/guide.md"}) + "\n")
+        error = product.json("migrate", str(product.dir), "--product", "maelys-fixture", "--documents", str(records),
+                             expect=1)["error"]
+        self.assertEqual(error["code"], "VALIDATION_FAILED")
+        self.assertIn("--documents-repository", error["message"])
+        self.assertIn("maelys-platform", error["hint"])
+
+    def test_the_reading_end_reads_prose_and_not_code_or_data(self) -> None:
+        product = Product()
+        self.addCleanup(product.close)
+        product.run("adopt", str(product.dir), "--apply")
+        product.write("tools/sync.py", "REPOSITORY = 'maelys-dev/maelys-docs'\n")
+        product.write("data/sites.json", '{"docs": "maelys-docs"}\n')
+        product.write("NOTES.txt", "moved to maelys-docs\n")
+        product.git(product.dir, "init", "-q")
+        product.git(product.dir, "add", "-A")
+        product.git(product.dir, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "fixture")
+        decl = MODULE.read_declarations(product.dir, "maelys-fixture", "custom")
+        said = [c["message"].split(" ")[0] for c in decl.checks if "names the documentation repository" in c["message"]]
+        self.assertEqual(said, ["NOTES.txt"])

@@ -37,7 +37,7 @@ import maelys_cli as cli  # noqa: E402
 from maelys_socle.constants import (
     AGENT_BRANCHES, BEGIN, BOTTLES, CHECK_PLATFORMS, CI_JOB, CI_USES, CLI_CONTRACT,
     CLI_DECLARATIONS, CLI_GENERATOR, CLI_REFERENCE, CONVENTION_MANAGED, CONVENTION_SEEDED,
-    DECLARATION_FILE, DEFAULT_DOCUMENTS, DEFAULT_IMAGE, DEFAULT_TAP, END, EXPRESSION,
+    DECLARATION_FILE, DOCUMENTS_REPOSITORY, DEFAULT_IMAGE, DEFAULT_TAP, END, EXPRESSION, PROSE_SUFFIXES,
     FORMER_DECLARATION_FILE, FUZZ_DIRECTORIES, FUZZ_TARGET, GENERATED_HEAD_LINES,
     GENERATED_MARK, GENERATED_REFUSAL, JOB_ID, LABEL, LEGACY_CLI_REFERENCES, LEGS_JOB,
     LEGS_USES, MANAGED, MATRIX_REFERENCE, MECHANISMS, PIN_SPELLINGS, PLATFORMS, PRODUCT,
@@ -83,7 +83,8 @@ from maelys_socle.dependencies import (
     neighbour_pins, series, sibling_readers, text_dependencies,
 )
 from maelys_socle.project import (
-    declared_mechanism, declared_word, engaged_documents, pinned_product, project_of, require_socle_mechanism,
+    declared_mechanism, declared_value, declared_word, engaged_documents, pinned_product, project_of,
+    require_socle_mechanism,
 )
 from maelys_socle.migration import (
     BUILD_FILES, migration_notes, push_branch, read_prose_records, referencing_files, rewrite_markdown,
@@ -182,7 +183,7 @@ def socle_identity(sha: str, tag: str) -> tuple[str, str]:
 
 # The bullet of the managed blocks that names the documentation repository,
 # and what stands in its place for a repository that declares [docs] unnamed.
-DOCS_BULLET = re.compile(r"^- The prose of this repository lives in `maelys-dev/maelys-docs`.*?(?=^- |\Z)",
+DOCS_BULLET = re.compile(r"^- The prose of this repository lives in `[^`]*`.*?(?=^- |\Z)",
                          re.MULTILINE | re.DOTALL)
 DOCS_UNNAMED_BULLET = (
     "- `docs/` carries what a machine writes and what this repository engages\n"
@@ -413,9 +414,11 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
     # parse_release, which validates them with everything else. Read once
     # here; what renders the block and what preflight refuses read the
     # declaration, not the file again.
-    decl.docs_named = declared_word(project, "docs", "named")
+    named = declared_value(project, "docs", "named")
+    decl.docs_named = named is not None
+    decl.documents = named or ""
     if decl.docs_named:
-        decl.add("ok", f"{DECLARATION_FILE} [docs] named: the managed blocks name maelys-dev/maelys-docs;"
+        decl.add("ok", f"{DECLARATION_FILE} [docs] named: the managed blocks name {decl.documents or 'nothing'};"
                  " preflight refuses it on a public repository", "conventions")
     elif declared_word(project, "docs", "unnamed"):
         decl.add("note", f"{DECLARATION_FILE} [docs] unnamed is the default since 0.58.0; the line can go",
@@ -437,7 +440,14 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
         else:
             tracked = [path.relative_to(project).as_posix() for path in project.rglob("*")
                        if path.is_file() and ".git/" not in path.as_posix()]
-        for relative in sorted(name for name in tracked if name and name != "CHANGELOG.md"):
+        # The files a reader reads: prose. Code and data that carry the name
+        # are the checker's own knowledge, or a fixture of it; every leak the
+        # fleet found was Markdown. A violation since 0.61.0, as 0.60.0
+        # announced; the socle itself is held to it, with no exception.
+        # A CHANGELOG.md anywhere is history -- the socle's own frozen copies
+        # in its references included -- and history is not rewritten.
+        for relative in sorted(name for name in tracked if name and name.rpartition("/")[2] != "CHANGELOG.md"
+                               and name.lower().endswith(PROSE_SUFFIXES)):
             path = project / relative
             if not path.is_file():
                 continue
@@ -446,12 +456,11 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
             except (UnicodeDecodeError, OSError):
                 continue
             if lines:
-                decl.add("note", f"{relative} names the documentation repository at line"
-                                 f"{'s' if len(lines) > 1 else ''} {', '.join(str(n) for n in lines[:8])}"
-                                 f"{', …' if len(lines) > 8 else ''}, which this repository's files do not unless"
-                                 f" {DECLARATION_FILE} declares [docs] named: remove the name (a public reader may"
-                                 " see it), or declare the word on a private repository; check refuses it from"
-                                 " maelys-release 0.61.0", "conventions")
+                decl.add("missing", f"{relative} names the documentation repository at line"
+                                    f"{'s' if len(lines) > 1 else ''} {', '.join(str(n) for n in lines[:8])}"
+                                    f"{', …' if len(lines) > 8 else ''}, which this repository's files do not unless"
+                                    f" {DECLARATION_FILE} declares [docs] named OWNER/NAME: remove the name (a public"
+                                    " reader may see it), or declare the repository on a private one", "conventions")
     # A repository whose CI is entirely its own calls no shared CI, and
     # `check` must not create a ci.yml for it nor warn that none calls
     # check-product.yml. The socle is the first: its CI lints the workflows
@@ -698,12 +707,8 @@ COMING: tuple[tuple[str, str, str], ...] = (
     # moving it once, from 0.53.0, in the open. 0.60.0 honoured the second,
     # its epilogue: the aliases that made the rename survivable left once
     # nothing needed them, measured on the fleet the day of the cut.
-    # The third: 0.60.0 notes a seeded text naming the documentation
-    # repository; 0.61.0 refuses it. The seed of 0.59.2 wrote that line for
-    # every product, so the refusal comes one version after the note.
-    ("0.61.0", "all", "a seeded text (RELEASING.md, LICENSING.md, SECURITY.md) naming the documentation"
-                      " repository is refused by check unless maelys-release.conf declares [docs] named:"
-                      " remove the name now, or declare the word on a private repository"),
+    # The third: 0.60.0 noted a text naming the documentation repository;
+    # 0.61.0 refuses it, honoured and removed.
 )
 
 
@@ -811,7 +816,7 @@ def read_docs(decl: Declarations) -> None:
                  f"{relative[len('docs/'):]}; move it with its history:"
                  f" 'maelys-platform docs --prose --only {decl.product} --format jsonl"
                  f" | {PROGRAM} migrate . --product {decl.product} --documents -'."
-                 f" {DEFAULT_DOCUMENTS.split('/')[-1]} is private: a document a public README links to"
+                 f" {DOCUMENTS_REPOSITORY.split('/')[-1]} is private: a document a public README links to"
                  " stays here until the destination is one its readers can open", "conventions")
 
 
@@ -834,7 +839,10 @@ def stage(decl: Declarations, sha: str, tag: str) -> dict[str, tuple[str, bool]]
     share = share_dir()
     formulas = ", ".join(f"packaging/homebrew/{name}.rb.in" for name in decl.formulas) \
         or "packaging/homebrew/<name>.rb.in"
-    mapping = {"PRODUCT": decl.product, "FORMULAS": formulas, "SOCLE_TAG": tag, "SOCLE_VERSION": version}
+    mapping = {"PRODUCT": decl.product, "FORMULAS": formulas, "SOCLE_TAG": tag, "SOCLE_VERSION": version,
+               # The documentation repository a named product spells, from
+               # its declaration: the socle's texts carry no name of their own.
+               "DOCUMENTS": decl.documents, "DOCUMENTS_NAME": decl.documents.split("/")[-1]}
     staged: dict[str, tuple[str, bool]] = {}
     if decl.releases_here:
         staged[".github/workflows/release.yml"] = (release_workflow(decl, sha, tag, version), False)
@@ -1656,7 +1664,7 @@ CONTEXT = Context(
 
 APP = SocleProgram(PROGRAM, PRODUCT, socle_version(), [
     cli.transaction("migrate", "migrate",
-                    "Move a product's prose into maelys-docs with its history and out of the product;"
+                    "Move a product's prose into the documentation repository with its history and out of the product;"
                     " plan without --apply.",
                     handle_migrate, operands=[DIR_OPERAND],
                     options=[SOCLE_OPTIONS[0],
@@ -1664,7 +1672,7 @@ APP = SocleProgram(PROGRAM, PRODUCT, socle_version(), [
                                         " (maelys-platform docs --prose --only PRODUCT --format jsonl).",
                                         cli.argument("FILE"), default="-"),
                              cli.option("--documents-repository", "Repository the prose moves to.",
-                                        cli.argument("REPOSITORY"), default=DEFAULT_DOCUMENTS),
+                                        cli.argument("REPOSITORY")),
                              cli.flag("--push", "Send both branches; without it nothing leaves this machine.")],
                     schema={"type": "object", "additionalProperties": False,
                             "required": ["mode", "product", "project", "repository", "version", "tag", "commit",
