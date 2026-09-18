@@ -30772,6 +30772,17 @@
       ]
     }
   },
+  "private-open:repos/maelys-dev/maelys-system/rules/branches/main": {
+    "state": "ok",
+    "body": [],
+    "provenance": {
+      "kind": "derived",
+      "from": "repos/maelys-dev/maelys-system/rules/branches/main",
+      "changes": [
+        "no branch rules apply"
+      ]
+    }
+  },
   "private-unreadable:repos/maelys-dev/maelys-system": {
     "body": {
       "allow_auto_merge": false,
@@ -30957,6 +30968,17 @@
     "provenance": {
       "kind": "derived",
       "from": "repos/maelys-dev/maelys-system/branches/main/protection",
+      "changes": [
+        "protection/rules reading is unreadable"
+      ]
+    }
+  },
+  "private-unreadable:repos/maelys-dev/maelys-system/rules/branches/main": {
+    "state": "unreadable",
+    "body": null,
+    "provenance": {
+      "kind": "derived",
+      "from": "repos/maelys-dev/maelys-system/rules/branches/main",
       "changes": [
         "protection/rules reading is unreadable"
       ]

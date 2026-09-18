@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "sourceCommit": "89ead0fbe82ac1e6dce7d1c21225140c6e70a83b",
-  "inputsSha256": "20a59044c4343f0d3ccb2f20dfadac520c9503d7dde8f30421e225c29aaed8e2",
+  "sourceCommit": "ff194d6e1124059bbf4e0e628889232059f4f17c",
+  "inputsSha256": "faaed7275c61f2324f6f895ee5a5afac61493122c6e7eafb643baa7f9dd7346f",
   "cases": [
     "protect-classic-json",
     "protect-classic-text",
@@ -56,6 +56,10 @@
     "migration-foreign-json",
     "migration-foreign-text",
     "migration-wrong-destination-json",
-    "migration-wrong-destination-text"
+    "migration-wrong-destination-text",
+    "seeded-name-check-json",
+    "seeded-name-check-text",
+    "seeded-name-preflight-json",
+    "seeded-name-preflight-text"
   ]
 }
