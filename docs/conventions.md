@@ -1659,6 +1659,24 @@ names every other setting — `keeps`, or `create` line by line on a branch
 with none. It refuses from a version listed for `protect` in `WITHDRAWN` on
 this repository's main, and when that list cannot be read.
 
+**What `protect` keeps of the state it read, and what that is not** (0.60.0).
+Every run carries `before` in its JSON, printed on `--apply`: the classic
+settings as `protection_settings` normalises them, the contexts the classic
+protection required, and the contexts the rulesets required. It is a record
+for a diagnosis — what the branch required and how it was configured, in
+the terminal and the logs of the run that wrote — and it is **not a
+restorable backup**: the rulesets are reduced to their contexts, without
+their identifiers, their other rules or their bypass actors; the classic
+settings are normalised, not the endpoint's full answer; and nothing the
+socle wrote before 0.60.0 left any record at all. There is no `restore`,
+and none is planned: a second writing path in the command that produced six
+defects in two days is not what it needs. To put a protection back by hand,
+read the full state through the API first — `gh api
+repos/OWNER/NAME/branches/BRANCH/protection` and `gh api
+repos/OWNER/NAME/rulesets/ID` — compare it with `before` to see what moved,
+and write only the setting that moved, through its own endpoint, as
+`protect` does for the checks.
+
 **What `protect --apply` writes, and what it refuses to write** (0.57.1).
 An existing classic protection changes through its `required_status_checks`
 endpoint alone, `strict` and every other setting kept; a ruleset has its
