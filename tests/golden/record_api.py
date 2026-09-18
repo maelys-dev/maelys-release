@@ -73,6 +73,14 @@ def fixture(module, parent, repository, commit, kind):
             raise RuntimeError(err.getvalue())
     finally:
         module.host.HOST = original
+    if kind == 'seeded-name':
+        # The line the seed of 0.58.0 to 0.59.1 wrote for every product: a
+        # note since 0.60.0, a refusal from 0.61.0 -- this case is where the
+        # reference records each, and what the refusal does to preflight.
+        licensing = project / 'LICENSING.md'
+        licensing.write_text(licensing.read_text(encoding='utf-8')
+                             + '\nProse that is not engaged migrates to `maelys-docs/' + project.name + '/`.\n',
+                             encoding='utf-8')
     if kind == 'old-pin':
         for path in (project / '.github/workflows').glob('*.yml'):
             text = path.read_text(encoding='utf-8')
@@ -133,6 +141,8 @@ def scenarios():
         add('adoption-guard-' + name, repository, profile, 'adopt', kind='old-pin', options=('--apply',))
     for kind in ('migration', 'migration-foreign', 'migration-wrong-destination'):
         add(kind, system, 'live', 'migrate', kind=kind)
+    for command in ('check', 'preflight'):
+        add('seeded-name-' + command, system, 'live', command, kind='seeded-name')
     return cases
 
 
