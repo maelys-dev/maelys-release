@@ -49,15 +49,16 @@
   refuse to write a file carrying the name into a repository that does not
   declare the word, naming the socle's own template or rewrite as the
   fault.
-- **Impact.** [asks: public] [writes: nothing] A note, on the three
-  repositories of the fleet without a harness (agent-cli-spec,
-  maelys-system, the pilot); nothing to do unless one of them fuzzes
-  somewhere the conventions cannot see. The `before` paragraph changes no
-  output. A public repository whose tracked files name the documentation
-  repository sees each in a note (measured on nine main branches: one
-  file each on maelys-egress and maelys-json, none on the seven others —
-  maelys-cli removed its line with its 0.60.0 adoption) and removes them
-  before 0.61.0 refuses.
+- **Impact.** [asks: public] [writes: nothing] A public repository whose
+  prose files name the documentation repository removes the lines
+  **before adopting**: `check` refuses them, and `adopt` refuses on a
+  violation. Measured on nine main branches: one file each on
+  maelys-egress (`examples/README.md`) and maelys-json (`LICENSING.md`),
+  none on the seven others. A product that declares `[docs] named` writes
+  the repository it names after the word. The fuzzing note reaches the
+  three repositories without a harness (agent-cli-spec, maelys-system, the
+  pilot); nothing to do unless one of them fuzzes somewhere the conventions
+  cannot see. The `before` paragraph changes no output.
 
 ## 0.60.0 — 2026-09-18
 
