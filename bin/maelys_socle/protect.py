@@ -261,7 +261,18 @@ def handle_protect(invocation: Invocation, context: Context) -> tuple[dict, int]
                              if name not in derived and not socle_owned(name, caller)},
               "pullRequests": partial.get("heads", 0),
               "missingFromRuns": absent, "requiredButNeverRun": stale, "replaced": replaced, "kept": kept,
-              "proposed": proposed, "applied": False}
+              "proposed": proposed, "applied": False,
+              # What protected the branch before this command touched it,
+              # kept in the output of every run: the settings a write must
+              # keep, the contexts each mechanism required. What 0.43.0 to
+              # 0.57.0 overwrote is gone because nothing had read it first
+              # (maelys-datalog); a write from here on leaves its before
+              # state in the terminal and the logs, for a hand to restore.
+              # This is a record, not a restore command: a second writing
+              # path is not what the command that produced six defects in
+              # two days needs.
+              "before": {"classic": protection_settings(holds) if state == "ok" else None,
+                         "required": sorted(required), "rulesets": sorted(by_rule)}}
     # A job seen on some pull requests is intermittent only if a workflow
     # still defines it. maelys-json removed `fuzz` from its ci.yml in 0.2.0,
     # and protect called it "1 of 3 recent pull requests": the conclusion
@@ -529,5 +540,8 @@ def text_protect(data: dict) -> str:
                      " requests produced it, and a protection should require what reliably runs")
     for name in data["fromTag"]:
         lines.append(f"note     {name} is left out: a tag produces it, a pull request never does")
+    if data["applied"] and data.get("before"):
+        # Printed on a write only: the plan already lists what it keeps.
+        lines.append(f"{'before':<8} {json.dumps(data['before'], sort_keys=True)}")
     lines.append(f"protect: {'applied' if data['applied'] else 'nothing written; add --apply'}")
     return "\n".join(lines) + "\n"

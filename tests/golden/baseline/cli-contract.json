@@ -1000,6 +1000,12 @@
                     },
                     "version": {
                       "type": "string"
+                    },
+                    "writes": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
                     }
                   },
                   "required": [
@@ -2411,6 +2417,34 @@
             "properties": {
               "applied": {
                 "type": "boolean"
+              },
+              "before": {
+                "properties": {
+                  "classic": {
+                    "type": [
+                      "object",
+                      "null"
+                    ]
+                  },
+                  "required": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "rulesets": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "classic",
+                  "required",
+                  "rulesets"
+                ],
+                "type": "object"
               },
               "branch": {
                 "type": "string"

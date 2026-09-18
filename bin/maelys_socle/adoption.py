@@ -97,7 +97,8 @@ def text_adopt(data: dict) -> str:
             lines.append(f"{entry['version']:<8} {'-':<4} superseded by {entry['supersededBy']}, below: read that line")
             continue
         mark = {True: "ASKS", False: "-", None: "?"}[entry.get("asksThis")]
-        lines.append(f"{entry['version']:<8} {mark:<4} {entry['says']}")
+        lines.append(f"{entry['version']:<8} {mark:<4} {entry['says']}"
+                     + (f" [writes: {', '.join(entry['writes'])}]" if entry.get("writes") else ""))
     if data.get("impact"):
         asking = [entry["version"] for entry in data["impact"] if entry.get("asksThis") is True]
         unknown = [entry["version"] for entry in data["impact"] if entry.get("asksThis") is None]
