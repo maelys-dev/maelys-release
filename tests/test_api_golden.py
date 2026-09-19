@@ -255,23 +255,26 @@ class ApiGoldenCoverageTest(unittest.TestCase):
 class ApiGoldenSeededNameTest(unittest.TestCase):
     """The seeded line naming the documentation repository, recorded at each stage.
 
-    0.60.0 notes it; 0.61.0 refuses it, announced. This case is where the
-    reference records the note today and, at the activation, what a refusal
-    does to preflight -- which stops on a conventions violation before its
-    GitHub reads. The activation commit changes both recordings, reviewed.
+    0.60.0 noted it; 0.61.0 refuses it, announced. This case records what
+    the refusal does: check exits 2, and preflight stops on the violation
+    before its GitHub reads.
     """
 
     NOTE = 'LICENSING.md names the documentation repository'
 
-    def test_check_notes_the_line_and_stays_valid(self):
+    def test_check_refuses_the_line(self):
         data = envelope('seeded-name-check')['data']
         said = [item for item in data['checks'] if item['message'].startswith(self.NOTE)]
-        self.assertEqual([item['status'] for item in said], ['note'])
-        self.assertIn('refuses it from maelys-release 0.61.0', said[0]['message'])
-        self.assertTrue(data['conventions']['valid'])
+        self.assertEqual([item['status'] for item in said], ['missing'])
+        self.assertFalse(data['conventions']['valid'])
+        self.assertEqual(snapshot('seeded-name-check')['exitCode'], 2)
 
-    def test_preflight_still_reaches_github_with_the_note(self):
+    def test_preflight_stops_on_the_violation_before_github(self):
+        # The refusal is a conventions violation, and preflight stops on one
+        # before its GitHub reads: recorded, so that the reference says what
+        # 0.61.0 does to a product that kept the line -- and the other
+        # preflight cases, on fixtures with the 0.59.2 seed, still reach them.
         data = envelope('seeded-name-preflight')['data']
         self.assertTrue(any(item['message'].startswith(self.NOTE) for item in data['checks']))
-        self.assertTrue(data['valid'])
-        self.assertTrue(data['preflight'], 'the API checks ran: a note is not a violation')
+        self.assertFalse(data['valid'])
+        self.assertEqual(data['preflight'], [])

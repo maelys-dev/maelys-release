@@ -91,8 +91,9 @@ decided. A repository that wants one writes its own.
 ## What `docs/` holds
 
 A product repository keeps what a machine writes and what it engages
-publicly; its prose lives in `maelys-dev/maelys-docs`, directory
-`<product>/` (the documentation policy of maelys-platform). `check` reads
+publicly; its prose lives in the documentation repository of the fleet,
+directory `<product>/` — a private repository maelys-platform names, and
+that this text does not, for the reason the rule below gives. `check` reads
 `docs/` and sorts every file into four kinds:
 
 | Kind | Recognised by | Stays |
@@ -101,7 +102,7 @@ publicly; its prose lives in `maelys-dev/maelys-docs`, directory
 | other generated file | its head says so | yes |
 | public engagement | a link from `LICENSING.md` | yes |
 | data | not Markdown | yes |
-| prose | everything else | no, it moves to `maelys-docs/<product>/` |
+| prose | everything else | no, it moves to `<documentation repository>/<product>/` |
 
 A file is generated when its first ten lines carry both the word
 `generated` and a refusal to be edited (`do not edit`, `ne pas éditer`).
@@ -180,7 +181,7 @@ built before `check` runs, so the comparison is real there.
 
 `check` reports prose as a note naming its destination, and refuses it only
 under `--docs-contract` (the `docs_contract` input of `check-product.yml`).
-The refusal is opt-in for as long as `maelys-docs` does not exist: a product
+The refusal is opt-in for as long as the documentation repository does not exist: a product
 cannot move its prose to a repository nobody has created yet, and a rule
 that no product can satisfy is a rule that gets disabled. A product opts in
 once its prose has moved.
@@ -1244,13 +1245,13 @@ its head naming the check that holds it against the code:
 
 It stays for the reason `docs/cli.md` does: the check must read it in the
 checkout it verifies, and a public library's `make check` cannot clone a
-private maelys-docs.
+private documentation repository.
 
 **Prose a README links is named, not refused.** A link is inline, by
 reference, in HTML, or through the repository's own GitHub URL, to the file or
 to a directory holding it; a path mentioned in a sentence is not a link. A
 public README holds such a page until a site documents the product, since
-maelys-docs is private. `check` is offline: it sees the link and neither the
+the documentation repository is private. `check` is offline: it sees the link and neither the
 visibility nor the sites, so its note states the rule and `--docs-contract`
 does not count the page. maelys-platform, which reads both, decides `movable`,
 and `--prose` lists only what moves.
@@ -1271,13 +1272,13 @@ review.
 - **The list comes from maelys-platform**, one JSON record per line with the
   document's path and its destination. The socle does not recompute it: the
   classification lives in one place, so the two cannot disagree.
-- **maelys-docs receives the history**, not a copy. A throwaway clone of the
+- **The documentation repository receives the history**, not a copy. A throwaway clone of the
   product is rewritten with `git filter-repo --path <document> ...
-  --path-rename docs/:<product>/`, then merged into maelys-docs with
+  --path-rename docs/:<product>/`, then merged into it with
   `--allow-unrelated-histories`, so `git log -- <product>/<file>.md` reads
   there. `git subtree add` was tried and rejected: it grafts the history but
   the old commits keep the old path, so the log on the new path is empty.
-- **maelys-docs also receives the pin**, `dependencies/<product>.pin` at the
+- **It also receives the pin**, `dependencies/<product>.pin` at the
   product's latest tag and commit, and `<product>/VERSION`. A product with
   no tag is refused: its prose would describe no release. The pin is the
   fleet's one format, tag on line 1 and commit on line 2; the socle refuses
@@ -1307,7 +1308,7 @@ review.
 
 `migrate` replaces the links to the documents it moved with one pointer, and
 that pointer **never names a destination the reader cannot open**.
-maelys-docs is private: a public README naming it sends a reader to a 404,
+The documentation repository is private: a public README naming it sends a reader to a 404,
 and plants exactly the private reference the fleet audit blocks a repository
 on before opening it to the public.
 

@@ -78,6 +78,28 @@ def engaged_documents(project: pathlib.Path) -> set[str]:
             re.findall(r"\(([^)\s]*docs/[^)\s#]+)\)", licensing.read_text(encoding="utf-8"))}
 
 
+def declared_value(project: pathlib.Path, section: str, key: str) -> str | None:
+    """What follows `key` under `[section]` of maelys-release.conf; "" when bare; None when absent.
+
+    The same tolerant scan as declared_word, for a key that carries a value:
+    `[docs] named OWNER/NAME`. Read before the rest of the file parses, as
+    the managed block needs it even when a later section is refused.
+    """
+    release = project / DECLARATION_FILE
+    if not release.is_file():
+        return None
+    current = ""
+    for raw in release.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("["):
+            current = line
+        elif current == f"[{section}]" and (line == key or line.startswith(key + " ")):
+            return line[len(key):].strip()
+    return None
+
+
 def declared_word(project: pathlib.Path, section: str, word: str) -> bool:
     """Whether maelys-release.conf holds `word` under `[section]`."""
     release = project / DECLARATION_FILE

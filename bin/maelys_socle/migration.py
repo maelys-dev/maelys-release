@@ -13,7 +13,7 @@ import tempfile
 from maelys_cli import EXIT_OK, Failure, Invocation
 
 from .checkouts import author_identity
-from .constants import CLI_CONTRACT, CLI_REFERENCE, DEFAULT_DOCUMENTS
+from .constants import CLI_CONTRACT, CLI_REFERENCE
 from .context import Context
 from .declarations import Declarations
 from .github import destination_is_public
@@ -69,7 +69,15 @@ def plan_with_declarations(invocation: Invocation, context: Context) -> tuple[di
     if foreign:
         raise Failure("VALIDATION_FAILED", f"The list carries documents of {', '.join(foreign)}, not {product}.",
                       f"Pass 'maelys-platform docs --prose --only {product} --format jsonl'.")
-    repository = str(invocation.option("--documents-repository", DEFAULT_DOCUMENTS))
+    # No default: the socle's public reference of this command spelled the
+    # private repository's name until 0.60.0. maelys-platform, which lists
+    # the documents, names their destination.
+    repository = str(invocation.option("--documents-repository", "")).strip()
+    if not re.fullmatch(r"[A-Za-z0-9._-]+/[A-Za-z0-9._-]+", repository):
+        raise Failure("VALIDATION_FAILED",
+                      "--documents-repository OWNER/NAME names where the prose moves; none was given."
+                      if not repository else f"--documents-repository is OWNER/NAME, not {repository!r}.",
+                      "Pass the documentation repository maelys-platform names, with the list it produces.")
     moving, unknown = [], []
     for record in records:
         relative = record["path"]

@@ -60,8 +60,8 @@ when it has what they name.
   socle that tag pinned; when the socle is at fault, the remedy is a new patch
   release carrying the corrected pin. A tag is never moved or recreated.
 - Never commit a secret or a key.
-- The prose of this repository lives in `maelys-dev/maelys-docs`, directory
-  `@PRODUCT@/`, with a neighbouring checkout at `../maelys-docs`.
+- The prose of this repository lives in `@DOCUMENTS@`, directory
+  `@PRODUCT@/`, with a neighbouring checkout at `../@DOCUMENTS_NAME@`.
   Documenting means opening a pull request there, not writing in `docs/`
   here, which carries what a machine writes and what this repository engages
   publicly. An agent that finds prose in `docs/` moves it rather than
