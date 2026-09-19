@@ -1,5 +1,167 @@
 # Changelog
 
+## Unreleased
+
+- **A text naming the documentation repository is refused.** The note of
+  0.60.0 becomes the violation it announced: `check` exits 2 on a prose
+  file — Markdown or plain text, `CHANGELOG.md` and the managed block
+  apart — naming the repository in a product that does not declare
+  `[docs] named`. Measured the day of the cut on nine main branches.
+- **The socle's texts carry no private name.** A public socle that spelled
+  a private repository's name in its conventions, its command reference
+  and its block texts was the leak its own rule forbids. `[docs] named`
+  now carries the repository it names, `named OWNER/NAME`, and the managed
+  block renders what the declaration says; the bare word is refused with
+  the reason (no product declared it: measured on nine repositories, so
+  nothing was announced). `migrate` requires `--documents-repository`,
+  which maelys-platform names with the list it produces; the conventions
+  describe the migration without spelling its destination. The name stays
+  in one place, a constant in code: the checker's knowledge, which the
+  reading end needs to check anything at all. Measured: zero notes on the
+  socle's own repository, held to the rule with no exception.
+
+- **`check` says when it detects no fuzzing.** A product with no harness
+  in `tests/fuzz/` or `fuzz/` and no fuzz job was told nothing; maelys-cli
+  named the blind spot. It is a note, worded for what the reader can see —
+  "no fuzzing detected by the conventions" — because a harness elsewhere or
+  a fuzzer run outside `ci.yml` is invisible to it. The reader also reads
+  the value of `fuzz_command`, not its presence: an empty or commented
+  command runs nothing, and the note says so. Measured at four ends on the
+  fleet: a product the socle fuzzes, one that fuzzes in its own job, one
+  with neither, and a fixture with an empty command; no false verdict.
+- **The conventions say what `before` is not.** 0.60.0's record of what
+  `protect` read before writing is a diagnosis, not a restorable backup:
+  rulesets reduced to their contexts, classic settings normalised, nothing
+  recorded by the versions before. The conventions say so, and how to put
+  a protection back by hand — read the full state through the API, compare
+  with `before`, write only what moved. No `restore`, and none planned.
+- **One rule for the documentation repository's name, at both ends.** The
+  rule — a repository that does not declare `[docs] named` carries the
+  name in none of its files — was applied site by site over three
+  versions, the managed blocks (0.58.0), the seed and `migrate` (0.59.2),
+  the seeded texts (0.60.0), each after a product found the next site. One
+  search over every tracked file of the fleet, done once, found two more:
+  maelys-egress's `examples/README.md` and maelys-cli's `AGENTS.md`, both
+  rewritten by `migrate` before 0.59.2. Now one predicate, read at the two
+  ends there are: `check` scans every tracked file (the managed block and
+  `CHANGELOG.md` apart) and notes each file with its lines — the note that
+  becomes a refusal in 0.61.0, as announced; and `plan` and `migrate`
+  refuse to write a file carrying the name into a repository that does not
+  declare the word, naming the socle's own template or rewrite as the
+  fault.
+- **Impact.** [asks: public] [writes: nothing] A public repository whose
+  prose files name the documentation repository removes the lines
+  **before adopting**: `check` refuses them, and `adopt` refuses on a
+  violation. Measured on nine main branches: one file each on
+  maelys-egress (`examples/README.md`) and maelys-json (`LICENSING.md`),
+  none on the seven others. A product that declares `[docs] named` writes
+  the repository it names after the word. The fuzzing note reaches the
+  three repositories without a harness (agent-cli-spec, maelys-system, the
+  pilot); nothing to do unless one of them fuzzes somewhere the conventions
+  cannot see. The `before` paragraph changes no output.
+
+## 0.60.0 — 2026-09-18
+
+- **The aliases go.** `check (ubuntu-26.04)`, `check (ubuntu-26.04-arm)`
+  and `check (macos-15)` stop reporting, as 0.59.0 announced: they carried
+  the fleet's branches through the leg rename, and on the day of this cut
+  no branch of the fleet required an old name — measured again, not
+  assumed. Three jobs fewer on every pull request that calls the shared CI.
+  The adoption guard refuses this version on a branch that still requires
+  one, and `protect DIR` names the replacement.
+- **The Impact line says what a version writes.** `[writes: protect, tap]`
+  after the selectors names the commands whose writes on GitHub the version
+  changes; `[writes: nothing]` says it was looked at. `adopt` prints it, its
+  JSON carries `writes`, and a product that lets such a version mature a
+  day, as maelys-http does, reads the marker.
+- **`protect` keeps what it read before writing.** Its output carries
+  `before`: the classic settings, the contexts each mechanism required.
+  Nothing restores what 0.43.0 to 0.57.0 overwrote — nothing had read it —
+  but every write from here on leaves its before state in the terminal and
+  the logs, for a hand. A record, not a restore command.
+- **`check` notes a seeded text that names the documentation repository**
+  while `[docs]` is unnamed, and refuses it from 0.61.0, announced:
+  `RELEASING.md`, `LICENSING.md`, `SECURITY.md` are written once by the
+  socle and then the product's, and 0.59.2's seed had named it for every
+  product — a refusal the day the rule arrives would have turned a CI red
+  for the socle's own words. Measured on the fleet's main branches: one
+  repository carries the line, maelys-json, told the day before.
+- **Coming in 0.61.0: that note becomes a refusal.** Remove the name from
+  the seeded texts now, or declare `[docs] named` on a private repository.
+- **The conventions say when to adopt between releases.** Only when a line
+  asks; with two exceptions the line itself says, a version that changes
+  what the shared CI runs and a version marked `[writes: …]`. The rule five
+  products wrote, held by the socle with them.
+- **Impact.** [asks: old-legs, public] [writes: nothing] A branch that
+  still requires an old leg name blocks every pull request once this is
+  adopted: `protect DIR` shows it and `protect DIR --apply` replaces it by
+  its leg before adopting. A public product whose seeded `LICENSING.md`
+  names the documentation repository removes the line before 0.61.0
+  refuses it (one measured: maelys-json). Every other product: adopt with
+  its next release, or now, for three jobs fewer per pull request.
+
+## 0.59.2 — 2026-09-17
+
+- **The seed and `migrate` name no private repository either.** 0.58.0
+  stopped the managed blocks from naming the documentation repository in a
+  public product's files, and two neighbours kept doing it: the seeded
+  `LICENSING.md` named it under "Documents engaged publicly" in every new
+  product (maelys-json found the line adopting), and `migrate` rewrote each
+  moved path into `maelys-docs/<product>/...` in every Markdown file, the
+  AGENTS.md of public maelys-cli included (maelys-cli#83 removed it). The
+  seed names none; `migrate` names the destination only when the product
+  declares `[docs] named`, and otherwise leaves the path as it was and
+  reports it `BY HAND` with the other files the socle does not rewrite.
+  Measured on the fleet's main branches: one repository carries the seeded
+  line, maelys-json, and removes it by hand; the seed is written once and
+  never rewritten.
+- **A scaffold has published nothing: `new` seeds VERSION 0.0.0.** It
+  seeded 0.1.0 with a dated entry, and `cut DIR 0.1.0` then refused the
+  first release of every new product: "0.1.0 does not come after the
+  current version 0.1.0". Found on the pilot repository's first day, at its
+  first cut. VERSION says what was published last; the scaffold says 0.0.0
+  with its own dated entry, whose text says how the first release is cut.
+  `cut`'s refusal now tells a VERSION no tag ever published from one that
+  was, and says what to set.
+- **Impact.** [asks: nothing] A product already carrying the seeded line
+  edits it by hand; `adopt` writes no LICENSING.md that exists. A
+  repository created by `new` before this cuts its first release after
+  setting VERSION to 0.0.0 with a dated entry, as the pilot did.
+
+## 0.59.1 — 2026-09-17
+
+- **`cut` sets a closed, unmerged pull request aside.** 0.59.0's first
+  release pull request was closed after its checks refused, the branch
+  deleted and cut again; `cut --tag` then counted the closed one beside the
+  merged one and refused to sign, asking to close what was already closed.
+- **One reader for what protects a branch.** The classic protection and
+  the rulesets were read and parsed at four places — the adoption guard,
+  `protect`, `preflight`, the `classic-protection` selector — and each fix
+  reached the readers it knew: 0.46.x, 0.51.1, 0.51.2 corrected one each,
+  and 0.57.1's fix to one left the guard refusing (0.57.2). `read_protection`
+  is the one reader now, `rule_contexts` the one parser of what a ruleset
+  requires, and every site reads exactly what it read before, in the same
+  order — the recorded API reference holds the call sequences.
+- **The initial golden freezes VERSION and CHANGELOG.md too.** The same
+  coupling #125 removed from the API reference: after the 0.59.0 cut, 150 of
+  its 153 files differed on `0.58.0 -> 0.59.0` and nothing else. The replay
+  runs the candidate's code from a copy carrying the recorded version and
+  changelog, `baseline/socle/`, written by `--record`.
+- **One reader for what GitHub says of a repository.** Its visibility and its
+  default branch were read at seven sites — `protect`, `preflight`, the
+  adoption guard, `cut`, the two selectors, the migration — with two
+  spellings of the fallback branch and two readings of a refusal.
+  `read_repository` is the one reader now; every site still reads once,
+  where it read before, and the recorded API reference holds the sequences.
+- **One reader for `[ci] own` and `[docs] named`.** Three parsers read the
+  declaration file for its two early words — `parse_release`, which
+  validates them, a copy of the tolerant scan for one word, and
+  `declared_word`, the same scan for any — and `[docs] named` was read
+  from the file again at every render of the managed block and at every
+  preflight. The scan is `declared_word`, read once into the declaration.
+- **Impact.** [asks: nothing] Nothing: `cut` runs at the checkout, and the
+  readers change no answer.
+
 ## 0.59.0 — 2026-09-16
 
 - **Refactoring.** The socle now separates parsing, workflow rendering and
