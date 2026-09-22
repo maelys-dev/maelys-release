@@ -51,12 +51,152 @@
     }
   },
   "argv": [
-    "protect",
+    "preflight",
     "<PRODUCT>",
+    "--socle-sha",
+    "4eae1d2538d76f5e0de317e0e86564681eca8dc9",
+    "--socle-tag",
+    "v0.60.0",
     "--format",
     "text"
   ],
   "events": [
+    {
+      "call": {
+        "kind": "run",
+        "argv": [
+          "git",
+          "ls-files",
+          "-z"
+        ],
+        "cwd": "<PRODUCT>"
+      },
+      "result": {
+        "returncode": 0,
+        "stdout": ".claude/skills/maelys-release/SKILL.md\u0000.github/workflows/ci.yml\u0000.github/workflows/release.yml\u0000AGENTS.md\u0000CHANGELOG.md\u0000CLAUDE.md\u0000LICENSING.md\u0000RELEASING.md\u0000SECURITY.md\u0000VERSION\u0000maelys-release.conf\u0000scripts/package-release.sh\u0000",
+        "stderr": ""
+      }
+    },
+    {
+      "call": {
+        "kind": "run",
+        "argv": [
+          "git",
+          "rev-parse",
+          "--abbrev-ref",
+          "HEAD"
+        ],
+        "cwd": "<PRODUCT>"
+      },
+      "result": {
+        "returncode": 0,
+        "stdout": "main\n",
+        "stderr": ""
+      }
+    },
+    {
+      "call": {
+        "kind": "run",
+        "argv": [
+          "git",
+          "config",
+          "--get",
+          "tag.gpgsign"
+        ],
+        "cwd": "<PRODUCT>"
+      },
+      "result": {
+        "returncode": 0,
+        "stdout": "true\n",
+        "stderr": ""
+      }
+    },
+    {
+      "call": {
+        "kind": "run",
+        "argv": [
+          "git",
+          "config",
+          "--get",
+          "gpg.format"
+        ],
+        "cwd": "<PRODUCT>"
+      },
+      "result": {
+        "returncode": 0,
+        "stdout": "ssh\n",
+        "stderr": ""
+      }
+    },
+    {
+      "call": {
+        "kind": "run",
+        "argv": [
+          "git",
+          "config",
+          "--get",
+          "user.signingkey"
+        ],
+        "cwd": "<PRODUCT>"
+      },
+      "result": {
+        "returncode": 0,
+        "stdout": "golden-fixture-key-not-used\n",
+        "stderr": ""
+      }
+    },
+    {
+      "call": {
+        "kind": "run",
+        "argv": [
+          "git",
+          "rev-parse",
+          "--is-shallow-repository"
+        ],
+        "cwd": "<PRODUCT>"
+      },
+      "result": {
+        "returncode": 0,
+        "stdout": "false\n",
+        "stderr": ""
+      }
+    },
+    {
+      "call": {
+        "kind": "run",
+        "argv": [
+          "git",
+          "tag",
+          "--list",
+          "v*",
+          "--sort=-v:refname"
+        ],
+        "cwd": "<PRODUCT>"
+      },
+      "result": {
+        "returncode": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "call": {
+        "kind": "run",
+        "argv": [
+          "git",
+          "rev-parse",
+          "-q",
+          "--verify",
+          "refs/tags/v1.2.3"
+        ],
+        "cwd": "<PRODUCT>"
+      },
+      "result": {
+        "returncode": 1,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
     {
       "call": {
         "kind": "run",
@@ -91,30 +231,114 @@
     {
       "call": {
         "kind": "read",
-        "path": "repos/maelys-dev/maelys-system/pulls?state=closed&per_page=30"
+        "path": "repos/maelys-dev/maelys-system/environments/release"
       },
-      "response": "repos/maelys-dev/maelys-system/pulls?state=closed&per_page=30"
+      "response": "repos/maelys-dev/maelys-system/environments/release"
     },
     {
       "call": {
         "kind": "read",
-        "path": "repos/maelys-dev/maelys-system/commits/735de5e7661a043d5a167a59b11468258f161068/check-runs?per_page=100"
+        "path": "repos/maelys-dev/maelys-system/environments/release/deployment-branch-policies"
       },
-      "response": "repos/maelys-dev/maelys-system/commits/735de5e7661a043d5a167a59b11468258f161068/check-runs?per_page=100"
+      "response": "repos/maelys-dev/maelys-system/environments/release/deployment-branch-policies"
     },
     {
       "call": {
         "kind": "read",
-        "path": "repos/maelys-dev/maelys-system/commits/163361d97b5ff7c6f5700df887fda44a6ec63774/check-runs?per_page=100"
+        "path": "repos/maelys-dev/homebrew-tap/contents/Formula"
       },
-      "response": "repos/maelys-dev/maelys-system/commits/163361d97b5ff7c6f5700df887fda44a6ec63774/check-runs?per_page=100"
+      "response": "repos/maelys-dev/homebrew-tap/contents/Formula"
     },
     {
       "call": {
         "kind": "read",
-        "path": "repos/maelys-dev/maelys-system/commits/0dc3fcd8e9686e888102b94518a1401fef21faeb/check-runs?per_page=100"
+        "path": "repos/maelys-dev/homebrew-tap/contents/Formula/libmaelys-cli.rb"
       },
-      "response": "repos/maelys-dev/maelys-system/commits/0dc3fcd8e9686e888102b94518a1401fef21faeb/check-runs?per_page=100"
+      "response": "repos/maelys-dev/homebrew-tap/contents/Formula/libmaelys-cli.rb"
+    },
+    {
+      "call": {
+        "kind": "read",
+        "path": "repos/maelys-dev/homebrew-tap/contents/Formula/libmaelys-http.rb"
+      },
+      "response": "repos/maelys-dev/homebrew-tap/contents/Formula/libmaelys-http.rb"
+    },
+    {
+      "call": {
+        "kind": "read",
+        "path": "repos/maelys-dev/homebrew-tap/contents/Formula/libmaelys-json.rb"
+      },
+      "response": "repos/maelys-dev/homebrew-tap/contents/Formula/libmaelys-json.rb"
+    },
+    {
+      "call": {
+        "kind": "read",
+        "path": "repos/maelys-dev/homebrew-tap/contents/Formula/libmaelys-oci.rb"
+      },
+      "response": "repos/maelys-dev/homebrew-tap/contents/Formula/libmaelys-oci.rb"
+    },
+    {
+      "call": {
+        "kind": "read",
+        "path": "repos/maelys-dev/homebrew-tap/contents/Formula/libmaelys-sys.rb"
+      },
+      "response": "repos/maelys-dev/homebrew-tap/contents/Formula/libmaelys-sys.rb"
+    },
+    {
+      "call": {
+        "kind": "read",
+        "path": "repos/maelys-dev/homebrew-tap/contents/Formula/maelys-egress.rb"
+      },
+      "response": "repos/maelys-dev/homebrew-tap/contents/Formula/maelys-egress.rb"
+    },
+    {
+      "call": {
+        "kind": "read",
+        "path": "repos/maelys-dev/homebrew-tap/contents/Formula/maelys-mcp.rb"
+      },
+      "response": "repos/maelys-dev/homebrew-tap/contents/Formula/maelys-mcp.rb"
+    },
+    {
+      "call": {
+        "kind": "read",
+        "path": "repos/maelys-dev/homebrew-tap/contents/Formula/maelys-oci.rb"
+      },
+      "response": "repos/maelys-dev/homebrew-tap/contents/Formula/maelys-oci.rb"
+    },
+    {
+      "call": {
+        "kind": "read",
+        "path": "repos/maelys-dev/homebrew-tap/contents/Formula/maelys-sandbox-policy.rb"
+      },
+      "response": "repos/maelys-dev/homebrew-tap/contents/Formula/maelys-sandbox-policy.rb"
+    },
+    {
+      "call": {
+        "kind": "read",
+        "path": "repos/maelys-dev/homebrew-tap/contents/Formula/maelys-warden-guest-kernel.rb"
+      },
+      "response": "repos/maelys-dev/homebrew-tap/contents/Formula/maelys-warden-guest-kernel.rb"
+    },
+    {
+      "call": {
+        "kind": "read",
+        "path": "repos/maelys-dev/homebrew-tap/contents/Formula/maelys-warden-oci-tools.rb"
+      },
+      "response": "repos/maelys-dev/homebrew-tap/contents/Formula/maelys-warden-oci-tools.rb"
+    },
+    {
+      "call": {
+        "kind": "read",
+        "path": "repos/maelys-dev/homebrew-tap/contents/Formula/maelys-warden.rb"
+      },
+      "response": "repos/maelys-dev/homebrew-tap/contents/Formula/maelys-warden.rb"
+    },
+    {
+      "call": {
+        "kind": "read",
+        "path": "repos/maelys-dev/homebrew-tap/contents/Formula/maelys.rb"
+      },
+      "response": "repos/maelys-dev/homebrew-tap/contents/Formula/maelys.rb"
     },
     {
       "call": {
@@ -129,6 +353,13 @@
         "path": "repos/maelys-dev/maelys-system/rules/branches/main"
       },
       "response": "repos/maelys-dev/maelys-system/rules/branches/main"
+    },
+    {
+      "call": {
+        "kind": "read",
+        "path": "repos/maelys-dev/maelys-system/releases?per_page=5"
+      },
+      "response": "never-published:repos/maelys-dev/maelys-system/releases?per_page=5"
     }
   ]
 }

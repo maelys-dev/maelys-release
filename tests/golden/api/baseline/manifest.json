@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "sourceCommit": "8655dc0ccf831c69df207464af9c3f39c31c56cf",
-  "inputsSha256": "d7416c6367fdc2c80a663e0c716c35bd7678041dc55ac7311a18dd855b58990c",
+  "sourceCommit": "4eae1d2538d76f5e0de317e0e86564681eca8dc9",
+  "inputsSha256": "6f51df28879f76e46d2ffc494e8d43cc4b0dc559562769632e3515640255107f",
   "cases": [
     "protect-classic-json",
     "protect-classic-text",
@@ -25,6 +25,10 @@
     "preflight-open-text",
     "preflight-missing-environment-json",
     "preflight-missing-environment-text",
+    "preflight-widening-policy-json",
+    "preflight-widening-policy-text",
+    "preflight-never-published-json",
+    "preflight-never-published-text",
     "current-live-adopt-json",
     "current-live-adopt-text",
     "current-live-check-json",

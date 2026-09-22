@@ -79,25 +79,31 @@ The original reference remains unchanged: 680 observations, 142 command triplets
 eight pinned fleet repositories, without `gh`. The additional `api/` reference
 records the approved stage 4d implementation at
 `a6a308b67c26ddd2a16dfffee25f7476f02a06d1` (PR #117), before moving any further
-command. It contains 27 scenarios, each in JSON and text (54 CLI invocations):
+command. It contains 31 scenarios, each in JSON and text (62 CLI invocations);
+the count had stayed at the original 27 through two additions and is counted
+from the manifest here:
 
 | Command | Recorded branches |
 | --- | --- |
 | `protect` plan | Classic settings, rulesets, open branch, unreadable protection, unreadable check runs, `--without-legs` |
-| `preflight` | Classic protection, ruleset, private visibility, open branch, absent release environment; signing configuration and tap drift reads |
+| `preflight` | Classic protection, ruleset, private visibility, open branch, absent release environment, a branch policy beside the tag rule, a repository that has never published; signing configuration and tap drift reads |
+| `check` and `preflight` on a seeded name | The prose line naming the documentation repository: refused, and `preflight` stopping before its GitHub reads |
 | `adopt` plan and `check` | Old pin with public/classic-protection selectors; `current` false, true and unknown, and the resulting `check` verdicts |
 | `adopt --apply` on throwaway files only | Classic and ruleset guards: allowed or refused due to a retired required context; unreadable protection |
 | `migrate` plan, without `--push` | A moving document and its references, generated/public/data/unlisted documents staying, foreign product and wrong destination refusals |
 
-The inputs contain 32 real GET responses read through `Host.read` on
-2026-09-16: `maelys-dev/maelys-system` (classic protection),
+The inputs contain 34 real GET responses read through `Host.read`, the first
+32 on 2026-09-16 and the release listings of both repositories on 2026-09-22: `maelys-dev/maelys-system` (classic protection),
 `maelys-dev/agent-cli-spec` (ruleset), and the public `homebrew-tap` formula
 listing/files read by preflight. Each response retains its decoded body and
 state, endpoint and reading timestamp. The cache keeps the first reading of
 each endpoint; these independent GETs are not an atomic GitHub snapshot.
-The 15 derived responses explicitly name their original response and changes:
+The 19 derived responses explicitly name their original response and changes:
 private visibility, absent/unreadable protection, missing environment,
-unreadable check runs, or an added retired context. These are constructed
+unreadable check runs, an added retired context, a branch policy sitting
+beside the tag rule, or a repository with no release. The last two have no
+end on the fleet to record live — every repository carries the tag rule
+alone, and every one of them has published. These are constructed
 branches, **not** claims about the repositories' actual settings. No real
 settings were changed to manufacture a failure.
 
