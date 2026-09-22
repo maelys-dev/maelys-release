@@ -101,9 +101,9 @@ from maelys_socle.inspection import (
 from maelys_socle.github import (
     FORMULA_REPOSITORY, FORMULA_VERSIONS, TAG_WORKFLOWS, TAP_SECRETS, WITHDRAWN_FILE,
     branch_protection, channel_visibility, check_runs, classic_protection, cut_repository, default_branch,
-    destination_is_public, environment_gate, github_api, github_list, github_read,
-    github_repository, observed_contexts, protection_settings, read_repository, repository_visibility,
-    required_contexts, ruleset_shape, tag_deployments, tap_drift, tap_secrets,
+    deployment_policies, destination_is_public, environment_gate, github_api, github_list, github_read,
+    github_repository, observed_contexts, protection_settings, publication_record, read_repository,
+    repository_visibility, required_contexts, ruleset_shape, tag_deployments, tap_drift, tap_secrets,
     verify_protection,
 )
 
@@ -1803,7 +1803,8 @@ APP = SocleProgram(PROGRAM, PRODUCT, socle_version(), [
                                                  "runs": {"enum": ["socle", "own", "none"]}}},
                                     "checks": CHECKS_SCHEMA}}),
     cli.read("preflight", "preflight",
-             "Check, then report what the release workflow would refuse of the next tag; exit 2 when not ready.",
+             "Check, then report what the release workflow would refuse of the next tag; exit 2 when not ready."
+             " It reads the configuration and the publication record, and builds nothing itself.",
              handle_preflight, operands=[DIR_OPERAND], options=[*SOCLE_OPTIONS, DOCS_CONTRACT_OPTION],
              schema={"type": "object", "additionalProperties": False,
                      "required": ["ready", "valid", "product", "project", "socle", "pinned", "checks", "files",

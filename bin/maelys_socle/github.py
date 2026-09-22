@@ -223,6 +223,71 @@ def destination_is_public(repository: str) -> bool | None:
     return found.visibility == "public" if found.read else None
 
 
+def deployment_policies(repository: str, environment: dict | None) -> list[tuple[str, str]]:
+    """Whether the release environment admits tags v* and nothing else.
+
+    The socle looked for the tag rule with `any` and said "limits
+    deployments to tags v*" as soon as it found one. The policies of an
+    environment are alternatives, never restrictions of one another: what
+    admits is their union, so `tag v*` beside `branch main` -- or beside
+    `branch *` -- admits every branch, which is exactly what the policy
+    exists to prevent, a workflow_dispatch from a branch or a release.yml
+    edited on a branch publishing. The verdict named the rule it had found
+    and said nothing of the ones it had read past. maelys-datalog measured
+    it on a fixture: "tags v* only" and "tags v* + branch main" answered the
+    same. The whole set is read, and anything beyond the tag rule is named
+    with what removes it.
+    """
+    if environment is None:
+        return [("fail", f"environment release is missing in {repository};"
+                         " create it and limit its deployments to tags v*")]
+    if not (environment.get("deployment_branch_policy") or {}).get("custom_branch_policies"):
+        return [("fail", f"environment release of {repository} has no deployment policy: any branch,"
+                         " workflow_dispatch or edited release.yml can publish; limit it to tags v*")]
+    policies = github_api(f"repos/{repository}/environments/release/deployment-branch-policies") or {}
+    entries = [entry for entry in policies.get("branch_policies") or [] if isinstance(entry, dict)]
+    tag_rule = [entry for entry in entries if entry.get("type") == "tag" and entry.get("name") == "v*"]
+    widening = [entry for entry in entries if entry not in tag_rule]
+    found: list[tuple[str, str]] = []
+    if not tag_rule:
+        found.append(("fail", f"environment release of {repository} has a deployment policy without the tag rule v*"))
+    for entry in widening:
+        kind = entry.get("type") or "policy"
+        found.append(("fail", f"environment release of {repository} also admits the {kind} {entry.get('name') or '?'}:"
+                              " a deployment policy is a union, so that alone lets a workflow_dispatch or an edited"
+                              " release.yml publish. Remove it with 'gh api -X DELETE repos/" + repository
+                              + f"/environments/release/deployment-branch-policies/{entry.get('id', '?')}'"))
+    if tag_rule and not widening:
+        found.append(("ok", f"environment release of {repository} limits deployments to tags v*"))
+    return found
+
+
+def publication_record(repository: str) -> list[tuple[str, str]]:
+    """What this repository has already published, which no configuration proves.
+
+    `preflight` reads: the signing configuration, the free tag, the
+    environment, the tap, the protection. It builds nothing, so `ready`
+    says the next tag would not be refused -- never that a package comes
+    out of it. maelys-datalog measured the gap on a bootstrap whose
+    packaging refuses by design and whose preflight is green, and asked
+    that the outputs tell a conformant configuration from a publication
+    that has worked. An adjective cannot; the record can, so the record is
+    what is reported here. What builds is `rehearse`.
+    """
+    releases = [entry for entry in github_list(f"repos/{repository}/releases?per_page=5")
+                if isinstance(entry, dict) and not entry.get("draft")]
+    boundary = ("preflight reads the configuration and builds nothing, so ready means the tag would not be"
+                " refused, not that a package comes out of it. rehearse is what builds")
+    if not releases:
+        return [("note", f"no release of {repository} has published yet: {boundary}")]
+    last = releases[0]
+    tag, assets = last.get("tag_name") or "?", len(last.get("assets") or [])
+    if not assets:
+        return [("note", f"the last release of {repository}, {tag}, carries no artifact: {boundary}")]
+    return [("note", f"the last publication of {repository} is {tag}, with {assets} artifacts: preflight reads the"
+                     " configuration that publication ran under, and builds nothing itself")]
+
+
 def environment_gate(repository: str, environment: dict | None, declared: str = "") -> list[tuple[str, str]]:
     """Whether the release environment holds the gate this repository asked for.
 

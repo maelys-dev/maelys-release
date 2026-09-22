@@ -130,7 +130,9 @@ def scenarios():
     add('protect-narrow-plan', system, 'live', 'protect', options=('--without-legs',))
     for name, repository, profile in (('classic', system, 'live'), ('ruleset', ruleset, 'live'),
                                       ('private', system, 'private'), ('open', system, 'open'),
-                                      ('missing-environment', system, 'missing-environment')):
+                                      ('missing-environment', system, 'missing-environment'),
+                                      ('widening-policy', system, 'widening-policy'),
+                                      ('never-published', system, 'never-published')):
         add('preflight-' + name, repository, profile, 'preflight')
     for profile in ('live', 'private', 'private-open', 'private-unreadable'):
         for command in ('adopt', 'check'):
@@ -187,6 +189,17 @@ class Responses:
         if profile == 'missing-environment' and '/environments/release' in endpoint:
             answer.update(state='absent', body=None)
             changes.append('release environment is absent')
+        # The two facts 0.61.0 added to preflight: a policy list is read
+        # whole, and the publication record is reported beside the verdict.
+        # Neither has an end on the fleet to record live -- every repository
+        # carries the tag rule alone, and every one of them has published --
+        # so both are derived from what does answer.
+        if profile == 'widening-policy' and endpoint.endswith('/deployment-branch-policies'):
+            answer['body']['branch_policies'].append({'id': 90000001, 'name': 'main', 'type': 'branch'})
+            changes.append('a branch policy sits beside the tag rule v*')
+        if profile == 'never-published' and '/releases' in endpoint:
+            answer.update(state='ok', body=[])
+            changes.append('the repository has never published a release')
         if profile == 'stale':
             if endpoint.endswith('/protection') and answer['state'] == 'ok':
                 answer['body']['required_status_checks']['contexts'].append('check / check (retired-golden)')

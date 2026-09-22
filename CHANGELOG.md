@@ -49,6 +49,27 @@
   refuse to write a file carrying the name into a repository that does not
   declare the word, naming the socle's own template or rewrite as the
   fault.
+- **A deployment policy is read whole.** The policies of the `release`
+  environment are alternatives, so `tag v*` beside `branch main` admits
+  that branch; `preflight` looked for the tag rule with `any` and answered
+  "limits deployments to tags v*" in both cases — and with `branch *`,
+  every branch, too. It named the rule it had found and said nothing of
+  the ones it had read past. The whole set is read now: anything beyond
+  `tag v*` is a violation naming the `gh api -X DELETE` that removes it,
+  and a missing tag rule stays its own distinct fact. The socle writes no
+  policy here. Measured on the ten repositories of the fleet the day of
+  this entry: nine carry `tag v*` alone, one has no `release`
+  environment — no product loses a green `preflight` to this. maelys-datalog
+  measured the defect on a fixture.
+- **`preflight` says what it has not measured.** `ready: true` means the
+  next tag would not be refused, never that a package comes out of it: it
+  reads configuration and builds nothing, and a bootstrap whose packaging
+  refuses by design reads `ready: true`, correctly. An adjective cannot
+  tell a conformant configuration from a publication that worked, so the
+  report ends on the record — the last release of the repository and how
+  many artifacts it carried, or that none has published yet — always a
+  note, whatever it says. The command's own description says it too.
+  What builds is `rehearse`. maelys-datalog asked for the distinction.
 - **Impact.** [asks: public] [writes: nothing] A public repository whose
   prose files name the documentation repository removes the lines
   **before adopting**: `check` refuses them, and `adopt` refuses on a
@@ -58,7 +79,11 @@
   the repository it names after the word. The fuzzing note reaches the
   three repositories without a harness (agent-cli-spec, maelys-system, the
   pilot); nothing to do unless one of them fuzzes somewhere the conventions
-  cannot see. The `before` paragraph changes no output.
+  cannot see. The `before` paragraph changes no output. The deployment
+  policy is read whole for every product the socle releases: a repository
+  whose `release` environment carries a policy beyond `tag v*` removes it
+  before its next cut, and none of the fleet does today. The publication
+  note reaches every `preflight` and asks nothing.
 
 ## 0.60.0 — 2026-09-18
 

@@ -5586,6 +5586,77 @@ class UnitTest(unittest.TestCase):
                                                   "can_admins_bypass": False})
         self.assertEqual(control, [("ok", "environment release of o/r requires a reviewer: another")])
 
+    def test_deployment_policies_read_the_whole_set(self) -> None:
+        """The policies of an environment are alternatives: what admits is
+        their union. The socle looked for the tag rule with `any` and said
+        "limits deployments to tags v*" while a branch policy sat beside it
+        -- maelys-datalog measured the two answering the same on a fixture,
+        and `branch *` answered that way too."""
+        endpoint = "repos/o/r/environments/release/deployment-branch-policies"
+        custom = {"deployment_branch_policy": {"custom_branch_policies": True}}
+        tag_rule = {"type": "tag", "name": "v*", "id": 1}
+
+        def verdicts(*policies):
+            host = FakeHost({endpoint: ("ok", {"branch_policies": list(policies)})})
+            with using_host(host):
+                return MODULE.deployment_policies("o/r", custom)
+
+        limited = verdicts(tag_rule)
+        self.assertEqual(limited, [("ok", "environment release of o/r limits deployments to tags v*")])
+        for widening in ({"type": "branch", "name": "main", "id": 2},
+                         {"type": "branch", "name": "*", "id": 3},
+                         {"type": "tag", "name": "nightly-*", "id": 4}):
+            found = verdicts(tag_rule, widening)
+            self.assertEqual([status for status, _ in found], ["fail"], widening)
+            # Named with what removes it: the socle writes no policy here.
+            self.assertIn(f"also admits the {widening['type']} {widening['name']}", found[0][1])
+            self.assertIn(f"-X DELETE {endpoint}/{widening['id']}", found[0][1])
+        # A missing tag rule and a widening one are two distinct facts.
+        self.assertEqual([status for status, _ in verdicts({"type": "branch", "name": "main", "id": 2})],
+                         ["fail", "fail"])
+        self.assertEqual([status for status, _ in verdicts()], ["fail"])
+
+    def test_deployment_policies_before_the_list(self) -> None:
+        """An absent environment and one without custom policies are refused
+        without reading the list: GitHub creates a missing environment on
+        first use, without rules, so presence proves nothing."""
+        with using_host(FakeHost({})) as host:
+            missing = MODULE.deployment_policies("o/r", None)
+            unlimited = MODULE.deployment_policies("o/r", {"deployment_branch_policy": None})
+            protected = MODULE.deployment_policies(
+                "o/r", {"deployment_branch_policy": {"protected_branches": True,
+                                                     "custom_branch_policies": False}})
+            self.assertEqual(host.reads, [])
+        self.assertEqual([status for status, _ in missing + unlimited + protected], ["fail"] * 3)
+        self.assertIn("environment release is missing in o/r", missing[0][1])
+        self.assertIn("no deployment policy", unlimited[0][1])
+        self.assertIn("no deployment policy", protected[0][1])
+
+    def test_publication_record_tells_configuration_from_publication(self) -> None:
+        """`ready` says the next tag would not be refused, not that a package
+        comes out of it: maelys-datalog measured a green preflight on a
+        bootstrap whose packaging refuses by design. What tells the two apart
+        is the record, so preflight reports it -- always a note."""
+        def record(*releases):
+            host = FakeHost({"repos/o/r/releases?per_page=5": ("ok", list(releases))})
+            with using_host(host):
+                found = MODULE.publication_record("o/r")
+            self.assertEqual([status for status, _ in found], ["note"], releases)
+            return found[0][1]
+
+        never = record()
+        self.assertIn("no release of o/r has published yet", never)
+        self.assertIn("rehearse is what builds", never)
+        # A draft is not a publication.
+        self.assertEqual(record({"tag_name": "v0.2.0", "draft": True, "assets": [{}]}), never)
+        empty = record({"tag_name": "v0.1.0", "assets": []})
+        self.assertIn("v0.1.0, carries no artifact", empty)
+        self.assertIn("rehearse is what builds", empty)
+        published = record({"tag_name": "v0.7.1", "assets": [{}] * 20},
+                           {"tag_name": "v0.7.0", "assets": [{}] * 20})
+        self.assertIn("the last publication of o/r is v0.7.1, with 20 artifacts", published)
+        self.assertIn("builds nothing itself", published)
+
     def test_managed_block(self) -> None:
         block = "new\n"
         self.assertEqual(MODULE.managed_block(None, block), f"{MODULE.BEGIN}\nnew\n{MODULE.END}\n")

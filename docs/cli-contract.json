@@ -1900,7 +1900,7 @@
           "pattern": [
             "preflight"
           ],
-          "purpose": "Check, then report what the release workflow would refuse of the next tag; exit 2 when not ready.",
+          "purpose": "Check, then report what the release workflow would refuse of the next tag; exit 2 when not ready. It reads the configuration and the publication record, and builds nothing itself.",
           "usage": "preflight DIR [--product NAME] [--docs-contract]"
         },
         {

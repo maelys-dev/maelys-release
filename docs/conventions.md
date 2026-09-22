@@ -1023,8 +1023,10 @@ does not say where either came from.
 - The `publish` job runs in the `release` environment of the repository,
   whose deployment policy is limited to tags `v*`: a `workflow_dispatch`
   from a branch or a `release.yml` edited on a branch cannot publish. GitHub
-  creates a missing environment without any rule, so `preflight` checks
-  the tag rule, not the presence. Set it once per repository:
+  creates a missing environment without any rule, so `preflight` checks the
+  rules and not the presence — all of them, since they are alternatives and
+  one branch policy beside the tag rule admits that branch. Set it once per
+  repository, and nothing else:
 
   ```bash
   gh api -X PUT repos/OWNER/REPO/environments/release \
@@ -1827,6 +1829,36 @@ tap and `check` runs on every pull request of every product.
 
 maelys-datalog asked for it, after maelys-platform found that the tap had been
 serving its September archive for six versions.
+
+### What preflight reads, and what it does not
+
+**A deployment policy is a union.** The policies of the `release`
+environment are alternatives: a tag and a branch listed side by side admit
+the tag *and* the branch. The socle looked for the tag rule alone, with
+`any`, and answered `environment release of OWNER/REPO limits deployments to
+tags v*` while `branch main` — or `branch *`, which is every branch — sat
+next to it in the same list. It named the rule it had found and said nothing
+of the ones it had read past, so the verdict was an accurate reading of one
+line and a false statement about the environment. Since 0.61.0 the whole set
+is read: anything beyond `tag v*` is a violation, named with the `gh api -X
+DELETE` that removes it. The socle writes no policy here, so the remedy is
+the operator's hand either way. Measured on the ten repositories of the
+fleet on 2026-09-22: nine carry `tag v*` and nothing else, one has no
+`release` environment — the rule costs no product a refusal, and removes a
+sentence none of them could have relied on.
+
+**A conformant configuration is not a publication that worked.** `preflight`
+reads: the signing configuration, the free tag, the environment, the tap,
+the protection. It builds nothing, so `ready` says the next tag would not be
+refused — never that a package comes out of it. A bootstrap whose packaging
+refuses by design reads `ready: true`, correctly, and that is the moment the
+word is misread. An adjective cannot tell the two apart; the record can, so
+`preflight` ends on what the repository has already published — the last
+release and how many artifacts it carried, or that none has published yet —
+always as a note, whatever it says. What builds is `rehearse`.
+
+maelys-datalog measured both, the first on a fixture where `tags v* only`
+and `tags v* + branch main` gave the same verdict.
 
 **A rehearsal rehearses the tree CI would check out.** It clones the working
 tree into the container and applies the uncommitted changes to tracked
