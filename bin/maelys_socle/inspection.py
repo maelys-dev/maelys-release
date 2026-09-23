@@ -7,6 +7,7 @@ the pinned socle before checking a product.
 """
 from __future__ import annotations
 
+import json
 import pathlib
 import re
 
@@ -21,7 +22,7 @@ from .identity import socle_data
 from .declarations import Declarations, version_tuple
 from .project import project_of
 from .texts import checks_text
-from .workflows import block_list, file_runners, sub_block, top_block, workflow_events
+from .workflows import block_list, file_runners, sub_block, top_block, workflow_events, yaml_scalar
 
 
 def pinned_socle(project: pathlib.Path) -> dict | None:
@@ -94,6 +95,63 @@ def read_runners(project: pathlib.Path) -> dict:
 
 # The events the socle names; anything else a workflow declares is reported
 # verbatim, because an event nobody named must not read as absence.
+
+
+CARRY_CALL = re.compile(
+    rf"^\s*uses:\s*{re.escape(SOCLE_REPOSITORY)}/\.github/workflows/carry-dependencies\.yml@", re.M)
+PIN_NAME = re.compile(r"[a-z0-9-]+")
+
+
+def with_value(job: str, key: str) -> "str | None":
+    """One `key:` of a job's `with:`, unquoted; None when it is not one line the socle reads."""
+    match = re.search(rf"^\s*{re.escape(key)}:(.*)$", sub_block(job, "with"), re.M)
+    if not match:
+        return None
+    value = yaml_scalar(match.group(1))
+    if value in ("", "|", ">", "|-", ">-"):
+        return None
+    if len(value) >= 2 and value[0] == value[-1] == "'":
+        return value[1:-1].replace("''", "'")
+    if len(value) >= 2 and value[0] == value[-1] == '"':
+        return value[1:-1]
+    return value
+
+
+def read_carried(project: pathlib.Path) -> dict:
+    """The pins a product carries to runners that may not read them, and where they are read.
+
+    carry-dependencies.yml is called by hand: what travels is the product's
+    decision. The fleet asks this, rather than running a regular expression of
+    its own over the product's workflows, to know which runner must read a
+    private pin directly -- the carry's -- and which receives it instead: a
+    runner that holds no credential for a carried pin is configured as
+    intended, not drifting. What the socle cannot read goes to `unresolved`,
+    and an observer concludes nothing from it.
+    """
+    calls: list = []
+    unresolved: list = []
+    workflows = project / ".github" / "workflows"
+    for path in sorted(workflows.glob("*.y*ml")) if workflows.is_dir() else []:
+        jobs = top_block(path.read_text(encoding="utf-8"), "jobs")
+        for job in JOB_ID.findall(jobs):
+            block = sub_block(jobs, job)
+            if not CARRY_CALL.search(block):
+                continue
+            names = (with_value(block, "dependencies") or "").split()
+            try:
+                runner = json.loads(with_value(block, "runner") or "")
+            except ValueError:
+                runner = None
+            if isinstance(runner, str):
+                runner = [runner]
+            if (not names or not all(PIN_NAME.fullmatch(name) for name in names)
+                    or not isinstance(runner, list) or not runner
+                    or not all(isinstance(label, str) and label for label in runner)):
+                unresolved.append(f"{path.name}: job {job}")
+                continue
+            calls.append({"file": path.name, "job": job, "dependencies": names, "runner": runner})
+    return {"dependencies": sorted({name for call in calls for name in call["dependencies"]}),
+            "calls": calls, "unresolved": unresolved}
 
 
 def read_workflows(project: pathlib.Path) -> list:
@@ -230,6 +288,7 @@ def handle_declarations(invocation: Invocation, context: Context) -> tuple[dict,
             "managedBy": stamp.group(1) if stamp else "",
             "runners": read_runners(project),
             "workflows": read_workflows(project),
+            "carried": read_carried(project),
             "dependencies": decl.dependencies, "linuxPackages": decl.linux_packages,
             "macosPackages": decl.macos_packages, "formulas": decl.formulas,
             "targets": [name for name, _ in decl.targets] or list(SOCLE_TARGETS),

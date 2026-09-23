@@ -18,6 +18,9 @@
   carry's `uses:` line at the check's commit. The artifact is readable by
   whoever reads the product's Actions while it lives; the conventions say
   so where the mechanism is described.
+  `declarations` reports what travels under `carried` — the pins, the
+  runner of each carry, and what it could not read — so that the fleet
+  stops expecting a direct credential on a runner fed by bundles.
 
 - **A text naming the documentation repository is refused.** The note of
   0.60.0 becomes the violation it announced: `check` exits 2 on a prose

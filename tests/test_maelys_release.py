@@ -1186,6 +1186,38 @@ class CarriedDependencyTest(unittest.TestCase):
         # Only the legs of check: fuzz and sanitizers run where the pins are read.
         self.assertEqual(workflow.count("MAELYS_DEPENDENCY_BUNDLES="), 1)
 
+    def carry_call(self, body: str) -> None:
+        ci_path = self.product.dir / ".github" / "workflows" / "ci.yml"
+        ci_path.write_text(ci_path.read_text(encoding="utf-8") + "  carry:\n    uses: "
+                           "maelys-dev/maelys-release/.github/workflows/carry-dependencies.yml@" + "a" * 40
+                           + " # v9.9.9\n    with:\n" + body, encoding="utf-8")
+
+    def test_declarations_say_what_travels_and_where_it_is_read(self) -> None:
+        """The fleet asks the socle which runner must read a private pin
+        directly, rather than reading the product's workflows itself."""
+        self.assertEqual(self.product.json("declarations", self.dir)["data"]["carried"],
+                         {"dependencies": [], "calls": [], "unresolved": []})
+        self.carry_call("      dependencies: maelys-system\n"
+                        "      runner: '[\"self-hosted\", \"Linux\", \"ARM64\"]'\n")
+        carried = self.product.json("declarations", self.dir)["data"]["carried"]
+        self.assertEqual(carried["dependencies"], ["maelys-system"])
+        self.assertEqual(carried["calls"], [{"file": "ci.yml", "job": "carry", "dependencies": ["maelys-system"],
+                                             "runner": ["self-hosted", "Linux", "ARM64"]}])
+        self.assertEqual(carried["unresolved"], [])
+
+    def test_a_carry_the_socle_cannot_read_is_unresolved_not_empty(self) -> None:
+        # A runner given as one label is still one runner.
+        self.carry_call("      dependencies: \"maelys-system\"\n      runner: '\"ubuntu-26.04-arm\"'\n")
+        carried = self.product.json("declarations", self.dir)["data"]["carried"]
+        self.assertEqual(carried["calls"][0]["runner"], ["ubuntu-26.04-arm"])
+        # A runner computed by an expression names nothing the socle can read.
+        ci_path = self.product.dir / ".github" / "workflows" / "ci.yml"
+        ci_path.write_text(ci_path.read_text(encoding="utf-8").replace(
+            "runner: '\"ubuntu-26.04-arm\"'", "runner: ${{ vars.CARRY_RUNNER }}"), encoding="utf-8")
+        carried = self.product.json("declarations", self.dir)["data"]["carried"]
+        self.assertEqual((carried["calls"], carried["unresolved"]), ([], ["ci.yml: job carry"]))
+        self.assertEqual(carried["dependencies"], [])
+
     def test_adopt_keeps_the_carry_at_the_check_s_commit(self) -> None:
         ci_path = self.product.dir / ".github" / "workflows" / "ci.yml"
         old = "0" * 40

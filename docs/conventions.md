@@ -295,6 +295,12 @@ required: the ceremony by hand remains what it was.
   source rather than a credential, and the product decides it by naming what
   travels. The carry runs on a private repository only, as every
   self-hosted runner the socle names.
+  `declarations` reports it under `carried`: the pins that travel and the
+  runner of each carry call, read from the workflows, and in `unresolved`
+  a call it cannot read -- a runner computed by an expression, a list it
+  cannot parse. The fleet asks this to know which runner must read a
+  private pin directly and which receives it: a runner without a
+  credential for a carried pin is configured as intended.
 - A dependency on another Maelys repository is pinned by commit in an
   `dependencies/<name>.pin` file, `name` being the repository name
   (`maelys-system.pin`): the nearest tag on line 1 for
