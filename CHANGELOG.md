@@ -90,7 +90,10 @@
   naming what could not be read, and `ready` stays true on one: the
   deployment policy is applied by GitHub when a job asks for the
   environment, not by `preflight`, so a refused reading costs the warning
-  and never the gate.
+  and never the gate. A partial reading keeps what it read and concludes
+  nothing from what it did not: the policies of the pages that answered
+  stay violations when a later page is refused, and a list the reader did
+  not finish says that the tag rule is unanswered rather than missing.
 - **Impact.** [asks: public] [writes: nothing] A public repository whose
   prose files name the documentation repository removes the lines
   **before adopting**: `check` refuses them, and `adopt` refuses on a

@@ -267,22 +267,29 @@ def deployment_policies(repository: str, environment: dict | None,
                          " workflow_dispatch or edited release.yml can publish; limit it to tags v*")]
     listing = f"repos/{repository}/environments/release/deployment-branch-policies"
     entries: list[dict] = []
-    total, page = None, 1
+    total, page, unread, complete = None, 1, "", False
     while page <= POLICY_PAGES:
         read, body = github_read(f"{listing}?per_page={PAGE}&page={page}")
         if read != "ok" or not isinstance(body, dict):
-            return [("note", f"the deployment policies of {repository} could not be read ({read}):"
-                             " whether anything but tags v* may publish is unknown here")]
+            # Not a return: the policies already read are facts, and a
+            # refusal on page 2 used to drop the violations of page 1 --
+            # ready went back to true with a branch policy in hand.
+            unread = read
+            break
         batch = [entry for entry in body.get("branch_policies") or [] if isinstance(entry, dict)]
         entries.extend(batch)
-        total = body.get("total_count") if isinstance(body.get("total_count"), int) else None
-        if not batch or total is None or len(entries) >= total:
+        if isinstance(body.get("total_count"), int):
+            total = body["total_count"]
+        if not batch or (len(entries) >= total if total is not None else len(batch) < PAGE):
+            complete = True
             break
         page += 1
     tag_rule = [entry for entry in entries if entry.get("type") == "tag" and entry.get("name") == "v*"]
     widening = [entry for entry in entries if entry not in tag_rule]
     found: list[tuple[str, str]] = []
-    if not tag_rule:
+    # An absence is a conclusion about what was not seen, so it needs the
+    # whole list; a policy that was seen is a fact whatever came after it.
+    if complete and not tag_rule:
         found.append(("fail", f"environment release of {repository} has a deployment policy without the tag rule v*"))
     for entry in widening:
         kind = entry.get("type") or "policy"
@@ -290,13 +297,23 @@ def deployment_policies(repository: str, environment: dict | None,
                               " a deployment policy is a union, so that alone lets a workflow_dispatch or an edited"
                               " release.yml publish. Remove it with 'gh api -X DELETE " + listing
                               + f"/{entry.get('id', '?')}'"))
-    if total is not None and len(entries) < total:
-        # Said rather than implied: the lines above are what was read, not
-        # everything that admits.
-        found.append(("note", f"{len(entries)} of the {total} deployment policies of {repository} were read"
-                              f" ({POLICY_PAGES} pages): the ones named above are not necessarily all of them"))
-    elif tag_rule and not widening:
-        found.append(("ok", f"environment release of {repository} limits deployments to tags v*"))
+    if complete:
+        if tag_rule and not widening:
+            found.append(("ok", f"environment release of {repository} limits deployments to tags v*"))
+        return found
+    # Said rather than implied: what was read, why it stopped, and which
+    # question that leaves unanswered.
+    reason = (f"page {page} could not be read ({unread})" if unread
+              else f"the reading stopped after {POLICY_PAGES} pages")
+    if not entries:
+        found.append(("note", f"the deployment policies of {repository} could not be read: {reason}."
+                              " Whether anything but tags v* may publish is unknown here"))
+        return found
+    read_so_far = (f"{len(entries)} of the {total} deployment policies" if total is not None
+                   else f"{len(entries)} deployment policies")
+    unanswered = ("" if tag_rule else "; whether the tag rule v* is there at all is unanswered")
+    found.append(("note", f"{read_so_far} of {repository} were read: {reason}. What is named above was read and"
+                          f" holds, and is not necessarily everything that admits{unanswered}"))
     return found
 
 

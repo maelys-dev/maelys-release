@@ -5655,6 +5655,7 @@ class UnitTest(unittest.TestCase):
             refused = MODULE.deployment_policies("o/r", custom)
         self.assertEqual([status for status, _ in refused], ["note"])
         self.assertIn("deployment policies of o/r could not be read", refused[0][1])
+        self.assertIn("page 1 could not be read (unreadable)", refused[0][1])
 
         with using_host(FakeHost({"repos/o/r/releases?per_page=100&page=1": ("unreadable", None)})):
             history = MODULE.publication_record("o/r")
@@ -5688,6 +5689,43 @@ class UnitTest(unittest.TestCase):
         # than concluding from what the drafts hid.
         self.assertEqual([status for status, _ in record], ["note"])
         self.assertIn("no release of o/r has published yet", record[0][1])
+
+    def test_a_partial_reading_keeps_what_it_read_and_concludes_nothing(self) -> None:
+        """Two halves of one rule, both from the second review of this code.
+
+        A policy that was read is a fact whatever came after it: a refusal on
+        page 2 used to drop the violations of page 1 and hand back a green
+        preflight with a branch policy in hand. And an absence is a statement
+        about what was not seen, so it needs the whole list: five pages of
+        branch policies with the tag rule on the sixth answered "without the
+        tag rule v*", which the reader had no way to know.
+        """
+        listing = "repos/o/r/environments/release/deployment-branch-policies"
+        custom = {"deployment_branch_policy": {"custom_branch_policies": True}}
+
+        def page_of(path):
+            return int(path.rsplit("page=", 1)[1])
+
+        widening = [{"id": n, "type": "branch", "name": f"branch-{n}"} for n in range(1, 101)]
+        with using_host(FakeHost(read=lambda path: ("ok", {"total_count": 101, "branch_policies":
+                                                           [{"id": 0, "type": "tag", "name": "v*"}] + widening[:99]})
+                                 if page_of(path) == 1 else ("unreadable", None))):
+            refused = MODULE.deployment_policies("o/r", custom)
+        self.assertEqual(sum(status == "fail" for status, _ in refused), 99)
+        self.assertEqual(refused[-1][0], "note")
+        self.assertIn("page 2 could not be read (unreadable)", refused[-1][1])
+        # The tag rule was seen, so that question is answered and not raised.
+        self.assertNotIn("is there at all is unanswered", refused[-1][1])
+
+        beyond = ([{"id": n, "type": "branch", "name": f"branch-{n}"} for n in range(1, 501)]
+                  + [{"id": 501, "type": "tag", "name": "v*"}])
+        with using_host(FakeHost(read=lambda path: ("ok", {"total_count": 501, "branch_policies":
+                                                           beyond[(page_of(path) - 1) * 100:page_of(path) * 100]}))):
+            truncated = MODULE.deployment_policies("o/r", custom)
+        self.assertEqual(sum(status == "fail" for status, _ in truncated), 500)
+        self.assertFalse(any("without the tag rule" in message for _, message in truncated))
+        self.assertIn("whether the tag rule v* is there at all is unanswered", truncated[-1][1])
+        self.assertIn(f"{listing}/500", truncated[-2][1])
 
     def test_what_was_read_is_not_implied_to_be_everything(self) -> None:
         """A repository with more policies than the reader walks: the lines

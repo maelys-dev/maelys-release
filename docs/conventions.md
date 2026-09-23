@@ -1875,8 +1875,14 @@ would not give as a listing with no tag rule, a release history it would not
 give as a repository that has never published. It is the lesson of the
 seventeen branches reported unprotected while GitHub was refusing to answer,
 found three more times in one review. Each is a note naming what could not
-be read; only an absent environment, and a list that was read and lacks the
-tag rule, are violations. `ready` therefore stays true on a refused reading,
+be read; only an absent environment, and a list that was read **in full**
+and lacks the tag rule, are violations. The two halves matter apart: a
+policy that was read is a fact whatever came after it, so a refusal on page
+two keeps the violations of page one — dropping them handed back a green
+`preflight` with a branch policy in hand — and an absence is a statement
+about what was not seen, so five pages of branch policies with the tag rule
+on the sixth say that the question is unanswered, not that the rule is
+missing. `ready` therefore stays true on a refused reading,
 which is not a hole: the deployment policy is applied by GitHub at the
 moment a job asks for the environment, not by `preflight`. What a failed
 reading costs is the warning, never the gate — and refusing to cut because
