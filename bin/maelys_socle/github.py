@@ -304,7 +304,7 @@ def deployment_policies(repository: str, environment: dict | None,
     # Said rather than implied: what was read, why it stopped, and which
     # question that leaves unanswered.
     reason = (f"page {page} could not be read ({unread})" if unread
-              else f"the reading stopped after {POLICY_PAGES} pages")
+              else f"the reading stopped after {POLICY_PAGES} page" + ("s" if POLICY_PAGES > 1 else ""))
     if not entries:
         found.append(("note", f"the deployment policies of {repository} could not be read: {reason}."
                               " Whether anything but tags v* may publish is unknown here"))
