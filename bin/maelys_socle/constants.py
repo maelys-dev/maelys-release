@@ -178,6 +178,13 @@ RELEASE_USES = re.compile(rf"{re.escape(SOCLE_REPOSITORY)}/\.github/workflows/re
 
 CI_USES = re.compile(rf"({re.escape(SOCLE_REPOSITORY)}/\.github/workflows/check-product\.yml@)[0-9a-f]{{40}} # \S+")
 
+# The call that carries a product's private pins to the legs of that check. It
+# is written by hand, since what travels is the product's choice, and kept at
+# the check's own commit by adopt: a check at one socle fed by bundles of
+# another is two contracts where there should be one.
+CARRY_USES = re.compile(
+    rf"({re.escape(SOCLE_REPOSITORY)}/\.github/workflows/carry-dependencies\.yml@)[0-9a-f]{{40}} # \S+")
+
 LEGS_USES = re.compile(rf"({re.escape(SOCLE_REPOSITORY)}/\.github/workflows/check-legs\.yml@)[0-9a-f]{{40}} # \S+")
 
 BEGIN = "<!-- maelys-release:begin -->"

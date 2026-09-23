@@ -1053,6 +1053,157 @@ jobs:
         self.assertIn("The socle schedules\n          nothing.", check_product)
 
 
+def workflow_step_script(text: str, step: str) -> str:
+    """The `run: |` block of the step named `step`, dedented."""
+    lines = text.splitlines()
+    at = next(index for index, line in enumerate(lines) if line.strip() == f"- name: {step}")
+    run = next(index for index in range(at, len(lines)) if lines[index].strip() == "run: |")
+    body = []
+    for line in lines[run + 1:]:
+        if line.strip() and len(line) - len(line.lstrip()) < 10:
+            break
+        body.append(line[10:])
+    return "\n".join(body) + "\n"
+
+
+class CarriedDependencyTest(unittest.TestCase):
+    """A private pin a runner may not fetch travels to it as a git bundle.
+
+    The macOS leg of maelys-warden cloned four public pins and failed on the
+    first private one, on a machine that holds no credential and must not:
+    the source travels instead of the token, from a machine that may read,
+    and the pinned commit is checked by its hash on arrival.
+    """
+
+    def setUp(self) -> None:
+        self.product = Product()
+        self.dir = str(self.product.dir)
+        self.product.run("adopt", self.dir, "--apply")
+        self.script = self.product.dir / "scripts" / "checkout-dependency.sh"
+        self.bundles = self.product.work / "bundles"
+        self.bundles.mkdir()
+
+    def tearDown(self) -> None:
+        self.product.close()
+
+    def bundle(self, commit: str, name: str = "maelys-system") -> None:
+        full = self.product.work / f"full-{commit[:7]}.git"
+        self.product.git(self.product.work, "clone", "-q", "--bare",
+                         str(self.product.work / "remotes" / "maelys-system.git"), str(full))
+        self.product.git(full, "update-ref", "refs/heads/maelys-pin", commit)
+        self.product.git(full, "bundle", "create", "-q", str(self.bundles / f"{name}.bundle"), "refs/heads/maelys-pin")
+
+    def carried(self, destination: str, name: str = "maelys-system") -> subprocess.CompletedProcess:
+        # Nothing to fall back on: a clone of the repository would fail.
+        environment = {**self.product.env, "MAELYS_DEPENDENCY_BUNDLES": str(self.bundles),
+                       "MAELYS_GIT_BASE": "file:///nulle-part"}
+        return subprocess.run(["sh", str(self.script), name, str(self.product.work / destination)],
+                              cwd=self.product.dir, env=environment, check=False, text=True,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    def test_a_carried_pin_is_cloned_from_its_bundle(self) -> None:
+        self.bundle(self.product.pinned)
+        completed = self.carried("carried")
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        destination = self.product.work / "carried"
+        self.assertEqual(self.product.git(destination, "rev-parse", "HEAD"), self.product.pinned)
+        self.assertIn(f"from bundle {self.bundles / 'maelys-system.bundle'}", completed.stdout)
+        # One shape of checkout, whichever way it came.
+        self.assertEqual(self.product.git(destination, "remote", "get-url", "origin"),
+                         "file:///nulle-part/maelys-system.git")
+
+    def test_a_bundle_without_the_pinned_commit_brings_nothing(self) -> None:
+        """Checked by the commit's own hash: an older bundle is refused, and
+        nothing falls back on a repository the runner may not read."""
+        self.bundle(self.product.tagged)
+        completed = self.carried("stale")
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertNotIn("from bundle", completed.stdout)
+
+    def test_a_bundle_carries_no_submodule(self) -> None:
+        self.product.write("dependencies/maelys-system.pin",
+                           f"{PINNED_TAG}\n{self.product.pinned}\nsubmodules\n")
+        self.bundle(self.product.pinned)
+        completed = self.carried("with-submodules")
+        self.assertEqual(completed.returncode, 65)
+        self.assertIn("declares submodules, which a bundle does not carry", completed.stderr)
+        self.assertFalse((self.product.work / "with-submodules").exists())
+
+    def test_a_pin_the_bundles_do_not_carry_is_cloned_as_usual(self) -> None:
+        environment = {**self.product.env, "MAELYS_DEPENDENCY_BUNDLES": str(self.bundles)}
+        completed = subprocess.run(["sh", str(self.script), "maelys-system", str(self.product.work / "cloned")],
+                                   cwd=self.product.dir, env=environment, check=True, text=True,
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertNotIn("from bundle", completed.stdout)
+        self.assertEqual(self.product.git(self.product.work / "cloned", "rev-parse", "HEAD"), self.product.pinned)
+
+    def test_the_carry_job_bundles_what_the_legs_clone(self) -> None:
+        """The producer's own script, run on the fixture, then the managed
+        script on a machine with no repository to read: the two ends meet."""
+        workflow = (ROOT / ".github" / "workflows" / "carry-dependencies.yml").read_text(encoding="utf-8")
+        producer = workflow_step_script(workflow, "Bundle the pinned commits")
+        temp = self.product.work / "runner-temp"
+        temp.mkdir()
+        output = self.product.work / "github-output"
+        environment = {**self.product.env, "RUNNER_TEMP": str(temp), "GITHUB_OUTPUT": str(output),
+                       "GITHUB_RUN_ATTEMPT": "2", "DEPENDENCIES": "maelys-system"}
+        subprocess.run(["bash", "-c", producer], cwd=self.product.dir, env=environment, check=True,
+                       stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertIn("artifact=maelys-dependency-bundles-2", output.read_text(encoding="utf-8"))
+        carried = temp / "maelys-dependency-bundles"
+        self.assertEqual(sorted(path.name for path in carried.iterdir()), ["maelys-system.bundle"])
+        environment = {**self.product.env, "MAELYS_DEPENDENCY_BUNDLES": str(carried),
+                       "MAELYS_GIT_BASE": "file:///nulle-part"}
+        completed = subprocess.run(["sh", str(self.script), "maelys-system", str(self.product.work / "leg")],
+                                   cwd=self.product.dir, env=environment, check=True, text=True,
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertIn("from bundle", completed.stdout)
+        self.assertEqual(self.product.git(self.product.work / "leg", "rev-parse", "HEAD"), self.product.pinned)
+        # A name that is no pin stops the carry: nothing is bundled by guess.
+        refused = subprocess.run(["bash", "-c", producer], cwd=self.product.dir,
+                                 env={**environment, "RUNNER_TEMP": str(temp), "GITHUB_OUTPUT": str(output),
+                                      "GITHUB_RUN_ATTEMPT": "3", "DEPENDENCIES": "maelys-absent"},
+                                 check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertNotEqual(refused.returncode, 0)
+
+    def test_the_carry_reads_only_and_runs_on_a_private_repository_only(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "carry-dependencies.yml").read_text(encoding="utf-8")
+        self.assertEqual(workflow_permissions(workflow), {"carry": {"contents": "read"}})
+        self.assertIn("    if: github.event.repository.private\n", workflow)
+        self.assertIn("          retention-days: 1\n", workflow)
+        self.assertIn("          persist-credentials: false\n", workflow)
+        for line in workflow.splitlines():
+            if "uses: " in line and not line.lstrip().startswith("#"):
+                self.assertRegex(line, r"@[0-9a-f]{40} # v", line)
+
+    def test_the_check_legs_receive_the_carried_bundles(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "check-product.yml").read_text(encoding="utf-8")
+        self.assertIn("      carried_dependencies:\n", workflow)
+        check = workflow.split("\n  check:\n", 1)[1].split("\n  fuzz:\n", 1)[0]
+        self.assertEqual(check.count("if: inputs.carried_dependencies != ''"), 2)
+        self.assertLess(check.index("MAELYS_DEPENDENCY_BUNDLES="),
+                        check.index("- name: Pinned dependency checkouts, beside the product"))
+        # Only the legs of check: fuzz and sanitizers run where the pins are read.
+        self.assertEqual(workflow.count("MAELYS_DEPENDENCY_BUNDLES="), 1)
+
+    def test_adopt_keeps_the_carry_at_the_check_s_commit(self) -> None:
+        ci_path = self.product.dir / ".github" / "workflows" / "ci.yml"
+        old = "0" * 40
+        text = re.sub(r"check-product\.yml@[0-9a-f]{40} # \S+", f"check-product.yml@{old} # v0.0.0",
+                      ci_path.read_text(encoding="utf-8"))
+        text += ("  carry:\n    uses: maelys-dev/maelys-release/.github/workflows/carry-dependencies.yml@"
+                 f"{old} # v0.0.0\n    with:\n      dependencies: maelys-system\n"
+                 "      runner: '[\"self-hosted\"]'\n")
+        ci_path.write_text(text, encoding="utf-8")
+        self.product.run("adopt", self.dir, "--apply")
+        updated = ci_path.read_text(encoding="utf-8")
+        self.assertNotIn(old, updated)
+        check = re.search(r"check-product\.yml@([0-9a-f]{40}) # \S+", updated).group(1)
+        carry = re.search(r"carry-dependencies\.yml@([0-9a-f]{40}) # \S+", updated).group(1)
+        self.assertEqual(carry, check)
+        self.assertIn("      dependencies: maelys-system\n", updated)
+
+
 class MechanismTest(unittest.TestCase):
     """A product the socle does not release: conventions installed, workflows untouched."""
 

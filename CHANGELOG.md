@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- **A private pin can travel to a runner that may not read it.** The macOS
+  leg of maelys-warden cloned four public pins and failed on the first
+  private one, `could not read Username`, on a runner that holds no
+  credential and, under the fleet's secrets policy, must not: its machine
+  is shared by several repositories. A new reusable workflow,
+  `carry-dependencies.yml`, bundles the pins its caller names on a machine
+  that may read them, one git bundle per pin, kept one day;
+  `check-product.yml` takes the artifact in `carried_dependencies`, and
+  `scripts/checkout-dependency.sh` clones from a bundle when
+  `MAELYS_DEPENDENCY_BUNDLES` holds one, checking the pinned commit by its
+  hash. **A managed text changes, so this is a minor**: a product re-adopts
+  for its checkouts to read bundles, and adds the carry job and the input
+  to its `ci.yml` by hand — what travels is its decision. `adopt` keeps the
+  carry's `uses:` line at the check's commit. The artifact is readable by
+  whoever reads the product's Actions while it lives; the conventions say
+  so where the mechanism is described.
+
 - **A text naming the documentation repository is refused.** The note of
   0.60.0 becomes the violation it announced: `check` exits 2 on a prose
   file — Markdown or plain text, `CHANGELOG.md` and the managed block

@@ -278,6 +278,23 @@ required: the ceremony by hand remains what it was.
   maelys-http does with Mbed TLS under its security floor, declares it once
   in the same file as every other pin instead of carrying a checkout of its
   own.
+- **A private pin travels to a runner that may not read it, instead of a
+  credential travelling to the runner.** `carry-dependencies.yml`, called
+  beside the check, runs on a machine that may read the pins the caller
+  names — and those only — clones each with the managed script, and uploads
+  one git bundle per pin, holding the history up to the pinned commit, as an
+  artifact kept one day. `check-product.yml` takes that artifact in
+  `carried_dependencies`; its legs set `MAELYS_DEPENDENCY_BUNDLES`, and
+  `scripts/checkout-dependency.sh` clones `NAME.bundle` from there in place
+  of the repository, checks the pinned commit by its hash as for any clone,
+  and refuses a pin that declares submodules, which no bundle carries. A pin
+  the artifact does not hold is cloned as usual. `adopt` keeps the carry's
+  `uses:` line at the check's commit. While it lives, the artifact is
+  readable by whoever reads the product's Actions, which a reader of the
+  product who does not read the dependency is: that is the price of carrying
+  source rather than a credential, and the product decides it by naming what
+  travels. The carry runs on a private repository only, as every
+  self-hosted runner the socle names.
 - A dependency on another Maelys repository is pinned by commit in an
   `dependencies/<name>.pin` file, `name` being the repository name
   (`maelys-system.pin`): the nearest tag on line 1 for

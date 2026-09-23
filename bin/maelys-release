@@ -35,7 +35,7 @@ import maelys_cli as cli  # noqa: E402
 
 # Keep the SourceFileLoader interface while the pure implementation lives beside it.
 from maelys_socle.constants import (
-    AGENT_BRANCHES, BEGIN, BOTTLES, CHECK_PLATFORMS, CI_JOB, CI_USES, CLI_CONTRACT,
+    AGENT_BRANCHES, BEGIN, BOTTLES, CARRY_USES, CHECK_PLATFORMS, CI_JOB, CI_USES, CLI_CONTRACT,
     CLI_DECLARATIONS, CLI_GENERATOR, CLI_REFERENCE, CONVENTION_MANAGED, CONVENTION_SEEDED,
     DECLARATION_FILE, DOCUMENTS_REPOSITORY, DEFAULT_IMAGE, DEFAULT_TAP, END, EXPRESSION, PROSE_SUFFIXES,
     FORMER_DECLARATION_FILE, FUZZ_DIRECTORIES, FUZZ_TARGET, GENERATED_HEAD_LINES,
@@ -906,10 +906,11 @@ def stage(decl: Declarations, sha: str, tag: str) -> dict[str, tuple[str, bool]]
     if not ci.is_file():
         staged[".github/workflows/ci.yml"] = (ci_workflow(decl, sha, tag, version), False)
     else:
-        # The product owns its ci.yml; only the line naming the socle is managed.
+        # The product owns its ci.yml; only the lines naming the socle are
+        # managed: the check's, and the carry that feeds it, at one commit.
         existing = ci.read_text(encoding="utf-8")
         if CI_USES.search(existing):
-            updated = CI_USES.sub(rf"\g<1>{sha} # {tag}", existing)
+            updated = CARRY_USES.sub(rf"\g<1>{sha} # {tag}", CI_USES.sub(rf"\g<1>{sha} # {tag}", existing))
             staged[".github/workflows/ci.yml"] = (ci_legs(ci_macos_runner(updated, decl.runners), decl, sha, tag),
                                                   False)
     return staged
