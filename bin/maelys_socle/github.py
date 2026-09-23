@@ -223,7 +223,16 @@ def destination_is_public(repository: str) -> bool | None:
     return found.visibility == "public" if found.read else None
 
 
-def deployment_policies(repository: str, environment: dict | None) -> list[tuple[str, str]]:
+# A page, and how many of them a reader walks before it says it stopped.
+# GitHub answers 30 entries by default and 100 at most, and both readers
+# below were written as if one page were the whole answer.
+PAGE = 100
+POLICY_PAGES = 5
+RELEASE_PAGES = 3
+
+
+def deployment_policies(repository: str, environment: dict | None,
+                        state: str = "ok") -> list[tuple[str, str]]:
     """Whether the release environment admits tags v* and nothing else.
 
     The socle looked for the tag rule with `any` and said "limits
@@ -235,17 +244,41 @@ def deployment_policies(repository: str, environment: dict | None) -> list[tuple
     edited on a branch publishing. The verdict named the rule it had found
     and said nothing of the ones it had read past. maelys-datalog measured
     it on a fixture: "tags v* only" and "tags v* + branch main" answered the
-    same. The whole set is read, and anything beyond the tag rule is named
-    with what removes it.
+    same.
+
+    The whole set is read now, across pages: the listing answers 30 entries
+    by default, and a first version of this read one page and named 29 of
+    the 30 policies to remove -- red, and an incomplete remedy, which is the
+    same defect one level down. `total_count` says when to stop.
+
+    Two states, never one: an environment GitHub refused to describe is not
+    an environment that does not exist, and a listing it refused is not an
+    empty listing. Both are notes naming what could not be read; only an
+    absent environment and a read list missing the tag rule are violations.
     """
-    if environment is None:
+    if state == "absent" or (state == "ok" and environment is None):
         return [("fail", f"environment release is missing in {repository};"
                          " create it and limit its deployments to tags v*")]
+    if state != "ok" or not isinstance(environment, dict):
+        return [("note", f"environment release of {repository} could not be read ({state}):"
+                         " what may publish from this repository is unknown here")]
     if not (environment.get("deployment_branch_policy") or {}).get("custom_branch_policies"):
         return [("fail", f"environment release of {repository} has no deployment policy: any branch,"
                          " workflow_dispatch or edited release.yml can publish; limit it to tags v*")]
-    policies = github_api(f"repos/{repository}/environments/release/deployment-branch-policies") or {}
-    entries = [entry for entry in policies.get("branch_policies") or [] if isinstance(entry, dict)]
+    listing = f"repos/{repository}/environments/release/deployment-branch-policies"
+    entries: list[dict] = []
+    total, page = None, 1
+    while page <= POLICY_PAGES:
+        read, body = github_read(f"{listing}?per_page={PAGE}&page={page}")
+        if read != "ok" or not isinstance(body, dict):
+            return [("note", f"the deployment policies of {repository} could not be read ({read}):"
+                             " whether anything but tags v* may publish is unknown here")]
+        batch = [entry for entry in body.get("branch_policies") or [] if isinstance(entry, dict)]
+        entries.extend(batch)
+        total = body.get("total_count") if isinstance(body.get("total_count"), int) else None
+        if not batch or total is None or len(entries) >= total:
+            break
+        page += 1
     tag_rule = [entry for entry in entries if entry.get("type") == "tag" and entry.get("name") == "v*"]
     widening = [entry for entry in entries if entry not in tag_rule]
     found: list[tuple[str, str]] = []
@@ -255,9 +288,14 @@ def deployment_policies(repository: str, environment: dict | None) -> list[tuple
         kind = entry.get("type") or "policy"
         found.append(("fail", f"environment release of {repository} also admits the {kind} {entry.get('name') or '?'}:"
                               " a deployment policy is a union, so that alone lets a workflow_dispatch or an edited"
-                              " release.yml publish. Remove it with 'gh api -X DELETE repos/" + repository
-                              + f"/environments/release/deployment-branch-policies/{entry.get('id', '?')}'"))
-    if tag_rule and not widening:
+                              " release.yml publish. Remove it with 'gh api -X DELETE " + listing
+                              + f"/{entry.get('id', '?')}'"))
+    if total is not None and len(entries) < total:
+        # Said rather than implied: the lines above are what was read, not
+        # everything that admits.
+        found.append(("note", f"{len(entries)} of the {total} deployment policies of {repository} were read"
+                              f" ({POLICY_PAGES} pages): the ones named above are not necessarily all of them"))
+    elif tag_rule and not widening:
         found.append(("ok", f"environment release of {repository} limits deployments to tags v*"))
     return found
 
@@ -273,19 +311,36 @@ def publication_record(repository: str) -> list[tuple[str, str]]:
     that the outputs tell a conformant configuration from a publication
     that has worked. An adjective cannot; the record can, so the record is
     what is reported here. What builds is `rehearse`.
+
+    Drafts are not publications, and GitHub lists them for anyone who may
+    write: a first version read one short page, dropped the drafts and
+    concluded that nothing had ever published, which a handful of open
+    drafts was enough to produce. Pages are walked until one answers a
+    publication or runs out. A listing GitHub refused to give is its own
+    answer, never an empty history.
     """
-    releases = [entry for entry in github_list(f"repos/{repository}/releases?per_page=5")
-                if isinstance(entry, dict) and not entry.get("draft")]
     boundary = ("preflight reads the configuration and builds nothing, so ready means the tag would not be"
                 " refused, not that a package comes out of it. rehearse is what builds")
-    if not releases:
-        return [("note", f"no release of {repository} has published yet: {boundary}")]
-    last = releases[0]
-    tag, assets = last.get("tag_name") or "?", len(last.get("assets") or [])
-    if not assets:
-        return [("note", f"the last release of {repository}, {tag}, carries no artifact: {boundary}")]
-    return [("note", f"the last publication of {repository} is {tag}, with {assets} artifacts: preflight reads the"
-                     " configuration that publication ran under, and builds nothing itself")]
+    seen, page = 0, 1
+    while page <= RELEASE_PAGES:
+        state, body = github_read(f"repos/{repository}/releases?per_page={PAGE}&page={page}")
+        if state != "ok" or not isinstance(body, list):
+            return [("note", f"the release history of {repository} could not be read ({state}), so what it has"
+                             f" already published is unknown here: {boundary}")]
+        if not body:
+            return [("note", f"no release of {repository} has published yet: {boundary}")]
+        published = [entry for entry in body if isinstance(entry, dict) and not entry.get("draft")]
+        if published:
+            last = published[0]
+            tag, assets = last.get("tag_name") or "?", len(last.get("assets") or [])
+            if not assets:
+                return [("note", f"the last release of {repository}, {tag}, carries no artifact: {boundary}")]
+            return [("note", f"the last publication of {repository} is {tag}, with {assets} artifacts: preflight"
+                             " reads the configuration that publication ran under, and builds nothing itself")]
+        seen += len(body)
+        page += 1
+    return [("note", f"the {seen} most recent releases of {repository} are drafts and the history was not read"
+                     f" further: what it has already published is unknown here. {boundary}")]
 
 
 def environment_gate(repository: str, environment: dict | None, declared: str = "") -> list[tuple[str, str]]:

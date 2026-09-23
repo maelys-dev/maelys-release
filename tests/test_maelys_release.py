@@ -5597,7 +5597,8 @@ class UnitTest(unittest.TestCase):
         tag_rule = {"type": "tag", "name": "v*", "id": 1}
 
         def verdicts(*policies):
-            host = FakeHost({endpoint: ("ok", {"branch_policies": list(policies)})})
+            host = FakeHost({endpoint + "?per_page=100&page=1":
+                             ("ok", {"total_count": len(policies), "branch_policies": list(policies)})})
             with using_host(host):
                 return MODULE.deployment_policies("o/r", custom)
 
@@ -5632,13 +5633,83 @@ class UnitTest(unittest.TestCase):
         self.assertIn("no deployment policy", unlimited[0][1])
         self.assertIn("no deployment policy", protected[0][1])
 
+    def test_a_reading_that_failed_is_never_an_answer(self) -> None:
+        """Three states told apart where two were reported: an environment
+        GitHub refused to describe is not one that does not exist, a listing
+        it refused is not an empty listing, and a release history it refused
+        is not a repository that never published. The socle learned this on
+        seventeen branches reported unprotected while GitHub was refusing to
+        answer; the review of the first version of these readers found the
+        same collapse three times here."""
+        with using_host(FakeHost({})):
+            missing = MODULE.deployment_policies("o/r", None, "absent")
+            unreadable = MODULE.deployment_policies("o/r", None, "unreadable")
+        self.assertEqual([status for status, _ in missing], ["fail"])
+        self.assertIn("is missing in o/r", missing[0][1])
+        self.assertEqual([status for status, _ in unreadable], ["note"])
+        self.assertIn("could not be read (unreadable)", unreadable[0][1])
+
+        custom = {"deployment_branch_policy": {"custom_branch_policies": True}}
+        listing = "repos/o/r/environments/release/deployment-branch-policies?per_page=100&page=1"
+        with using_host(FakeHost({listing: ("unreadable", None)})):
+            refused = MODULE.deployment_policies("o/r", custom)
+        self.assertEqual([status for status, _ in refused], ["note"])
+        self.assertIn("deployment policies of o/r could not be read", refused[0][1])
+
+        with using_host(FakeHost({"repos/o/r/releases?per_page=100&page=1": ("unreadable", None)})):
+            history = MODULE.publication_record("o/r")
+        self.assertEqual([status for status, _ in history], ["note"])
+        self.assertNotIn("has published yet", history[0][1])
+        self.assertIn("could not be read (unreadable)", history[0][1])
+
+    def test_a_page_is_not_the_whole_answer(self) -> None:
+        """GitHub answers 30 policies by default and a page of releases at a
+        time. The first version of both readers took one page for the whole
+        answer: with 31 policies it named 29 of the 30 to remove -- red, and
+        an incomplete remedy -- and a handful of open drafts made it say that
+        nothing had ever published. Both branches come from the review."""
+        listing = "repos/o/r/environments/release/deployment-branch-policies"
+        policies = ([{"id": 1, "name": "v*", "type": "tag"}]
+                    + [{"id": n, "name": f"branch-{n}", "type": "branch"} for n in range(2, 32)])
+
+        def pages(path):
+            if path.startswith(listing):
+                page = 2 if "page=2" in path else 1
+                return "ok", {"total_count": 31, "branch_policies": policies[30:] if page == 2 else policies[:30]}
+            return "ok", ([] if "page=2" in path else [{"tag_name": "v9.0.0", "draft": True, "assets": []}])
+
+        with using_host(FakeHost(read=pages)) as host:
+            found = MODULE.deployment_policies("o/r", {"deployment_branch_policy": {"custom_branch_policies": True}})
+            record = MODULE.publication_record("o/r")
+        self.assertEqual(len([status for status, _ in found if status == "fail"]), 30)
+        self.assertTrue(any(f"{listing}/31" in message for _, message in found), found[-1])
+        self.assertEqual(sum("page=2" in path for path in host.reads), 2)  # both readers asked for it
+        # Drafts fill the first page; the reader asks the next one rather
+        # than concluding from what the drafts hid.
+        self.assertEqual([status for status, _ in record], ["note"])
+        self.assertIn("no release of o/r has published yet", record[0][1])
+
+    def test_what_was_read_is_not_implied_to_be_everything(self) -> None:
+        """A repository with more policies than the reader walks: the lines
+        say what was read, and say that they are not necessarily all."""
+        listing = "repos/o/r/environments/release/deployment-branch-policies"
+        batch = [{"id": n, "name": f"branch-{n}", "type": "branch"} for n in range(1, 101)]
+        with using_host(FakeHost(read=lambda path: ("ok", {"total_count": 900, "branch_policies": batch}))):
+            found = MODULE.deployment_policies("o/r", {"deployment_branch_policy": {"custom_branch_policies": True}})
+        self.assertEqual(found[-1][0], "note")
+        self.assertIn("500 of the 900 deployment policies of o/r were read", found[-1][1])
+        self.assertTrue(all(status == "fail" for status, _ in found[:-1]))
+
     def test_publication_record_tells_configuration_from_publication(self) -> None:
         """`ready` says the next tag would not be refused, not that a package
         comes out of it: maelys-datalog measured a green preflight on a
         bootstrap whose packaging refuses by design. What tells the two apart
         is the record, so preflight reports it -- always a note."""
         def record(*releases):
-            host = FakeHost({"repos/o/r/releases?per_page=5": ("ok", list(releases))})
+            host = FakeHost({"repos/o/r/releases?per_page=100&page=1": ("ok", list(releases)),
+                             # A page holding only drafts is not an answer: the
+                             # reader asks the next one, which ends the history.
+                             "repos/o/r/releases?per_page=100&page=2": ("ok", [])})
             with using_host(host):
                 found = MODULE.publication_record("o/r")
             self.assertEqual([status for status, _ in found], ["note"], releases)

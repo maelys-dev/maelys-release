@@ -9,7 +9,7 @@ from . import host
 from .constants import DECLARATION_FILE
 from .declarations import Declarations
 from .github import (branch_protection, channel_visibility, deployment_policies, environment_gate,
-                     github_api, github_read, github_repository, publication_record, read_protection,
+                     github_read, github_repository, publication_record, read_protection,
                      read_repository, tap_drift, tap_secrets)
 from .host import git, run
 
@@ -114,8 +114,12 @@ def repository_checks(decl: Declarations) -> list[tuple[str, str]]:
             found.append(("note", f"{repository} is private: the SBOM {decl_sbom} is published but not attested."
                                   " The release still refuses a document that names no subject or records a"
                                   " digest that disagrees; nothing signs the link"))
-    environment = github_api(f"repos/{repository}/environments/release")
-    found.extend(deployment_policies(repository, environment))
+    # Read once, with its state: an environment GitHub refused to describe
+    # was reported as an environment that does not exist, which is the
+    # collapse github_read exists to prevent.
+    state, body = github_read(f"repos/{repository}/environments/release")
+    environment = body if state == "ok" and isinstance(body, dict) else None
+    found.extend(deployment_policies(repository, environment, state))
     # A deployment policy says *what* may publish; it says nothing about
     # *who* approves. The conventions call this environment the human gate,
     # and the socle used to describe a gate it never saw closed: a product

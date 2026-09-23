@@ -1840,12 +1840,23 @@ tags v*` while `branch main` — or `branch *`, which is every branch — sat
 next to it in the same list. It named the rule it had found and said nothing
 of the ones it had read past, so the verdict was an accurate reading of one
 line and a false statement about the environment. Since 0.61.0 the whole set
-is read: anything beyond `tag v*` is a violation, named with the `gh api -X
-DELETE` that removes it. The socle writes no policy here, so the remedy is
-the operator's hand either way. Measured on the ten repositories of the
-fleet on 2026-09-22: nine carry `tag v*` and nothing else, one has no
-`release` environment — the rule costs no product a refusal, and removes a
-sentence none of them could have relied on.
+is read, **across pages**: the listing answers thirty entries by default, and
+a reader that took one page for the answer named twenty-nine of thirty
+policies to remove — red, and an incomplete remedy, which is the same defect
+one level down. Anything beyond `tag v*` is a violation, named with the `gh
+api -X DELETE` that removes it; what the reader did not reach is said rather
+than implied. The socle writes no policy here, so the remedy is the
+operator's hand either way.
+
+Measured on the ten repositories of the fleet on 2026-09-23, reading each
+`release` environment and its policies only when it has custom ones: nine
+carry `tag v*` and nothing else. maelys-warden has had a `release`
+environment since 2026-09-01 with no deployment policy at all — the
+pre-existing `has no deployment policy` violation, not this one; it declares
+nothing and has published nothing. A first measurement asked only the policy
+listing, which answers 404 when an environment has no custom policies, and
+read that as an absent environment: the endpoint that says nothing is not
+the endpoint that says no.
 
 **A conformant configuration is not a publication that worked.** `preflight`
 reads: the signing configuration, the free tag, the environment, the tap,
@@ -1857,8 +1868,24 @@ word is misread. An adjective cannot tell the two apart; the record can, so
 release and how many artifacts it carried, or that none has published yet —
 always as a note, whatever it says. What builds is `rehearse`.
 
-maelys-datalog measured both, the first on a fixture where `tags v* only`
-and `tags v* + branch main` gave the same verdict.
+**A reading that failed is not an answer.** The three readings this section
+added each collapsed a refusal into a fact: an environment GitHub would not
+describe was reported as an environment that does not exist, a listing it
+would not give as a listing with no tag rule, a release history it would not
+give as a repository that has never published. It is the lesson of the
+seventeen branches reported unprotected while GitHub was refusing to answer,
+found three more times in one review. Each is a note naming what could not
+be read; only an absent environment, and a list that was read and lacks the
+tag rule, are violations.
+
+**Drafts are not publications, and they are listed.** GitHub lists draft
+releases for anyone who may write, so a handful of open drafts was enough to
+make the record read `no release has published yet`. Pages are walked until
+one answers a publication or runs out.
+
+maelys-datalog measured the union, on a fixture where `tags v* only` and
+`tags v* + branch main` gave the same verdict. The review of the first
+implementation found the paging and the three collapsed states.
 
 **A rehearsal rehearses the tree CI would check out.** It clones the working
 tree into the container and applies the uncommitted changes to tracked

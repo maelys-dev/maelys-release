@@ -132,7 +132,8 @@ def scenarios():
                                       ('private', system, 'private'), ('open', system, 'open'),
                                       ('missing-environment', system, 'missing-environment'),
                                       ('widening-policy', system, 'widening-policy'),
-                                      ('never-published', system, 'never-published')):
+                                      ('never-published', system, 'never-published'),
+                                      ('unreadable-environment', system, 'unreadable-environment')):
         add('preflight-' + name, repository, profile, 'preflight')
     for profile in ('live', 'private', 'private-open', 'private-unreadable'):
         for command in ('adopt', 'check'):
@@ -194,12 +195,18 @@ class Responses:
         # Neither has an end on the fleet to record live -- every repository
         # carries the tag rule alone, and every one of them has published --
         # so both are derived from what does answer.
-        if profile == 'widening-policy' and endpoint.endswith('/deployment-branch-policies'):
+        if profile == 'widening-policy' and 'deployment-branch-policies' in endpoint:
             answer['body']['branch_policies'].append({'id': 90000001, 'name': 'main', 'type': 'branch'})
+            answer['body']['total_count'] = len(answer['body']['branch_policies'])
             changes.append('a branch policy sits beside the tag rule v*')
-        if profile == 'never-published' and '/releases' in endpoint:
+        if profile == 'never-published' and '/releases?' in endpoint:
             answer.update(state='ok', body=[])
             changes.append('the repository has never published a release')
+        # A reading GitHub refused, which the socle used to report as an
+        # environment that does not exist.
+        if profile == 'unreadable-environment' and endpoint.endswith('/environments/release'):
+            answer.update(state='unreadable', body=None)
+            changes.append('the release environment is unreadable')
         if profile == 'stale':
             if endpoint.endswith('/protection') and answer['state'] == 'ok':
                 answer['body']['required_status_checks']['contexts'].append('check / check (retired-golden)')
