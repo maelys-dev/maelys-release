@@ -57,10 +57,16 @@
   the ones it had read past. The whole set is read now: anything beyond
   `tag v*` is a violation naming the `gh api -X DELETE` that removes it,
   and a missing tag rule stays its own distinct fact. The socle writes no
-  policy here. Measured on the ten repositories of the fleet the day of
-  this entry: nine carry `tag v*` alone, one has no `release`
-  environment — no product loses a green `preflight` to this. maelys-datalog
-  measured the defect on a fixture.
+  policy here. The list is read across pages — GitHub answers thirty
+  entries by default, and one page named twenty-nine of thirty policies to
+  remove — and what the reader did not reach is said, not implied.
+  Measured on the ten repositories of the fleet on 2026-09-23, reading
+  each environment and its policies only when it has custom ones: nine
+  carry `tag v*` alone, and maelys-warden has had an environment with no
+  deployment policy at all since 2026-09-01, which is the older `has no
+  deployment policy` violation and not this one. No product loses a green
+  `preflight` to this rule. maelys-datalog measured the union on a
+  fixture; the review of the first implementation found the paging.
 - **`preflight` says what it has not measured.** `ready: true` means the
   next tag would not be refused, never that a package comes out of it: it
   reads configuration and builds nothing, and a bootstrap whose packaging
@@ -68,8 +74,21 @@
   tell a conformant configuration from a publication that worked, so the
   report ends on the record — the last release of the repository and how
   many artifacts it carried, or that none has published yet — always a
-  note, whatever it says. The command's own description says it too.
-  What builds is `rehearse`. maelys-datalog asked for the distinction.
+  note, whatever it says. Drafts are not publications and GitHub lists
+  them for anyone who may write, so the history is walked page by page
+  until one answers a publication: a handful of open drafts made the first
+  version say that nothing had ever published. The command's own
+  description says the boundary too. What builds is `rehearse`.
+  maelys-datalog asked for the distinction.
+- **A reading that failed is not an answer, in three more places.** An
+  environment GitHub would not describe was reported as an environment
+  that does not exist; a policy listing it would not give, as a listing
+  without the tag rule; a release history it would not give, as a
+  repository that has never published. The lesson of the seventeen
+  branches reported unprotected while GitHub was refusing to answer, found
+  three times in one review of the two readers above. Each is now a note
+  naming what could not be read, and `ready` no longer turns on a refusal
+  either way.
 - **Impact.** [asks: public] [writes: nothing] A public repository whose
   prose files name the documentation repository removes the lines
   **before adopting**: `check` refuses them, and `adopt` refuses on a
@@ -82,7 +101,8 @@
   cannot see. The `before` paragraph changes no output. The deployment
   policy is read whole for every product the socle releases: a repository
   whose `release` environment carries a policy beyond `tag v*` removes it
-  before its next cut, and none of the fleet does today. The publication
+  before its next cut, and none of the fleet does today — maelys-warden's
+  environment carries no policy at all, which 0.60.0 already refuses. The publication
   note reaches every `preflight` and asks nothing.
 
 ## 0.60.0 — 2026-09-18

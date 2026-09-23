@@ -87,8 +87,10 @@
   repository that has never published. The lesson of the seventeen
   branches reported unprotected while GitHub was refusing to answer, found
   three times in one review of the two readers above. Each is now a note
-  naming what could not be read, and `ready` no longer turns on a refusal
-  either way.
+  naming what could not be read, and `ready` stays true on one: the
+  deployment policy is applied by GitHub when a job asks for the
+  environment, not by `preflight`, so a refused reading costs the warning
+  and never the gate.
 - **Impact.** [asks: public] [writes: nothing] A public repository whose
   prose files name the documentation repository removes the lines
   **before adopting**: `check` refuses them, and `adopt` refuses on a

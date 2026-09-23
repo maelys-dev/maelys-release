@@ -6,11 +6,11 @@
       "executable": false
     },
     ".github/workflows/ci.yml": {
-      "text": "name: ci\n\n# Created by maelys-release v0.60.0 (0.60.0) and owned by this repository: add\n# jobs next to check; adopt keeps the socle line of check current.\non:\n  push:\n    branches: [main]\n  pull_request:\n\npermissions:\n  contents: read\n\njobs:\n  check:\n    uses: maelys-dev/maelys-release/.github/workflows/check-product.yml@4eae1d2538d76f5e0de317e0e86564681eca8dc9 # v0.60.0\n    with:\n      product: agent-cli-spec\n",
+      "text": "name: ci\n\n# Created by maelys-release v0.60.0 (0.60.0) and owned by this repository: add\n# jobs next to check; adopt keeps the socle line of check current.\non:\n  push:\n    branches: [main]\n  pull_request:\n\npermissions:\n  contents: read\n\njobs:\n  check:\n    uses: maelys-dev/maelys-release/.github/workflows/check-product.yml@96b546d57c511a08e3d4d4de73580dea9a7bf3e8 # v0.60.0\n    with:\n      product: agent-cli-spec\n",
       "executable": false
     },
     ".github/workflows/release.yml": {
-      "text": "name: release\n\n# Managed by maelys-release v0.60.0 (0.60.0). Regenerate with\n# 'maelys-release adopt' of maelys-release; do not edit by hand.\non:\n  push:\n    tags: [\"v*\"]\n  workflow_dispatch:\n    inputs:\n      tag:\n        description: Existing signed tag whose release and Homebrew publication are replayed\n        required: true\n        type: string\n\npermissions:\n  contents: write\n  id-token: write\n  attestations: write\n\njobs:\n  release:\n    uses: maelys-dev/maelys-release/.github/workflows/release.yml@4eae1d2538d76f5e0de317e0e86564681eca8dc9 # v0.60.0\n    permissions:\n      contents: write\n      id-token: write\n      attestations: write\n    with:\n      product: agent-cli-spec\n      tag: ${{ inputs.tag || github.ref_name }}\n",
+      "text": "name: release\n\n# Managed by maelys-release v0.60.0 (0.60.0). Regenerate with\n# 'maelys-release adopt' of maelys-release; do not edit by hand.\non:\n  push:\n    tags: [\"v*\"]\n  workflow_dispatch:\n    inputs:\n      tag:\n        description: Existing signed tag whose release and Homebrew publication are replayed\n        required: true\n        type: string\n\npermissions:\n  contents: write\n  id-token: write\n  attestations: write\n\njobs:\n  release:\n    uses: maelys-dev/maelys-release/.github/workflows/release.yml@96b546d57c511a08e3d4d4de73580dea9a7bf3e8 # v0.60.0\n    permissions:\n      contents: write\n      id-token: write\n      attestations: write\n    with:\n      product: agent-cli-spec\n      tag: ${{ inputs.tag || github.ref_name }}\n",
       "executable": false
     },
     "AGENTS.md": {
@@ -54,7 +54,7 @@
     "preflight",
     "<PRODUCT>",
     "--socle-sha",
-    "4eae1d2538d76f5e0de317e0e86564681eca8dc9",
+    "96b546d57c511a08e3d4d4de73580dea9a7bf3e8",
     "--socle-tag",
     "v0.60.0",
     "--format",
@@ -238,9 +238,9 @@
     {
       "call": {
         "kind": "read",
-        "path": "repos/maelys-dev/agent-cli-spec/environments/release/deployment-branch-policies"
+        "path": "repos/maelys-dev/agent-cli-spec/environments/release/deployment-branch-policies?per_page=100&page=1"
       },
-      "response": "repos/maelys-dev/agent-cli-spec/environments/release/deployment-branch-policies"
+      "response": "repos/maelys-dev/agent-cli-spec/environments/release/deployment-branch-policies?per_page=100&page=1"
     },
     {
       "call": {
@@ -357,9 +357,9 @@
     {
       "call": {
         "kind": "read",
-        "path": "repos/maelys-dev/agent-cli-spec/releases?per_page=5"
+        "path": "repos/maelys-dev/agent-cli-spec/releases?per_page=100&page=1"
       },
-      "response": "repos/maelys-dev/agent-cli-spec/releases?per_page=5"
+      "response": "repos/maelys-dev/agent-cli-spec/releases?per_page=100&page=1"
     }
   ]
 }

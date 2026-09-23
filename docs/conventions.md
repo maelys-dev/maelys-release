@@ -1876,7 +1876,12 @@ give as a repository that has never published. It is the lesson of the
 seventeen branches reported unprotected while GitHub was refusing to answer,
 found three more times in one review. Each is a note naming what could not
 be read; only an absent environment, and a list that was read and lacks the
-tag rule, are violations.
+tag rule, are violations. `ready` therefore stays true on a refused reading,
+which is not a hole: the deployment policy is applied by GitHub at the
+moment a job asks for the environment, not by `preflight`. What a failed
+reading costs is the warning, never the gate — and refusing to cut because
+GitHub was locked for a billing overage is the mistake this fleet already
+paid once.
 
 **Drafts are not publications, and they are listed.** GitHub lists draft
 releases for anyone who may write, so a handful of open drafts was enough to

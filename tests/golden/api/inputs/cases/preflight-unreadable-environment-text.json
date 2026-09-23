@@ -6,11 +6,11 @@
       "executable": false
     },
     ".github/workflows/ci.yml": {
-      "text": "name: ci\n\n# Created by maelys-release v0.60.0 (0.60.0) and owned by this repository: add\n# jobs next to check; adopt keeps the socle line of check current.\non:\n  push:\n    branches: [main]\n  pull_request:\n\npermissions:\n  contents: read\n\njobs:\n  check:\n    uses: maelys-dev/maelys-release/.github/workflows/check-product.yml@0000000000000000000000000000000000000000 # v0.57.2\n    with:\n      product: maelys-system\n",
+      "text": "name: ci\n\n# Created by maelys-release v0.60.0 (0.60.0) and owned by this repository: add\n# jobs next to check; adopt keeps the socle line of check current.\non:\n  push:\n    branches: [main]\n  pull_request:\n\npermissions:\n  contents: read\n\njobs:\n  check:\n    uses: maelys-dev/maelys-release/.github/workflows/check-product.yml@96b546d57c511a08e3d4d4de73580dea9a7bf3e8 # v0.60.0\n    with:\n      product: maelys-system\n",
       "executable": false
     },
     ".github/workflows/release.yml": {
-      "text": "name: release\n\n# Managed by maelys-release v0.60.0 (0.60.0). Regenerate with\n# 'maelys-release adopt' of maelys-release; do not edit by hand.\non:\n  push:\n    tags: [\"v*\"]\n  workflow_dispatch:\n    inputs:\n      tag:\n        description: Existing signed tag whose release and Homebrew publication are replayed\n        required: true\n        type: string\n\npermissions:\n  contents: write\n  id-token: write\n  attestations: write\n\njobs:\n  release:\n    uses: maelys-dev/maelys-release/.github/workflows/release.yml@0000000000000000000000000000000000000000 # v0.57.2\n    permissions:\n      contents: write\n      id-token: write\n      attestations: write\n    with:\n      product: maelys-system\n      tag: ${{ inputs.tag || github.ref_name }}\n",
+      "text": "name: release\n\n# Managed by maelys-release v0.60.0 (0.60.0). Regenerate with\n# 'maelys-release adopt' of maelys-release; do not edit by hand.\non:\n  push:\n    tags: [\"v*\"]\n  workflow_dispatch:\n    inputs:\n      tag:\n        description: Existing signed tag whose release and Homebrew publication are replayed\n        required: true\n        type: string\n\npermissions:\n  contents: write\n  id-token: write\n  attestations: write\n\njobs:\n  release:\n    uses: maelys-dev/maelys-release/.github/workflows/release.yml@96b546d57c511a08e3d4d4de73580dea9a7bf3e8 # v0.60.0\n    permissions:\n      contents: write\n      id-token: write\n      attestations: write\n    with:\n      product: maelys-system\n      tag: ${{ inputs.tag || github.ref_name }}\n",
       "executable": false
     },
     "AGENTS.md": {
@@ -51,14 +51,14 @@
     }
   },
   "argv": [
-    "check",
+    "preflight",
     "<PRODUCT>",
     "--socle-sha",
     "96b546d57c511a08e3d4d4de73580dea9a7bf3e8",
     "--socle-tag",
     "v0.60.0",
     "--format",
-    "json"
+    "text"
   ],
   "events": [
     {
@@ -99,31 +99,103 @@
         "kind": "run",
         "argv": [
           "git",
-          "remote",
-          "get-url",
-          "origin"
+          "config",
+          "--get",
+          "tag.gpgsign"
         ],
         "cwd": "<PRODUCT>"
       },
       "result": {
         "returncode": 0,
-        "stdout": "https://github.com/maelys-dev/maelys-system.git\n",
+        "stdout": "true\n",
         "stderr": ""
       }
     },
     {
       "call": {
-        "kind": "which",
-        "name": "gh"
+        "kind": "run",
+        "argv": [
+          "git",
+          "config",
+          "--get",
+          "gpg.format"
+        ],
+        "cwd": "<PRODUCT>"
       },
-      "result": "/opt/homebrew/bin/gh"
+      "result": {
+        "returncode": 0,
+        "stdout": "ssh\n",
+        "stderr": ""
+      }
     },
     {
       "call": {
-        "kind": "read",
-        "path": "repos/maelys-dev/maelys-system"
+        "kind": "run",
+        "argv": [
+          "git",
+          "config",
+          "--get",
+          "user.signingkey"
+        ],
+        "cwd": "<PRODUCT>"
       },
-      "response": "private-unreadable:repos/maelys-dev/maelys-system"
+      "result": {
+        "returncode": 0,
+        "stdout": "golden-fixture-key-not-used\n",
+        "stderr": ""
+      }
+    },
+    {
+      "call": {
+        "kind": "run",
+        "argv": [
+          "git",
+          "rev-parse",
+          "--is-shallow-repository"
+        ],
+        "cwd": "<PRODUCT>"
+      },
+      "result": {
+        "returncode": 0,
+        "stdout": "false\n",
+        "stderr": ""
+      }
+    },
+    {
+      "call": {
+        "kind": "run",
+        "argv": [
+          "git",
+          "tag",
+          "--list",
+          "v*",
+          "--sort=-v:refname"
+        ],
+        "cwd": "<PRODUCT>"
+      },
+      "result": {
+        "returncode": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "call": {
+        "kind": "run",
+        "argv": [
+          "git",
+          "rev-parse",
+          "-q",
+          "--verify",
+          "refs/tags/v1.2.3"
+        ],
+        "cwd": "<PRODUCT>"
+      },
+      "result": {
+        "returncode": 1,
+        "stdout": "",
+        "stderr": ""
+      }
     },
     {
       "call": {
@@ -154,90 +226,133 @@
         "kind": "read",
         "path": "repos/maelys-dev/maelys-system"
       },
-      "response": "private-unreadable:repos/maelys-dev/maelys-system"
+      "response": "repos/maelys-dev/maelys-system"
+    },
+    {
+      "call": {
+        "kind": "read",
+        "path": "repos/maelys-dev/maelys-system/environments/release"
+      },
+      "response": "unreadable-environment:repos/maelys-dev/maelys-system/environments/release"
+    },
+    {
+      "call": {
+        "kind": "read",
+        "path": "repos/maelys-dev/homebrew-tap/contents/Formula"
+      },
+      "response": "repos/maelys-dev/homebrew-tap/contents/Formula"
+    },
+    {
+      "call": {
+        "kind": "read",
+        "path": "repos/maelys-dev/homebrew-tap/contents/Formula/libmaelys-cli.rb"
+      },
+      "response": "repos/maelys-dev/homebrew-tap/contents/Formula/libmaelys-cli.rb"
+    },
+    {
+      "call": {
+        "kind": "read",
+        "path": "repos/maelys-dev/homebrew-tap/contents/Formula/libmaelys-http.rb"
+      },
+      "response": "repos/maelys-dev/homebrew-tap/contents/Formula/libmaelys-http.rb"
+    },
+    {
+      "call": {
+        "kind": "read",
+        "path": "repos/maelys-dev/homebrew-tap/contents/Formula/libmaelys-json.rb"
+      },
+      "response": "repos/maelys-dev/homebrew-tap/contents/Formula/libmaelys-json.rb"
+    },
+    {
+      "call": {
+        "kind": "read",
+        "path": "repos/maelys-dev/homebrew-tap/contents/Formula/libmaelys-oci.rb"
+      },
+      "response": "repos/maelys-dev/homebrew-tap/contents/Formula/libmaelys-oci.rb"
+    },
+    {
+      "call": {
+        "kind": "read",
+        "path": "repos/maelys-dev/homebrew-tap/contents/Formula/libmaelys-sys.rb"
+      },
+      "response": "repos/maelys-dev/homebrew-tap/contents/Formula/libmaelys-sys.rb"
+    },
+    {
+      "call": {
+        "kind": "read",
+        "path": "repos/maelys-dev/homebrew-tap/contents/Formula/maelys-egress.rb"
+      },
+      "response": "repos/maelys-dev/homebrew-tap/contents/Formula/maelys-egress.rb"
+    },
+    {
+      "call": {
+        "kind": "read",
+        "path": "repos/maelys-dev/homebrew-tap/contents/Formula/maelys-mcp.rb"
+      },
+      "response": "repos/maelys-dev/homebrew-tap/contents/Formula/maelys-mcp.rb"
+    },
+    {
+      "call": {
+        "kind": "read",
+        "path": "repos/maelys-dev/homebrew-tap/contents/Formula/maelys-oci.rb"
+      },
+      "response": "repos/maelys-dev/homebrew-tap/contents/Formula/maelys-oci.rb"
+    },
+    {
+      "call": {
+        "kind": "read",
+        "path": "repos/maelys-dev/homebrew-tap/contents/Formula/maelys-sandbox-policy.rb"
+      },
+      "response": "repos/maelys-dev/homebrew-tap/contents/Formula/maelys-sandbox-policy.rb"
+    },
+    {
+      "call": {
+        "kind": "read",
+        "path": "repos/maelys-dev/homebrew-tap/contents/Formula/maelys-warden-guest-kernel.rb"
+      },
+      "response": "repos/maelys-dev/homebrew-tap/contents/Formula/maelys-warden-guest-kernel.rb"
+    },
+    {
+      "call": {
+        "kind": "read",
+        "path": "repos/maelys-dev/homebrew-tap/contents/Formula/maelys-warden-oci-tools.rb"
+      },
+      "response": "repos/maelys-dev/homebrew-tap/contents/Formula/maelys-warden-oci-tools.rb"
+    },
+    {
+      "call": {
+        "kind": "read",
+        "path": "repos/maelys-dev/homebrew-tap/contents/Formula/maelys-warden.rb"
+      },
+      "response": "repos/maelys-dev/homebrew-tap/contents/Formula/maelys-warden.rb"
+    },
+    {
+      "call": {
+        "kind": "read",
+        "path": "repos/maelys-dev/homebrew-tap/contents/Formula/maelys.rb"
+      },
+      "response": "repos/maelys-dev/homebrew-tap/contents/Formula/maelys.rb"
     },
     {
       "call": {
         "kind": "read",
         "path": "repos/maelys-dev/maelys-system/branches/main/protection"
       },
-      "response": "private-unreadable:repos/maelys-dev/maelys-system/branches/main/protection"
-    },
-    {
-      "call": {
-        "kind": "run",
-        "argv": [
-          "git",
-          "remote",
-          "get-url",
-          "origin"
-        ],
-        "cwd": "<PRODUCT>"
-      },
-      "result": {
-        "returncode": 0,
-        "stdout": "https://github.com/maelys-dev/maelys-system.git\n",
-        "stderr": ""
-      }
-    },
-    {
-      "call": {
-        "kind": "which",
-        "name": "gh"
-      },
-      "result": "/opt/homebrew/bin/gh"
-    },
-    {
-      "call": {
-        "kind": "read",
-        "path": "repos/maelys-dev/maelys-system"
-      },
-      "response": "private-unreadable:repos/maelys-dev/maelys-system"
-    },
-    {
-      "call": {
-        "kind": "read",
-        "path": "repos/maelys-dev/maelys-system/branches/main/protection"
-      },
-      "response": "private-unreadable:repos/maelys-dev/maelys-system/branches/main/protection"
+      "response": "repos/maelys-dev/maelys-system/branches/main/protection"
     },
     {
       "call": {
         "kind": "read",
         "path": "repos/maelys-dev/maelys-system/rules/branches/main"
       },
-      "response": "private-unreadable:repos/maelys-dev/maelys-system/rules/branches/main"
-    },
-    {
-      "call": {
-        "kind": "run",
-        "argv": [
-          "git",
-          "remote",
-          "get-url",
-          "origin"
-        ],
-        "cwd": "<PRODUCT>"
-      },
-      "result": {
-        "returncode": 0,
-        "stdout": "https://github.com/maelys-dev/maelys-system.git\n",
-        "stderr": ""
-      }
-    },
-    {
-      "call": {
-        "kind": "which",
-        "name": "gh"
-      },
-      "result": "/opt/homebrew/bin/gh"
+      "response": "repos/maelys-dev/maelys-system/rules/branches/main"
     },
     {
       "call": {
         "kind": "read",
-        "path": "repos/maelys-dev/maelys-system"
+        "path": "repos/maelys-dev/maelys-system/releases?per_page=100&page=1"
       },
-      "response": "private-unreadable:repos/maelys-dev/maelys-system"
+      "response": "repos/maelys-dev/maelys-system/releases?per_page=100&page=1"
     }
   ]
 }

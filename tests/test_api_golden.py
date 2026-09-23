@@ -209,7 +209,7 @@ class ApiGoldenCoverageTest(unittest.TestCase):
     def test_preflight_reaches_api_checks_and_failure(self):
         for name, ready in (('classic', True), ('ruleset', True), ('private', True), ('open', True),
                             ('missing-environment', False), ('widening-policy', False),
-                            ('never-published', True)):
+                            ('never-published', True), ('unreadable-environment', True)):
             data = envelope('preflight-' + name)['data']
             self.assertTrue(data['valid'], name)  # Local checks must not short-circuit API checks.
             self.assertTrue(data['preflight'], name)
@@ -233,6 +233,16 @@ class ApiGoldenCoverageTest(unittest.TestCase):
         never = envelope('preflight-never-published')['data']
         self.assertIs(never['ready'], True)
         self.assertTrue(any('rehearse is what builds' in item['message'] for item in never['preflight']))
+        # A reading GitHub refused is a note naming it, not an environment
+        # that does not exist -- and it does not close the gate, which
+        # GitHub applies when a job asks for the environment.
+        refused = [item for item in envelope('preflight-unreadable-environment')['data']['preflight']
+                   if 'environment release' in item['message']]
+        self.assertEqual([item['status'] for item in refused], ['note'])
+        self.assertIn('could not be read (unreadable)', refused[0]['message'])
+        missing = [item for item in envelope('preflight-missing-environment')['data']['preflight']
+                   if 'environment release' in item['message']]
+        self.assertEqual([item['status'] for item in missing], ['fail'])
 
     def test_public_and_classic_selectors_cover_all_current_verdicts(self):
         for profile, current in (('live', False), ('private', False), ('private-open', True), ('private-unreadable', None)):
