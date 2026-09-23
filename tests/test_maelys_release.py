@@ -5586,6 +5586,186 @@ class UnitTest(unittest.TestCase):
                                                   "can_admins_bypass": False})
         self.assertEqual(control, [("ok", "environment release of o/r requires a reviewer: another")])
 
+    def test_deployment_policies_read_the_whole_set(self) -> None:
+        """The policies of an environment are alternatives: what admits is
+        their union. The socle looked for the tag rule with `any` and said
+        "limits deployments to tags v*" while a branch policy sat beside it
+        -- maelys-datalog measured the two answering the same on a fixture,
+        and `branch *` answered that way too."""
+        endpoint = "repos/o/r/environments/release/deployment-branch-policies"
+        custom = {"deployment_branch_policy": {"custom_branch_policies": True}}
+        tag_rule = {"type": "tag", "name": "v*", "id": 1}
+
+        def verdicts(*policies):
+            host = FakeHost({endpoint + "?per_page=100&page=1":
+                             ("ok", {"total_count": len(policies), "branch_policies": list(policies)})})
+            with using_host(host):
+                return MODULE.deployment_policies("o/r", custom)
+
+        limited = verdicts(tag_rule)
+        self.assertEqual(limited, [("ok", "environment release of o/r limits deployments to tags v*")])
+        for widening in ({"type": "branch", "name": "main", "id": 2},
+                         {"type": "branch", "name": "*", "id": 3},
+                         {"type": "tag", "name": "nightly-*", "id": 4}):
+            found = verdicts(tag_rule, widening)
+            self.assertEqual([status for status, _ in found], ["fail"], widening)
+            # Named with what removes it: the socle writes no policy here.
+            self.assertIn(f"also admits the {widening['type']} {widening['name']}", found[0][1])
+            self.assertIn(f"-X DELETE {endpoint}/{widening['id']}", found[0][1])
+        # A missing tag rule and a widening one are two distinct facts.
+        self.assertEqual([status for status, _ in verdicts({"type": "branch", "name": "main", "id": 2})],
+                         ["fail", "fail"])
+        self.assertEqual([status for status, _ in verdicts()], ["fail"])
+
+    def test_deployment_policies_before_the_list(self) -> None:
+        """An absent environment and one without custom policies are refused
+        without reading the list: GitHub creates a missing environment on
+        first use, without rules, so presence proves nothing."""
+        with using_host(FakeHost({})) as host:
+            missing = MODULE.deployment_policies("o/r", None)
+            unlimited = MODULE.deployment_policies("o/r", {"deployment_branch_policy": None})
+            protected = MODULE.deployment_policies(
+                "o/r", {"deployment_branch_policy": {"protected_branches": True,
+                                                     "custom_branch_policies": False}})
+            self.assertEqual(host.reads, [])
+        self.assertEqual([status for status, _ in missing + unlimited + protected], ["fail"] * 3)
+        self.assertIn("environment release is missing in o/r", missing[0][1])
+        self.assertIn("no deployment policy", unlimited[0][1])
+        self.assertIn("no deployment policy", protected[0][1])
+
+    def test_a_reading_that_failed_is_never_an_answer(self) -> None:
+        """Three states told apart where two were reported: an environment
+        GitHub refused to describe is not one that does not exist, a listing
+        it refused is not an empty listing, and a release history it refused
+        is not a repository that never published. The socle learned this on
+        seventeen branches reported unprotected while GitHub was refusing to
+        answer; the review of the first version of these readers found the
+        same collapse three times here."""
+        with using_host(FakeHost({})):
+            missing = MODULE.deployment_policies("o/r", None, "absent")
+            unreadable = MODULE.deployment_policies("o/r", None, "unreadable")
+        self.assertEqual([status for status, _ in missing], ["fail"])
+        self.assertIn("is missing in o/r", missing[0][1])
+        self.assertEqual([status for status, _ in unreadable], ["note"])
+        self.assertIn("could not be read (unreadable)", unreadable[0][1])
+
+        custom = {"deployment_branch_policy": {"custom_branch_policies": True}}
+        listing = "repos/o/r/environments/release/deployment-branch-policies?per_page=100&page=1"
+        with using_host(FakeHost({listing: ("unreadable", None)})):
+            refused = MODULE.deployment_policies("o/r", custom)
+        self.assertEqual([status for status, _ in refused], ["note"])
+        self.assertIn("deployment policies of o/r could not be read", refused[0][1])
+        self.assertIn("page 1 could not be read (unreadable)", refused[0][1])
+
+        with using_host(FakeHost({"repos/o/r/releases?per_page=100&page=1": ("unreadable", None)})):
+            history = MODULE.publication_record("o/r")
+        self.assertEqual([status for status, _ in history], ["note"])
+        self.assertNotIn("has published yet", history[0][1])
+        self.assertIn("could not be read (unreadable)", history[0][1])
+
+    def test_a_page_is_not_the_whole_answer(self) -> None:
+        """GitHub answers 30 policies by default and a page of releases at a
+        time. The first version of both readers took one page for the whole
+        answer: with 31 policies it named 29 of the 30 to remove -- red, and
+        an incomplete remedy -- and a handful of open drafts made it say that
+        nothing had ever published. Both branches come from the review."""
+        listing = "repos/o/r/environments/release/deployment-branch-policies"
+        policies = ([{"id": 1, "name": "v*", "type": "tag"}]
+                    + [{"id": n, "name": f"branch-{n}", "type": "branch"} for n in range(2, 32)])
+
+        def pages(path):
+            if path.startswith(listing):
+                page = 2 if "page=2" in path else 1
+                return "ok", {"total_count": 31, "branch_policies": policies[30:] if page == 2 else policies[:30]}
+            return "ok", ([] if "page=2" in path else [{"tag_name": "v9.0.0", "draft": True, "assets": []}])
+
+        with using_host(FakeHost(read=pages)) as host:
+            found = MODULE.deployment_policies("o/r", {"deployment_branch_policy": {"custom_branch_policies": True}})
+            record = MODULE.publication_record("o/r")
+        self.assertEqual(len([status for status, _ in found if status == "fail"]), 30)
+        self.assertTrue(any(f"{listing}/31" in message for _, message in found), found[-1])
+        self.assertEqual(sum("page=2" in path for path in host.reads), 2)  # both readers asked for it
+        # Drafts fill the first page; the reader asks the next one rather
+        # than concluding from what the drafts hid.
+        self.assertEqual([status for status, _ in record], ["note"])
+        self.assertIn("no release of o/r has published yet", record[0][1])
+
+    def test_a_partial_reading_keeps_what_it_read_and_concludes_nothing(self) -> None:
+        """Two halves of one rule, both from the second review of this code.
+
+        A policy that was read is a fact whatever came after it: a refusal on
+        page 2 used to drop the violations of page 1 and hand back a green
+        preflight with a branch policy in hand. And an absence is a statement
+        about what was not seen, so it needs the whole list: five pages of
+        branch policies with the tag rule on the sixth answered "without the
+        tag rule v*", which the reader had no way to know.
+        """
+        listing = "repos/o/r/environments/release/deployment-branch-policies"
+        custom = {"deployment_branch_policy": {"custom_branch_policies": True}}
+
+        def page_of(path):
+            return int(path.rsplit("page=", 1)[1])
+
+        widening = [{"id": n, "type": "branch", "name": f"branch-{n}"} for n in range(1, 101)]
+        with using_host(FakeHost(read=lambda path: ("ok", {"total_count": 101, "branch_policies":
+                                                           [{"id": 0, "type": "tag", "name": "v*"}] + widening[:99]})
+                                 if page_of(path) == 1 else ("unreadable", None))):
+            refused = MODULE.deployment_policies("o/r", custom)
+        self.assertEqual(sum(status == "fail" for status, _ in refused), 99)
+        self.assertEqual(refused[-1][0], "note")
+        self.assertIn("page 2 could not be read (unreadable)", refused[-1][1])
+        # The tag rule was seen, so that question is answered and not raised.
+        self.assertNotIn("is there at all is unanswered", refused[-1][1])
+
+        beyond = ([{"id": n, "type": "branch", "name": f"branch-{n}"} for n in range(1, 501)]
+                  + [{"id": 501, "type": "tag", "name": "v*"}])
+        with using_host(FakeHost(read=lambda path: ("ok", {"total_count": 501, "branch_policies":
+                                                           beyond[(page_of(path) - 1) * 100:page_of(path) * 100]}))):
+            truncated = MODULE.deployment_policies("o/r", custom)
+        self.assertEqual(sum(status == "fail" for status, _ in truncated), 500)
+        self.assertFalse(any("without the tag rule" in message for _, message in truncated))
+        self.assertIn("whether the tag rule v* is there at all is unanswered", truncated[-1][1])
+        self.assertIn(f"{listing}/500", truncated[-2][1])
+
+    def test_what_was_read_is_not_implied_to_be_everything(self) -> None:
+        """A repository with more policies than the reader walks: the lines
+        say what was read, and say that they are not necessarily all."""
+        listing = "repos/o/r/environments/release/deployment-branch-policies"
+        batch = [{"id": n, "name": f"branch-{n}", "type": "branch"} for n in range(1, 101)]
+        with using_host(FakeHost(read=lambda path: ("ok", {"total_count": 900, "branch_policies": batch}))):
+            found = MODULE.deployment_policies("o/r", {"deployment_branch_policy": {"custom_branch_policies": True}})
+        self.assertEqual(found[-1][0], "note")
+        self.assertIn("500 of the 900 deployment policies of o/r were read", found[-1][1])
+        self.assertTrue(all(status == "fail" for status, _ in found[:-1]))
+
+    def test_publication_record_tells_configuration_from_publication(self) -> None:
+        """`ready` says the next tag would not be refused, not that a package
+        comes out of it: maelys-datalog measured a green preflight on a
+        bootstrap whose packaging refuses by design. What tells the two apart
+        is the record, so preflight reports it -- always a note."""
+        def record(*releases):
+            host = FakeHost({"repos/o/r/releases?per_page=100&page=1": ("ok", list(releases)),
+                             # A page holding only drafts is not an answer: the
+                             # reader asks the next one, which ends the history.
+                             "repos/o/r/releases?per_page=100&page=2": ("ok", [])})
+            with using_host(host):
+                found = MODULE.publication_record("o/r")
+            self.assertEqual([status for status, _ in found], ["note"], releases)
+            return found[0][1]
+
+        never = record()
+        self.assertIn("no release of o/r has published yet", never)
+        self.assertIn("rehearse is what builds", never)
+        # A draft is not a publication.
+        self.assertEqual(record({"tag_name": "v0.2.0", "draft": True, "assets": [{}]}), never)
+        empty = record({"tag_name": "v0.1.0", "assets": []})
+        self.assertIn("v0.1.0, carries no artifact", empty)
+        self.assertIn("rehearse is what builds", empty)
+        published = record({"tag_name": "v0.7.1", "assets": [{}] * 20},
+                           {"tag_name": "v0.7.0", "assets": [{}] * 20})
+        self.assertIn("the last publication of o/r is v0.7.1, with 20 artifacts", published)
+        self.assertIn("builds nothing itself", published)
+
     def test_managed_block(self) -> None:
         block = "new\n"
         self.assertEqual(MODULE.managed_block(None, block), f"{MODULE.BEGIN}\nnew\n{MODULE.END}\n")

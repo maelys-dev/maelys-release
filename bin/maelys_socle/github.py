@@ -223,6 +223,143 @@ def destination_is_public(repository: str) -> bool | None:
     return found.visibility == "public" if found.read else None
 
 
+# A page, and how many of them a reader walks before it says it stopped.
+# GitHub answers 30 entries by default and 100 at most, and both readers
+# below were written as if one page were the whole answer.
+PAGE = 100
+POLICY_PAGES = 5
+RELEASE_PAGES = 3
+
+
+def deployment_policies(repository: str, environment: dict | None,
+                        state: str = "ok") -> list[tuple[str, str]]:
+    """Whether the release environment admits tags v* and nothing else.
+
+    The socle looked for the tag rule with `any` and said "limits
+    deployments to tags v*" as soon as it found one. The policies of an
+    environment are alternatives, never restrictions of one another: what
+    admits is their union, so `tag v*` beside `branch main` -- or beside
+    `branch *` -- admits every branch, which is exactly what the policy
+    exists to prevent, a workflow_dispatch from a branch or a release.yml
+    edited on a branch publishing. The verdict named the rule it had found
+    and said nothing of the ones it had read past. maelys-datalog measured
+    it on a fixture: "tags v* only" and "tags v* + branch main" answered the
+    same.
+
+    The whole set is read now, across pages: the listing answers 30 entries
+    by default, and a first version of this read one page and named 29 of
+    the 30 policies to remove -- red, and an incomplete remedy, which is the
+    same defect one level down. `total_count` says when to stop.
+
+    Two states, never one: an environment GitHub refused to describe is not
+    an environment that does not exist, and a listing it refused is not an
+    empty listing. Both are notes naming what could not be read; only an
+    absent environment and a read list missing the tag rule are violations.
+    """
+    if state == "absent" or (state == "ok" and environment is None):
+        return [("fail", f"environment release is missing in {repository};"
+                         " create it and limit its deployments to tags v*")]
+    if state != "ok" or not isinstance(environment, dict):
+        return [("note", f"environment release of {repository} could not be read ({state}):"
+                         " what may publish from this repository is unknown here")]
+    if not (environment.get("deployment_branch_policy") or {}).get("custom_branch_policies"):
+        return [("fail", f"environment release of {repository} has no deployment policy: any branch,"
+                         " workflow_dispatch or edited release.yml can publish; limit it to tags v*")]
+    listing = f"repos/{repository}/environments/release/deployment-branch-policies"
+    entries: list[dict] = []
+    total, page, unread, complete = None, 1, "", False
+    while page <= POLICY_PAGES:
+        read, body = github_read(f"{listing}?per_page={PAGE}&page={page}")
+        if read != "ok" or not isinstance(body, dict):
+            # Not a return: the policies already read are facts, and a
+            # refusal on page 2 used to drop the violations of page 1 --
+            # ready went back to true with a branch policy in hand.
+            unread = read
+            break
+        batch = [entry for entry in body.get("branch_policies") or [] if isinstance(entry, dict)]
+        entries.extend(batch)
+        if isinstance(body.get("total_count"), int):
+            total = body["total_count"]
+        if not batch or (len(entries) >= total if total is not None else len(batch) < PAGE):
+            complete = True
+            break
+        page += 1
+    tag_rule = [entry for entry in entries if entry.get("type") == "tag" and entry.get("name") == "v*"]
+    widening = [entry for entry in entries if entry not in tag_rule]
+    found: list[tuple[str, str]] = []
+    # An absence is a conclusion about what was not seen, so it needs the
+    # whole list; a policy that was seen is a fact whatever came after it.
+    if complete and not tag_rule:
+        found.append(("fail", f"environment release of {repository} has a deployment policy without the tag rule v*"))
+    for entry in widening:
+        kind = entry.get("type") or "policy"
+        found.append(("fail", f"environment release of {repository} also admits the {kind} {entry.get('name') or '?'}:"
+                              " a deployment policy is a union, so that alone lets a workflow_dispatch or an edited"
+                              " release.yml publish. Remove it with 'gh api -X DELETE " + listing
+                              + f"/{entry.get('id', '?')}'"))
+    if complete:
+        if tag_rule and not widening:
+            found.append(("ok", f"environment release of {repository} limits deployments to tags v*"))
+        return found
+    # Said rather than implied: what was read, why it stopped, and which
+    # question that leaves unanswered.
+    reason = (f"page {page} could not be read ({unread})" if unread
+              else f"the reading stopped after {POLICY_PAGES} page" + ("s" if POLICY_PAGES > 1 else ""))
+    if not entries:
+        found.append(("note", f"the deployment policies of {repository} could not be read: {reason}."
+                              " Whether anything but tags v* may publish is unknown here"))
+        return found
+    read_so_far = (f"{len(entries)} of the {total} deployment policies" if total is not None
+                   else f"{len(entries)} deployment policies")
+    unanswered = ("" if tag_rule else "; whether the tag rule v* is there at all is unanswered")
+    found.append(("note", f"{read_so_far} of {repository} were read: {reason}. What is named above was read and"
+                          f" holds, and is not necessarily everything that admits{unanswered}"))
+    return found
+
+
+def publication_record(repository: str) -> list[tuple[str, str]]:
+    """What this repository has already published, which no configuration proves.
+
+    `preflight` reads: the signing configuration, the free tag, the
+    environment, the tap, the protection. It builds nothing, so `ready`
+    says the next tag would not be refused -- never that a package comes
+    out of it. maelys-datalog measured the gap on a bootstrap whose
+    packaging refuses by design and whose preflight is green, and asked
+    that the outputs tell a conformant configuration from a publication
+    that has worked. An adjective cannot; the record can, so the record is
+    what is reported here. What builds is `rehearse`.
+
+    Drafts are not publications, and GitHub lists them for anyone who may
+    write: a first version read one short page, dropped the drafts and
+    concluded that nothing had ever published, which a handful of open
+    drafts was enough to produce. Pages are walked until one answers a
+    publication or runs out. A listing GitHub refused to give is its own
+    answer, never an empty history.
+    """
+    boundary = ("preflight reads the configuration and builds nothing, so ready means the tag would not be"
+                " refused, not that a package comes out of it. rehearse is what builds")
+    seen, page = 0, 1
+    while page <= RELEASE_PAGES:
+        state, body = github_read(f"repos/{repository}/releases?per_page={PAGE}&page={page}")
+        if state != "ok" or not isinstance(body, list):
+            return [("note", f"the release history of {repository} could not be read ({state}), so what it has"
+                             f" already published is unknown here: {boundary}")]
+        if not body:
+            return [("note", f"no release of {repository} has published yet: {boundary}")]
+        published = [entry for entry in body if isinstance(entry, dict) and not entry.get("draft")]
+        if published:
+            last = published[0]
+            tag, assets = last.get("tag_name") or "?", len(last.get("assets") or [])
+            if not assets:
+                return [("note", f"the last release of {repository}, {tag}, carries no artifact: {boundary}")]
+            return [("note", f"the last publication of {repository} is {tag}, with {assets} artifacts: preflight"
+                             " reads the configuration that publication ran under, and builds nothing itself")]
+        seen += len(body)
+        page += 1
+    return [("note", f"the {seen} most recent releases of {repository} are drafts and the history was not read"
+                     f" further: what it has already published is unknown here. {boundary}")]
+
+
 def environment_gate(repository: str, environment: dict | None, declared: str = "") -> list[tuple[str, str]]:
     """Whether the release environment holds the gate this repository asked for.
 

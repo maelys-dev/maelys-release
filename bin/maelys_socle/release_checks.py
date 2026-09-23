@@ -8,7 +8,9 @@ import re
 from . import host
 from .constants import DECLARATION_FILE
 from .declarations import Declarations
-from .github import (branch_protection, channel_visibility, environment_gate, github_api, github_read, github_repository, read_protection, read_repository, tap_drift, tap_secrets)
+from .github import (branch_protection, channel_visibility, deployment_policies, environment_gate,
+                     github_read, github_repository, publication_record, read_protection,
+                     read_repository, tap_drift, tap_secrets)
 from .host import git, run
 
 
@@ -112,19 +114,12 @@ def repository_checks(decl: Declarations) -> list[tuple[str, str]]:
             found.append(("note", f"{repository} is private: the SBOM {decl_sbom} is published but not attested."
                                   " The release still refuses a document that names no subject or records a"
                                   " digest that disagrees; nothing signs the link"))
-    environment = github_api(f"repos/{repository}/environments/release")
-    if environment is None:
-        found.append(("fail", f"environment release is missing in {repository}; create it and limit its deployments to tags v*"))
-    elif not (environment.get("deployment_branch_policy") or {}).get("custom_branch_policies"):
-        found.append(("fail", f"environment release of {repository} has no deployment policy: any branch,"
-                              " workflow_dispatch or edited release.yml can publish; limit it to tags v*"))
-    else:
-        policies = github_api(f"repos/{repository}/environments/release/deployment-branch-policies") or {}
-        if any(policy.get("type") == "tag" and policy.get("name") == "v*"
-               for policy in policies.get("branch_policies", [])):
-            found.append(("ok", f"environment release of {repository} limits deployments to tags v*"))
-        else:
-            found.append(("fail", f"environment release of {repository} has a deployment policy without the tag rule v*"))
+    # Read once, with its state: an environment GitHub refused to describe
+    # was reported as an environment that does not exist, which is the
+    # collapse github_read exists to prevent.
+    state, body = github_read(f"repos/{repository}/environments/release")
+    environment = body if state == "ok" and isinstance(body, dict) else None
+    found.extend(deployment_policies(repository, environment, state))
     # A deployment policy says *what* may publish; it says nothing about
     # *who* approves. The conventions call this environment the human gate,
     # and the socle used to describe a gate it never saw closed: a product
@@ -145,4 +140,8 @@ def repository_checks(decl: Declarations) -> list[tuple[str, str]]:
     protection = read_protection(repository, branch)
     found.append(branch_protection(repository, branch, protection.classic_state, protection.ruled_state,
                                    protection.rules, decl.commit_verification))
+    # Last, and a note whatever it says: what the repository has already
+    # published. Everything above is configuration, and a configuration that
+    # conforms is not a publication that worked.
+    found.extend(publication_record(repository))
     return found

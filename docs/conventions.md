@@ -1023,8 +1023,10 @@ does not say where either came from.
 - The `publish` job runs in the `release` environment of the repository,
   whose deployment policy is limited to tags `v*`: a `workflow_dispatch`
   from a branch or a `release.yml` edited on a branch cannot publish. GitHub
-  creates a missing environment without any rule, so `preflight` checks
-  the tag rule, not the presence. Set it once per repository:
+  creates a missing environment without any rule, so `preflight` checks the
+  rules and not the presence — all of them, since they are alternatives and
+  one branch policy beside the tag rule admits that branch. Set it once per
+  repository, and nothing else:
 
   ```bash
   gh api -X PUT repos/OWNER/REPO/environments/release \
@@ -1827,6 +1829,74 @@ tap and `check` runs on every pull request of every product.
 
 maelys-datalog asked for it, after maelys-platform found that the tap had been
 serving its September archive for six versions.
+
+### What preflight reads, and what it does not
+
+**A deployment policy is a union.** The policies of the `release`
+environment are alternatives: a tag and a branch listed side by side admit
+the tag *and* the branch. The socle looked for the tag rule alone, with
+`any`, and answered `environment release of OWNER/REPO limits deployments to
+tags v*` while `branch main` — or `branch *`, which is every branch — sat
+next to it in the same list. It named the rule it had found and said nothing
+of the ones it had read past, so the verdict was an accurate reading of one
+line and a false statement about the environment. Since 0.61.0 the whole set
+is read, **across pages**: the listing answers thirty entries by default, and
+a reader that took one page for the answer named twenty-nine of thirty
+policies to remove — red, and an incomplete remedy, which is the same defect
+one level down. Anything beyond `tag v*` is a violation, named with the `gh
+api -X DELETE` that removes it; what the reader did not reach is said rather
+than implied. The socle writes no policy here, so the remedy is the
+operator's hand either way.
+
+Measured on the ten repositories of the fleet on 2026-09-23, reading each
+`release` environment and its policies only when it has custom ones: nine
+carry `tag v*` and nothing else. maelys-warden has had a `release`
+environment since 2026-09-01 with no deployment policy at all — the
+pre-existing `has no deployment policy` violation, not this one; it declares
+nothing and has published nothing. A first measurement asked only the policy
+listing, which answers 404 when an environment has no custom policies, and
+read that as an absent environment: the endpoint that says nothing is not
+the endpoint that says no.
+
+**A conformant configuration is not a publication that worked.** `preflight`
+reads: the signing configuration, the free tag, the environment, the tap,
+the protection. It builds nothing, so `ready` says the next tag would not be
+refused — never that a package comes out of it. A bootstrap whose packaging
+refuses by design reads `ready: true`, correctly, and that is the moment the
+word is misread. An adjective cannot tell the two apart; the record can, so
+`preflight` ends on what the repository has already published — the last
+release and how many artifacts it carried, or that none has published yet —
+always as a note, whatever it says. What builds is `rehearse`.
+
+**A reading that failed is not an answer.** The three readings this section
+added each collapsed a refusal into a fact: an environment GitHub would not
+describe was reported as an environment that does not exist, a listing it
+would not give as a listing with no tag rule, a release history it would not
+give as a repository that has never published. It is the lesson of the
+seventeen branches reported unprotected while GitHub was refusing to answer,
+found three more times in one review. Each is a note naming what could not
+be read; only an absent environment, and a list that was read **in full**
+and lacks the tag rule, are violations. The two halves matter apart: a
+policy that was read is a fact whatever came after it, so a refusal on page
+two keeps the violations of page one — dropping them handed back a green
+`preflight` with a branch policy in hand — and an absence is a statement
+about what was not seen, so five pages of branch policies with the tag rule
+on the sixth say that the question is unanswered, not that the rule is
+missing. `ready` therefore stays true on a refused reading,
+which is not a hole: the deployment policy is applied by GitHub at the
+moment a job asks for the environment, not by `preflight`. What a failed
+reading costs is the warning, never the gate — and refusing to cut because
+GitHub was locked for a billing overage is the mistake this fleet already
+paid once.
+
+**Drafts are not publications, and they are listed.** GitHub lists draft
+releases for anyone who may write, so a handful of open drafts was enough to
+make the record read `no release has published yet`. Pages are walked until
+one answers a publication or runs out.
+
+maelys-datalog measured the union, on a fixture where `tags v* only` and
+`tags v* + branch main` gave the same verdict. The review of the first
+implementation found the paging and the three collapsed states.
 
 **A rehearsal rehearses the tree CI would check out.** It clones the working
 tree into the container and applies the uncommitted changes to tracked
