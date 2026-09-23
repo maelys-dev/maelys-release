@@ -57,7 +57,7 @@ from maelys_socle.texts import (
 from maelys_socle.workflows import (
     block_list, ci_legs, ci_macos_runner, ci_workflow, file_runners, legs_job,
     macos_runner_input, matrix_values, release_workflow, runner_inputs, runner_json,
-    sanitizers_twice, sub_block, top_block, workflow_events, yaml_scalar,
+    sanitizers_twice, sub_block, top_block, uses_commit, workflow_events, yaml_scalar,
 )
 # Import the module holding the current host, never a copy of its HOST binding.
 from maelys_socle import adoption, cut, dependencies, github, host, identity, inspection, migration, protect, rehearse
@@ -480,6 +480,17 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
         if CI_USES.search(text):
             decl.calls_socle_ci = True
             decl.add("ok", ".github/workflows/ci.yml calls check-product.yml of the socle")
+            # The carry is written by hand and kept at the check's commit by
+            # adopt. Read here too: a pin held at the end that writes is a
+            # pin nothing holds between two adoptions, and bundles made by
+            # one socle feeding the check of another is the second contract
+            # this rule exists to prevent.
+            carry_at, check_at = uses_commit(CARRY_USES, text), uses_commit(CI_USES, text)
+            if carry_at and carry_at != check_at:
+                decl.add("missing", ".github/workflows/ci.yml calls carry-dependencies.yml at"
+                         f" {carry_at[:7]} and check-product.yml at {check_at[:7]}: the bundles one socle"
+                         " makes would feed the check of another. Run"
+                         f" '{PROGRAM} adopt {project} --apply', which puts both at one commit")
             for number in sanitizers_twice(text):
                 decl.add("note", f".github/workflows/ci.yml line {number} sanitizes, and the socle's own"
                          " sanitizers job runs too: sanitizer_command is opt-out and this call does not"

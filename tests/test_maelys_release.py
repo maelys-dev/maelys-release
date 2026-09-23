@@ -1187,10 +1187,15 @@ class CarriedDependencyTest(unittest.TestCase):
         self.assertEqual(workflow.count("MAELYS_DEPENDENCY_BUNDLES="), 1)
 
     def carry_call(self, body: str) -> None:
+        # At the check's own commit, which is what adopt writes and what
+        # check now reads back: a fixture that pins it elsewhere is the
+        # drift, and one test says so on purpose.
         ci_path = self.product.dir / ".github" / "workflows" / "ci.yml"
-        ci_path.write_text(ci_path.read_text(encoding="utf-8") + "  carry:\n    uses: "
-                           "maelys-dev/maelys-release/.github/workflows/carry-dependencies.yml@" + "a" * 40
-                           + " # v9.9.9\n    with:\n" + body, encoding="utf-8")
+        text = ci_path.read_text(encoding="utf-8")
+        at = re.search(r"check-product\.yml@([0-9a-f]{40}) # (\S+)", text)
+        ci_path.write_text(text + "  carry:\n    uses: "
+                           "maelys-dev/maelys-release/.github/workflows/carry-dependencies.yml@"
+                           + at.group(1) + f" # {at.group(2)}\n    with:\n" + body, encoding="utf-8")
 
     def test_declarations_say_what_travels_and_where_it_is_read(self) -> None:
         """The fleet asks the socle which runner must read a private pin
@@ -1234,6 +1239,35 @@ class CarriedDependencyTest(unittest.TestCase):
         carry = re.search(r"carry-dependencies\.yml@([0-9a-f]{40}) # \S+", updated).group(1)
         self.assertEqual(carry, check)
         self.assertIn("      dependencies: maelys-system\n", updated)
+
+    def test_check_refuses_a_carry_pinned_elsewhere_than_the_check(self) -> None:
+        """adopt keeps the two lines at one commit; check reads them back.
+
+        A pin held only at the end that writes is a pin nothing holds
+        between two adoptions, and bundles made by one socle feeding the
+        check of another is the second contract the carry exists to avoid.
+        """
+        ci_path = self.product.dir / ".github" / "workflows" / "ci.yml"
+        text = ci_path.read_text(encoding="utf-8")
+        at = re.search(r"check-product\.yml@([0-9a-f]{40}) # (\S+)", text)
+        check, tag, elsewhere = at.group(1), at.group(2), "b" * 40
+        # The same tag as the check, so that only the commit differs: the
+        # rule names the drift, not the line that carries another name.
+        ci_path.write_text(text + ("  carry:\n    uses: maelys-dev/maelys-release/.github/workflows/"
+                                   f"carry-dependencies.yml@{elsewhere} # {tag}\n    with:\n"
+                                   "      dependencies: maelys-system\n      runner: '[\"self-hosted\"]'\n"),
+                           encoding="utf-8")
+        data = self.product.json("check", self.dir, expect=2)["data"]
+        said = [item for item in data["checks"] if "carry-dependencies.yml at" in item["message"]]
+        self.assertEqual([item["status"] for item in said], ["missing"], data["checks"])
+        self.assertIn(f"at {elsewhere[:7]} and check-product.yml at {check[:7]}", said[0]["message"])
+        self.assertIn("adopt", said[0]["message"])
+        self.assertFalse(data["valid"])
+        # At one commit, nothing is said: the rule names a drift, not a carry.
+        ci_path.write_text(ci_path.read_text(encoding="utf-8").replace(elsewhere, check), encoding="utf-8")
+        again = self.product.json("check", self.dir)["data"]
+        self.assertTrue(again["valid"])
+        self.assertEqual([item for item in again["checks"] if "carry-dependencies.yml at" in item["message"]], [])
 
 
 class MechanismTest(unittest.TestCase):

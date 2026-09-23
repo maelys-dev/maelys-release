@@ -20,7 +20,11 @@
   so where the mechanism is described.
   `declarations` reports what travels under `carried` — the pins, the
   runner of each carry, and what it could not read — so that the fleet
-  stops expecting a direct credential on a runner fed by bundles.
+  stops expecting a direct credential on a runner fed by bundles. `check`
+  reads the carry's `uses:` line back and refuses a commit that is not the
+  check's: a pin held at the end that writes is a pin nothing holds
+  between two adoptions, and bundles made by one socle feeding the check
+  of another is the second contract this exists to prevent.
 
 - **A text naming the documentation repository is refused.** The note of
   0.60.0 becomes the violation it announced: `check` exits 2 on a prose
@@ -114,7 +118,14 @@
   nothing from what it did not: the policies of the pages that answered
   stay violations when a later page is refused, and a list the reader did
   not finish says that the tag rule is unanswered rather than missing.
-- **Impact.** [asks: public] [writes: nothing] A public repository whose
+- **Impact.** [asks: public, pins] [writes: nothing] A product that pins
+  another Maelys repository **re-adopts**: `scripts/checkout-dependency.sh`
+  changes, and a product that moves its socle pin to this version without
+  re-adopting reads `check` exit 2 on `scripts/checkout-dependency.sh:
+  update` — measured on the reference, 195 observations of 715. Carrying a
+  private pin is then its own decision, and its own two lines in `ci.yml`:
+  the carry job and `carried_dependencies`. Nothing changes for a product
+  that carries nothing, beyond the file `adopt` rewrites. A public repository whose
   prose files name the documentation repository removes the lines
   **before adopting**: `check` refuses them, and `adopt` refuses on a
   violation. Measured on nine main branches: one file each on

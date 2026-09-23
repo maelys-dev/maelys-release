@@ -29,6 +29,17 @@ name: carry dependencies (reusable)
 # Actions -- a reader of the product who does not read the dependency
 # included. That is the price of carrying the source rather than the
 # credential; the retention is the shortest GitHub allows.
+#
+# This job does not run on a public repository, and a check that names it in
+# `needs:` does not run either. Measured on the public pilot: the run ends
+# `skipped`, the only check runs published are `carry / carry` and the
+# caller's own job, both skipped -- the legs of the matrix never exist, so
+# the contexts branch protection requires never report and every pull
+# request stays blocked. Nothing turns green in silence, which is the point,
+# but nothing says why either. A product that wants its check to run without
+# bundles adds `if: ${{ !cancelled() }}` beside its `needs: carry`:
+# check-product.yml clones every pin as usual when `carried_dependencies` is
+# empty, which is what a skipped carry leaves.
 on:
   workflow_call:
     inputs:
@@ -81,7 +92,10 @@ jobs:
             # The managed script resolves where NAME lives and checks its
             # pin, as every checkout of the product does: one rule, not two.
             sh scripts/checkout-dependency.sh "$name" "$work/$name"
-            pin="$(sed -n 2p "dependencies/$name.pin")"
+            # The commit it just placed and verified, read from the checkout
+            # rather than from the pin file: a second reader of that format
+            # is the second rule this line exists to avoid.
+            pin="$(git -C "$work/$name" rev-parse HEAD)"
             # A partial clone is bundled only by fetching each missing object
             # on its own; the full history comes in one fetch instead.
             git clone --quiet --bare "$(git -C "$work/$name" remote get-url origin)" "$work/$name.git"
