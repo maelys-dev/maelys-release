@@ -3255,7 +3255,15 @@ class ImpactLinesTest(unittest.TestCase):
         self.assertNotIn("[asks:", by_version["0.49.1"]["says"], "the marker is data, not prose")
         # old-legs asks GitHub, and this fixture has no origin: unknown, not no.
         self.assertIsNone(by_version["0.57.0"]["asksThis"])
-        self.assertIsNone(data["current"])
+        # A line that asks settles the question whatever is unknown beside
+        # it: 0.61.0 asks every product that pins, and this fixture pins
+        # maelys-system, so current is false and not unknown. Before that
+        # version the newest lines asked GitHub alone, and the answer here
+        # was None -- which is what makes this assertion worth keeping: it
+        # moves with the changelog, on purpose.
+        self.assertIs(by_version["0.61.0"]["asksThis"], True)
+        self.assertIn("pins", by_version["0.61.0"]["asks"])
+        self.assertIs(data["current"], False)
         text = self.product.run("adopt", self.dir).stdout
         self.assertIn("0.49.1   -    Nobody", text)
         self.assertIn("0.57.0   ?    ", text)
