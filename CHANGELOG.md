@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.61.0 — 2026-09-25
 
 - **A private pin can travel to a runner that may not read it.** The macOS
   leg of maelys-warden cloned four public pins and failed on the first
