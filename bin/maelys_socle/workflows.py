@@ -464,6 +464,16 @@ def yaml_scalar(raw: str) -> str:
     return re.split(r"\s+#", value, maxsplit=1)[0].strip()
 
 
+def uses_commit(pattern: "re.Pattern[str]", text: str) -> str:
+    """The commit a `uses:` line names, for a pattern whose group 1 ends at the @.
+
+    The socle writes those lines and, since this, reads them back: a pin kept
+    at one end only is a pin nothing holds between two adoptions.
+    """
+    match = pattern.search(text)
+    return "" if not match else match.group(0)[len(match.group(1)):][:40]
+
+
 def sanitizers_twice(text: str) -> list[int]:
     """One line per product job of ci.yml that sanitizes while the socle's job does too.
 

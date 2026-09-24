@@ -278,6 +278,43 @@ required: the ceremony by hand remains what it was.
   maelys-http does with Mbed TLS under its security floor, declares it once
   in the same file as every other pin instead of carrying a checkout of its
   own.
+- **A private pin travels to a runner that may not read it, instead of a
+  credential travelling to the runner.** `carry-dependencies.yml`, called
+  beside the check, runs on a machine that may read the pins the caller
+  names — and those only — clones each with the managed script, and uploads
+  one git bundle per pin, holding the history up to the pinned commit, as an
+  artifact kept one day. `check-product.yml` takes that artifact in
+  `carried_dependencies`; its legs set `MAELYS_DEPENDENCY_BUNDLES`, and
+  `scripts/checkout-dependency.sh` clones `NAME.bundle` from there in place
+  of the repository, checks the pinned commit by its hash as for any clone,
+  and refuses a pin that declares submodules, which no bundle carries. A pin
+  the artifact does not hold is cloned as usual. `adopt` keeps the carry's
+  `uses:` line at the check's commit. While it lives, the artifact is
+  readable by whoever reads the product's Actions, which a reader of the
+  product who does not read the dependency is: that is the price of carrying
+  source rather than a credential, and the product decides it by naming what
+  travels. The carry runs on a private repository only, as every
+  self-hosted runner the socle names — **and a check that names it in
+  `needs:` does not run where it does not**. Measured on the public pilot:
+  the run ends `skipped`, the check runs published are the carry and the
+  caller's job, both skipped, the legs of the matrix never exist, the
+  required contexts never report, and the pull request stays blocked. That
+  is the safe failure and not a silent one, but it says nothing on its own:
+  a product that carries on a repository that may turn public writes
+  `if: ${{ !cancelled() }}` beside its `needs: carry`, since
+  `check-product.yml` clones every pin as usual on an empty
+  `carried_dependencies`, which is what a skipped carry leaves.
+  `declarations` reports it under `carried`: the pins that travel and the
+  runner of each carry call, read from the workflows, and in `unresolved`
+  a call it cannot read -- a runner computed by an expression, a list it
+  cannot parse. The fleet asks this to know which runner must read a
+  private pin directly and which receives it: a runner without a
+  credential for a carried pin is configured as intended.
+  `adopt` keeps the carry's `uses:` line at the check's commit, and `check`
+  reads it back: a carry naming another commit is a violation naming
+  `adopt` as its remedy. The rule is held at both ends on purpose — a pin
+  kept only where the socle writes is a pin nothing holds between two
+  adoptions.
 - A dependency on another Maelys repository is pinned by commit in an
   `dependencies/<name>.pin` file, `name` being the repository name
   (`maelys-system.pin`): the nearest tag on line 1 for

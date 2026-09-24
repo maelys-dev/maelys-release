@@ -1400,6 +1400,62 @@
               "afterVersion": {
                 "type": "string"
               },
+              "carried": {
+                "additionalProperties": false,
+                "properties": {
+                  "calls": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "dependencies": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "file": {
+                          "type": "string"
+                        },
+                        "job": {
+                          "type": "string"
+                        },
+                        "runner": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        }
+                      },
+                      "required": [
+                        "file",
+                        "job",
+                        "dependencies",
+                        "runner"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "dependencies": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "unresolved": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "dependencies",
+                  "calls",
+                  "unresolved"
+                ],
+                "type": "object"
+              },
               "channels": {
                 "items": {
                   "additionalProperties": false,
@@ -1657,6 +1713,7 @@
               "managedBy",
               "runners",
               "workflows",
+              "carried",
               "checks"
             ],
             "type": "object"

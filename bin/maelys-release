@@ -35,7 +35,7 @@ import maelys_cli as cli  # noqa: E402
 
 # Keep the SourceFileLoader interface while the pure implementation lives beside it.
 from maelys_socle.constants import (
-    AGENT_BRANCHES, BEGIN, BOTTLES, CHECK_PLATFORMS, CI_JOB, CI_USES, CLI_CONTRACT,
+    AGENT_BRANCHES, BEGIN, BOTTLES, CARRY_USES, CHECK_PLATFORMS, CI_JOB, CI_USES, CLI_CONTRACT,
     CLI_DECLARATIONS, CLI_GENERATOR, CLI_REFERENCE, CONVENTION_MANAGED, CONVENTION_SEEDED,
     DECLARATION_FILE, DOCUMENTS_REPOSITORY, DEFAULT_IMAGE, DEFAULT_TAP, END, EXPRESSION, PROSE_SUFFIXES,
     FORMER_DECLARATION_FILE, FUZZ_DIRECTORIES, FUZZ_TARGET, GENERATED_HEAD_LINES,
@@ -57,7 +57,7 @@ from maelys_socle.texts import (
 from maelys_socle.workflows import (
     block_list, ci_legs, ci_macos_runner, ci_workflow, file_runners, legs_job,
     macos_runner_input, matrix_values, release_workflow, runner_inputs, runner_json,
-    sanitizers_twice, sub_block, top_block, workflow_events, yaml_scalar,
+    sanitizers_twice, sub_block, top_block, uses_commit, workflow_events, yaml_scalar,
 )
 # Import the module holding the current host, never a copy of its HOST binding.
 from maelys_socle import adoption, cut, dependencies, github, host, identity, inspection, migration, protect, rehearse
@@ -480,6 +480,17 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
         if CI_USES.search(text):
             decl.calls_socle_ci = True
             decl.add("ok", ".github/workflows/ci.yml calls check-product.yml of the socle")
+            # The carry is written by hand and kept at the check's commit by
+            # adopt. Read here too: a pin held at the end that writes is a
+            # pin nothing holds between two adoptions, and bundles made by
+            # one socle feeding the check of another is the second contract
+            # this rule exists to prevent.
+            carry_at, check_at = uses_commit(CARRY_USES, text), uses_commit(CI_USES, text)
+            if carry_at and carry_at != check_at:
+                decl.add("missing", ".github/workflows/ci.yml calls carry-dependencies.yml at"
+                         f" {carry_at[:7]} and check-product.yml at {check_at[:7]}: the bundles one socle"
+                         " makes would feed the check of another. Run"
+                         f" '{PROGRAM} adopt {project} --apply', which puts both at one commit")
             for number in sanitizers_twice(text):
                 decl.add("note", f".github/workflows/ci.yml line {number} sanitizes, and the socle's own"
                          " sanitizers job runs too: sanitizer_command is opt-out and this call does not"
@@ -906,10 +917,11 @@ def stage(decl: Declarations, sha: str, tag: str) -> dict[str, tuple[str, bool]]
     if not ci.is_file():
         staged[".github/workflows/ci.yml"] = (ci_workflow(decl, sha, tag, version), False)
     else:
-        # The product owns its ci.yml; only the line naming the socle is managed.
+        # The product owns its ci.yml; only the lines naming the socle are
+        # managed: the check's, and the carry that feeds it, at one commit.
         existing = ci.read_text(encoding="utf-8")
         if CI_USES.search(existing):
-            updated = CI_USES.sub(rf"\g<1>{sha} # {tag}", existing)
+            updated = CARRY_USES.sub(rf"\g<1>{sha} # {tag}", CI_USES.sub(rf"\g<1>{sha} # {tag}", existing))
             staged[".github/workflows/ci.yml"] = (ci_legs(ci_macos_runner(updated, decl.runners), decl, sha, tag),
                                                   False)
     return staged
@@ -1762,7 +1774,8 @@ APP = SocleProgram(PROGRAM, PRODUCT, socle_version(), [
                      "required": ["valid", "product", "project", "version", "mechanism", "dependencies",
                                   "linuxPackages", "macosPackages", "formulas", "targets",
                                   "manifestPatterns", "channels", "gate", "afterVersion", "fuzz",
-                                  "declared", "pinned", "managedBy", "runners", "workflows", "checks"],
+                                  "declared", "pinned", "managedBy", "runners", "workflows", "carried",
+                                  "checks"],
                      "properties": {"valid": {"type": "boolean"}, "product": {"type": "string"},
                                     "project": {"type": "string"}, "version": {"type": "string"},
                                     "mechanism": MECHANISM_SCHEMA,
@@ -1791,6 +1804,18 @@ APP = SocleProgram(PROGRAM, PRODUCT, socle_version(), [
                                                        "jobs": STRINGS, "runners": STRINGS,
                                                        "unresolved": STRINGS,
                                                        "delegates": {"type": "boolean"}}}},
+                                    "carried": {"type": "object", "additionalProperties": False,
+                                                "required": ["dependencies", "calls", "unresolved"],
+                                                "properties": {
+                                                    "dependencies": STRINGS,
+                                                    "calls": {"type": "array", "items": {
+                                                        "type": "object", "additionalProperties": False,
+                                                        "required": ["file", "job", "dependencies", "runner"],
+                                                        "properties": {"file": {"type": "string"},
+                                                                       "job": {"type": "string"},
+                                                                       "dependencies": STRINGS,
+                                                                       "runner": STRINGS}}},
+                                                    "unresolved": STRINGS}},
                                     "runners": {"type": "object", "additionalProperties": False,
                                                 "required": ["labels", "unresolved", "delegated"],
                                                 "properties": {"labels": STRINGS,

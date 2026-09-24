@@ -1,0 +1,114 @@
+name: carry dependencies (reusable)
+
+# The private dependencies of a product, carried as git bundles to runners
+# that may not fetch them. A machine that holds no credential for a private
+# pin -- the macOS leg of a product whose private pins are read, with a
+# read-only token, on a Linux guest dedicated to it -- receives the pinned
+# commits and nothing else, for one run: the artifact expires after a day, and
+# the runner that builds never holds anything that reads a repository.
+#
+# Called beside the product's check job, whose legs it feeds through
+# check-product.yml's carried_dependencies:
+#
+#   carry:
+#     uses: maelys-dev/maelys-release/.github/workflows/carry-dependencies.yml@<sha>
+#     with:
+#       dependencies: maelys-mcp maelys-warden-guest-linux
+#       runner: '["self-hosted","Linux","ARM64","maelys-virtualization"]'
+#   socle:
+#     needs: carry
+#     uses: maelys-dev/maelys-release/.github/workflows/check-product.yml@<sha>
+#     with:
+#       carried_dependencies: ${{ needs.carry.outputs.artifact }}
+#
+# What travels is what the caller names, and only that: every other pin is
+# cloned as usual. A bundle holds the history up to the pinned commit, and the
+# managed script checks that commit by its own hash on arrival.
+#
+# While it lives, the artifact is readable by whoever reads this repository's
+# Actions -- a reader of the product who does not read the dependency
+# included. That is the price of carrying the source rather than the
+# credential; the retention is the shortest GitHub allows.
+#
+# This job does not run on a public repository, and a check that names it in
+# `needs:` does not run either. Measured on the public pilot: the run ends
+# `skipped`, the only check runs published are `carry / carry` and the
+# caller's own job, both skipped -- the legs of the matrix never exist, so
+# the contexts branch protection requires never report and every pull
+# request stays blocked. Nothing turns green in silence, which is the point,
+# but nothing says why either. A product that wants its check to run without
+# bundles adds `if: ${{ !cancelled() }}` beside its `needs: carry`:
+# check-product.yml clones every pin as usual when `carried_dependencies` is
+# empty, which is what a skipped carry leaves.
+on:
+  workflow_call:
+    inputs:
+      dependencies:
+        description: >-
+          The pins to carry, by name and space-separated, as in
+          dependencies/NAME.pin. Nothing else travels.
+        required: true
+        type: string
+      runner:
+        description: >-
+          JSON naming the runner that fetches them: a machine that may read
+          those repositories. Read on a private repository only, as every
+          self-hosted runner the socle names.
+        required: true
+        type: string
+    outputs:
+      artifact:
+        description: The artifact holding NAME.bundle for each carried pin.
+        value: ${{ jobs.carry.outputs.artifact }}
+
+permissions:
+  contents: read
+
+jobs:
+  carry:
+    # A self-hosted runner, and the credential it holds, never run what a
+    # pull request to a public repository can carry.
+    if: github.event.repository.private
+    runs-on: ${{ fromJSON(inputs.runner) }}
+    outputs:
+      artifact: ${{ steps.bundle.outputs.artifact }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Bundle the pinned commits
+        id: bundle
+        shell: bash
+        env:
+          DEPENDENCIES: ${{ inputs.dependencies }}
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/maelys-dependency-bundles"
+          work="$RUNNER_TEMP/maelys-dependency-sources"
+          rm -rf "$out" "$work"
+          mkdir -p "$out" "$work"
+          test -n "${DEPENDENCIES// /}" || { echo "::error::carry-dependencies names no dependency" >&2; exit 64; }
+          for name in $DEPENDENCIES; do
+            # The managed script resolves where NAME lives and checks its
+            # pin, as every checkout of the product does: one rule, not two.
+            sh scripts/checkout-dependency.sh "$name" "$work/$name"
+            # The commit it just placed and verified, read from the checkout
+            # rather than from the pin file: a second reader of that format
+            # is the second rule this line exists to avoid.
+            pin="$(git -C "$work/$name" rev-parse HEAD)"
+            # A partial clone is bundled only by fetching each missing object
+            # on its own; the full history comes in one fetch instead.
+            git clone --quiet --bare "$(git -C "$work/$name" remote get-url origin)" "$work/$name.git"
+            git -C "$work/$name.git" update-ref refs/heads/maelys-pin "$pin"
+            git -C "$work/$name.git" bundle create --quiet "$out/$name.bundle" refs/heads/maelys-pin
+            git -C "$work/$name.git" bundle verify --quiet "$out/$name.bundle"
+          done
+          # One name per attempt: a re-run that carries again must not
+          # collide with the artifact of the attempt before.
+          echo "artifact=maelys-dependency-bundles-${GITHUB_RUN_ATTEMPT}" >>"$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.bundle.outputs.artifact }}
+          path: ${{ runner.temp }}/maelys-dependency-bundles
+          retention-days: 1
+          if-no-files-found: error
