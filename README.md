@@ -36,6 +36,29 @@ envelope on stderr; exit 0 completed, 1 failed, 2 a validation that found
 violations. It runs from a checkout at a tag, or installed. Every command, its
 options and effect are in [docs/cli.md](docs/cli.md), generated from `describe`.
 
+### Installing it, or running it from a checkout
+
+```sh
+brew install maelys-dev/tap/maelys-release   # the tag's own source archive
+```
+
+The formula points at the archive GitHub builds from the tag; this
+repository still publishes no artifact, and its release is still the signed
+tag alone. An installed copy carries `VERSION`, `CHANGELOG.md`, `LICENSE`,
+`INSTALLED.pin` and `share/` beside the directory holding the executable,
+which is the layout `socle_root()` reads — the same shape a checkout has.
+
+`INSTALLED.pin` is expanded by git when it builds the archive, so an
+installed copy names the commit it was cut from: that commit is what `adopt`
+and `new` write into a product's workflows, and what `check` compares a
+product's managed files against. A copy whose archive was not expanded knows
+no commit, so it refuses **both** — nothing that answers for a product can
+answer without naming the socle that would write it — and says which
+`--socle-sha` to pass instead of pinning a guess.
+
+A checkout at a tag remains the way a candidate is tried, and the only way
+to run `self-test`, which an installed copy does not carry.
+
 ```sh
 git clone https://github.com/maelys-dev/maelys-release && git -C maelys-release checkout vX.Y.Z
 maelys-release/bin/maelys-release adopt /path/to/product            # plan

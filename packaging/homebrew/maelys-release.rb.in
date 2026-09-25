@@ -1,0 +1,47 @@
+# typed: strict
+# frozen_string_literal: true
+
+# Rendered by the socle's own tap workflow from this template: @VERSION@,
+# @URL@ and @SHA256@ become the source archive of one tag. Nothing new is
+# published -- the archive is the one GitHub builds from the tag, and the
+# release of this repository stays the signed tag alone.
+#
+# That archive carries INSTALLED.pin, which git expands at archive time, so
+# an installed copy names the commit it was cut from and can write the pin a
+# product's workflows carry. A checkout reads that commit from .git instead.
+class MaelysRelease < Formula
+  include Language::Python::Shebang
+
+  desc "Shared release mechanics of the Maelys repositories"
+  homepage "https://github.com/maelys-dev/maelys-release"
+  url "@URL@"
+  sha256 "@SHA256@"
+  license "MPL-2.0"
+
+  # The program is Python 3.9 or later, standard library only. git is used by
+  # every command; gh by those that read GitHub -- protect, preflight, cut --
+  # which say so themselves when it is missing.
+  depends_on "gh"
+  depends_on "git"
+  depends_on "python@3.13"
+
+  def install
+    # socle_root() is the parent of the directory holding the executable, so
+    # VERSION, CHANGELOG.md, LICENSE, INSTALLED.pin and share/ sit beside
+    # libexec here exactly as they sit beside bin/ in a checkout. The
+    # framework and the internal package travel beside the executable, which
+    # is what the program's own sys.path insert expects.
+    libexec.install "bin/maelys-release", "bin/maelys_cli.py", "bin/maelys_socle"
+    rewrite_shebang detected_python_shebang, libexec/"maelys-release"
+    prefix.install "VERSION", "CHANGELOG.md", "LICENSE", "INSTALLED.pin", "share"
+    bin.install_symlink libexec/"maelys-release"
+  end
+
+  test do
+    assert_match "maelys-release @VERSION@", shell_output("#{bin}/maelys-release version")
+    # Without the commit the archive carried, no product could be adopted
+    # from this copy: the program would refuse rather than pin a guess.
+    assert_match(/\A[0-9a-f]{40}\z/, (prefix/"INSTALLED.pin").read.lines[1].strip)
+    assert_match "agent-cli/v2", shell_output("#{bin}/maelys-release describe --format json")
+  end
+end

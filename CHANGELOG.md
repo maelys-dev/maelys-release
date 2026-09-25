@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- **The command installs, and an installed copy knows its own commit.**
+  `brew install maelys-dev/tap/maelys-release` renders from the tag's own
+  source archive, so this repository still publishes no artifact and its
+  release is still the signed tag alone — the formula is a pointer to it.
+  What made an installation useless until now was the pin: a product names
+  the socle by commit, and a copy without `.git` could not say which commit
+  it was, so it refused every write and handed back a `git ls-remote` to run
+  by hand. The archive carries it now. `INSTALLED.pin` holds two
+  `$Format:` placeholders that git expands when it builds the archive of a
+  tag — the tarball a formula downloads — in the two-line shape every
+  `dependencies/*.pin` already uses. Read closed: forty hexadecimal
+  characters and a tag that is this copy's own `VERSION`, or the refusal
+  stands and names the `--socle-sha` to pass. A copy whose two halves
+  disagree is refused outright. Measured on git itself, in the suite: the
+  archive carries the commit, the checkout keeps the placeholder, and a
+  product created from an installed prefix carries the right pin.
+
 - **A release is signed by a key the fleet names.** GitHub's `verified`
   says the key belongs to some account, and every account that may push a
   tag to a product has such a key: it answers a different question from
@@ -31,11 +48,15 @@
   Measured on the published v0.60.0 tag, whose signature still verifies
   against this file once its key is retired, and in the suite on a tag
   signed for the test.
+
 - **Impact.** [asks: nothing] [writes: nothing] Nothing to do for a
-  product that signs with the key the fleet already uses, which is all of
-  them: the same tags verify. A product whose operator signs with another
-  key learns it at `preflight`, before the tag, instead of at the release
-  workflow after it.
+  product: both concern whoever runs the command and whoever signs a tag.
+  A product that signs with the key the fleet already uses — which is all
+  of them, measured — sees the same tags verify; one whose operator signs
+  with another key, or in another format, learns it at `preflight`, before
+  the tag rather than after the push. The formula and the archived pin ask
+  nothing of a product at all: it is still adopted by a socle at a tag,
+  pinned by commit, and reads the same files.
 
 ## 0.61.0 — 2026-09-25
 

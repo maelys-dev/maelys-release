@@ -1,0 +1,30 @@
+name: formula
+
+# This repository publishes no artifact: its release is the signed tag alone,
+# which products pin by commit. This pushes a Homebrew formula that points at
+# the tag's own source archive -- the one GitHub builds, not a file this
+# repository uploads -- so that an operator can install the command instead of
+# keeping a checkout. The tag stays the release; the formula is a pointer to
+# it.
+#
+# Without the tap credentials, tap.yml renders the formula, lints it, and says
+# in a warning that it pushed nothing, keeping it as an artifact. Adding this
+# repository to the organisation secret's list is the operator's gesture, not
+# the socle's.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  formula:
+    uses: ./.github/workflows/tap.yml
+    with:
+      product: maelys-release
+      formula_template: packaging/homebrew/maelys-release.rb.in
+      # No compiled artifact: the formula installs a Python program from the
+      # source archive, so there is nothing to bottle.
+      bottles: "[]"
+    secrets: inherit

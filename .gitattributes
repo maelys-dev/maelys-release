@@ -1,0 +1,5 @@
+# The tag's own archive carries the commit it was made from: git expands
+# these at `git archive` time, which is how GitHub builds the tarball a
+# formula downloads. A checkout keeps the literal placeholders and reads
+# its commit from .git, as it always did.
+INSTALLED.pin export-subst
