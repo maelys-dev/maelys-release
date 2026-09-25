@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+- **The socle's own formula workflow starts.** A called workflow may not
+  ask for more than its caller allows, and `tap.yml`'s bottle job asks for
+  `contents`, `id-token` and `attestations`; `formula.yml` granted
+  `contents: read`. The run of `v0.62.0` therefore failed **before a single
+  job started** — no jobs, no log, only "a workflow file issue" — and the
+  formula never went out. The socle writes those permissions on the calling
+  job of every product that calls `release.yml`; it had not written them
+  for its own. Reproduced on a branch by hand, corrected, and measured
+  there: `signed`, `formula / render` and `formula / publish` all green.
+  Nothing reaches a product: this workflow runs on the socle's own tags.
+- **And that formula is replayed on the tag it already has.** `formula.yml`
+  takes a `workflow_dispatch` with the tag to publish, as `release.yml`
+  does: a publication that failed is repeated on its existing tag, never by
+  moving one.
+- **Impact.** [asks: nothing] [writes: nothing] Nothing for a product.
+
 ## 0.62.0 — 2026-09-25
 
 - **The command installs, and an installed copy knows its own commit.**
