@@ -48,6 +48,16 @@
   Measured on the published v0.60.0 tag, whose signature still verifies
   against this file once its key is retired, and in the suite on a tag
   signed for the test.
+  **The socle holds itself to it.** It does not run `release.yml` — its
+  release is the signed tag alone — so the rule would have bound nine
+  products and not the repository that writes it. The publication its own
+  tags now have, the Homebrew formula, waits on the same sequence: the tag
+  names the `VERSION` its commit carries, it is annotated, its commit is
+  already on `main`, and its signature verifies against the allowed signers
+  **that tag itself publishes**, at its tagger date. Reading its own list
+  would be a circle if the commit were not required to be on `main` first,
+  where the branch's rules stand. A tag that predates the file publishes
+  nothing, which is the honest answer for one.
 
 - **Impact.** [asks: nothing] [writes: nothing] Nothing to do for a
   product: both concern whoever runs the command and whoever signs a tag.

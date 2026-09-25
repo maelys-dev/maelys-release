@@ -269,5 +269,38 @@ class ReleaseWorkflowSignatureTest(unittest.TestCase):
         self.assertRegex(step, r"set -euo pipefail")
 
 
+class SocleHoldsItselfTest(unittest.TestCase):
+    """The socle publishes a formula on its own tags, and holds that
+    publication to the rule it holds products to.
+
+    A product's tag is verified by release.yml before anything is built.
+    This repository does not run release.yml -- its release is the signed
+    tag alone -- so without this the rule would have bound nine products and
+    not the one that writes it.
+    """
+
+    FORMULA = (ROOT / ".github" / "workflows" / "formula.yml").read_text(encoding="utf-8")
+
+    def test_the_formula_waits_for_the_tag_to_be_verified(self) -> None:
+        self.assertIn("  signed:", self.FORMULA)
+        self.assertIn("needs: signed", self.FORMULA)
+        # The formula job is the one that pushes; it must come after.
+        self.assertLess(self.FORMULA.index("  signed:"), self.FORMULA.index("  formula:"))
+
+    def test_the_gate_holds_the_socle_to_its_own_contract(self) -> None:
+        step = self.FORMULA.split("The tag is signed by a key this repository names", 1)[1]
+        for guard, why in (
+                ('test "v$(git show "${TAG}:VERSION")" = "$TAG"', "the tag names the VERSION its commit carries"),
+                ('test "$(git cat-file -t "$TAG")" = tag', "annotated, as a release is"),
+                ("git merge-base --is-ancestor", "on main, where the branch's rules stand"),
+                ('git show "${TAG}:share/allowed-signers"', "the list the tag itself publishes"),
+                ("ssh-keygen -Y find-principals", "a key the file names"),
+                ("ssh-keygen -Y verify", "and the signature verifies"),
+                ('-O "verify-time=${signed_at}"', "at the tagger date, not at the clock")):
+            self.assertIn(guard, step, why)
+        self.assertEqual(step.count('-O "verify-time=${signed_at}"'), 2)
+        self.assertIn("set -euo pipefail", step)
+
+
 if __name__ == "__main__":
     unittest.main()

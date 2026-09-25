@@ -244,6 +244,10 @@ socle declares, the observer counts: the same split as the release gate.
   the tag they are about to sign is signed today. And the fleet signs in
   **ssh**: the workflow verifies an ssh signature and nothing else, so
   `gpg.format = openpgp` is refused before the tag rather than after it.
+  The socle is held to the same rule by its own tag workflow, against the
+  list its tag publishes and only once that commit is on `main`: a rule the
+  repository that writes it does not obey is a rule with an exception at
+  its centre.
 
 ### Cutting a release, in two stops
 
