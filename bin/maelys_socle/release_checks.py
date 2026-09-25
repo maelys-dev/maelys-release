@@ -2,6 +2,7 @@
 """The signing and repository gates shared by preflight and cut."""
 from __future__ import annotations
 
+import datetime
 import pathlib
 import re
 
@@ -17,14 +18,17 @@ from .host import git, run
 SSH_KEY_TYPES = ("ssh-ed25519", "ssh-rsa", "ssh-dss", "ecdsa-sha2-", "sk-ssh-", "sk-ecdsa-")
 
 
-def allowed_signer_keys(text: str) -> list[tuple[str, str, str]]:
-    """(principal, type, material) of each line of an ssh allowed_signers file.
+def allowed_signer_keys(text: str) -> list[tuple[str, str, str, str]]:
+    """(principal, options, type, material) of each line of an allowed_signers file.
 
     The options field sits between the principal and the key and may hold
     anything, `valid-before` included, so the key is found by its type rather
-    than by its position.
+    than by its position -- and the options are kept, because they decide as
+    much as the key does. Reading the material alone answered `ok` for four
+    lines ssh-keygen refuses: a retired key, one not yet valid, a
+    certificate authority, and a key allowed in another namespace.
     """
-    found: list[tuple[str, str, str]] = []
+    found: list[tuple[str, str, str, str]] = []
     for line in text.splitlines():
         line = line.strip()
         if not line or line.startswith("#"):
@@ -32,9 +36,58 @@ def allowed_signer_keys(text: str) -> list[tuple[str, str, str]]:
         parts = line.split()
         for index, token in enumerate(parts[1:], start=1):
             if token.startswith(SSH_KEY_TYPES) and index + 1 < len(parts):
-                found.append((parts[0], token, parts[index + 1]))
+                found.append((parts[0], " ".join(parts[1:index]), token, parts[index + 1]))
                 break
     return found
+
+
+def signer_options(options: str) -> dict[str, str]:
+    """The options of one line, lowercased, quotes removed; a flag maps to "".
+
+    Commas separate them and a value may be quoted, so a comma inside quotes
+    belongs to the value.
+    """
+    found: dict[str, str] = {}
+    name, value, quoted, key = "", "", False, True
+    for character in options + ",":
+        if character == '"':
+            quoted = not quoted
+        elif character == "," and not quoted:
+            if name.strip():
+                found[name.strip().lower()] = value
+            name, value, key = "", "", True
+        elif character == "=" and key and not quoted:
+            key = False
+        elif key:
+            name += character
+        else:
+            value += character
+    return found
+
+
+def signer_line_refuses(options: dict[str, str], today: str) -> str:
+    """Why ssh-keygen would refuse this line for a git signature today, or ""."""
+    if "cert-authority" in options:
+        return "the line names a certificate authority, not this key"
+    namespaces = options.get("namespaces", "")
+    if namespaces and "git" not in [name.strip() for name in namespaces.split(",")]:
+        return f"the line allows the namespaces {namespaces} and a tag is signed in git"
+    # A signature carries no timestamp: ssh-keygen judges these against the
+    # clock of whoever runs it, and the release workflow gives it the tag's
+    # own tagger date. Here the signature does not exist yet, so the moment
+    # is now -- the moment this checkout would sign.
+    after, before = options.get("valid-after", ""), options.get("valid-before", "")
+    if after and today < signer_date(after):
+        return f"the line allows this key only after {after}"
+    if before and today >= signer_date(before):
+        return f"the line retired this key on {before}"
+    return ""
+
+
+def signer_date(value: str) -> str:
+    """YYYYMMDD[HHMM[SS]][Z] padded to the comparable YYYYMMDDHHMMSS."""
+    digits = value.rstrip("Zz").replace("-", "").replace(":", "").replace("T", "")
+    return (digits + "0" * 14)[:14]
 
 
 def public_key(project: pathlib.Path, declared: str) -> str:
@@ -45,6 +98,8 @@ def public_key(project: pathlib.Path, declared: str) -> str:
     it back as if it were a public key is how a checker reports a key it
     never understood. The content decides, not the name.
     """
+    # git's own literal form, documented under user.signingKey.
+    declared = declared[5:] if declared.startswith("key::") else declared
     if declared.startswith(SSH_KEY_TYPES):
         return declared
     path = pathlib.Path(declared).expanduser()
@@ -89,9 +144,19 @@ def signing_key_named(project: pathlib.Path, declared: str, fmt: str,
     if len(parts) < 2 or not parts[0].startswith(SSH_KEY_TYPES):
         return [("note", f"user.signingkey names {declared}, which does not read as an ssh public key:"
                          " whether the release workflow will accept it is unknown here")]
-    for principal, kind, material in entries:
-        if (kind, material) == (parts[0], parts[1]):
+    today = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d%H%M%S")
+    refusals = []
+    for principal, options, kind, material in entries:
+        if (kind, material) != (parts[0], parts[1]):
+            continue
+        refused = signer_line_refuses(signer_options(options), today)
+        if not refused:
             return [("ok", f"the signing key is named in {allowed_signers.name}, as {principal}")]
+        refusals.append(f"{principal}: {refused}")
+    if refusals:
+        return [("fail", f"the signing key is in {allowed_signers} on a line that would not sign this tag"
+                         " today -- " + "; ".join(refusals) + ". ssh-keygen reads those options and the"
+                         " release workflow runs it, so the tag would be refused after the push")]
     return [("fail", f"the signing key is not named in {allowed_signers}: the release workflow verifies the"
                      " tag's signature against that file and would refuse this one. Add the key there, or sign"
                      " with one it names")]

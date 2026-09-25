@@ -18,8 +18,13 @@
 #   someone@example.org namespaces="git",valid-before="20260901" ssh-ed25519 AAAA...
 #
 # `valid-after` does the same at the other end for a key that starts today.
-# Both are dates in the signature's own timestamp, which is why the check
-# reads the signature and not the calendar.
+# An ssh signature carries no timestamp, so ssh-keygen judges both against
+# the clock of whoever runs it -- which would make a retirement break every
+# tag that key ever signed, the day it happens. The release workflow gives
+# it the tag's own tagger date instead, read from the payload the signature
+# covers, so a retired key still verifies what it signed while it was
+# allowed to, and nothing else. `preflight` and `cut` judge against today,
+# because the tag they are about to sign is signed today.
 #
 # One namespace: git. A key that signs tags signs nothing else here.
 davidb987654@gmail.com namespaces="git" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPjvkRbQYfr09ZNh5AzHIILBRw8XbiOFHrmEczoq6KXH

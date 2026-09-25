@@ -25,7 +25,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "bin"))
 
 from maelys_socle.release_checks import (  # noqa: E402
-    allowed_signer_keys, public_key, signing_key_named,
+    allowed_signer_keys, public_key, signer_date, signer_options, signing_key_named,
 )
 
 SIGNERS = ROOT / "share" / "allowed-signers"
@@ -41,27 +41,68 @@ class AllowedSignersFileTest(unittest.TestCase):
     def test_the_fleet_names_at_least_one_key_for_git(self) -> None:
         entries = allowed_signer_keys(SIGNERS.read_text(encoding="utf-8"))
         self.assertTrue(entries, "an empty file refuses every tag")
-        for principal, kind, material in entries:
+        for principal, options, kind, material in entries:
             self.assertRegex(principal, r"\S")
             self.assertTrue(kind.startswith(("ssh-", "ecdsa-", "sk-")), kind)
             self.assertGreater(len(material), 32)
+            # Whatever the fleet names today must be able to sign a tag.
+            self.assertIn("git", signer_options(options).get("namespaces", "git"))
         self.assertIn('namespaces="git"', SIGNERS.read_text(encoding="utf-8"))
 
     def test_a_retired_key_keeps_its_line(self) -> None:
-        """A line removed turns a past release into one that can no longer be
-        replayed, and a failed publication is replayed on its own tag."""
-        text = SIGNERS.read_text(encoding="utf-8")
-        self.assertIn("valid-before", text)
-        self.assertIn("retired, never deleted", text)
+        """The file says so; this measures that it is true.
 
-    def test_options_never_hide_the_key(self) -> None:
+        An ssh signature carries no timestamp, so ssh-keygen judges
+        valid-before against the clock of whoever runs it. Judged at the
+        clock, retiring a key breaks every tag it ever signed -- the day of
+        the retirement -- which is exactly what the line promises it will
+        not do. The workflow judges at the tag's own tagger date instead.
+        """
+        self.assertIn("valid-before", SIGNERS.read_text(encoding="utf-8"))
+        self.assertIn("retired, never deleted", SIGNERS.read_text(encoding="utf-8"))
+        directory = pathlib.Path(tempfile.mkdtemp(prefix="maelys-retired-"))
+        self.addCleanup(shutil.rmtree, directory, True)
+        subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(directory / "key")],
+                       check=True, capture_output=True)
+        public = (directory / "key.pub").read_text(encoding="utf-8").strip()
+        (directory / "payload").write_text("what the key signed while it was allowed to\n", encoding="utf-8")
+        subprocess.run(["ssh-keygen", "-Y", "sign", "-f", str(directory / "key"), "-n", "git",
+                        str(directory / "payload")], check=True, capture_output=True)
+        retired = directory / "retired"
+        retired.write_text(f'signer@example.org namespaces="git",valid-before="20250101" {public}\n',
+                           encoding="utf-8")
+
+        def verify(*options: str) -> subprocess.CompletedProcess:
+            return subprocess.run(["ssh-keygen", "-Y", "verify", *options, "-f", str(retired),
+                                   "-I", "signer@example.org", "-n", "git",
+                                   "-s", str(directory / "payload.sig")],
+                                  capture_output=True, text=True,
+                                  input=(directory / "payload").read_text(encoding="utf-8"))
+
+        # At the clock: the retirement takes the past with it.
+        now = verify()
+        self.assertNotEqual(now.returncode, 0)
+        self.assertIn("expired", now.stdout + now.stderr)
+        # At a moment the line allowed, which is what the workflow passes:
+        # the replay of an old release still verifies.
+        signed = verify("-O", "verify-time=20240601")
+        self.assertEqual(signed.returncode, 0, signed.stderr)
+        self.assertIn("Good \"git\" signature", signed.stdout + signed.stderr)
+
+    def test_options_never_hide_the_key_and_travel_with_it(self) -> None:
         text = ('# a comment\n'
                 '\n'
                 'someone@example.org namespaces="git",valid-before="20260901" ssh-ed25519 AAAAOLD comment\n'
                 'other@example.org ssh-ed25519 AAAANEW\n')
         self.assertEqual(allowed_signer_keys(text),
-                         [("someone@example.org", "ssh-ed25519", "AAAAOLD"),
-                          ("other@example.org", "ssh-ed25519", "AAAANEW")])
+                         [("someone@example.org", 'namespaces="git",valid-before="20260901"',
+                           "ssh-ed25519", "AAAAOLD"),
+                          ("other@example.org", "", "ssh-ed25519", "AAAANEW")])
+        self.assertEqual(signer_options('namespaces="git,file",valid-before="20260901"'),
+                         {"namespaces": "git,file", "valid-before": "20260901"})
+        self.assertEqual(signer_options("cert-authority"), {"cert-authority": ""})
+        self.assertEqual(signer_date("20260901"), "20260901000000")
+        self.assertEqual(signer_date("20260901T1230Z"), "20260901123000")
 
 
 class SigningKeyNamedTest(unittest.TestCase):
@@ -84,6 +125,31 @@ class SigningKeyNamedTest(unittest.TestCase):
                 found = self.verdicts(declared)
                 self.assertEqual([status for status, _ in found], ["ok"], found)
                 self.assertIn("probe@example.org", found[0][1])
+
+    def test_a_line_ssh_keygen_would_refuse_is_refused_here_too(self) -> None:
+        """The four lines that used to answer ok while ssh-keygen refused
+        them: a retired key, one not yet valid, a certificate authority, and
+        a key allowed in another namespace. A rule held at one end is a rule
+        nothing holds between two adoptions -- here, between the push and
+        the workflow, which costs a version."""
+        for options, said in (('namespaces="git",valid-before="20250101"', "retired this key"),
+                              ('valid-after="20300101"', "only after"),
+                              ("cert-authority", "certificate authority"),
+                              ('namespaces="file"', "a tag is signed in git")):
+            with self.subTest(options=options):
+                self.named.write_text(f"probe@example.org {options} {self.public}\n", encoding="utf-8")
+                found = self.verdicts(str(self.dir / "key.pub"))
+                self.assertEqual([status for status, _ in found], ["fail"], found)
+                self.assertIn(said, found[0][1])
+                self.assertIn("refused after the push", found[0][1])
+
+    def test_every_shape_git_accepts_for_the_key_is_read(self) -> None:
+        """A path to the public half, a path to the private one beside it,
+        the literal, and git's own key:: form."""
+        for declared in (str(self.dir / "key.pub"), str(self.dir / "key"),
+                         self.public, "key::" + self.public):
+            with self.subTest(declared=declared[:24]):
+                self.assertEqual([status for status, _ in self.verdicts(declared)], ["ok"])
 
     def test_a_key_the_file_does_not_name_is_refused(self) -> None:
         subprocess.run(["ssh-keygen", "-t", "ed25519", "-N", "", "-C", "other",
@@ -194,6 +260,10 @@ class ReleaseWorkflowSignatureTest(unittest.TestCase):
         self.assertIn("ssh-keygen -Y find-principals", step)
         self.assertIn("ssh-keygen -Y verify", step)
         self.assertIn("-n git", step)
+        # Judged at the tag's own tagger date, which the signature covers,
+        # and not at the clock of whoever replays the publication.
+        self.assertIn("awk '/^tagger /{print $(NF-1); exit}'", step)
+        self.assertEqual(step.count('-O "verify-time=${signed_at}"'), 2)
         # jq -j: the payload is signed byte for byte.
         self.assertIn("jq -rj .verification.payload", step)
         self.assertRegex(step, r"set -euo pipefail")

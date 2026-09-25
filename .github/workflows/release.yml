@@ -204,12 +204,31 @@ jobs:
           jq -rj .verification.payload "$RUNNER_TEMP/tag.json" >"$RUNNER_TEMP/payload"
           jq -rj .verification.signature "$RUNNER_TEMP/tag.json" >"$RUNNER_TEMP/signature"
           test -s "$RUNNER_TEMP/signature" || { echo "${TAG} carries no signature GitHub could read" >&2; exit 1; }
-          principal="$(ssh-keygen -Y find-principals -f "$signers" -s "$RUNNER_TEMP/signature" | head -n 1)" \
-            || { echo "${TAG} is signed by a key ${socle} does not name: it may not publish here" >&2; exit 1; }
+          grep -q '^-----BEGIN SSH SIGNATURE-----' "$RUNNER_TEMP/signature" \
+            || { echo "${TAG} carries no ssh signature: a Maelys release is signed with an ssh key" >&2; exit 1; }
+          # An sshsig carries no timestamp of its own, so ssh-keygen judges
+          # valid-after and valid-before against the clock of whoever runs
+          # it. Judged against today, a key retired with valid-before stops
+          # verifying every tag it ever signed, and a replay of an old
+          # release -- which is how a failed publication is repeated, since
+          # a published tag is never moved -- fails on the day of the
+          # retirement. The tag's own tagger date is inside the payload the
+          # signature covers, so it is as authentic as the signature, and it
+          # is the moment this key had to be allowed to sign.
+          epoch="$(awk '/^tagger /{print $(NF-1); exit}' "$RUNNER_TEMP/payload")"
+          case "$epoch" in ''|*[!0-9]*) echo "${TAG} has no tagger date in its signed payload" >&2; exit 1 ;; esac
+          # GNU date on the Linux runner this job declares; the BSD form
+          # keeps the step honest wherever a product points it.
+          signed_at="$(date -u -d "@${epoch}" +%Y%m%d%H%M%SZ 2>/dev/null \
+            || date -u -r "${epoch}" +%Y%m%d%H%M%SZ)"
+          principal="$(ssh-keygen -Y find-principals -O "verify-time=${signed_at}" \
+            -f "$signers" -s "$RUNNER_TEMP/signature" | head -n 1)" \
+            || { echo "${TAG} is signed by a key ${socle} did not name on ${signed_at}: it may not publish here" >&2
+                 exit 1; }
           test -n "$principal" || { echo "${TAG} is signed by a key ${socle} does not name" >&2; exit 1; }
-          ssh-keygen -Y verify -f "$signers" -I "$principal" -n git \
+          ssh-keygen -Y verify -O "verify-time=${signed_at}" -f "$signers" -I "$principal" -n git \
             -s "$RUNNER_TEMP/signature" <"$RUNNER_TEMP/payload"
-          echo "${TAG} is signed by ${principal}, named by ${socle} at ${SOCLE_SHA}"
+          echo "${TAG} is signed by ${principal}, named by ${socle} at ${SOCLE_SHA}, allowed on ${signed_at}"
       - name: Verify the tag's commit
         if: inputs.commit_verification != 'none'
         env:

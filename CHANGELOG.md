@@ -15,11 +15,22 @@
   refusal after the push would cost a version, since a published tag is
   never moved. Fails closed at every step — no reusable-workflow commit,
   no file, an empty file, no matching principal, a signature that does not
-  verify — and none of them falls back to GitHub's own verdict. A key is
-  retired with `valid-before` and never deleted, or a past release becomes
-  one that cannot be replayed on its own tag. Measured on the published
-  v0.60.0 tag, whose signature verifies against this file, and in the
-  suite on a tag signed for the test.
+  verify. It stands **beside** GitHub's verdict and not in its place: the
+  workflow still requires `verification.verified` first. A key is retired
+  with `valid-before` and never deleted, or a past release becomes one
+  that cannot be replayed on its own tag — and since an ssh signature
+  carries no timestamp, the workflow judges that option at the tag's own
+  **tagger date**, read from the payload the signature covers, while
+  `preflight` and `cut` judge at today. Judged at the clock instead, a
+  retirement would break every tag that key ever signed, on the day it
+  happened: measured, then corrected. The same reading holds the other
+  options a line may carry — `valid-after`, `cert-authority`,
+  `namespaces` — at both ends, rather than matching the key material and
+  ignoring what stands in front of it. The fleet signs in ssh, so
+  `gpg.format = openpgp` is refused before the tag rather than after.
+  Measured on the published v0.60.0 tag, whose signature still verifies
+  against this file once its key is retired, and in the suite on a tag
+  signed for the test.
 - **Impact.** [asks: nothing] [writes: nothing] Nothing to do for a
   product that signs with the key the fleet already uses, which is all of
   them: the same tags verify. A product whose operator signs with another

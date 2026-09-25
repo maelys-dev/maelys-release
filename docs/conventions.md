@@ -233,9 +233,17 @@ socle declares, the observer counts: the same split as the release gate.
   name the key this checkout would sign with, because a refusal after the
   push costs a version — a published tag is never moved.
   It fails closed at every step: no file, an empty one, a key that is not
-  there, a signature that does not verify. **A key is retired, never
-  deleted**: give it `valid-before` and leave the line, or a past release
-  becomes one that can no longer be replayed on its own tag.
+  there, a signature that does not verify. The tag is held to **both**
+  verdicts, GitHub's and the fleet's: the workflow still requires
+  `verification.verified`, and this stands beside it rather than in its
+  place. **A key is retired, never deleted**: give it `valid-before` and
+  leave the line, or a past release becomes one that can no longer be
+  replayed on its own tag. An ssh signature carries no timestamp of its
+  own, so the workflow judges those options at the tag's **tagger date**,
+  which the signature covers; `preflight` and `cut` judge at today, since
+  the tag they are about to sign is signed today. And the fleet signs in
+  **ssh**: the workflow verifies an ssh signature and nothing else, so
+  `gpg.format = openpgp` is refused before the tag rather than after it.
 
 ### Cutting a release, in two stops
 
