@@ -51,7 +51,9 @@ on the tag it already has.
 
 The maintainer of this repository decides which keys `share/allowed-signers`
 names, and a key enters it through a pull request here — public, reviewable,
-and recorded in the file's own history.
+and recorded in the file's own history. `maelys-release signers .` lists what
+that file says today; `--add` and `--retire` prepare the line so that the
+pull request carries an edit `ssh-keygen` accepts.
 
 The request carries its own proof: **the commit that adds the line is signed
 by the key it adds**. Nothing else establishes that whoever asks holds the
