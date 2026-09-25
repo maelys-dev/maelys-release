@@ -164,6 +164,15 @@ class Product:
         self.env = {**os.environ, "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null",
                     "GIT_CONFIG_NOSYSTEM": "1", "MAELYS_CLI_FORMAT": ""}
         self.env.pop("MAELYS_CLI_FORMAT")
+        # A fixture writes in its own cache, never in the one of whoever runs
+        # the suite: migrate keeps its two clones there without --push, and
+        # every run of the self-test left a migrate-maelys-fixture/ behind in
+        # ~/.cache/maelys-release. A command started in this process reads
+        # os.environ and not this copy, so both are set, as the signers are.
+        self.cache = self.work / "cache"
+        self.env["XDG_CACHE_HOME"] = str(self.cache)
+        self.previous_cache = os.environ.get("XDG_CACHE_HOME")
+        os.environ["XDG_CACHE_HOME"] = str(self.cache)
         source = self.work / "src" / "maelys-system"
         source.mkdir(parents=True)
         self.git(source, "init", "-q")
@@ -220,6 +229,10 @@ class Product:
             os.environ.pop("_MAELYS_RELEASE_TEST_SIGNERS", None)
         else:
             os.environ["_MAELYS_RELEASE_TEST_SIGNERS"] = self.previous_signers
+        if self.previous_cache is None:
+            os.environ.pop("XDG_CACHE_HOME", None)
+        else:
+            os.environ["XDG_CACHE_HOME"] = self.previous_cache
         shutil.rmtree(self.work, ignore_errors=True)
 
     def git(self, cwd: pathlib.Path, *arguments: str) -> str:
@@ -1705,9 +1718,14 @@ class MigrateTest(unittest.TestCase):
         self.assertIn("already carries this prose", error["message"])
 
     def test_nothing_leaves_the_machine_without_push(self) -> None:
-        self.migrate("--apply")
+        data = self.migrate("--apply")["data"]
         remote = self.product.git(self.documents, "for-each-ref", "--format=%(refname)")
         self.assertNotIn("migrate/maelys-fixture", remote)
+        # Nor does it land beside the machine's own work: the kept copy goes
+        # to the cache the caller names, which for a fixture is its own.
+        kept = pathlib.Path(data["kept"])
+        self.assertTrue(kept.is_relative_to(self.product.work), kept)
+        self.assertEqual(sorted(entry.name for entry in kept.iterdir()), ["documents", "product"])
 
 
 class DocsContractTest(unittest.TestCase):
