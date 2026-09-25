@@ -16,11 +16,11 @@ from __future__ import annotations
 import datetime
 import pathlib
 import re
-import subprocess
 import tempfile
 
 from maelys_cli import EXIT_OK, EXIT_VIOLATIONS, Failure, Invocation
 from .context import Context
+from .host import run
 from .identity import allowed_signers
 from .project import project_of
 from .release_checks import (SSH_KEY_TYPES, allowed_signer_keys, signer_date, signer_line_refuses,
@@ -35,7 +35,9 @@ def fingerprint(kind: str, material: str) -> str:
     with tempfile.NamedTemporaryFile("w", suffix=".pub", encoding="utf-8") as handle:
         handle.write(f"{kind} {material}\n")
         handle.flush()
-        done = subprocess.run(["ssh-keygen", "-l", "-f", handle.name], capture_output=True, text=True)
+        # Through the host, like every process this program starts: one
+        # boundary is what lets the self-test see what was run.
+        done = run(["ssh-keygen", "-l", "-f", handle.name])
     match = re.search(r"SHA256:\S+", done.stdout)
     return match.group(0) if done.returncode == 0 and match else ""
 
