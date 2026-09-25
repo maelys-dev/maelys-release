@@ -60,7 +60,7 @@ from maelys_socle.workflows import (
     sanitizers_twice, sub_block, top_block, uses_commit, workflow_events, yaml_scalar,
 )
 # Import the module holding the current host, never a copy of its HOST binding.
-from maelys_socle import adoption, cut, dependencies, github, host, identity, inspection, migration, protect, rehearse
+from maelys_socle import adoption, cut, dependencies, github, host, identity, inspection, migration, protect, rehearse, signers
 from maelys_socle.cut import (
     CHECK_PENDING, CHECK_PASSED, CHANGELOG_ENTRY,
     host_target, worktree_paths, entry_heading, changelog_entry,
@@ -1495,6 +1495,10 @@ def handle_preflight(invocation: Invocation) -> tuple[dict, int]:
     return data, EXIT_OK if data["ready"] else EXIT_VIOLATIONS
 
 
+def handle_signers(invocation: Invocation) -> tuple[dict, int]:
+    return signers.handle_signers(invocation, CONTEXT)
+
+
 def handle_cut(invocation: Invocation) -> tuple[dict, int]:
     return cut.handle_cut(invocation, CONTEXT, release_signers)
 
@@ -1639,6 +1643,7 @@ TEXT = {
     "check": text_check,
     "declarations": text_declarations,
     "preflight": text_preflight,
+    "signers": signers.text_signers,
     "cut": text_cut,
     "protect": lambda data: text_protect(data),
     "rehearse": lambda data: text_rehearse(data),
@@ -1898,6 +1903,35 @@ APP = SocleProgram(PROGRAM, PRODUCT, socle_version(), [
                                     "socle": SOCLE_SCHEMA, "pinned": {"type": ["object", "null"]},
                                     "checks": CHECKS_SCHEMA, "files": FILES_SCHEMA,
                                     "preflight": CHECKS_SCHEMA, "violations": STRINGS}}),
+    cli.execute("signers", "signers",
+                "List the keys that may sign a release of this fleet, or prepare one line of that file;"
+                " --apply writes it.",
+                handle_signers, operands=[DIR_OPERAND],
+                options=[cli.option("--add", "Public key file to name, with --principal.",
+                                    cli.argument("FILE", "path"), conflicts_with=("--retire",)),
+                         cli.option("--principal", "The identity that key signs as, as in an email.",
+                                    cli.argument("NAME", "string"), requires=("--add",)),
+                         cli.option("--retire", "Principal or SHA256 fingerprint to stop from signing new tags.",
+                                    cli.argument("WHO", "string"), conflicts_with=("--add",)),
+                         cli.option("--at", "When it stopped being trusted, YYYYMMDD[HHMM[SS]]Z; now by default.",
+                                    cli.argument("TIME", "string"), requires=("--retire",)),
+                         cli.flag("--apply", "Write the file instead of only reporting what it would become.")],
+                schema={"type": "object", "additionalProperties": False,
+                        "required": ["file", "action", "signers", "wrote", "next"],
+                        "properties": {"file": {"type": "string"},
+                                       "action": {"enum": ["list", "add", "retire"]},
+                                       "wrote": {"type": "boolean"}, "diff": {"type": "boolean"},
+                                       "line": {"type": "string"}, "retired": STRINGS, "next": STRINGS,
+                                       "signers": {"type": "array", "items": {
+                                           "type": "object", "additionalProperties": False,
+                                           "required": ["principal", "options", "type", "fingerprint",
+                                                        "signsToday", "refusal"],
+                                           "properties": {"principal": {"type": "string"},
+                                                          "options": {"type": "string"},
+                                                          "type": {"type": "string"},
+                                                          "fingerprint": {"type": "string"},
+                                                          "signsToday": {"type": "boolean"},
+                                                          "refusal": {"type": "string"}}}}}}),
     cli.transaction("cut", "cut",
                     "Open the release of a version, then sign its tag on the merge commit whose checks passed;"
                     " plan without --apply.",

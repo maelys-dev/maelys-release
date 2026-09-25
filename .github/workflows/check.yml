@@ -51,6 +51,32 @@ jobs:
         # blocks, its declarations, its docs. It drifted from 0.16.0 to 0.57.0
         # because nothing ran this on the repository that writes the rules.
         run: bin/maelys-release check . --product maelys-release
+      - name: The allowed signers only grow
+        if: runner.os == 'Linux' && github.event_name == 'pull_request'
+        # The command that writes a line is a formatter; this is the
+        # invariant, and it is held on the difference rather than on the
+        # line written last. A removed line makes the releases that key
+        # signed unreplayable; a valid-before pushed later un-retires a key
+        # that was retired. Neither is visible in the file alone.
+        env:
+          BASE: ${{ github.base_ref }}
+        # The branch name reaches python as data, never as a line of it.
+        run: |
+          python3 - <<'PY'
+          import os, pathlib, subprocess, sys
+          sys.path.insert(0, "bin")
+          from maelys_socle.signers import only_grew
+          name = "share/allowed-signers"
+          base = subprocess.run(["git", "show", f"origin/{os.environ['BASE']}:{name}"],
+                                capture_output=True, text=True)
+          if base.returncode != 0:
+              print(f"{name} is new on this branch: nothing to compare")
+              raise SystemExit(0)
+          refusals = only_grew(base.stdout, pathlib.Path(name).read_text(encoding="utf-8"))
+          print("\n".join(refusals) if refusals else f"{name} only grew")
+          raise SystemExit(1 if refusals else 0)
+          PY
+
       - name: The CLI reference follows describe
         if: runner.os == 'Linux'
         # The socle documents its own command line the way it documents a

@@ -71,6 +71,20 @@
   asker holds the private half — and an operator who is not that maintainer
   counts the steps before relying on it. Naming the authority is a
   governance choice; it is written down so that it is one.
+  **`signers` prepares a line, and `check` holds the file.** Writing an
+  allowed signers line by hand is how a `namespaces` gets misspelled and a
+  `valid-before` gets a separator ssh-keygen refuses — `ok` here, refused
+  after the tag is pushed. The command lists what the file says, with the
+  fingerprint of each key and what would refuse it today; adds a line from
+  a public key file, refusing a private key, a duplicate, a key ssh-keygen
+  cannot read, and a missing principal; and retires one by writing
+  `valid-before`, **never** by deleting a line. It writes one file, makes
+  no GitHub call, and prints the steps that follow it — the pull request
+  signed by the key it adds, the socle release, the adoption. The
+  invariant is not in the command, since a hand can edit the file without
+  it: the socle's own CI compares the file with the base branch and
+  refuses a line removed, a retirement dropped or a `valid-before` moved
+  later.
   **The socle holds itself to it.** It does not run `release.yml` — its
   release is the signed tag alone — so the rule would have bound nine
   products and not the repository that writes it. The publication its own

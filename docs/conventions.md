@@ -247,7 +247,11 @@ socle declares, the observer counts: the same split as the release gate.
   The socle is held to the same rule by its own tag workflow, against the
   list its tag publishes and only once that commit is on `main`: a rule the
   repository that writes it does not obey is a rule with an exception at
-  its centre.
+  its centre. `maelys-release signers DIR` lists that file, adds a line
+  from a public key, or retires one by writing `valid-before` — never by
+  deleting it — and refuses what `ssh-keygen` would refuse, so that a line
+  it writes is a line the release accepts. Who may ask for a key, and what
+  proves the asking, are in the socle's `SECURITY.md`.
 
 ### Cutting a release, in two stops
 
