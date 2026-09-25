@@ -141,17 +141,28 @@ jobs:
       - name: Fetch the socle this workflow comes from
         id: socle
         shell: bash
+        env:
+          # What GitHub says this job is running, beside what the product's
+          # files pin. A notice and never a refusal: during a trial, ci.yml
+          # and release.yml legitimately name two commits. It is here so
+          # that every product's CI says, in the open, whether GitHub fills
+          # these -- release.yml refuses on them, and the first candidate
+          # read a context property that was always empty.
+          SOCLE_RUN: ${{ job.workflow_repository }}
+          SOCLE_RUN_SHA: ${{ job.workflow_sha }}
         # The socle commit is read from the product's release.yml when the
         # socle generated it, and otherwise from the ci.yml line that calls
         # this very workflow: a product that keeps a release mechanism of
         # its own still names the socle there, and can use this CI.
         run: |
           set -euo pipefail
+          echo "::notice::this CI runs ${SOCLE_RUN:-an unnamed repository} at ${SOCLE_RUN_SHA:-an unnamed commit}"
           sha="$(sed -n 's|.*maelys-release/.github/workflows/release.yml@\([0-9a-f]\{40\}\).*|\1|p' .github/workflows/release.yml 2>/dev/null || true)"
           if [ -z "$sha" ]; then
             sha="$(sed -n 's|.*maelys-release/.github/workflows/check-product\.yml@\([0-9a-f]\{40\}\).*|\1|p' .github/workflows/*.yml | head -n 1)"
           fi
           test -n "$sha" || { echo "no workflow of this repository names a maelys-release commit" >&2; exit 1; }
+          echo "::notice::release.yml of this product pins ${sha}"
           socle="$RUNNER_TEMP/maelys-release"
           git init -q "$socle"
           git -C "$socle" fetch -q --depth 1 https://github.com/maelys-dev/maelys-release.git "$sha"

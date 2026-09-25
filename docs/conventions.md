@@ -227,7 +227,10 @@ socle declares, the observer counts: the same split as the release gate.
   the socle holds them in the ssh `allowed_signers` format, and the release
   workflow verifies the tag's own signature against that file — read at the
   socle commit this product pinned, so the list travels with the version a
-  product adopted. GitHub's `verified` answers a different question: it says
+  product adopted. The workflow takes that commit from the job it runs as,
+  and requires the `uses:` line of the tag's own `release.yml` to name the
+  same one: a replay started from a branch runs a socle the tag never
+  pinned, and is refused there rather than at `publish`. GitHub's `verified` answers a different question: it says
   the key belongs to some account, and every account that may push a tag has
   one. `preflight` and `cut` read the same file before there is a tag, and
   name the key this checkout would sign with, because a refusal after the
