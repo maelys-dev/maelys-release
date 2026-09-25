@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.62.1 — 2026-09-25
 
 - **The socle's own formula workflow starts.** A called workflow may not
   ask for more than its caller allows, and `tap.yml`'s bottle job asks for
