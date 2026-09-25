@@ -1,3 +1,13 @@
 self-hosted-runner:
   # Official public-preview labels not yet bundled with actionlint 1.7.12.
   labels: [ubuntu-26.04, ubuntu-26.04-arm]
+paths:
+  .github/workflows/release.yml:
+    ignore:
+      # github.job_workflow_ref and github.job_workflow_sha are documented
+      # properties of the github context -- the ref and commit of the
+      # *reusable* workflow a job is running, which is what lets the
+      # signature check read the allowed signers at the commit the product
+      # pinned. actionlint 1.7.12 does not carry them in its context type
+      # yet. Narrow on purpose: this file, these two names.
+      - 'property "job_workflow_(ref|sha)" is not defined'
