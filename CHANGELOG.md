@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased
+
+- **The command installs, and an installed copy knows its own commit.**
+  `brew install maelys-dev/tap/maelys-release` renders from the tag's own
+  source archive, so this repository still publishes no artifact and its
+  release is still the signed tag alone — the formula is a pointer to it.
+  What made an installation useless until now was the pin: a product names
+  the socle by commit, and a copy without `.git` could not say which commit
+  it was, so it refused every write and handed back a `git ls-remote` to run
+  by hand. The archive carries it now. `INSTALLED.pin` holds two
+  `$Format:` placeholders that git expands when it builds the archive of a
+  tag — the tarball a formula downloads — in the two-line shape every
+  `dependencies/*.pin` already uses. Read closed: forty hexadecimal
+  characters and a tag that is this copy's own `VERSION`, or the refusal
+  stands and names the `--socle-sha` to pass. A copy whose two halves
+  disagree is refused outright. Measured on git itself, in the suite: the
+  archive carries the commit, the checkout keeps the placeholder, and a
+  product created from an installed prefix carries the right pin.
+- **Impact.** [asks: nothing] [writes: nothing] Nothing for a product: the
+  formula and the archived pin concern whoever runs the command. A product
+  is still adopted by a socle at a tag, pinned by commit, and reads the
+  same files.
+
 ## 0.61.0 — 2026-09-25
 
 - **A private pin can travel to a runner that may not read it.** The macOS

@@ -153,6 +153,44 @@ class SocleProgram(cli.Program):
         return invocation, {**command, "handler": checked}
 
 
+def archived_identity(root: pathlib.Path) -> "tuple[str, str] | None":
+    """The tag and commit the archive was made from, or None outside one.
+
+    A product pins the socle by commit, so a socle that cannot name its own
+    commit cannot write a product's workflows: an installed copy used to
+    refuse every write and hand the operator a `git ls-remote` to run by
+    hand. It does not have to. `INSTALLED.pin` carries `$Format:` place
+    holders that git expands when it builds the archive of a tag -- which is
+    how GitHub builds the tarball a Homebrew formula downloads -- so the tag
+    and its commit travel inside the archive itself, in the two-line shape
+    every `dependencies/*.pin` already uses.
+
+    Read closed: the commit must be forty hexadecimal characters and the tag
+    must be the `v` of this copy's own VERSION. An unexpanded placeholder,
+    a tarball built by something that ignores export-subst, or a file edited
+    by hand all read as absent, and the refusal that follows names the
+    commit the operator must pass. Nothing here trusts a file over the
+    archive's own digest: what ties this copy to that commit is the sha256
+    the formula verified before unpacking it.
+    """
+    pin = root / "INSTALLED.pin"
+    if not pin.is_file():
+        return None
+    lines = pin.read_text(encoding="utf-8").splitlines()
+    if len(lines) < 2:
+        return None
+    described, commit = lines[0].strip(), lines[1].strip()
+    if not re.fullmatch(r"[0-9a-f]{40}", commit):
+        return None
+    expected = f"v{socle_version()}"
+    if described != expected:
+        raise Failure("PRECONDITION_FAILED",
+                      f"this copy says VERSION {socle_version()} and was archived at {described or 'no tag'}:"
+                      " the two disagree, so what it would write names a commit that does not produce it.",
+                      "Install a copy of one tag, or run from a checkout at that tag.")
+    return commit, described
+
+
 def socle_identity(sha: str, tag: str) -> tuple[str, str]:
     """The commit and tag written into the managed files.
 
@@ -165,9 +203,12 @@ def socle_identity(sha: str, tag: str) -> tuple[str, str]:
         return sha, tag or "untagged"
     root = socle_root()
     if not (root / ".git").exists():
+        recorded = archived_identity(root)
+        if recorded:
+            return recorded
         version = socle_version()
-        raise Failure("PRECONDITION_FAILED", "This socle is not a git checkout (an archive of a tag, or an installed"
-                      " copy), so its commit is unknown, and the pin must name the commit.",
+        raise Failure("PRECONDITION_FAILED", "This socle is not a git checkout and its archive carries no commit"
+                      " (INSTALLED.pin was not expanded), so its commit is unknown, and the pin must name the commit.",
                       f"Pass the commit of the tag: --socle-sha \"$(git ls-remote https://github.com/{SOCLE_REPOSITORY}.git"
                       f" 'v{version}^{{}}' | cut -f1)\" --socle-tag v{version}; or run from a checkout at that tag.")
     dirty = git("status", "--porcelain", "--", "share", "bin", "VERSION", cwd=root, check=False)

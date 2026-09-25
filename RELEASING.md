@@ -29,7 +29,14 @@ workflows, so `preflight` and `rehearse` do not apply here.
    whose checks passed and pushes the signed tag. The command takes the
    repository as an operand and never `cd`s: a tag has been created in the
    wrong repository that way.
-5. Tell the products. They re-adopt at their next release, never in a
+5. Pushing the tag starts `formula.yml`, which renders
+   `packaging/homebrew/maelys-release.rb.in` from that tag's own source
+   archive and pushes it to the tap. It publishes no artifact: the formula
+   is a pointer to the archive GitHub builds. Without the tap credentials it
+   renders and lints only, says so in a warning, and keeps the formula as an
+   artifact — adding this repository to the organisation secret's list is
+   the operator's gesture.
+6. Tell the products. They re-adopt at their next release, never in a
    dedicated pull request; the changelog names what they must change by hand.
 
 A published tag is never moved, deleted or force-pushed.
