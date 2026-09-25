@@ -253,13 +253,24 @@ class ReleaseWorkflowSignatureTest(unittest.TestCase):
     def test_the_workflow_reads_the_socle_the_product_pinned_and_fails_closed(self) -> None:
         step = WORKFLOW.split("Verify the tag was signed by a key the fleet names", 1)[1]
         step = step.split("- name: Verify the tag's commit", 1)[0]
-        # The file is read at the reusable workflow's own commit, which is
-        # the one the product pinned, and from its own repository.
-        self.assertIn("github.job_workflow_sha", step)
-        self.assertIn("github.job_workflow_ref", step)
+        # The file is read at the commit of the workflow this job runs,
+        # which is the one the product pinned. Not github.job_workflow_sha:
+        # GitHub calls that one a documentation bug, it exists as an OIDC
+        # claim, and a real run measured it empty -- the pilot's v0.2.0.
+        self.assertIn("job.workflow_sha", step)
+        self.assertIn("job.workflow_repository", step)
+        # The comment keeps the name, because it records why; what must
+        # not come back is the expression.
+        self.assertNotIn("${{ github.job_workflow", step)
         self.assertIn("contents/share/allowed-signers?ref=${SOCLE_SHA}", step)
+        # And the socle that runs must be the one this tag pinned: a replay
+        # started from a branch runs another socle, and is refused here
+        # rather than by the environment after three builds.
+        self.assertIn("release\\.yml@[0-9a-f]{40}", step)
+        self.assertIn('"$SOCLE_SHA") ;;', step)
+        self.assertIn("replay it with --ref", step)
         # Every way out is a refusal, and none falls back to GitHub's verdict.
-        for guard in ('test -n "$SOCLE_SHA"', 'test -n "$socle"', 'test -s "$signers"',
+        for guard in ('test -n "$SOCLE_SHA"', 'test -n "$SOCLE"', 'test -s "$signers"',
                       'test -s "$RUNNER_TEMP/signature"', 'test -n "$principal"'):
             self.assertIn(guard, step, guard)
         self.assertIn("ssh-keygen -Y find-principals", step)

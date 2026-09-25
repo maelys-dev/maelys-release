@@ -25,9 +25,19 @@
   "may this key sign a Maelys release". `share/allowed-signers` answers
   that one, in the ssh `allowed_signers` format, and the release workflow
   verifies the tag's own signature against it — read at the socle commit
-  the product pinned, through `job_workflow_sha`, so the list travels with
+  the product pinned, through `job.workflow_sha`, so the list travels with
   the version a product adopted rather than with whatever the socle's
-  default branch holds today. `preflight` and `cut` read the same file
+  default branch holds today. **That commit is read where GitHub puts it**:
+  the first candidate read `github.job_workflow_sha`, which GitHub itself
+  calls a documentation bug — it exists as an OIDC claim and never in this
+  context — and the pilot measured it **empty in a real run**, its v0.2.0
+  stopping on `the reusable workflow's own commit is unknown` and costing
+  that repository a version. Read from a description, the property was
+  right; run, it was not there. The step also refuses a socle that is not
+  the one the tag pinned: a replay started from a branch runs another
+  socle, and stops in seconds rather than at `publish` after three builds.
+  Every product's CI now prints, as a notice, the commit GitHub says it is
+  running beside the one its `release.yml` pins. `preflight` and `cut` read the same file
   before there is a tag and name the key this checkout would sign with: a
   refusal after the push would cost a version, since a published tag is
   never moved. Fails closed at every step — no reusable-workflow commit,

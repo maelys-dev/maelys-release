@@ -176,8 +176,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.tag.outputs.tag }}
-          SOCLE_REF: ${{ github.job_workflow_ref }}
-          SOCLE_SHA: ${{ github.job_workflow_sha }}
+          # The workflow that defines this job: the socle, at the commit the
+          # product's release.yml names. The first candidate read
+          # github.job_workflow_sha, which GitHub calls a documentation bug
+          # -- it exists as an OIDC claim and never in this context -- and
+          # the pilot measured it empty on its v0.2.0, run 36116807658,
+          # which cost that repository a version. job.workflow_* is what
+          # GitHub fills.
+          SOCLE: ${{ job.workflow_repository }}
+          SOCLE_SHA: ${{ job.workflow_sha }}
         shell: bash
         # GitHub's `verified` says the key belongs to some account, and every
         # account that may push a tag to this repository has such a key. This
@@ -185,27 +192,46 @@ jobs:
         # the product pinned, are read at that commit, and a tag signed by
         # anything else stops here -- before a single artifact is built.
         #
-        # Fail closed at every step: no reusable-workflow commit, no file, an
-        # empty file, no matching principal, a signature that does not verify
-        # against it. None of them falls back to GitHub's own verdict.
+        # Fail closed at every step: no socle commit, a socle this tag did
+        # not pin, no file, an empty file, no matching principal, a signature
+        # that does not verify. None of them falls back to GitHub's verdict.
         run: |
           set -euo pipefail
-          test -n "$SOCLE_SHA" || { echo "the reusable workflow's own commit is unknown" >&2; exit 1; }
-          socle="${SOCLE_REF%%/.github/*}"
-          test -n "$socle" || { echo "the reusable workflow's own repository is unknown" >&2; exit 1; }
+          refuse() { echo "$1" >&2; exit 1; }
+          test -n "$SOCLE_SHA" || refuse "the socle judging ${TAG} is unknown: job.workflow_sha is empty"
+          test -n "$SOCLE" || refuse "the socle judging ${TAG} is unknown: job.workflow_repository is empty"
+          case "$SOCLE_SHA" in
+            *[!0-9a-f]*|"") refuse "the socle judging ${TAG} is not a commit: ${SOCLE_SHA}" ;;
+          esac
+          test "${#SOCLE_SHA}" = 40 || refuse "the socle judging ${TAG} is not a commit: ${SOCLE_SHA}"
+          # The socle this run executes must be the one this tag pinned. On a
+          # tag push they are one file; on a replay they agree only when the
+          # replay started from the tag, which is the only replay the
+          # conventions allow -- and one started from a branch is refused
+          # here, in seconds, rather than by the environment after three
+          # builds.
+          pinned="$( { grep -Eo "${SOCLE}/\.github/workflows/release\.yml@[0-9a-f]{40}" \
+                         .github/workflows/release.yml || true; } | sed -E 's/.*@//' | sort -u)"
+          case "$pinned" in
+            "$SOCLE_SHA") ;;
+            "") refuse "${TAG} names no ${SOCLE} commit in .github/workflows/release.yml: the socle judging it is not the one it pinned" ;;
+            *) refuse "this run executes ${SOCLE} at ${SOCLE_SHA} but ${TAG} pinned $(tr '\n' ' ' <<<"$pinned"): replay it with --ref ${TAG}" ;;
+          esac
           signers="$RUNNER_TEMP/allowed-signers"
-          gh api "repos/${socle}/contents/share/allowed-signers?ref=${SOCLE_SHA}" --jq .content \
-            | base64 -d >"$signers"
-          test -s "$signers" || { echo "${socle} at ${SOCLE_SHA} names no allowed signer" >&2; exit 1; }
+          gh api "repos/${SOCLE}/contents/share/allowed-signers?ref=${SOCLE_SHA}" --jq .content \
+            >"$RUNNER_TEMP/signers.b64" \
+            || refuse "${SOCLE} at ${SOCLE_SHA} has no share/allowed-signers, or this token cannot read it"
+          base64 -d "$RUNNER_TEMP/signers.b64" >"$signers"
+          test -s "$signers" || refuse "${SOCLE} at ${SOCLE_SHA} names no allowed signer"
           ref="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" --jq .object.sha)"
           gh api "repos/${GITHUB_REPOSITORY}/git/tags/${ref}" >"$RUNNER_TEMP/tag.json"
           # -j: the payload is signed byte for byte, and a trailing newline
           # jq would add of its own is one byte too many.
           jq -rj .verification.payload "$RUNNER_TEMP/tag.json" >"$RUNNER_TEMP/payload"
           jq -rj .verification.signature "$RUNNER_TEMP/tag.json" >"$RUNNER_TEMP/signature"
-          test -s "$RUNNER_TEMP/signature" || { echo "${TAG} carries no signature GitHub could read" >&2; exit 1; }
+          test -s "$RUNNER_TEMP/signature" || refuse "${TAG} carries no signature GitHub could read"
           grep -q '^-----BEGIN SSH SIGNATURE-----' "$RUNNER_TEMP/signature" \
-            || { echo "${TAG} carries no ssh signature: a Maelys release is signed with an ssh key" >&2; exit 1; }
+            || refuse "${TAG} carries no ssh signature: a Maelys release is signed with an ssh key"
           # An sshsig carries no timestamp of its own, so ssh-keygen judges
           # valid-after and valid-before against the clock of whoever runs
           # it. Judged at the clock, a key retired with valid-before stops
@@ -224,18 +250,16 @@ jobs:
           # claim to be old. Absent, this stops: a verdict without its date
           # is not a verdict.
           seen="$(jq -r '.verification.verified_at // empty' "$RUNNER_TEMP/tag.json")"
-          test -n "$seen" || { echo "${TAG} carries no verified_at: GitHub did not say when it saw this tag" >&2
-                               exit 1; }
+          test -n "$seen" || refuse "${TAG} carries no verified_at: GitHub did not say when it saw this tag"
           signed_at="$(printf '%s' "$seen" | tr -d ':-' | tr 'T' ' ' | cut -d' ' -f1,2 | tr -d ' ')"
-          case "$signed_at" in ''|*[!0-9Zz]*) echo "${TAG} has an unreadable verified_at: ${seen}" >&2; exit 1 ;; esac
+          case "$signed_at" in ''|*[!0-9Zz]*) refuse "${TAG} has an unreadable verified_at: ${seen}" ;; esac
           principal="$(ssh-keygen -Y find-principals -O "verify-time=${signed_at}" \
             -f "$signers" -s "$RUNNER_TEMP/signature" | head -n 1)" \
-            || { echo "${TAG} is signed by a key ${socle} did not name on ${signed_at}: it may not publish here" >&2
-                 exit 1; }
-          test -n "$principal" || { echo "${TAG} is signed by a key ${socle} does not name" >&2; exit 1; }
+            || refuse "${TAG} is signed by a key ${SOCLE} did not name on ${signed_at}: it may not publish here"
+          test -n "$principal" || refuse "${TAG} is signed by a key ${SOCLE} does not name"
           ssh-keygen -Y verify -O "verify-time=${signed_at}" -f "$signers" -I "$principal" -n git \
             -s "$RUNNER_TEMP/signature" <"$RUNNER_TEMP/payload"
-          echo "${TAG} is signed by ${principal}, named by ${socle} at ${SOCLE_SHA}, allowed on ${signed_at}"
+          echo "${TAG} is signed by ${principal}, named by ${SOCLE} at ${SOCLE_SHA}, allowed on ${signed_at}"
       - name: Verify the tag's commit
         if: inputs.commit_verification != 'none'
         env:

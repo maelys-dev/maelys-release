@@ -2,12 +2,19 @@ self-hosted-runner:
   # Official public-preview labels not yet bundled with actionlint 1.7.12.
   labels: [ubuntu-26.04, ubuntu-26.04-arm]
 paths:
+  .github/workflows/check-product.yml:
+    ignore:
+      # Same two members of the job context as release.yml below: here they
+      # only print a notice, so that every product's CI says whether GitHub
+      # fills them.
+      - 'property "workflow_(sha|repository)" is not defined'
   .github/workflows/release.yml:
     ignore:
-      # github.job_workflow_ref and github.job_workflow_sha are documented
-      # properties of the github context -- the ref and commit of the
-      # *reusable* workflow a job is running, which is what lets the
-      # signature check read the allowed signers at the commit the product
-      # pinned. actionlint 1.7.12 does not carry them in its context type
-      # yet. Narrow on purpose: this file, these two names.
-      - 'property "job_workflow_(ref|sha)" is not defined'
+      # job.workflow_sha and job.workflow_repository name the reusable
+      # workflow a job is running -- for the signature check, the socle
+      # commit the product pinned. GitHub added them in April 2026, after
+      # calling github.job_workflow_sha a documentation bug: that one is an
+      # OIDC claim and was measured empty in a real run, which cost the
+      # pilot a version. actionlint 1.7.12 does not carry the job context's
+      # new members. Narrow on purpose: this file, these two names.
+      - 'property "workflow_(sha|repository)" is not defined'
