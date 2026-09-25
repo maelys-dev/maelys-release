@@ -1962,6 +1962,211 @@
         },
         {
           "available": true,
+          "effect": "execute",
+          "exitCodes": {
+            "0": "command completed",
+            "1": "execution failed",
+            "2": "valid report with violations"
+          },
+          "external": false,
+          "hidden": false,
+          "id": "signers",
+          "input": {
+            "constraints": [
+              {
+                "kind": "at-most-one",
+                "options": [
+                  "--add",
+                  "--retire"
+                ]
+              },
+              {
+                "kind": "requires",
+                "options": [
+                  "--principal",
+                  "--add"
+                ]
+              },
+              {
+                "kind": "at-most-one",
+                "options": [
+                  "--retire",
+                  "--add"
+                ]
+              },
+              {
+                "kind": "requires",
+                "options": [
+                  "--at",
+                  "--retire"
+                ]
+              }
+            ],
+            "operands": [
+              {
+                "name": "DIR",
+                "required": true,
+                "summary": "Product repository.",
+                "variadic": false
+              }
+            ],
+            "options": [
+              {
+                "argument": {
+                  "name": "FILE",
+                  "type": "path"
+                },
+                "conflictsWith": [
+                  "--retire"
+                ],
+                "long": "--add",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "Public key file to name, with --principal."
+              },
+              {
+                "argument": {
+                  "name": "NAME",
+                  "type": "string"
+                },
+                "conflictsWith": [],
+                "long": "--principal",
+                "repeatable": false,
+                "required": false,
+                "requires": [
+                  "--add"
+                ],
+                "summary": "The identity that key signs as, as in an email."
+              },
+              {
+                "argument": {
+                  "name": "WHO",
+                  "type": "string"
+                },
+                "conflictsWith": [
+                  "--add"
+                ],
+                "long": "--retire",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "Principal or SHA256 fingerprint to stop from signing new tags."
+              },
+              {
+                "argument": {
+                  "name": "TIME",
+                  "type": "string"
+                },
+                "conflictsWith": [],
+                "long": "--at",
+                "repeatable": false,
+                "required": false,
+                "requires": [
+                  "--retire"
+                ],
+                "summary": "When it stopped being trusted, YYYYMMDD[HHMM[SS]]Z; now by default."
+              },
+              {
+                "conflictsWith": [],
+                "long": "--apply",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "Write the file instead of only reporting what it would become."
+              }
+            ],
+            "passthrough": false,
+            "synopsis": "signers DIR [--add FILE] [--principal NAME] [--retire WHO] [--at TIME] [--apply]"
+          },
+          "outputMode": "json-envelope",
+          "outputSchema": {
+            "additionalProperties": false,
+            "properties": {
+              "action": {
+                "enum": [
+                  "list",
+                  "add",
+                  "retire"
+                ]
+              },
+              "diff": {
+                "type": "boolean"
+              },
+              "file": {
+                "type": "string"
+              },
+              "line": {
+                "type": "string"
+              },
+              "next": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "retired": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "signers": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "fingerprint": {
+                      "type": "string"
+                    },
+                    "options": {
+                      "type": "string"
+                    },
+                    "principal": {
+                      "type": "string"
+                    },
+                    "refusal": {
+                      "type": "string"
+                    },
+                    "signsToday": {
+                      "type": "boolean"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "principal",
+                    "options",
+                    "type",
+                    "fingerprint",
+                    "signsToday",
+                    "refusal"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "wrote": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "file",
+              "action",
+              "signers",
+              "wrote",
+              "next"
+            ],
+            "type": "object"
+          },
+          "pattern": [
+            "signers"
+          ],
+          "purpose": "List the keys that may sign a release of this fleet, or prepare one line of that file; --apply writes it.",
+          "usage": "signers DIR [--add FILE] [--principal NAME] [--retire WHO] [--at TIME] [--apply]"
+        },
+        {
+          "available": true,
           "effect": {
             "apply": "commit",
             "plan": "preview"
