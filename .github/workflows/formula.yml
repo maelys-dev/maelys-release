@@ -59,12 +59,15 @@ jobs:
           jq -rj .verification.signature "$RUNNER_TEMP/tag.json" >"$RUNNER_TEMP/signature"
           grep -q '^-----BEGIN SSH SIGNATURE-----' "$RUNNER_TEMP/signature" \
             || { echo "${TAG} carries no ssh signature" >&2; exit 1; }
-          # The tagger date the signature covers, never the clock: a key
-          # retired since then still verifies what it signed while allowed.
-          epoch="$(awk '/^tagger /{print $(NF-1); exit}' "$RUNNER_TEMP/payload")"
-          case "$epoch" in ''|*[!0-9]*) echo "${TAG} has no tagger date in its signed payload" >&2; exit 1 ;; esac
-          signed_at="$(date -u -d "@${epoch}" +%Y%m%d%H%M%SZ 2>/dev/null \
-            || date -u -r "${epoch}" +%Y%m%d%H%M%SZ)"
+          # The moment GitHub saw the tag, which the signer does not write,
+          # rather than the clock (a retirement would break every tag the key
+          # ever signed) or the tagger date (a stolen key backdates its tag
+          # and walks through its own retirement -- measured).
+          seen="$(jq -r '.verification.verified_at // empty' "$RUNNER_TEMP/tag.json")"
+          test -n "$seen" || { echo "${TAG} carries no verified_at: GitHub did not say when it saw this tag" >&2
+                               exit 1; }
+          signed_at="$(printf '%s' "$seen" | tr -d ':-' | tr 'T' ' ' | cut -d' ' -f1,2 | tr -d ' ')"
+          case "$signed_at" in ''|*[!0-9Zz]*) echo "${TAG} has an unreadable verified_at: ${seen}" >&2; exit 1 ;; esac
           principal="$(ssh-keygen -Y find-principals -O "verify-time=${signed_at}" \
             -f "$RUNNER_TEMP/allowed-signers" -s "$RUNNER_TEMP/signature" | head -n 1)" \
             || { echo "${TAG} is signed by a key this repository did not name on ${signed_at}" >&2; exit 1; }

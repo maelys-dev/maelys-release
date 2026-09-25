@@ -208,19 +208,26 @@ jobs:
             || { echo "${TAG} carries no ssh signature: a Maelys release is signed with an ssh key" >&2; exit 1; }
           # An sshsig carries no timestamp of its own, so ssh-keygen judges
           # valid-after and valid-before against the clock of whoever runs
-          # it. Judged against today, a key retired with valid-before stops
-          # verifying every tag it ever signed, and a replay of an old
-          # release -- which is how a failed publication is repeated, since
-          # a published tag is never moved -- fails on the day of the
-          # retirement. The tag's own tagger date is inside the payload the
-          # signature covers, so it is as authentic as the signature, and it
-          # is the moment this key had to be allowed to sign.
-          epoch="$(awk '/^tagger /{print $(NF-1); exit}' "$RUNNER_TEMP/payload")"
-          case "$epoch" in ''|*[!0-9]*) echo "${TAG} has no tagger date in its signed payload" >&2; exit 1 ;; esac
-          # GNU date on the Linux runner this job declares; the BSD form
-          # keeps the step honest wherever a product points it.
-          signed_at="$(date -u -d "@${epoch}" +%Y%m%d%H%M%SZ 2>/dev/null \
-            || date -u -r "${epoch}" +%Y%m%d%H%M%SZ)"
+          # it. Judged at the clock, a key retired with valid-before stops
+          # verifying every tag it ever signed, and a replay -- which is how
+          # a failed publication is repeated, since a published tag is never
+          # moved -- fails on the day of the retirement.
+          #
+          # The tag's own tagger date fixes that and opens a worse hole: it
+          # sits in the payload the signer writes, so a stolen key backdates
+          # its tag and walks through its own retirement. Measured.
+          #
+          # GitHub's verified_at is neither: it is the moment GitHub saw the
+          # tag, recorded once, and the signer does not write it. A replay
+          # reads the same tag object and gets the same moment, so an old
+          # release still verifies; a tag pushed after the retirement cannot
+          # claim to be old. Absent, this stops: a verdict without its date
+          # is not a verdict.
+          seen="$(jq -r '.verification.verified_at // empty' "$RUNNER_TEMP/tag.json")"
+          test -n "$seen" || { echo "${TAG} carries no verified_at: GitHub did not say when it saw this tag" >&2
+                               exit 1; }
+          signed_at="$(printf '%s' "$seen" | tr -d ':-' | tr 'T' ' ' | cut -d' ' -f1,2 | tr -d ' ')"
+          case "$signed_at" in ''|*[!0-9Zz]*) echo "${TAG} has an unreadable verified_at: ${seen}" >&2; exit 1 ;; esac
           principal="$(ssh-keygen -Y find-principals -O "verify-time=${signed_at}" \
             -f "$signers" -s "$RUNNER_TEMP/signature" | head -n 1)" \
             || { echo "${TAG} is signed by a key ${socle} did not name on ${signed_at}: it may not publish here" >&2

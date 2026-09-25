@@ -13,6 +13,7 @@ hold is the sequence the workflow runs, not a description of it.
 """
 from __future__ import annotations
 
+import os
 import pathlib
 import re
 import shutil
@@ -102,7 +103,11 @@ class AllowedSignersFileTest(unittest.TestCase):
                          {"namespaces": "git,file", "valid-before": "20260901"})
         self.assertEqual(signer_options("cert-authority"), {"cert-authority": ""})
         self.assertEqual(signer_date("20260901"), "20260901000000")
-        self.assertEqual(signer_date("20260901T1230Z"), "20260901123000")
+        self.assertEqual(signer_date("202609011230Z"), "20260901123000")
+        # The shapes ssh-keygen refuses are refused here too, rather
+        # than read as a time it never accepted.
+        self.assertEqual(signer_date("20260901T1230Z"), "")
+        self.assertEqual(signer_date("2026-09-01"), "")
 
 
 class SigningKeyNamedTest(unittest.TestCase):
@@ -260,13 +265,78 @@ class ReleaseWorkflowSignatureTest(unittest.TestCase):
         self.assertIn("ssh-keygen -Y find-principals", step)
         self.assertIn("ssh-keygen -Y verify", step)
         self.assertIn("-n git", step)
-        # Judged at the tag's own tagger date, which the signature covers,
-        # and not at the clock of whoever replays the publication.
-        self.assertIn("awk '/^tagger /{print $(NF-1); exit}'", step)
+        # Judged at the moment GitHub saw the tag -- which the signer does
+        # not write -- and never at the tagger date, which is inside the
+        # payload the signer signs.
+        self.assertIn(".verification.verified_at", step)
+        self.assertNotIn("awk '/^tagger /", step)
+        self.assertIn('test -n "$seen"', step)
         self.assertEqual(step.count('-O "verify-time=${signed_at}"'), 2)
         # jq -j: the payload is signed byte for byte.
         self.assertIn("jq -rj .verification.payload", step)
         self.assertRegex(step, r"set -euo pipefail")
+
+
+class BackdatedTagTest(unittest.TestCase):
+    """Why the moment is read from GitHub and not from the tag.
+
+    The tagger date sits in the payload the signature covers, so it is
+    authentic -- and written by whoever signs. A stolen key that backdates
+    its tag walks through its own retirement, which is the opposite of what
+    a retirement is for. The moment GitHub recorded is neither the clock nor
+    the signer's word.
+    """
+
+    def setUp(self) -> None:
+        if not shutil.which("ssh-keygen"):
+            self.skipTest("ssh-keygen is required")
+        self.dir = pathlib.Path(tempfile.mkdtemp(prefix="maelys-backdated-"))
+        self.addCleanup(shutil.rmtree, self.dir, True)
+        subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(self.dir / "key")],
+                       check=True, capture_output=True)
+        public = (self.dir / "key.pub").read_text(encoding="utf-8").strip()
+        self.retired = self.dir / "retired"
+        # Trusted until the first of September, retired since.
+        self.retired.write_text(f'thief@example.invalid namespaces="git",valid-before="20260901000000Z" '
+                                f"{public}\n", encoding="utf-8")
+        repository = self.dir / "repository"
+        repository.mkdir()
+        git("init", "-q", "-b", "main", ".", cwd=repository)
+        for key, value in (("user.name", "Thief"), ("user.email", "thief@example.invalid"),
+                           ("commit.gpgsign", "false"), ("tag.gpgsign", "true"),
+                           ("gpg.format", "ssh"), ("user.signingkey", str(self.dir / "key.pub"))):
+            git("config", key, value, cwd=repository)
+        (repository / "VERSION").write_text("1.0.0\n", encoding="utf-8")
+        git("add", "-A", cwd=repository)
+        git("commit", "-q", "-m", "one", cwd=repository)
+        # Signed now, dated back to a day the key was still trusted.
+        subprocess.run(["git", "-C", str(repository), "tag", "-a", "-m", "backdated", "v1.0.0"],
+                       check=True, capture_output=True,
+                       env={**os.environ, "GIT_COMMITTER_DATE": "2026-08-01T12:00:00+0000"})
+        raw = subprocess.run(["git", "-C", str(repository), "cat-file", "tag", "v1.0.0"],
+                             capture_output=True, check=True).stdout
+        start = raw.index(b"-----BEGIN SSH SIGNATURE-----")
+        (self.dir / "payload").write_bytes(raw[:start])
+        (self.dir / "signature").write_bytes(raw[start:])
+
+    def principals(self, at: str) -> subprocess.CompletedProcess:
+        return subprocess.run(["ssh-keygen", "-Y", "find-principals", "-O", f"verify-time={at}",
+                               "-f", str(self.retired), "-s", str(self.dir / "signature")],
+                              capture_output=True, text=True)
+
+    def test_the_tagger_date_lets_a_retired_key_through(self) -> None:
+        """What the payload says, and why the workflows stopped reading it."""
+        tagger = [line for line in (self.dir / "payload").read_text(encoding="utf-8").splitlines()
+                  if line.startswith("tagger ")][0]
+        self.assertIn("1785585600", tagger, "the tag claims the first of August")
+        self.assertEqual(self.principals("20260801120000Z").returncode, 0,
+                         "judged at the date the signer wrote, the retirement is walked through")
+
+    def test_the_moment_github_saw_it_does_not(self) -> None:
+        """The same signature, judged at a moment the signer cannot write."""
+        refused = self.principals("20260925024021Z")
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("expired", refused.stdout + refused.stderr)
 
 
 class SocleHoldsItselfTest(unittest.TestCase):
@@ -296,7 +366,8 @@ class SocleHoldsItselfTest(unittest.TestCase):
                 ('git show "${TAG}:share/allowed-signers"', "the list the tag itself publishes"),
                 ("ssh-keygen -Y find-principals", "a key the file names"),
                 ("ssh-keygen -Y verify", "and the signature verifies"),
-                ('-O "verify-time=${signed_at}"', "at the tagger date, not at the clock")):
+                (".verification.verified_at", "at the moment GitHub saw the tag"),
+                ('-O "verify-time=${signed_at}"', "and never at the clock")):
             self.assertIn(guard, step, why)
         self.assertEqual(step.count('-O "verify-time=${signed_at}"'), 2)
         self.assertIn("set -euo pipefail", step)

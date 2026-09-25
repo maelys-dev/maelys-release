@@ -77,6 +77,10 @@ def signer_line_refuses(options: dict[str, str], today: str) -> str:
     # own tagger date. Here the signature does not exist yet, so the moment
     # is now -- the moment this checkout would sign.
     after, before = options.get("valid-after", ""), options.get("valid-before", "")
+    for name, value in (("valid-after", after), ("valid-before", before)):
+        if value and not signer_date(value):
+            return (f'the line carries {name}="{value}", which ssh-keygen reads as an invalid time:'
+                    " the shape is YYYYMMDD, or YYYYMMDDHHMM[SS], with an optional Z and no separator")
     if after and today < signer_date(after):
         return f"the line allows this key only after {after}"
     if before and today >= signer_date(before):
@@ -84,10 +88,20 @@ def signer_line_refuses(options: dict[str, str], today: str) -> str:
     return ""
 
 
+SIGNER_TIME = re.compile(r"[0-9]{8}([0-9]{4}([0-9]{2})?)?[Zz]?")
+
+
 def signer_date(value: str) -> str:
-    """YYYYMMDD[HHMM[SS]][Z] padded to the comparable YYYYMMDDHHMMSS."""
-    digits = value.rstrip("Zz").replace("-", "").replace(":", "").replace("T", "")
-    return (digits + "0" * 14)[:14]
+    """YYYYMMDD[HHMM[SS]][Z] padded to the comparable YYYYMMDDHHMMSS, or "".
+
+    The shape ssh-keygen accepts and nothing else: it reads no separator,
+    and answers `invalid "valid-before" time` to a line carrying one --
+    measured. A reader more permissive than the tool that decides is a
+    reader that says ok to a line the release will refuse.
+    """
+    if not SIGNER_TIME.fullmatch(value):
+        return ""
+    return (value.rstrip("Zz") + "0" * 14)[:14]
 
 
 def public_key(project: pathlib.Path, declared: str) -> str:

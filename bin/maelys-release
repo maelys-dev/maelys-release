@@ -1293,6 +1293,29 @@ def pinned_socle_checkout(sha: str) -> pathlib.Path:
     return cache
 
 
+def release_signers(project: pathlib.Path) -> pathlib.Path:
+    """The allowed signers this product's own release will be judged against.
+
+    The release workflow reads them at the socle commit the product pinned,
+    so `cut` reads them there too. Judging against the list of whichever
+    socle happens to be running says ok to a key the workflow then refuses,
+    after the tag is pushed -- and a published tag is never moved, so that
+    costs a version. `check` and `preflight` relocate to the pinned socle
+    and already judge the right list; `cut` never relocates, which is why it
+    has to fetch that one file itself.
+
+    A repository that pins nothing -- the socle cutting itself -- is judged
+    by the list it carries.
+    """
+    pinned = pinned_socle(project)
+    root = socle_root()
+    if not pinned or os.environ.get("MAELYS_RELEASE_NO_RELOCATE") == "1":
+        return identity.allowed_signers(root)
+    if (root / ".git").exists() and git("rev-parse", "HEAD", cwd=root, check=False) == pinned["sha"]:
+        return identity.allowed_signers(root)
+    return identity.allowed_signers(pinned_socle_checkout(pinned["sha"]))
+
+
 def run_pinned_socle(invocation: Invocation, project: pathlib.Path) -> None:
     """Hand the invocation to the socle the product pins, when this is another one.
 
@@ -1473,7 +1496,7 @@ def handle_preflight(invocation: Invocation) -> tuple[dict, int]:
 
 
 def handle_cut(invocation: Invocation) -> tuple[dict, int]:
-    return cut.handle_cut(invocation, CONTEXT)
+    return cut.handle_cut(invocation, CONTEXT, release_signers)
 
 
 def socle_check_contexts(project: pathlib.Path) -> tuple[str, list[str]]:
