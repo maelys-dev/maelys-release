@@ -19,7 +19,62 @@ permissions:
   contents: read
 
 jobs:
+  # The socle holds itself to the contract it holds products to. release.yml
+  # does this for a product before it builds anything; this repository does
+  # not run release.yml -- its release is the signed tag alone -- so the rule
+  # would have applied to nine products and not to the one that writes it.
+  # Here it applies to both.
+  signed:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: The tag is signed by a key this repository names, and landed on main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        shell: bash
+        # The allowed signers of the tag itself: a product reads the list at
+        # the socle commit it pinned, and the socle has no earlier socle to
+        # read -- so it reads the list this very tag publishes, which is the
+        # list a reader of that tag would see. What keeps that from being a
+        # circle is the last check: the commit must already be on main,
+        # where the branch's own rules stand.
+        run: |
+          set -euo pipefail
+          test "v$(git show "${TAG}:VERSION")" = "$TAG" \
+            || { echo "${TAG} does not name the VERSION its commit carries" >&2; exit 1; }
+          test "$(git cat-file -t "$TAG")" = tag \
+            || { echo "${TAG} is not an annotated tag" >&2; exit 1; }
+          git merge-base --is-ancestor "${TAG}^{commit}" origin/main \
+            || { echo "${TAG} is not on main: a tag on a branch publishes nothing" >&2; exit 1; }
+          signers="$(git show "${TAG}:share/allowed-signers")"
+          test -n "$signers" || { echo "${TAG} names no allowed signer" >&2; exit 1; }
+          printf '%s\n' "$signers" >"$RUNNER_TEMP/allowed-signers"
+          object="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" --jq .object.sha)"
+          gh api "repos/${GITHUB_REPOSITORY}/git/tags/${object}" >"$RUNNER_TEMP/tag.json"
+          jq -rj .verification.payload "$RUNNER_TEMP/tag.json" >"$RUNNER_TEMP/payload"
+          jq -rj .verification.signature "$RUNNER_TEMP/tag.json" >"$RUNNER_TEMP/signature"
+          grep -q '^-----BEGIN SSH SIGNATURE-----' "$RUNNER_TEMP/signature" \
+            || { echo "${TAG} carries no ssh signature" >&2; exit 1; }
+          # The tagger date the signature covers, never the clock: a key
+          # retired since then still verifies what it signed while allowed.
+          epoch="$(awk '/^tagger /{print $(NF-1); exit}' "$RUNNER_TEMP/payload")"
+          case "$epoch" in ''|*[!0-9]*) echo "${TAG} has no tagger date in its signed payload" >&2; exit 1 ;; esac
+          signed_at="$(date -u -d "@${epoch}" +%Y%m%d%H%M%SZ 2>/dev/null \
+            || date -u -r "${epoch}" +%Y%m%d%H%M%SZ)"
+          principal="$(ssh-keygen -Y find-principals -O "verify-time=${signed_at}" \
+            -f "$RUNNER_TEMP/allowed-signers" -s "$RUNNER_TEMP/signature" | head -n 1)" \
+            || { echo "${TAG} is signed by a key this repository did not name on ${signed_at}" >&2; exit 1; }
+          test -n "$principal" || { echo "${TAG} is signed by a key this repository does not name" >&2; exit 1; }
+          ssh-keygen -Y verify -O "verify-time=${signed_at}" -f "$RUNNER_TEMP/allowed-signers" \
+            -I "$principal" -n git -s "$RUNNER_TEMP/signature" <"$RUNNER_TEMP/payload"
+          echo "${TAG} is signed by ${principal} and on main: the formula may go"
+
   formula:
+    needs: signed
     uses: ./.github/workflows/tap.yml
     with:
       product: maelys-release

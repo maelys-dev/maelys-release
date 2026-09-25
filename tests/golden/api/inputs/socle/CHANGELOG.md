@@ -2,6 +2,56 @@
 
 ## Unreleased
 
+- **A release is signed by a key the fleet names.** GitHub's `verified`
+  says the key belongs to some account, and every account that may push a
+  tag to a product has such a key: it answers a different question from
+  "may this key sign a Maelys release". `share/allowed-signers` answers
+  that one, in the ssh `allowed_signers` format, and the release workflow
+  verifies the tag's own signature against it — read at the socle commit
+  the product pinned, through `job_workflow_sha`, so the list travels with
+  the version a product adopted rather than with whatever the socle's
+  default branch holds today. `preflight` and `cut` read the same file
+  before there is a tag and name the key this checkout would sign with: a
+  refusal after the push would cost a version, since a published tag is
+  never moved. Fails closed at every step — no reusable-workflow commit,
+  no file, an empty file, no matching principal, a signature that does not
+  verify — and none of them falls back to GitHub's own verdict. A key is
+  retired with `valid-before` and never deleted, or a past release becomes
+  one that cannot be replayed on its own tag. Measured on the published
+  v0.60.0 tag, whose signature verifies against this file, and in the
+  suite on a tag signed for the test.
+- **Impact.** [asks: nothing] [writes: nothing] Nothing to do for a
+  product that signs with the key the fleet already uses, which is all of
+  them: the same tags verify. A product whose operator signs with another
+  key learns it at `preflight`, before the tag, instead of at the release
+  workflow after it.
+
+## 0.61.0 — 2026-09-25
+
+- **A private pin can travel to a runner that may not read it.** The macOS
+  leg of maelys-warden cloned four public pins and failed on the first
+  private one, `could not read Username`, on a runner that holds no
+  credential and, under the fleet's secrets policy, must not: its machine
+  is shared by several repositories. A new reusable workflow,
+  `carry-dependencies.yml`, bundles the pins its caller names on a machine
+  that may read them, one git bundle per pin, kept one day;
+  `check-product.yml` takes the artifact in `carried_dependencies`, and
+  `scripts/checkout-dependency.sh` clones from a bundle when
+  `MAELYS_DEPENDENCY_BUNDLES` holds one, checking the pinned commit by its
+  hash. **A managed text changes, so this is a minor**: a product re-adopts
+  for its checkouts to read bundles, and adds the carry job and the input
+  to its `ci.yml` by hand — what travels is its decision. `adopt` keeps the
+  carry's `uses:` line at the check's commit. The artifact is readable by
+  whoever reads the product's Actions while it lives; the conventions say
+  so where the mechanism is described.
+  `declarations` reports what travels under `carried` — the pins, the
+  runner of each carry, and what it could not read — so that the fleet
+  stops expecting a direct credential on a runner fed by bundles. `check`
+  reads the carry's `uses:` line back and refuses a commit that is not the
+  check's: a pin held at the end that writes is a pin nothing holds
+  between two adoptions, and bundles made by one socle feeding the check
+  of another is the second contract this exists to prevent.
+
 - **A text naming the documentation repository is refused.** The note of
   0.60.0 becomes the violation it announced: `check` exits 2 on a prose
   file — Markdown or plain text, `CHANGELOG.md` and the managed block
@@ -87,9 +137,21 @@
   repository that has never published. The lesson of the seventeen
   branches reported unprotected while GitHub was refusing to answer, found
   three times in one review of the two readers above. Each is now a note
-  naming what could not be read, and `ready` no longer turns on a refusal
-  either way.
-- **Impact.** [asks: public] [writes: nothing] A public repository whose
+  naming what could not be read, and `ready` stays true on one: the
+  deployment policy is applied by GitHub when a job asks for the
+  environment, not by `preflight`, so a refused reading costs the warning
+  and never the gate. A partial reading keeps what it read and concludes
+  nothing from what it did not: the policies of the pages that answered
+  stay violations when a later page is refused, and a list the reader did
+  not finish says that the tag rule is unanswered rather than missing.
+- **Impact.** [asks: public, pins] [writes: nothing] A product that pins
+  another Maelys repository **re-adopts**: `scripts/checkout-dependency.sh`
+  changes, and a product that moves its socle pin to this version without
+  re-adopting reads `check` exit 2 on `scripts/checkout-dependency.sh:
+  update` — measured on the reference, 195 observations of 715. Carrying a
+  private pin is then its own decision, and its own two lines in `ci.yml`:
+  the carry job and `carried_dependencies`. Nothing changes for a product
+  that carries nothing, beyond the file `adopt` rewrites. A public repository whose
   prose files name the documentation repository removes the lines
   **before adopting**: `check` refuses them, and `adopt` refuses on a
   violation. Measured on nine main branches: one file each on

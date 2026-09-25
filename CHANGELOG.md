@@ -18,10 +18,55 @@
   disagree is refused outright. Measured on git itself, in the suite: the
   archive carries the commit, the checkout keeps the placeholder, and a
   product created from an installed prefix carries the right pin.
-- **Impact.** [asks: nothing] [writes: nothing] Nothing for a product: the
-  formula and the archived pin concern whoever runs the command. A product
-  is still adopted by a socle at a tag, pinned by commit, and reads the
-  same files.
+
+- **A release is signed by a key the fleet names.** GitHub's `verified`
+  says the key belongs to some account, and every account that may push a
+  tag to a product has such a key: it answers a different question from
+  "may this key sign a Maelys release". `share/allowed-signers` answers
+  that one, in the ssh `allowed_signers` format, and the release workflow
+  verifies the tag's own signature against it — read at the socle commit
+  the product pinned, through `job_workflow_sha`, so the list travels with
+  the version a product adopted rather than with whatever the socle's
+  default branch holds today. `preflight` and `cut` read the same file
+  before there is a tag and name the key this checkout would sign with: a
+  refusal after the push would cost a version, since a published tag is
+  never moved. Fails closed at every step — no reusable-workflow commit,
+  no file, an empty file, no matching principal, a signature that does not
+  verify. It stands **beside** GitHub's verdict and not in its place: the
+  workflow still requires `verification.verified` first. A key is retired
+  with `valid-before` and never deleted, or a past release becomes one
+  that cannot be replayed on its own tag — and since an ssh signature
+  carries no timestamp, the workflow judges that option at the tag's own
+  **tagger date**, read from the payload the signature covers, while
+  `preflight` and `cut` judge at today. Judged at the clock instead, a
+  retirement would break every tag that key ever signed, on the day it
+  happened: measured, then corrected. The same reading holds the other
+  options a line may carry — `valid-after`, `cert-authority`,
+  `namespaces` — at both ends, rather than matching the key material and
+  ignoring what stands in front of it. The fleet signs in ssh, so
+  `gpg.format = openpgp` is refused before the tag rather than after.
+  Measured on the published v0.60.0 tag, whose signature still verifies
+  against this file once its key is retired, and in the suite on a tag
+  signed for the test.
+  **The socle holds itself to it.** It does not run `release.yml` — its
+  release is the signed tag alone — so the rule would have bound nine
+  products and not the repository that writes it. The publication its own
+  tags now have, the Homebrew formula, waits on the same sequence: the tag
+  names the `VERSION` its commit carries, it is annotated, its commit is
+  already on `main`, and its signature verifies against the allowed signers
+  **that tag itself publishes**, at its tagger date. Reading its own list
+  would be a circle if the commit were not required to be on `main` first,
+  where the branch's rules stand. A tag that predates the file publishes
+  nothing, which is the honest answer for one.
+
+- **Impact.** [asks: nothing] [writes: nothing] Nothing to do for a
+  product: both concern whoever runs the command and whoever signs a tag.
+  A product that signs with the key the fleet already uses — which is all
+  of them, measured — sees the same tags verify; one whose operator signs
+  with another key, or in another format, learns it at `preflight`, before
+  the tag rather than after the push. The formula and the archived pin ask
+  nothing of a product at all: it is still adopted by a socle at a tag,
+  pinned by commit, and reads the same files.
 
 ## 0.61.0 — 2026-09-25
 

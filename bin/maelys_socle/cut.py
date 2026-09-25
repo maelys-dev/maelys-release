@@ -18,7 +18,7 @@ from .context import Context
 from .declarations import Declarations, version_tuple
 from .github import (check_runs, cut_repository, default_branch, github_api, tag_deployments)
 from .host import git, run
-from .identity import socle_data
+from .identity import allowed_signers, socle_data
 from .project import project_of
 from .release_checks import repository_checks, tag_checks
 from .texts import LABELS
@@ -260,7 +260,7 @@ def bump_audit(project: pathlib.Path, old: str, new: str) -> tuple[list[tuple[st
     return found, stale
 
 
-def cut_gate(decl: Declarations, version: str) -> list:
+def cut_gate(decl: Declarations, version: str, signers: pathlib.Path) -> list:
     """The gate cut holds before it writes anything.
 
     Only what the repository's own CI cannot see: the operator's signing
@@ -270,7 +270,7 @@ def cut_gate(decl: Declarations, version: str) -> list:
     commit, rather than a second time here from a socle that may not be the
     one the product pins.
     """
-    gate = tag_checks(decl.project, version)
+    gate = tag_checks(decl.project, version, signers)
     if decl.releases_here:
         gate += repository_checks(decl)
     return gate
@@ -313,7 +313,7 @@ def cut_report(data: dict, runs: list) -> tuple[dict, int]:
 
 
 def cut_resume(invocation: Invocation, decl: Declarations, data: dict, log, timeout: int,
-               poll: int) -> tuple[dict, int] | None:
+               poll: int, signers: pathlib.Path) -> tuple[dict, int] | None:
     """The wait, re-entered; None when there is nothing to resume.
 
     A first stop whose wait timed out leaves a branch and an open pull
@@ -345,7 +345,7 @@ def cut_resume(invocation: Invocation, decl: Declarations, data: dict, log, time
     data["pullRequest"] = {"number": pull["number"], "url": pull["url"], "state": pull["state"]}
     data["commit"] = head
     data["changelog"] = changelog_entry(project, version, at=head)[0]
-    gate = cut_gate(decl, version)
+    gate = cut_gate(decl, version, signers)
     data["gate"] = [{"status": status, "message": message} for status, message in gate]
     if any(status == "fail" for status, _ in gate):
         return data, EXIT_VIOLATIONS
@@ -384,11 +384,11 @@ def moved_pins_named(project: pathlib.Path, entry: str) -> list[tuple[str, str]]
     return found
 
 
-def cut_open(invocation: Invocation, decl: Declarations, data: dict, log, timeout: int, poll: int) -> tuple[dict, int]:
+def cut_open(invocation: Invocation, decl: Declarations, data: dict, log, timeout: int, poll: int, signers: pathlib.Path) -> tuple[dict, int]:
     """First stop: the signed bump commit, its pull request, and the wait."""
     project, product, version = decl.project, decl.product, data["version"]
     branch, base, repository = data["branch"], data["base"], data["repository"]
-    resumed = cut_resume(invocation, decl, data, log, timeout, poll)
+    resumed = cut_resume(invocation, decl, data, log, timeout, poll, signers)
     if resumed is not None:
         return resumed
     if not decl.version:
@@ -432,7 +432,7 @@ def cut_open(invocation: Invocation, decl: Declarations, data: dict, log, timeou
         raise Failure("PRECONDITION_FAILED",
                       f"{base} is {ahead} ahead and {behind} behind origin/{base}.",
                       f"Bring the two together before cutting: the pull request is opened against origin/{base}.")
-    gate = cut_gate(decl, version) + moved_pins_named(project, body)
+    gate = cut_gate(decl, version, signers) + moved_pins_named(project, body)
     data["gate"] = [{"status": status, "message": message} for status, message in gate]
     refused = [message for status, message in gate if status == "fail"]
     data["ready"] = not refused
@@ -542,7 +542,7 @@ def cut_open(invocation: Invocation, decl: Declarations, data: dict, log, timeou
     return cut_report(data, await_checks(repository, data["commit"], timeout, poll, log))
 
 
-def cut_tag(invocation: Invocation, decl: Declarations, data: dict, log, timeout: int, poll: int) -> tuple[dict, int]:
+def cut_tag(invocation: Invocation, decl: Declarations, data: dict, log, timeout: int, poll: int, signers: pathlib.Path) -> tuple[dict, int]:
     """Second stop: the tag, signed on the merge commit whose checks passed."""
     project, product, version = decl.project, decl.product, data["version"]
     tag, branch, base, repository = data["tag"], data["branch"], data["base"], data["repository"]
@@ -591,7 +591,7 @@ def cut_tag(invocation: Invocation, decl: Declarations, data: dict, log, timeout
         raise Failure("PRECONDITION_FAILED", f"{merge[:7]} has no dated CHANGELOG entry for {version}.",
                       "Read what was merged; nothing is tagged.")
     data["changelog"] = date
-    gate = tag_checks(project, version)
+    gate = tag_checks(project, version, signers)
     if merge != head:
         gate.append(("note", f"origin/{base} has moved past {merge[:7]}: the tag names the commit whose checks"
                              " were read, not the head of the branch"))
@@ -679,7 +679,7 @@ def handle_cut(invocation: Invocation, context: Context) -> tuple[dict, int]:
     timeout = int(invocation.option("--timeout", 30)) * 60
     poll = int(invocation.option("--poll", 15))
     stage = cut_tag if invocation.flag("--tag") else cut_open
-    return stage(invocation, decl, data, log, timeout, poll)
+    return stage(invocation, decl, data, log, timeout, poll, allowed_signers(context.socle_root()))
 
 
 def text_cut(data: dict) -> str:

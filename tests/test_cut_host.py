@@ -192,7 +192,7 @@ class CutHostTest(unittest.TestCase):
         self.host.conclusion = ""
         with fixtures.using_host(self.host), self.assertRaises(MODULE.Failure) as raised:
             MODULE.cut_tag(fixtures.CutTest.Stub(**{"--apply": True}), self.fixture.declarations(),
-                           envelope["data"], self.fixture.log, 0, 0)
+                           envelope["data"], self.fixture.log, 0, 0, self.fixture.product.signers)
         self.assertEqual(raised.exception.code, "PRECONDITION_FAILED")
         self.assertIn("No check registered", raised.exception.message)
         self.assert_no_tag()
