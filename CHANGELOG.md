@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.62.0 — 2026-09-25
 
 - **The command installs, and an installed copy knows its own commit.**
   `brew install maelys-dev/tap/maelys-release` renders from the tag's own
