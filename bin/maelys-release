@@ -1260,6 +1260,28 @@ def socle_data(sha: str, tag: str) -> dict:
     return identity.socle_data(sha, tag, CONTEXT)
 
 
+def discard_empty_checkout(cache: pathlib.Path) -> None:
+    """Remove the directory a fetch that never landed left behind.
+
+    `git init` makes the directory before the fetch can fail, so a commit
+    the network, the remote or a typo puts out of reach leaves a repository
+    with no commit in it. Nothing reads it -- the next call fetches again
+    whatever is there -- and nothing removes it either: a cache of
+    fifty-two checkouts held four such shells, one of them naming a commit
+    GitHub no longer serves, which no later call could ever fill.
+
+    What is removed is proved empty first, because this is the one place
+    the socle deletes in a directory it made: nothing beside `.git`, and no
+    commit to lose. A checkout that carries either stays, and the caller
+    still degrades on None.
+    """
+    if not cache.is_dir() or [entry.name for entry in cache.iterdir()] != [".git"]:
+        return
+    if run(["git", "rev-parse", "--quiet", "--verify", "HEAD"], cwd=cache).returncode == 0:
+        return
+    shutil.rmtree(cache, ignore_errors=True)
+
+
 def pinned_checkout(name: str, sha: str, witness: str) -> pathlib.Path | None:
     """A checkout of `name` at `sha`, fetched once into the user's cache.
 
@@ -1277,6 +1299,7 @@ def pinned_checkout(name: str, sha: str, witness: str) -> pathlib.Path | None:
     git("init", "-q", str(cache))
     fetched = run(["git", "fetch", "-q", "--depth", "1", f"{base}/{name}.git", sha], cwd=cache)
     if fetched.returncode != 0:
+        discard_empty_checkout(cache)
         return None
     git("checkout", "-q", "FETCH_HEAD", cwd=cache)
     return cache
