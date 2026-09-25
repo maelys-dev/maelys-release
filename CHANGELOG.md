@@ -12,6 +12,15 @@
   for its own. Reproduced on a branch by hand, corrected, and measured
   there: `signed`, `formula / render` and `formula / publish` all green.
   Nothing reaches a product: this workflow runs on the socle's own tags.
+- **And it carries the tap credentials by name.** `secrets: inherit`
+  forwards only the secrets whose names match what the called workflow
+  declares, and `tap.yml` declares `tap_token` and `tap_signing_key` —
+  which no organisation secret is called. So the formula was rendered,
+  linted, and left as an artifact with `no tap credentials`, twice, while
+  the secrets were in scope. The socle writes that mapping on every
+  product that publishes a formula; it had not written it for its own —
+  the third time in one day that a rule held for nine repositories and not
+  for the one that writes it.
 - **And that formula is replayed on the tag it already has.** `formula.yml`
   takes a `workflow_dispatch` with the tag to publish, as `release.yml`
   does: a publication that failed is repeated on its existing tag, never by
