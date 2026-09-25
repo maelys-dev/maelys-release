@@ -6578,3 +6578,58 @@ class DocumentationNameGrammarTest(unittest.TestCase):
         decl = MODULE.read_declarations(product.dir, "maelys-fixture", "custom")
         said = [c["message"].split(" ")[0] for c in decl.checks if "names the documentation repository" in c["message"]]
         self.assertEqual(said, ["NOTES.txt"])
+
+
+class EmptyCheckoutTest(unittest.TestCase):
+    """A fetch that never landed leaves nothing in the cache.
+
+    `git init` makes the directory before the fetch can fail. A machine
+    that had run the socle for a month held fifty-two checkouts, four of
+    them repositories with no commit in them -- and one of those four named
+    a commit GitHub no longer serves, so no later call could ever fill it.
+    """
+
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.cache = pathlib.Path(self.temp.name) / "cache"
+        self.root = self.cache / "maelys-release"
+        self.environment = {"XDG_CACHE_HOME": str(self.cache), "MAELYS_GIT_BASE": "file:///nulle-part"}
+
+    def fetch(self, sha: str) -> pathlib.Path | None:
+        saved = dict(os.environ)
+        os.environ.update(self.environment)
+        try:
+            return MODULE.pinned_checkout("maelys-release", sha, "bin/maelys-release")
+        finally:
+            os.environ.clear()
+            os.environ.update(saved)
+
+    def commit(self, path: pathlib.Path, *arguments: str) -> None:
+        subprocess.run(["git", "init", "-q", str(path)], check=True)
+        subprocess.run(["git", "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid",
+                        "-c", "commit.gpgsign=false", "commit", "-q", "-m", "fixture", *arguments],
+                       cwd=path, check=True)
+
+    def test_a_failed_fetch_leaves_no_checkout(self) -> None:
+        self.assertIsNone(self.fetch("f" * 40))
+        self.assertTrue(self.root.is_dir())               # the cache itself stays
+        self.assertEqual(sorted(entry.name for entry in self.root.iterdir()), [])
+
+    def test_a_checkout_that_carries_a_commit_is_kept(self) -> None:
+        """The removal is not "the fetch failed" but "there is nothing to
+        lose": a repository whose working tree is empty still has its
+        history, and an interrupted fetch must not cost it."""
+        path = self.root / ("a" * 40)
+        path.mkdir(parents=True)
+        self.commit(path, "--allow-empty")
+        self.assertEqual(sorted(entry.name for entry in path.iterdir()), [".git"])
+        self.assertIsNone(self.fetch("a" * 40))
+        self.assertTrue((path / ".git").is_dir())
+
+    def test_a_checkout_that_carries_a_file_is_kept(self) -> None:
+        path = self.root / ("b" * 40)
+        path.mkdir(parents=True)
+        (path / "half-written.txt").write_text("left by hand\n", encoding="utf-8")
+        self.assertIsNone(self.fetch("b" * 40))
+        self.assertEqual((path / "half-written.txt").read_text(encoding="utf-8"), "left by hand\n")

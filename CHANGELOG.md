@@ -25,6 +25,16 @@
   takes a `workflow_dispatch` with the tag to publish, as `release.yml`
   does: a publication that failed is repeated on its existing tag, never by
   moving one.
+- **A fetch that never lands leaves nothing behind.** `git init` makes the
+  directory before the fetch can fail, so a commit the network, the remote
+  or a typo puts out of reach left a repository with no commit in it under
+  `~/.cache/maelys-release/`. Nothing read it and nothing removed it: a
+  cache of fifty-two checkouts held four such shells, one of them naming a
+  commit GitHub no longer serves, which no later call could ever fill. The
+  directory is now removed when the fetch fails — and only once proved
+  empty, nothing beside `.git` and no commit to lose, because this is the
+  one place the socle deletes in a directory it made. A checkout that
+  carries either stays where it is.
 - **Impact.** [asks: nothing] [writes: nothing] Nothing for a product.
 
 ## 0.62.0 — 2026-09-25
