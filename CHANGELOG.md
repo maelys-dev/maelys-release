@@ -48,6 +48,29 @@
   Measured on the published v0.60.0 tag, whose signature still verifies
   against this file once its key is retired, and in the suite on a tag
   signed for the test.
+  **A retirement retires, and rotation is not revocation.** The first
+  reading judged those options at the clock, which broke every tag a
+  retired key had ever signed; the second judged them at the tag's own
+  tagger date, which a stolen key writes itself — measured, a tag signed
+  today and dated to August walks through its own retirement. Both
+  workflows read `verification.verified_at` now, the moment GitHub saw the
+  tag, which the signer does not write and which a replay of an old tag
+  reads unchanged; a verdict without that date stops the release. And the
+  file says what it is for: these options **rotate** a key. Revoking one is
+  removing it from its GitHub account, which every release workflow of the
+  fleet already answers to, at every pin, the same evening — `SECURITY.md`
+  says it in order. `check` also refuses a time in a shape ssh-keygen does
+  not read, rather than accepting what the release will refuse.
+  **`cut` judges the right list.** It never relocates to the pinned socle,
+  so it read the list of whichever socle was running: ok here, refused by
+  the workflow after the tag was pushed, and a published tag is never
+  moved. It fetches that one file at the pinned commit now.
+  **Who may sign, and how a key is retired**, are written in `SECURITY.md`:
+  the maintainer of this repository decides, a key enters by a pull request
+  whose commit is **signed by the key it adds** — the only proof that the
+  asker holds the private half — and an operator who is not that maintainer
+  counts the steps before relying on it. Naming the authority is a
+  governance choice; it is written down so that it is one.
   **The socle holds itself to it.** It does not run `release.yml` — its
   release is the signed tag alone — so the rule would have bound nine
   products and not the repository that writes it. The publication its own

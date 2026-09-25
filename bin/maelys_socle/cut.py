@@ -11,6 +11,8 @@ import sys
 import tempfile
 import time
 
+from typing import Callable
+
 from maelys_cli import EXIT_OK, EXIT_VIOLATIONS, Failure, Invocation
 from . import host
 from .constants import DECLARATION_FILE, PROGRAM
@@ -18,7 +20,7 @@ from .context import Context
 from .declarations import Declarations, version_tuple
 from .github import (check_runs, cut_repository, default_branch, github_api, tag_deployments)
 from .host import git, run
-from .identity import allowed_signers, socle_data
+from .identity import socle_data
 from .project import project_of
 from .release_checks import repository_checks, tag_checks
 from .texts import LABELS
@@ -651,7 +653,8 @@ def cut_tag(invocation: Invocation, decl: Declarations, data: dict, log, timeout
     return data, EXIT_OK
 
 
-def handle_cut(invocation: Invocation, context: Context) -> tuple[dict, int]:
+def handle_cut(invocation: Invocation, context: Context,
+               signers: "Callable[[pathlib.Path], pathlib.Path]") -> tuple[dict, int]:
     """Open the release of a version, then sign its tag on the merged commit."""
     project, product, mechanism = project_of(invocation)
     version = str(invocation.operands[1])
@@ -679,7 +682,10 @@ def handle_cut(invocation: Invocation, context: Context) -> tuple[dict, int]:
     timeout = int(invocation.option("--timeout", 30)) * 60
     poll = int(invocation.option("--poll", 15))
     stage = cut_tag if invocation.flag("--tag") else cut_open
-    return stage(invocation, decl, data, log, timeout, poll, allowed_signers(context.socle_root()))
+    # Resolved here and not before: it may fetch the pinned socle, and a
+    # network failure must not stand in front of the refusals this command
+    # owes first -- an origin that is not on GitHub, a dirty worktree.
+    return stage(invocation, decl, data, log, timeout, poll, signers(project))
 
 
 def text_cut(data: dict) -> str:
