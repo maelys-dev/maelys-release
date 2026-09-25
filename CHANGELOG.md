@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased
+
+- **A release is signed by a key the fleet names.** GitHub's `verified`
+  says the key belongs to some account, and every account that may push a
+  tag to a product has such a key: it answers a different question from
+  "may this key sign a Maelys release". `share/allowed-signers` answers
+  that one, in the ssh `allowed_signers` format, and the release workflow
+  verifies the tag's own signature against it — read at the socle commit
+  the product pinned, through `job_workflow_sha`, so the list travels with
+  the version a product adopted rather than with whatever the socle's
+  default branch holds today. `preflight` and `cut` read the same file
+  before there is a tag and name the key this checkout would sign with: a
+  refusal after the push would cost a version, since a published tag is
+  never moved. Fails closed at every step — no reusable-workflow commit,
+  no file, an empty file, no matching principal, a signature that does not
+  verify — and none of them falls back to GitHub's own verdict. A key is
+  retired with `valid-before` and never deleted, or a past release becomes
+  one that cannot be replayed on its own tag. Measured on the published
+  v0.60.0 tag, whose signature verifies against this file, and in the
+  suite on a tag signed for the test.
+- **Impact.** [asks: nothing] [writes: nothing] Nothing to do for a
+  product that signs with the key the fleet already uses, which is all of
+  them: the same tags verify. A product whose operator signs with another
+  key learns it at `preflight`, before the tag, instead of at the release
+  workflow after it.
+
 ## 0.61.0 — 2026-09-25
 
 - **A private pin can travel to a runner that may not read it.** The macOS

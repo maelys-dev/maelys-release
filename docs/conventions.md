@@ -223,6 +223,19 @@ socle declares, the observer counts: the same split as the release gate.
   without it, so `make check` fails before the tag does.
 - A published tag is never moved, deleted or force-pushed. A mistake is
   fixed by the next patch release.
+- **The tag is signed by a key the fleet names.** `share/allowed-signers` of
+  the socle holds them in the ssh `allowed_signers` format, and the release
+  workflow verifies the tag's own signature against that file — read at the
+  socle commit this product pinned, so the list travels with the version a
+  product adopted. GitHub's `verified` answers a different question: it says
+  the key belongs to some account, and every account that may push a tag has
+  one. `preflight` and `cut` read the same file before there is a tag, and
+  name the key this checkout would sign with, because a refusal after the
+  push costs a version — a published tag is never moved.
+  It fails closed at every step: no file, an empty one, a key that is not
+  there, a signature that does not verify. **A key is retired, never
+  deleted**: give it `valid-before` and leave the line, or a past release
+  becomes one that can no longer be replayed on its own tag.
 
 ### Cutting a release, in two stops
 

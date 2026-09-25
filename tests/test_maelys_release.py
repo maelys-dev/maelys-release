@@ -148,6 +148,13 @@ def protection_host(classic, *, rules=("ok", []), seen=(), open_pulls=(), write=
 ALL_LEGS = ["check / check (linux)", "check / check (linux-arm64)", "check / check (macos)"]
 
 
+# A key that signs nothing here: it gives the fixtures' allowed signers a
+# well-formed line, so that what a test measures is a fleet that does not
+# name its key, and never an empty file refusing everything.
+SAMPLE_KEY = ("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDZ9v1lQ4/1v1kJqOZfKbhRBQ3kkL0Kk"
+              "ZQ6lPsVjJq3B")
+
+
 class Product:
     """A product fixture with one pinned dependency served from a bare repository."""
 
@@ -187,8 +194,32 @@ class Product:
         self.write("packaging/homebrew/maelys-fixture.rb.in", "class MaelysFixture < Formula\nend\n")
         self.write("packaging/homebrew/libmaelys-fixture.rb.in", "class LibmaelysFixture < Formula\nend\n")
         self.write("AGENTS.md", "# Agent instructions\n\nKeep me.\n")
+        # A fixture signs with a key generated for it, which the fleet's own
+        # allowed signers will never name. The socle reads this one instead,
+        # and only inside a live self-test: the guard in front of it is the
+        # one the fake gh stands behind.
+        self.signers = self.work / "allowed-signers"
+        # A file that names somebody: an empty one is its own refusal, and
+        # what most tests need is a fleet that simply does not name *their*
+        # key. The ones that sign call name_signing_key.
+        self.signers.write_text(f'nobody@example.invalid namespaces="git" {SAMPLE_KEY}\n', encoding="utf-8")
+        self.previous_signers = os.environ.get("_MAELYS_RELEASE_TEST_SIGNERS")
+        os.environ["_MAELYS_RELEASE_TEST_SIGNERS"] = str(self.signers)
+        self.env["_MAELYS_RELEASE_TEST_SIGNERS"] = str(self.signers)
+
+    def name_signing_key(self, key: pathlib.Path) -> None:
+        """Let the fixture's own key sign, as the fleet's file names the operator's."""
+        public = key.parent / (key.name + ".pub")
+        if not public.is_file():
+            subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(key)], check=True)
+        self.signers.write_text('fixture@example.invalid namespaces="git" '
+                                + public.read_text(encoding="utf-8").strip() + "\n", encoding="utf-8")
 
     def close(self) -> None:
+        if self.previous_signers is None:
+            os.environ.pop("_MAELYS_RELEASE_TEST_SIGNERS", None)
+        else:
+            os.environ["_MAELYS_RELEASE_TEST_SIGNERS"] = self.previous_signers
         shutil.rmtree(self.work, ignore_errors=True)
 
     def git(self, cwd: pathlib.Path, *arguments: str) -> str:
@@ -2119,6 +2150,12 @@ class PreflightTest(unittest.TestCase):
         product.git(product.dir, "tag", "-d", "v1.0.0")
         if shutil.which("ssh-keygen"):
             subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(key)], check=True)
+            # A key the fleet does not name is preflight's business too: it
+            # says so here, before there is a tag to refuse.
+            unnamed = self.preflight(2)["preflight"]
+            self.assertTrue(any("is not named in" in item["message"] for item in unnamed
+                                if item["status"] == "fail"), unnamed)
+            product.name_signing_key(key)
             product.git(product.dir, "tag", "-s", "v1.0.0", "-m", "signed")
             self.assertTrue(self.preflight(0)["ready"])
             product.git(product.dir, "-c", "tag.gpgsign=false", "tag", "v1.2.3")
@@ -2197,7 +2234,8 @@ class CutTest(unittest.TestCase):
         # A real stream: cut hands the verify command's output straight to
         # this file descriptor, so an operator watching a long `make check`
         # sees it as it runs rather than at the end.
-        return MODULE.cut_open(self.Stub(**options), self.declarations(), data, self.log, 1, 1)
+        return MODULE.cut_open(self.Stub(**options), self.declarations(), data, self.log, 1, 1,
+                               self.product.signers)
 
     def refusal(self, version: str = "1.3.0", **options) -> MODULE.Failure:
         with self.assertRaises(MODULE.Failure) as raised:
@@ -2245,11 +2283,12 @@ class CutTest(unittest.TestCase):
         self.assertIn("HEAD is on work", failure.message)
 
     def test_the_gate_reads_the_signing_configuration_of_this_checkout(self) -> None:
-        gate = MODULE.cut_gate(self.declarations(), "1.3.0")
+        gate = MODULE.cut_gate(self.declarations(), "1.3.0", self.product.signers)
         self.assertTrue(any(status == "fail" and "tag.gpgsign" in message for status, message in gate))
         self.product.git(self.dir, "config", "tag.gpgsign", "true")
+        self.product.git(self.dir, "config", "gpg.format", "ssh")
         self.product.git(self.dir, "config", "user.signingkey", str(self.product.work / "signing-key"))
-        gate = MODULE.cut_gate(self.declarations(), "1.3.0")
+        gate = MODULE.cut_gate(self.declarations(), "1.3.0", self.product.signers)
         self.assertEqual([status for status, _ in gate if status == "fail"], [])
         self.assertIn("tag v1.3.0 is free", [message for _, message in gate])
         # A repository the socle does not release has no release environment
@@ -2284,6 +2323,7 @@ class CutTest(unittest.TestCase):
         self.product.write("CHANGELOG.md",
                            "# Changelog\n\n## 1.3.0 — 2026-09-03\n\n- Next.\n\n## 1.2.3 — 2026-09-03\n\n- Something.\n")
         self.product.git(self.dir, "config", "tag.gpgsign", "true")
+        self.product.git(self.dir, "config", "gpg.format", "ssh")
         self.product.git(self.dir, "config", "user.signingkey", str(self.product.work / "signing-key"))
         data, code = self.cut()
         self.assertEqual(code, MODULE.EXIT_OK)
@@ -2295,6 +2335,7 @@ class CutTest(unittest.TestCase):
         self.product.write("CHANGELOG.md",
                            "# Changelog\n\n## 1.3.0 — 2026-09-03\n\n- Next.\n\n## 1.2.3 — 2026-09-03\n\n- Something.\n")
         self.product.git(self.dir, "config", "tag.gpgsign", "true")
+        self.product.git(self.dir, "config", "gpg.format", "ssh")
         self.product.git(self.dir, "config", "user.signingkey", str(self.product.work / "signing-key"))
         data, code = self.cut()
         self.assertEqual(code, MODULE.EXIT_OK)
@@ -2365,6 +2406,9 @@ class CutTest(unittest.TestCase):
         key = self.product.work / "signing-key"
         if not key.is_file():
             subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(key)], check=True)
+        # The fleet names it, as it names the operator's: cut refuses a key
+        # its allowed signers do not hold, and that refusal has its own test.
+        self.product.name_signing_key(key)
         self.product.git(self.dir, "config", "tag.gpgsign", "true")
         self.product.git(self.dir, "config", "gpg.format", "ssh")
         self.product.git(self.dir, "config", "user.signingkey", str(key))
@@ -4505,11 +4549,12 @@ class WidenAfterTheMergeTest(unittest.TestCase):
                            cwd=work, check=True, capture_output=True)
         git("init", "-q"); (work / "VERSION").write_text("0.2.0\n")
         git("add", "-A"); git("commit", "-q", "-m", "0.2.0"); git("tag", "-a", "-m", "0.2.0", "v0.2.0")
-        between = [found for found in MODULE.tag_checks(work, "0.2.0", between_releases=True)
+        between = [found for found in MODULE.tag_checks(work, "0.2.0", MODULE.identity.allowed_signers(MODULE.socle_root()),
+                                                 between_releases=True)
                    if "v0.2.0" in found[1] and "annotated" not in found[1] and "signed" not in found[1]]
         self.assertEqual([status for status, _ in between], ["note"])
         # cut keeps the failure: there, an existing tag is a collision.
-        collision = [found for found in MODULE.tag_checks(work, "0.2.0")
+        collision = [found for found in MODULE.tag_checks(work, "0.2.0", MODULE.identity.allowed_signers(MODULE.socle_root()))
                      if "already exists" in found[1]]
         self.assertEqual([status for status, _ in collision], ["fail"])
 

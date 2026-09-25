@@ -172,6 +172,44 @@ jobs:
           head="$(git rev-parse HEAD)"
           test "$(jq -r .object.sha <<<"$object")" = "$head" || { echo "$TAG does not name $head" >&2; exit 1; }
           echo "tag=$TAG" >>"$GITHUB_OUTPUT"
+      - name: Verify the tag was signed by a key the fleet names
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          SOCLE_REF: ${{ github.job_workflow_ref }}
+          SOCLE_SHA: ${{ github.job_workflow_sha }}
+        shell: bash
+        # GitHub's `verified` says the key belongs to some account, and every
+        # account that may push a tag to this repository has such a key. This
+        # says *which* key: the allowed signers travel with the socle commit
+        # the product pinned, are read at that commit, and a tag signed by
+        # anything else stops here -- before a single artifact is built.
+        #
+        # Fail closed at every step: no reusable-workflow commit, no file, an
+        # empty file, no matching principal, a signature that does not verify
+        # against it. None of them falls back to GitHub's own verdict.
+        run: |
+          set -euo pipefail
+          test -n "$SOCLE_SHA" || { echo "the reusable workflow's own commit is unknown" >&2; exit 1; }
+          socle="${SOCLE_REF%%/.github/*}"
+          test -n "$socle" || { echo "the reusable workflow's own repository is unknown" >&2; exit 1; }
+          signers="$RUNNER_TEMP/allowed-signers"
+          gh api "repos/${socle}/contents/share/allowed-signers?ref=${SOCLE_SHA}" --jq .content \
+            | base64 -d >"$signers"
+          test -s "$signers" || { echo "${socle} at ${SOCLE_SHA} names no allowed signer" >&2; exit 1; }
+          ref="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" --jq .object.sha)"
+          gh api "repos/${GITHUB_REPOSITORY}/git/tags/${ref}" >"$RUNNER_TEMP/tag.json"
+          # -j: the payload is signed byte for byte, and a trailing newline
+          # jq would add of its own is one byte too many.
+          jq -rj .verification.payload "$RUNNER_TEMP/tag.json" >"$RUNNER_TEMP/payload"
+          jq -rj .verification.signature "$RUNNER_TEMP/tag.json" >"$RUNNER_TEMP/signature"
+          test -s "$RUNNER_TEMP/signature" || { echo "${TAG} carries no signature GitHub could read" >&2; exit 1; }
+          principal="$(ssh-keygen -Y find-principals -f "$signers" -s "$RUNNER_TEMP/signature" | head -n 1)" \
+            || { echo "${TAG} is signed by a key ${socle} does not name: it may not publish here" >&2; exit 1; }
+          test -n "$principal" || { echo "${TAG} is signed by a key ${socle} does not name" >&2; exit 1; }
+          ssh-keygen -Y verify -f "$signers" -I "$principal" -n git \
+            -s "$RUNNER_TEMP/signature" <"$RUNNER_TEMP/payload"
+          echo "${TAG} is signed by ${principal}, named by ${socle} at ${SOCLE_SHA}"
       - name: Verify the tag's commit
         if: inputs.commit_verification != 'none'
         env:

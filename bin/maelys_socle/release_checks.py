@@ -14,7 +14,91 @@ from .github import (branch_protection, channel_visibility, deployment_policies,
 from .host import git, run
 
 
-def tag_checks(project: pathlib.Path, version: str, between_releases: bool = False) -> list[tuple[str, str]]:
+SSH_KEY_TYPES = ("ssh-ed25519", "ssh-rsa", "ssh-dss", "ecdsa-sha2-", "sk-ssh-", "sk-ecdsa-")
+
+
+def allowed_signer_keys(text: str) -> list[tuple[str, str, str]]:
+    """(principal, type, material) of each line of an ssh allowed_signers file.
+
+    The options field sits between the principal and the key and may hold
+    anything, `valid-before` included, so the key is found by its type rather
+    than by its position.
+    """
+    found: list[tuple[str, str, str]] = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split()
+        for index, token in enumerate(parts[1:], start=1):
+            if token.startswith(SSH_KEY_TYPES) and index + 1 < len(parts):
+                found.append((parts[0], token, parts[index + 1]))
+                break
+    return found
+
+
+def public_key(project: pathlib.Path, declared: str) -> str:
+    """The key text `user.signingkey` names: a literal, a .pub, or a private key beside one.
+
+    git accepts all three, so all three are read; the private key beside a
+    .pub is the shape a signing configuration takes most often, and reading
+    it back as if it were a public key is how a checker reports a key it
+    never understood. The content decides, not the name.
+    """
+    if declared.startswith(SSH_KEY_TYPES):
+        return declared
+    path = pathlib.Path(declared).expanduser()
+    if not path.is_absolute():
+        path = project / path
+    for candidate in (path.with_name(path.name + ".pub"), path):
+        if candidate.is_file():
+            text = candidate.read_text(encoding="utf-8").strip()
+            if text.startswith(SSH_KEY_TYPES):
+                return text
+    return ""
+
+
+def signing_key_named(project: pathlib.Path, declared: str, fmt: str,
+                      allowed_signers: pathlib.Path) -> list[tuple[str, str]]:
+    """Whether the key this checkout would sign with is one the fleet names.
+
+    GitHub's `verified` says the key belongs to some account, and every
+    account that may push a tag has one: it answers a different question from
+    "may this key sign a Maelys release". The release workflow refuses a tag
+    whose signature does not verify against the socle's allowed signers, at
+    the commit the product pinned. This reads the same file before there is a
+    tag, because a refusal after the tag is pushed costs a version: a
+    published tag is never moved.
+    """
+    if not declared:
+        return []
+    if fmt != "ssh":
+        return [("fail", f"gpg.format = {fmt}: a release is signed with an ssh key named in"
+                         f" {allowed_signers.name}, and the release workflow verifies the tag against that file")]
+    if not allowed_signers.is_file():
+        return [("fail", f"{allowed_signers} is missing: nothing says which key may sign a release,"
+                         " and the release workflow refuses a tag it cannot match")]
+    entries = allowed_signer_keys(allowed_signers.read_text(encoding="utf-8"))
+    if not entries:
+        return [("fail", f"{allowed_signers} names no key: the release workflow would refuse every tag")]
+    text = public_key(project, declared)
+    if not text:
+        return [("note", f"user.signingkey names {declared}, which is not a key this command can read:"
+                         " whether the release workflow will accept it is unknown here")]
+    parts = text.split()
+    if len(parts) < 2 or not parts[0].startswith(SSH_KEY_TYPES):
+        return [("note", f"user.signingkey names {declared}, which does not read as an ssh public key:"
+                         " whether the release workflow will accept it is unknown here")]
+    for principal, kind, material in entries:
+        if (kind, material) == (parts[0], parts[1]):
+            return [("ok", f"the signing key is named in {allowed_signers.name}, as {principal}")]
+    return [("fail", f"the signing key is not named in {allowed_signers}: the release workflow verifies the"
+                     " tag's signature against that file and would refuse this one. Add the key there, or sign"
+                     " with one it names")]
+
+
+def tag_checks(project: pathlib.Path, version: str, allowed_signers: pathlib.Path,
+               between_releases: bool = False) -> list[tuple[str, str]]:
     """What the signed tag vVERSION needs of this checkout, whatever publishes it.
 
     These hold for every Maelys repository, the ones the socle does not
@@ -31,10 +115,12 @@ def tag_checks(project: pathlib.Path, version: str, between_releases: bool = Fal
     found.append(("ok", "tag.gpgsign = true") if signs
                  else ("fail", "tag.gpgsign is not true: git config tag.gpgsign true"))
     fmt = config("gpg.format") or "openpgp"
-    if config("user.signingkey"):
+    declared = config("user.signingkey")
+    if declared:
         found.append(("ok", f"gpg.format = {fmt}, user.signingkey set"))
     else:
         found.append(("fail", f"user.signingkey is not set (gpg.format = {fmt}); the key must be registered on GitHub"))
+    found.extend(signing_key_named(project, declared, fmt, allowed_signers))
     if git("rev-parse", "--is-shallow-repository", cwd=project, check=False) == "true":
         found.append(("fail", "shallow clone: previous tags are not visible; run from a full clone"))
     else:

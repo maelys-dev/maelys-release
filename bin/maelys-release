@@ -121,12 +121,7 @@ def socle_root() -> pathlib.Path:
 
 
 def share_dir() -> pathlib.Path:
-    root = socle_root()
-    for candidate in (root / "share", root / "share" / "maelys-release"):
-        if (candidate / "agents").is_dir():
-            return candidate
-    raise Failure("NOT_FOUND", f"share/agents not found under {root}.",
-                  "Run from a maelys-release checkout or an installed prefix.")
+    return identity.share_dir(socle_root())
 
 
 def socle_version() -> str:
@@ -1427,7 +1422,7 @@ def handle_preflight(invocation: Invocation) -> tuple[dict, int]:
     """What the release workflow will demand of the tag, before it exists."""
     decl, data = check_data(invocation)
     require_socle_mechanism(decl.project, decl.mechanism, "preflight")
-    gate = (tag_checks(decl.project, decl.version, between_releases=True)
+    gate = (tag_checks(decl.project, decl.version, identity.allowed_signers(socle_root()), between_releases=True)
             + repository_checks(decl)) \
         if data["valid"] else []
     data["preflight"] = [{"status": status, "message": message} for status, message in gate]

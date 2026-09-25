@@ -28,7 +28,8 @@ class Host:
 
     @staticmethod
     def _self_test() -> bool:
-        keys = ("_MAELYS_RELEASE_SELF_TEST", "_MAELYS_RELEASE_SELF_TEST_FILE", "_MAELYS_RELEASE_TEST_GH")
+        keys = ("_MAELYS_RELEASE_SELF_TEST", "_MAELYS_RELEASE_SELF_TEST_FILE", "_MAELYS_RELEASE_TEST_GH",
+                "_MAELYS_RELEASE_TEST_SIGNERS")
         if not any(key in os.environ for key in keys):
             return False
         token = os.environ.get(keys[0], "")
@@ -43,7 +44,8 @@ class Host:
         raise Failure("PRECONDITION_FAILED",
                       "_MAELYS_RELEASE_SELF_TEST and its companion variables are reserved "
                       "for self-test; the temporary token is missing, invalid or expired.",
-                      "Unset _MAELYS_RELEASE_SELF_TEST, _MAELYS_RELEASE_SELF_TEST_FILE and _MAELYS_RELEASE_TEST_GH.")
+                      "Unset _MAELYS_RELEASE_SELF_TEST, _MAELYS_RELEASE_SELF_TEST_FILE,"
+                      " _MAELYS_RELEASE_TEST_GH and _MAELYS_RELEASE_TEST_SIGNERS.")
 
     @staticmethod
     @contextmanager
@@ -61,6 +63,17 @@ class Host:
         if name == "gh" and testing:
             return os.environ.get("_MAELYS_RELEASE_TEST_GH") or None
         return shutil.which(name)
+
+    def test_signers(self) -> str | None:
+        """The allowed signers a self-test names, and nothing outside one.
+
+        The fleet's file names the keys that sign its releases; a fixture
+        signs with a key generated for the test, which that file will never
+        hold. The same guard as the fake gh stands in front of this: outside
+        a live self-test environment, with its token and its witness file,
+        asking for it is a refusal.
+        """
+        return (os.environ.get("_MAELYS_RELEASE_TEST_SIGNERS") or None) if self._self_test() else None
 
     def _command(self, command: list[str], cwd: pathlib.Path | None, env: dict[str, str] | None) -> list[str]:
         testing = self._self_test()
