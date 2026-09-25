@@ -104,4 +104,12 @@ jobs:
       # No compiled artifact: the formula installs a Python program from the
       # source archive, so there is nothing to bottle.
       bottles: "[]"
-    secrets: inherit
+    # By name, as the socle writes them on every product that publishes a
+    # formula: `inherit` forwards only the secrets whose names match what
+    # the called workflow declares, and tap.yml declares tap_token and
+    # tap_signing_key -- which no organisation secret is called. The run
+    # then reports "no tap credentials" and pushes nothing, which is what
+    # v0.62.0's formula did twice.
+    secrets:
+      tap_token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+      tap_signing_key: ${{ secrets.HOMEBREW_TAP_SIGNING_KEY }}

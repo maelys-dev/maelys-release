@@ -385,6 +385,17 @@ class SocleHoldsItselfTest(unittest.TestCase):
         for permission in sorted(asked):
             self.assertRegex(block, rf"(?m)^\s+{re.escape(permission)}: write$")
 
+    def test_it_passes_the_tap_secrets_the_way_a_product_does(self) -> None:
+        """`inherit` forwards only the secrets whose names match, and no
+        organisation secret is called tap_token. The socle writes the
+        mapping on every product that publishes a formula; it had not
+        written it for its own, and its formula stayed an artifact."""
+        written = (ROOT / "bin" / "maelys_socle" / "workflows.py").read_text(encoding="utf-8")
+        for secret in ("tap_token", "tap_signing_key"):
+            self.assertIn(f'"      {secret}: ${{{{ secrets.', written, "the socle stopped writing it")
+            self.assertRegex(self.FORMULA, rf"(?m)^\s+{secret}: \$\{{\{{ secrets\.[A-Z_]+ \}}\}}$")
+        self.assertNotIn("secrets: inherit", self.FORMULA)
+
     def test_a_formula_that_did_not_go_out_is_replayed_on_its_tag(self) -> None:
         """A published tag is never moved: the publication is repeated."""
         self.assertIn("workflow_dispatch:", self.FORMULA)
