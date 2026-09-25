@@ -35,6 +35,15 @@
   empty, nothing beside `.git` and no commit to lose, because this is the
   one place the socle deletes in a directory it made. A checkout that
   carries either stays where it is.
+- **And the self-test writes in its own cache.** The same cleaning found a
+  `migrate-maelys-fixture/` in `~/.cache/maelys-release/`, written by every
+  run of the suite: `migrate --apply` without `--push` keeps its two clones
+  in the cache the caller names, and the product fixture named the one of
+  whoever ran the tests. Each fixture now carries its own, in its temporary
+  directory and in `os.environ` too, because a command started in the test
+  process does not read the fixture's copy of the environment. Measured on
+  the whole suite: 539 tests, and `find ~/.cache/maelys-release` reports
+  nothing written since it started.
 - **Impact.** [asks: nothing] [writes: nothing] Nothing for a product.
 
 ## 0.62.0 — 2026-09-25
