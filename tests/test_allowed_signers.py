@@ -368,6 +368,28 @@ class SocleHoldsItselfTest(unittest.TestCase):
         # The formula job is the one that pushes; it must come after.
         self.assertLess(self.FORMULA.index("  signed:"), self.FORMULA.index("  formula:"))
 
+    def test_the_calling_job_allows_what_the_called_workflow_asks(self) -> None:
+        """A called workflow may not ask for more than its caller allows.
+
+        tap.yml's bottle job asks for contents, id-token and attestations;
+        without them on the calling job the run fails **before any job
+        starts**, which leaves no log at all -- measured on v0.62.0, whose
+        formula never went out and whose run reported only "a workflow file
+        issue". The socle writes exactly this on the job of a product that
+        calls release.yml; it had not written it for its own.
+        """
+        called = (ROOT / ".github" / "workflows" / "tap.yml").read_text(encoding="utf-8")
+        asked = set(re.findall(r"^\s{6}([a-z-]+): write$", called, re.M))
+        self.assertTrue(asked, "tap.yml asks for no write permission; this test has lost its subject")
+        block = self.FORMULA.split("  formula:", 1)[1].split("uses:", 1)[0]
+        for permission in sorted(asked):
+            self.assertRegex(block, rf"(?m)^\s+{re.escape(permission)}: write$")
+
+    def test_a_formula_that_did_not_go_out_is_replayed_on_its_tag(self) -> None:
+        """A published tag is never moved: the publication is repeated."""
+        self.assertIn("workflow_dispatch:", self.FORMULA)
+        self.assertIn("inputs.tag || github.ref_name", self.FORMULA)
+
     def test_the_gate_holds_the_socle_to_its_own_contract(self) -> None:
         step = self.FORMULA.split("The tag is signed by a key this repository names", 1)[1]
         for guard, why in (

@@ -14,6 +14,14 @@ name: formula
 on:
   push:
     tags: ["v*"]
+  # A formula that failed to go out is replayed on the tag it already has,
+  # as every publication of this fleet is: the tag never moves.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The existing signed tag to publish the formula for.
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -34,7 +42,7 @@ jobs:
       - name: The tag is signed by a key this repository names, and landed on main
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ inputs.tag || github.ref_name }}
         shell: bash
         # The allowed signers of the tag itself: a product reads the list at
         # the socle commit it pinned, and the socle has no earlier socle to
@@ -78,9 +86,20 @@ jobs:
 
   formula:
     needs: signed
+    # A called workflow may not ask for more than its caller allows, and
+    # tap.yml's bottle job asks for these three. Without them the run fails
+    # before a single job starts, which leaves no log to read -- measured on
+    # v0.62.0, whose formula never went out. The socle writes exactly this
+    # on the job of a product that calls release.yml; it had not written it
+    # for its own.
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
     uses: ./.github/workflows/tap.yml
     with:
       product: maelys-release
+      tag: ${{ inputs.tag || github.ref_name }}
       formula_template: packaging/homebrew/maelys-release.rb.in
       # No compiled artifact: the formula installs a Python program from the
       # source archive, so there is nothing to bottle.
