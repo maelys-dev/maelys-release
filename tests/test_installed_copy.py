@@ -30,6 +30,7 @@ COMMIT = "0" * 39 + "1"
 
 def install_prefix(directory: pathlib.Path, pin: "str | None") -> pathlib.Path:
     """The tree the formula installs, with whatever INSTALLED.pin it carries."""
+    directory.mkdir(parents=True, exist_ok=True)
     prefix = directory / "prefix"
     (prefix / "libexec").mkdir(parents=True)
     for name in ("maelys-release", "maelys_cli.py"):
@@ -74,6 +75,49 @@ class InstalledCopyTest(unittest.TestCase):
         head = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "HEAD"],
                               capture_output=True, text=True, check=True).stdout.strip()
         self.assertEqual(commit, head)
+
+    def test_the_archive_of_a_tag_carries_the_tag_too(self) -> None:
+        """Both lines, at a tag, which is the only shape that installs.
+
+        The line above archives HEAD, where `%(describe:tags)` answers
+        whatever the last tag plus a distance is; a copy is made from the
+        archive of a tag, and there the first line is that tag exactly --
+        which is what the reader compares with VERSION.
+        """
+        if not (ROOT / ".git").exists():
+            self.skipTest("not a git checkout")
+        clone = self.dir / "clone"
+        subprocess.run(["git", "clone", "-q", "--local", "--no-hardlinks", str(ROOT), str(clone)],
+                       check=True, capture_output=True)
+        # A version this repository will never publish, so the probe tag
+        # cannot collide with one the clone already carries.
+        version = "999.0.0"
+        (clone / "VERSION").write_text(version + "\n", encoding="utf-8")
+        for arguments in (["add", "VERSION"],
+                          ["-c", "user.name=probe", "-c", "user.email=p@example.invalid",
+                           "-c", "commit.gpgsign=false", "commit", "-q", "-m", "probe"],
+                          ["-c", "user.name=probe", "-c", "user.email=p@example.invalid",
+                           "-c", "tag.gpgsign=false", "tag", "-a", "-m", "probe", f"v{version}"]):
+            subprocess.run(["git", "-C", str(clone), *arguments], check=True, capture_output=True)
+        archive = subprocess.run(["git", "-C", str(clone), "archive", f"v{version}", "INSTALLED.pin"],
+                                 capture_output=True, check=True).stdout
+        (self.dir / "tagged.tar").write_bytes(archive)
+        out = self.dir / "tagged"
+        out.mkdir()
+        subprocess.run(["tar", "-xf", "../tagged.tar"], cwd=out, check=True)
+        described, commit = (out / "INSTALLED.pin").read_text(encoding="utf-8").splitlines()[:2]
+        self.assertEqual(described, f"v{version}")
+        self.assertEqual(commit, subprocess.run(["git", "-C", str(clone), "rev-parse", f"v{version}^{{}}"],
+                                                capture_output=True, text=True, check=True).stdout.strip())
+        # And that is what an installed copy then writes into a product. The
+        # prefix carries the VERSION of that same archive: the two halves
+        # come from one tag, which is what the reader checks.
+        prefix = install_prefix(self.dir / "from-tag", (out / "INSTALLED.pin").read_text(encoding="utf-8"))
+        (prefix / "VERSION").write_text(version + "\n", encoding="utf-8")
+        done = run(prefix, "new", str(self.dir / "product-from-tag"), "--product", "maelys-probe", "--apply")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        workflow = (self.dir / "product-from-tag" / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        self.assertIn(f"check-product.yml@{commit} # v{version}", workflow)
 
     def test_an_installed_copy_writes_the_pin_it_was_archived_at(self) -> None:
         prefix = install_prefix(self.dir, f"v{self.version}\n{COMMIT}\n")

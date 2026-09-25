@@ -50,8 +50,10 @@ which is the layout `socle_root()` reads — the same shape a checkout has.
 
 `INSTALLED.pin` is expanded by git when it builds the archive, so an
 installed copy names the commit it was cut from: that commit is what `adopt`
-and `new` write into a product's workflows. A copy whose archive was not
-expanded reads every product and refuses to write one, naming the
+and `new` write into a product's workflows, and what `check` compares a
+product's managed files against. A copy whose archive was not expanded knows
+no commit, so it refuses **both** — nothing that answers for a product can
+answer without naming the socle that would write it — and says which
 `--socle-sha` to pass instead of pinning a guess.
 
 A checkout at a tag remains the way a candidate is tried, and the only way
