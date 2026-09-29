@@ -1103,6 +1103,11 @@ def impact_selectors(decl: "Declarations") -> dict:
             # that only two of them carried. What the socle already knows,
             # it answers.
             "names-documentation": bool(decl.documentation_named),
+            # Not "does this product pin anything" but "does the socle write
+            # that script here": a product declaring [ci] own, or no release
+            # mechanism, carries none, and a line about the script asked it
+            # a gesture it had no file to make.
+            "checkout-script": bool(decl.dependencies) and decl.mechanism != "none" and not decl.own_ci,
             # Named after who is concerned, not who asked: 0.57.2's line named
             # maelys-warden for [docs] unnamed, and maelys-egress, public and
             # concerned, read "nothing".
