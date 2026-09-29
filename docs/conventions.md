@@ -1478,6 +1478,24 @@ then; and a version whose line says `[writes: …]` changes what a command
 writes on GitHub, which a product may let mature for a day on the pilot
 repository and on the products that adopt first.
 
+**A selector names the condition, not the audience.** This is the rule for
+writing the `[asks: …]` marker, and it was learned by breaking it: 0.60.0
+and 0.61.0 both named `public`, so every public product read "this version
+asks you a gesture" — and two of them checked three conditions by hand to
+find that none held. The gesture was carrying a line naming the
+documentation repository, which the socle already reads, file and line
+number. `public` names who could be subject to a rule; `names-documentation`
+names the case.
+
+The models are in the table the socle evaluates: `old-legs` reads what the
+default branch requires and answers **unknown** rather than false when
+GitHub cannot be asked; `names-documentation` answers from the product's
+own prose; `checkout-script` asks whether the socle writes that script
+*here* — a product declaring `[ci] own` pins dependencies and carries none.
+A selector that over-approximates costs its reader exactly the verification
+the marker exists to spare them, and a published line's prose is never
+rewritten, only its selectors are made exact.
+
 ```sh
 git clone https://github.com/maelys-dev/maelys-release && git -C maelys-release checkout vX.Y.Z
 maelys-release/bin/maelys-release adopt /path/to/product            # plan

@@ -182,6 +182,13 @@
   answered with a job's own — `workflow_permissions` reads the top-level
   key as a top-level key, which also corrects what a called workflow is
   measured to ask of its caller.
+- **And the rule for the next one is written down.** A selector names the
+  **condition**, not the audience — with `old-legs`, `names-documentation`
+  and now `checkout-script` as the models, and `unknown` rather than
+  `false` for what GitHub will not say. `checkout-script` replaces `pins`
+  in 0.61.0's line: that version changes a script the socle does not write
+  for every product that pins, since one declaring `[ci] own` carries
+  none and was asked a gesture it had no file to make.
 - **Impact.** [asks: nothing] [writes: cut, migrate, tap] Nothing for a
   product to do. The rules measure what the socle already writes, and the
   fleet passes them unchanged; what changes is that `cut`, `tap` and
@@ -467,7 +474,7 @@
   nothing from what it did not: the policies of the pages that answered
   stay violations when a later page is refused, and a list the reader did
   not finish says that the tag rule is unanswered rather than missing.
-- **Impact.** [asks: names-documentation, pins] [writes: nothing] A product that pins
+- **Impact.** [asks: names-documentation, checkout-script] [writes: nothing] A product that pins
   another Maelys repository **re-adopts**: `scripts/checkout-dependency.sh`
   changes, and a product that moves its socle pin to this version without
   re-adopting reads `check` exit 2 on `scripts/checkout-dependency.sh:

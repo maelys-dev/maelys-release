@@ -3366,7 +3366,7 @@ class ImpactLinesTest(unittest.TestCase):
         # was None -- which is what makes this assertion worth keeping: it
         # moves with the changelog, on purpose.
         self.assertIs(by_version["0.61.0"]["asksThis"], True)
-        self.assertIn("pins", by_version["0.61.0"]["asks"])
+        self.assertIn("checkout-script", by_version["0.61.0"]["asks"])
         self.assertIs(data["current"], False)
         text = self.product.run("adopt", self.dir).stdout
         self.assertIn("0.49.1   -    Nobody", text)
@@ -3416,7 +3416,22 @@ class ImpactLinesTest(unittest.TestCase):
         # published entry is untouched, its selectors are made exact.
         entries = {entry["version"]: entry["asks"] for entry in MODULE.socle_impact_entries("v0.59.2")}
         self.assertEqual(entries["0.60.0"], ["old-legs", "names-documentation"])
-        self.assertEqual(entries["0.61.0"], ["names-documentation", "pins"])
+        self.assertEqual(entries["0.61.0"], ["names-documentation", "checkout-script"])
+
+    def test_a_selector_names_the_condition_and_not_the_audience(self) -> None:
+        """`pins` answers "does this product pin anything", and the gesture
+        of 0.61.0 is a script the socle does not write for every product
+        that pins: one declaring `[ci] own` carries none, and read that the
+        version asked it something it had no file to do."""
+        decl = MODULE.read_declarations(self.product.dir, "maelys-fixture", "maelys-release")
+        self.assertTrue(decl.dependencies)
+        self.assertIs(MODULE.asks_this(decl, ["pins"], {}), True)
+        self.assertIs(MODULE.asks_this(decl, ["checkout-script"], {}), True)
+        self.product.write("maelys-release.conf", "[ci]\nown\n" + APART.lstrip("\n"))
+        own = MODULE.read_declarations(self.product.dir, "maelys-fixture", "maelys-release")
+        self.assertTrue(own.dependencies, "it still pins: that is what makes the two selectors differ")
+        self.assertIs(MODULE.asks_this(own, ["pins"], {}), True)
+        self.assertIs(MODULE.asks_this(own, ["checkout-script"], {}), False)
 
     def test_every_marker_names_selectors_the_socle_evaluates(self) -> None:
         known = set(MODULE.impact_selectors(MODULE.Declarations(pathlib.Path("/nonexistent"), "p")))
