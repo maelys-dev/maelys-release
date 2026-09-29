@@ -134,6 +134,21 @@
 
   Written in `docs/conventions.md` under Fuzzing too, because this is the
   kind of thing a product otherwise discovers from a failure.
+- **`docs/cli.md` is generated where a command line exists, not only where
+  the file does.** Relayed by a product, and worse than reported: the
+  condition read "the product has the generator **and** the file already
+  exists", and the note that explains an absent reference was written for
+  the other case — a product that pinned maelys-cli and shipped a command
+  got no reference **and** not a word about it. Silence is the one answer a
+  socle must never give.
+
+  It now generates where there is a command to describe. Measured on the
+  fleet's ten repositories first: the two that pin maelys-cli both carry
+  the file already, so nothing changes for anyone today — what changes is
+  what the next product finds. A library on the framework, whose templates
+  are all `lib*`, is told **why** it has none. And a generator that cannot
+  run — an unbuilt product — leaves no file at all where it used to be able
+  to write an empty one.
 - **Impact.** [asks: nothing] [writes: cut, migrate, tap] Nothing for a
   product to do. The rules measure what the socle already writes, and the
   fleet passes them unchanged; what changes is that `cut`, `tap` and
