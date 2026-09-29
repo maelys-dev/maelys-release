@@ -48,6 +48,12 @@ class Declarations:
         self.channels: list[tuple[str, str]] = []
         # The glob of the SBOM a build leaves in dist/, empty when none.
         self.sbom_pattern = ""
+        # The prose files of this product that name the documentation
+        # repository, so that an Impact line can ask the condition itself
+        # rather than "is this repository public": a product read "0.60.0
+        # asks you a gesture" and checked three conditions by hand to find
+        # that none of them held.
+        self.documentation_named: list[str] = []
         # "signed", "signed-on-default-branch", or "" for the workflow's
         # default of none.
         self.commit_verification = ""
