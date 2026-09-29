@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.62.2 — 2026-09-29
 
 - **The socle obeys, on its own workflows, the rule it writes on a
   product's.** Three defects of one class on 2026-09-25, all on the socle
