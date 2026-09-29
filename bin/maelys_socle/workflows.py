@@ -521,3 +521,95 @@ def sanitizers_twice(text: str) -> list[int]:
             job.append((number, line))
     close()
     return found
+
+
+# ---- what a reusable workflow asks of whoever calls it -----------------------
+
+# The order GitHub grants them in, strongest last: a caller that says `read`
+# where the called workflow writes is refused by the same measure as one that
+# says nothing.
+PERMISSION_ORDER = ("none", "read", "write")
+
+
+def workflow_jobs(text: str) -> dict:
+    """{name: body} of the jobs of one workflow, by indentation."""
+    body = top_block(text, "jobs")
+    jobs: dict = {}
+    name = ""
+    for line in body.splitlines():
+        match = re.match(r"^  ([A-Za-z0-9_-]+):\s*$", line)
+        if match:
+            name = match.group(1)
+            jobs[name] = []
+        elif name:
+            jobs[name].append(line)
+    return {name: "\n".join(lines) for name, lines in jobs.items()}
+
+
+def permission_block(block: str) -> dict:
+    """{scope: level} of a `permissions:` mapping, ignoring its comments."""
+    found = {}
+    for line in sub_block(block, "permissions").splitlines():
+        match = re.match(r"^\s*([a-z-]+):\s*([a-z-]+)\s*$", line)
+        if match and match.group(2) in PERMISSION_ORDER:
+            found[match.group(1)] = match.group(2)
+    return found
+
+
+def called_workflow_needs(text: str) -> tuple[dict, list]:
+    """({scope: level} its jobs ask of the caller, the secrets it declares).
+
+    A called workflow never receives more than its caller grants: the run
+    fails before a single job starts, with no log to read. So what its jobs
+    ask is a requirement on whoever calls it, and this reads it from the
+    called workflow itself rather than from a list somebody keeps current.
+
+    A job without a `permissions:` of its own takes the workflow's, so the
+    ceiling is the strongest level each scope reaches across the jobs. The
+    secrets are those `on.workflow_call` declares, required or not: an
+    optional secret still has to be handed over by name to arrive at all.
+    """
+    default = permission_block(text)
+    needs: dict = {}
+    for body in workflow_jobs(text).values():
+        for scope, level in (permission_block(body) or default).items():
+            if PERMISSION_ORDER.index(level) > PERMISSION_ORDER.index(needs.get(scope, "none")):
+                needs[scope] = level
+    declared = sub_block(sub_block(top_block(text, "on"), "workflow_call"), "secrets")
+    secrets = [match.group(1) for match in re.finditer(r"^      ([A-Za-z0-9_-]+):\s*$", declared, re.M)]
+    return needs, secrets
+
+
+def caller_faults(caller: str, job: str, needs: dict, secrets: list) -> list:
+    """What this calling job fails to grant the workflow it calls.
+
+    Three defects of the same day, 2026-09-25, all on the socle's own
+    workflows and none on a product's: its formula job granted `contents:
+    read` where tap.yml writes three scopes, and it passed `secrets:
+    inherit`, which forwards only the secrets whose names match what the
+    called workflow declares -- no organisation secret is called
+    `tap_token`. The socle writes both on every product that calls these
+    workflows; nothing held it to its own. This is that rule, read from the
+    two files rather than asserted.
+
+    Only a write is claimed here. What level a caller needs for a read
+    depends on the repository's default token, which the socle neither sets
+    nor sees, and a rule exact on the repository that had the defect must
+    not invent faults on the nine that never had it.
+    """
+    body = workflow_jobs(caller).get(job, "")
+    granted = permission_block(body) or permission_block(caller)
+    faults = []
+    for scope, level in sorted(needs.items()):
+        if level == "write" and granted.get(scope) != "write":
+            faults.append(f"{job} grants {scope}: {granted.get(scope, 'nothing')}"
+                          f" and the workflow it calls asks {scope}: write")
+    passed = sub_block(body, "secrets")
+    inherits = re.search(r"^\s*secrets:\s*inherit\s*$", body, re.M)
+    for secret in secrets:
+        if inherits:
+            faults.append(f"{job} passes secrets: inherit, which forwards only the secrets already called"
+                          f" {secret}; name it instead")
+        elif not re.search(rf"^\s*{re.escape(secret)}:", passed, re.M):
+            faults.append(f"{job} does not pass {secret}, which the workflow it calls declares")
+    return faults

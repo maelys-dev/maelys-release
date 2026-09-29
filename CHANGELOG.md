@@ -1,5 +1,37 @@
 # Changelog
 
+## Unreleased
+
+- **The socle obeys, on its own workflows, the rule it writes on a
+  product's.** Three defects of one class on 2026-09-25, all on the socle
+  and none on a product: its formula job granted `contents: read` where
+  `tap.yml` writes three scopes, so the run failed before a single job
+  started — no jobs, no log; and it passed `secrets: inherit`, which
+  forwards only the secrets already bearing the names the called workflow
+  declares, so the formula was rendered twice with no credentials to push
+  it with. The socle writes both on every product that calls these
+  workflows. Nothing held it to its own, because its workflows are not the
+  ones `adopt` generates — and that is by design, this repository's release
+  mechanism is its own.
+
+  So the rule is read rather than generated: `called_workflow_needs` takes,
+  from a reusable workflow, the permissions its jobs ask and the secrets it
+  declares; `caller_faults` measures a calling job against them. The tests
+  apply it at both ends — every job of this repository that calls one of
+  its own workflows, and every job `adopt` writes into a product
+  (`release.yml`, `tap.yml`, `channel.yml`) — and refuse the exact shape
+  v0.62.0 shipped, which reports five faults. Only a write is claimed: what
+  a caller needs for a read depends on the repository's default token,
+  which the socle neither sets nor sees.
+
+  This closes that class, not the exemption itself: the socle's own
+  machinery still is not the machinery it writes. What it can be held to is
+  every rule that can be read from the files rather than asserted, and this
+  is the first one.
+- **Impact.** [asks: nothing] [writes: nothing] Nothing for a product: the
+  rule measures what the socle already writes, and the fleet passes it
+  unchanged.
+
 ## 0.62.1 — 2026-09-25
 
 - **The socle's own formula workflow starts.** A called workflow may not
