@@ -70,7 +70,7 @@ from maelys_socle.cut import (
     cut_open, cut_tag,
     text_cut,
 )
-from maelys_socle.release_checks import repository_checks, tag_checks
+from maelys_socle.release_checks import formula_checks, repository_checks, tag_checks
 from maelys_socle.adoption import move_declaration, text_adopt
 from maelys_socle.tap import handle_tap, push_rebased, text_tap
 from maelys_socle.protect import PROTECTION_SHAPE, declared_legs, socle_owned, text_protect, write_ruleset
@@ -1517,6 +1517,7 @@ def handle_preflight(invocation: Invocation) -> tuple[dict, int]:
     decl, data = check_data(invocation)
     require_socle_mechanism(decl.project, decl.mechanism, "preflight")
     gate = (tag_checks(decl.project, decl.version, identity.allowed_signers(socle_root()), between_releases=True)
+            + formula_checks(decl)
             + repository_checks(decl)) \
         if data["valid"] else []
     data["preflight"] = [{"status": status, "message": message} for status, message in gate]

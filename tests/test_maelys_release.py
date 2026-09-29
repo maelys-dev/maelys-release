@@ -155,6 +155,28 @@ SAMPLE_KEY = ("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDZ9v1lQ4/1v1kJqOZfKbhRBQ3kkL
               "ZQ6lPsVjJq3B")
 
 
+def formula_template(klass: str, name: str) -> str:
+    """A Homebrew template of the shape brew style accepts, for the fixtures.
+
+    The sigils and the class comment are not decoration: a formula rendered
+    outside a tap's Formula/ directory -- which is where the tap job writes
+    it, and where preflight renders it -- is linted as plain Ruby with
+    Homebrew's configuration, and their absence is four offenses.
+    """
+    return (f"# typed: strict\n# frozen_string_literal: true\n\n"
+            f"# Fixture formula of the socle's own tests.\n"
+            f"class {klass} < Formula\n"
+            f'  desc "Fixture product of the socle\'s own tests"\n'
+            f'  homepage "https://example.invalid/{name}"\n'
+            f'  url "@URL@"\n'
+            f'  sha256 "@SHA256@"\n'
+            f'  license "MPL-2.0"\n\n'
+            f"  def install\n"
+            f'    bin.install "{name}"\n'
+            f"  end\n"
+            f"end\n")
+
+
 class Product:
     """A product fixture with one pinned dependency served from a bare repository."""
 
@@ -171,6 +193,18 @@ class Product:
         # os.environ and not this copy, so both are set, as the signers are.
         self.cache = self.work / "cache"
         self.env["XDG_CACHE_HOME"] = str(self.cache)
+        # A brew that answers instantly. `preflight` renders every formula
+        # and asks brew to read it, and the real brew boots Ruby and RuboCop:
+        # two formulas turned one test class into four minutes. What brew
+        # says of a formula is measured in test_formula_checks, against a
+        # host that answers for it, and once for real on this repository's
+        # own template; the hundred other tests only need the command to
+        # exist, as it does on the runner.
+        shim = self.work / "bin"
+        shim.mkdir()
+        (shim / "brew").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        (shim / "brew").chmod(0o755)
+        self.env["PATH"] = f"{shim}:{self.env.get('PATH', '')}"
         self.previous_cache = os.environ.get("XDG_CACHE_HOME")
         os.environ["XDG_CACHE_HOME"] = str(self.cache)
         source = self.work / "src" / "maelys-system"
@@ -200,8 +234,14 @@ class Product:
         self.write("dependencies/packages", "# build inputs\n[linux]\npkg-config\nlibjansson-dev\n\n[macos]\njansson\n")
         self.write("maelys-release.conf", APART.lstrip("\n"))
         # A conformant product with pins says where its build reads them.
-        self.write("packaging/homebrew/maelys-fixture.rb.in", "class MaelysFixture < Formula\nend\n")
-        self.write("packaging/homebrew/libmaelys-fixture.rb.in", "class LibmaelysFixture < Formula\nend\n")
+        # Templates a tap would accept: `preflight` renders them and reads
+        # them with brew since the version that found a product publishing
+        # with no formula at all, so a fixture carrying `class X < Formula;
+        # end` would make every preflight test fail on this machine and
+        # pass on a runner with no brew -- which is the worst of both.
+        self.write("packaging/homebrew/maelys-fixture.rb.in", formula_template("MaelysFixture", "maelys-fixture"))
+        self.write("packaging/homebrew/libmaelys-fixture.rb.in",
+                   formula_template("LibmaelysFixture", "libmaelys-fixture"))
         self.write("AGENTS.md", "# Agent instructions\n\nKeep me.\n")
         # A fixture signs with a key generated for it, which the fleet's own
         # allowed signers will never name. The socle reads this one instead,
@@ -2121,6 +2161,8 @@ class GoldenTest(unittest.TestCase):
             FAIL     user.signingkey is not set (gpg.format = openpgp); the key must be registered on GitHub
             note     no v* tag yet
             ok       tag v1.2.3 is free
+            ok       libmaelys-fixture renders from its template and passes brew style
+            ok       maelys-fixture renders from its template and passes brew style
             note     origin is not on GitHub: release environment not checked
             preflight: maelys-fixture is not ready to tag
             """))
