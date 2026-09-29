@@ -174,11 +174,16 @@ class CutHostTest(unittest.TestCase):
         signed = next(i for i, (kind, value) in enumerate(self.host.events) if kind == "run" and value[:3] == ["git", "tag", "-s"])
         verified = self.host.events.index(("run", ["git", "tag", "-v", "v1.3.0"]))
         pushed = self.host.events.index(("run", ["git", "push", "-q", "origin", "refs/tags/v1.3.0"]))
+        # The tag is read back from the remote before anything is reported:
+        # the exit status of a push says the transport worked, not which
+        # commit the remote now has under that name.
+        listed = self.host.events.index(("run", ["git", "ls-remote", "origin", "refs/tags/v1.3.0*"]))
         reread = self.host.events.index(("read", "repos/o/r/git/ref/tags/v1.3.0"))
         self.assertLess(checked, signed)
         self.assertLess(signed, verified)
         self.assertLess(verified, pushed)
-        self.assertLess(pushed, reread)
+        self.assertLess(pushed, listed)
+        self.assertLess(listed, reread)
 
     def test_red_or_missing_checks_never_create_a_tag(self):
         self.open_and_merge()

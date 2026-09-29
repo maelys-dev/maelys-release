@@ -28,9 +28,29 @@
   machinery still is not the machinery it writes. What it can be held to is
   every rule that can be read from the files rather than asserted, and this
   is the first one.
-- **Impact.** [asks: nothing] [writes: nothing] Nothing for a product: the
-  rule measures what the socle already writes, and the fleet passes it
-  unchanged.
+- **Every write to a remote is read back.** `protect` learned this in
+  0.58.0, after two products lost a setting under a write whose plan named
+  something else: it re-reads what it wrote and fails on anything that
+  moved. The same review asked the obvious next question — whether `cut`,
+  `tap` and `migrate` do the same — and the answer was no. Measured, one
+  command at a time: `cut` read the pull request back but not the branch it
+  had pushed, and read the tag's signature from GitHub without ever
+  comparing **which commit** that tag names; `tap` and `migrate` read the
+  exit status of `git push` and called it published.
+
+  An exit status is not a reading: it says the transport succeeded, not
+  that the remote holds what was meant. So `writes.py` holds the three
+  shapes, and the three commands use them — `confirm_ref` for a branch
+  nobody else writes, `confirm_tag` for a tag, by its **peeled** ref
+  because that is what says which commit it names, and `confirm_contains`
+  for the tap's one branch, where every product of the fleet publishes and
+  one landing a second later must not read as a failure. Unreadable stays
+  apart from absent, as it does everywhere else in this package.
+- **Impact.** [asks: nothing] [writes: cut, migrate, tap] Nothing for a
+  product to do. The rules measure what the socle already writes, and the
+  fleet passes them unchanged; what changes is that `cut`, `tap` and
+  `migrate` stop when a remote does not confirm what they pushed, where
+  they used to report the exit status of the push as a publication.
 
 ## 0.62.1 — 2026-09-25
 

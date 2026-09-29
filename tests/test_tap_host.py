@@ -148,6 +148,11 @@ class TapHostTest(unittest.TestCase):
         self.assertEqual(len(host.pushes), 2)
         self.assertIn(["git", "fetch", "-q", "origin", "main"], host.commands)
         self.assertIn(["git", "rebase", "-q", "origin/main"], host.commands)
+        # And the branch is read back for what it carries: another product
+        # publishing its own formula a second later moves the head without
+        # losing this commit, so containment is what is asserted.
+        self.assertTrue(any(command[:3] == ["git", "merge-base", "--is-ancestor"] for command in host.commands),
+                        host.commands)
         self.assertEqual(host.styles, [])
         self.assertEqual(len(host.signing_files), 1)
         self.assertEqual(host.signing_files[0][1], 0o600)

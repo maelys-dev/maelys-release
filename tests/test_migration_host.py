@@ -83,6 +83,10 @@ class MigrationHostTest(unittest.TestCase):
         host = MigrationHost(self.product)
         code, out, err = self.invoke(host)
         self.assertEqual((code, err), (0, ""))
+        # One reading per push: a migration writes into two repositories,
+        # and a push whose ref never arrived must not be reported as sent.
+        self.assertEqual(len([command for command in host.commands if command[:2] == ["git", "ls-remote"]]), 2,
+                         host.commands)
         data = json.loads(out)["data"]
         self.assertTrue(data["pushed"])
         for remote, field in ((self.fixture.documents, "documentsCommit"), (self.remote, "productCommit")):
