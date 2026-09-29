@@ -23,12 +23,12 @@ on:
         description: >-
           Run on Linux x86_64 with clang; empty disables the job.
 
-          **`CC` and `CXX` are in the job's environment**, so every command
-          of an `a && b` gets clang. The `CC=clang CXX=clang++` appended to
-          the line is a make override, and a make override reaches only the
-          command it is written on -- the last. The two say the same thing
-          for a Makefile that honours `CC`; they part company for one that
-          assigns it (`CC := gcc`), where only the last command is overridden.
+          **The line is run as written.** `CC` and `CXX` are in the job's
+          environment, and `MAKEFLAGS` carries the same override, so a
+          Makefile that assigns `CC` itself is overridden as a command-line
+          assignment would -- for every command of an `a && b`, not the last
+          one only. Nothing is appended to the line: a script would have
+          received `CC=clang` as an argument.
         required: false
         type: string
         default: make asan-ubsan
@@ -41,8 +41,8 @@ on:
           nothing. Opt-in: the nine products that fuzz spell their targets
           differently.
 
-          `CC` and `CXX` reach every command of this line through the job's
-          environment, as above; the trailing override reaches the last.
+          The line is run as written, with `CC`, `CXX` and `MAKEFLAGS` in
+          the environment, as above.
         required: false
         type: string
         default: ""
@@ -254,6 +254,15 @@ jobs:
     env:
       CC: clang
       CXX: clang++
+      # A make override without a word on the command line. Appending
+      # `CC=clang CXX=clang++` to the line made a variable for `make` and
+      # two positional arguments for a script, which is how a product's
+      # fuzzer was handed `CC=clang` as an argv entry. Measured: with the
+      # environment alone a Makefile that assigns `CC` keeps its own; with
+      # this, make reads it as a command-line assignment, which is what the
+      # appended words used to buy -- and every command of an `a && b` gets
+      # it, not the last one only.
+      MAKEFLAGS: CC=clang CXX=clang++
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -329,7 +338,7 @@ jobs:
         # campaign that finds new inputs is not a CI job; docs/conventions.md
         # of maelys-release says why, under Fuzzing, and that is the text to
         # read rather than this comment.
-        run: ${{ inputs.fuzz_command }} CC=clang CXX=clang++
+        run: ${{ inputs.fuzz_command }}
 
   sanitizers:
     if: inputs.sanitizer_command != ''
@@ -337,6 +346,15 @@ jobs:
     env:
       CC: clang
       CXX: clang++
+      # A make override without a word on the command line. Appending
+      # `CC=clang CXX=clang++` to the line made a variable for `make` and
+      # two positional arguments for a script, which is how a product's
+      # fuzzer was handed `CC=clang` as an argv entry. Measured: with the
+      # environment alone a Makefile that assigns `CC` keeps its own; with
+      # this, make reads it as a command-line assignment, which is what the
+      # appended words used to buy -- and every command of an `a && b` gets
+      # it, not the last one only.
+      MAKEFLAGS: CC=clang CXX=clang++
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -407,5 +425,5 @@ jobs:
           sudo apt-get install -y build-essential clang libclang-rt-18-dev ${{ steps.socle.outputs.linux_packages }}
       - name: Sanitizers with clang
         shell: bash
-        run: ${{ inputs.sanitizer_command }} CC=clang CXX=clang++
+        run: ${{ inputs.sanitizer_command }}
 

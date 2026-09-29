@@ -430,6 +430,17 @@ unbounded one runs it where it can watch it.
 CI job runs gets a note, never a violation. The socle does not know whether
 that is an oversight or a choice.
 
+**How the compiler reaches those two commands**, since it is the kind of
+thing a product otherwise finds out from a failure. The line a product
+declares is run **as written**: nothing is appended to it. Both jobs carry
+`CC=clang`, `CXX=clang++` and `MAKEFLAGS=CC=clang CXX=clang++` in their
+environment, so a Makefile that assigns `CC` itself is overridden exactly
+as a command-line assignment would override it, and every command of an
+`a && b` gets the same. Until 0.62.x the socle appended `CC=clang
+CXX=clang++` to the line instead, which is a variable for `make` and two
+positional arguments for anything else: a product's fuzzer was handed
+`CC=clang` as an argument.
+
 ## What the fleet reads from a product
 
 `declarations` is the one place a fleet observer reads a product from, so
