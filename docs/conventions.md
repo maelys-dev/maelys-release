@@ -854,6 +854,28 @@ provenance of an SBOM **file** with a proof that the SBOM describes the
 archive beside it. A verifier could confirm both files left this workflow
 and nothing more. maelys-http reported it.
 
+### What `check` and `adopt` verify, and what they do not
+
+They verify the **form of the release machinery**: the files the socle
+writes, the pins, the declarations, the conventions of this page. They
+never verify the product. Not its build, not its tests, not its API, not
+whether what it publishes is correct.
+
+A product that had just fixed three defects of its own — platforms lost
+from a release, a publication that ran before its own refusal, a foreign
+manifest accepted — observed that all three had passed under an entirely
+green socle. That is not a gap: `make check` belongs to the product, and a
+socle that judged a product's correctness would be claiming knowledge it
+does not have.
+
+It is written here because the boundary is invisible from outside, and a
+socle this strict about its own surface invites the belief that it covers
+more than it does. `check` green means **the machinery is in the shape the
+fleet agreed**; it says nothing about whether the release is good. What
+guards that is the product's own CI, which `ci.yml` owns and
+`check-product.yml` runs — its legs, its sanitizers, its fuzzing — and
+which the socle calls without reading.
+
 ### Choosing the macOS runner
 
 The runner of the `build` job has been a product's to declare since 0.24.0,

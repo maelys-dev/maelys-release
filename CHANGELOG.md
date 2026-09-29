@@ -62,6 +62,21 @@
   cannot be asked. A selector that names a property of the repository
   instead of the condition costs its reader the verification it was
   supposed to spare them.
+- **The boundary is written down.** `check` and `adopt` verify the form of
+  the release machinery — the files the socle writes, the pins, the
+  declarations, the conventions — and never the product: not its build,
+  not its tests, not whether what it publishes is correct. A product that
+  had just fixed three defects of its own observed that all three had
+  passed under an entirely green socle. That is not a gap; `make check`
+  belongs to the product, and a socle that judged a product's correctness
+  would be claiming knowledge it does not have. It is written in
+  `docs/conventions.md` because the boundary is invisible from outside,
+  and a socle this strict about its own surface invites the belief that it
+  covers more than it does.
+
+  This page is the socle's own, not one of the managed texts a product
+  receives, so the version stays a patch: nothing moves in a product, and
+  nothing is asked of one.
 - **Impact.** [asks: nothing] [writes: cut, migrate, tap] Nothing for a
   product to do. The rules measure what the socle already writes, and the
   fleet passes them unchanged; what changes is that `cut`, `tap` and
