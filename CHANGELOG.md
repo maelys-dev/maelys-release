@@ -91,6 +91,31 @@
   read has no evidence of what its own checks are called: the plan proposes
   the socle's contexts alone and says so, with the sentence that ends it —
   merge a pull request, then run this again to add what it produced.
+- **`preflight` renders the formula, and brew reads it.** A product
+  published a version with no formula in the tap and had to cut the next
+  patch for that alone. Nothing between `preflight` and the tag ever looked
+  at the template: the first thing that did was the release itself, at the
+  one moment nothing can be retried cheaply.
+
+  A full render cannot happen before the tag — it hashes the archive of a
+  tag that does not exist yet — but everything else can. The template is
+  substituted with the values that tag will produce, **an unrendered
+  placeholder is a refusal** with the placeholder named, and `brew style`
+  reads the result under the formula's own file name, because brew checks
+  the class name against it. Without brew, the formula still renders and
+  the line says the style is read at the tag: a note, not a failure. A
+  product whose own script renders is named, not guessed — that script
+  hashes an archive that does not exist yet either.
+
+  Measuring it on this repository found the rule's own false positive
+  before any product could: with the fleet's tap installed, `brew style`
+  reports `Lint/DuplicateMethods` on the rendered formula, naming the tap's
+  own copy of the same class. The runner that lints at the tag has no tap,
+  so that offense exists on a maintainer's machine and nowhere else — the
+  worst place for a false refusal, since that is where `preflight` runs. A
+  duplicate whose other definition is in **another file** is set aside and
+  reported as a note; two methods of the same name inside the template name
+  that file twice, and stay a refusal.
 - **Impact.** [asks: nothing] [writes: cut, migrate, tap] Nothing for a
   product to do. The rules measure what the socle already writes, and the
   fleet passes them unchanged; what changes is that `cut`, `tap` and

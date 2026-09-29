@@ -5,10 +5,12 @@ from __future__ import annotations
 import datetime
 import pathlib
 import re
+import tempfile
 
 from . import host
 from .constants import DECLARATION_FILE
 from .declarations import Declarations
+from .checkouts import git_base
 from .github import (branch_protection, channel_visibility, deployment_policies, environment_gate,
                      github_read, github_repository, publication_record, read_protection,
                      read_repository, tap_drift, tap_secrets)
@@ -238,6 +240,129 @@ def tag_checks(project: pathlib.Path, version: str, allowed_signers: pathlib.Pat
         found.append(("ok", f"tag v{version} is free"))
     return found
 
+
+
+# What a template leaves for the tag to fill, and what a rendered formula
+# must not carry any more.
+FORMULA_PLACEHOLDER = re.compile(r"@[A-Z0-9_]+@")
+
+# One line of brew style: path, position, severity, cop, message.
+STYLE_OFFENSE = re.compile(r"^(?P<path>\S+?):\d+:\d+: \w: (?P<cop>[\w/]+): (?P<message>.*)$")
+
+
+def style_offenses(output: str, linted: pathlib.Path) -> tuple[list[str], list[str]]:
+    """(offenses of this file, offenses it has only on this machine).
+
+    Measured on the socle's own formula: with the fleet's tap tapped,
+    `brew style` reports `Lint/DuplicateMethods` on `install`, naming the
+    tap's installed copy of the same formula -- the class is defined twice
+    in one RuboCop run. The runner that lints at the tag has no tap
+    installed, so that offense exists on a maintainer's machine and nowhere
+    else, which is the worst possible place for a false refusal: it is where
+    `preflight` runs.
+
+    Only a duplicate whose other definition is in another file is set aside,
+    and it is reported rather than hidden. Two methods of the same name in
+    the template itself name that file twice, and stay a refusal.
+    """
+    kept, elsewhere = [], []
+    for line in output.splitlines():
+        found = STYLE_OFFENSE.match(line.strip())
+        if not found or found.group("path") != str(linted):
+            continue
+        # The paths a message names, each one possibly followed by :LINE.
+        others = [named for named in re.findall(r"(/\S+?\.rb)(?::\d+)?", found.group("message"))
+                  if named != str(linted)]
+        if found.group("cop") == "Lint/DuplicateMethods" and others:
+            elsewhere.append(f"{found.group('cop')}: {found.group('message')}")
+        else:
+            kept.append(f"{found.group('cop')}: {found.group('message')}")
+    return kept, elsewhere
+
+
+def formula_checks(decl: Declarations) -> list[tuple[str, str]]:
+    """Whether each declared formula renders, and passes brew style, before the tag.
+
+    A product published a version with no formula in the tap and had to cut
+    the next patch for that alone: nothing between `preflight` and the tag
+    ever looked at the template, and the first thing that did was the
+    release itself, at the one moment nothing can be retried cheaply.
+
+    A full render cannot happen here -- it hashes the archive of a tag that
+    does not exist yet -- but everything else can. The template is
+    substituted with the values that tag will produce, an unrendered
+    placeholder is a refusal, and brew reads the result if brew is
+    installed. What is left untested is the digest, which is the one part
+    the workflow computes rather than the product writes.
+
+    Every formula of a product goes to brew in one call: `brew style` boots
+    Ruby and RuboCop, which costs seconds, and a product with two formulas
+    paid it twice for nothing -- each offense names the file it is in, so
+    one call answers for all of them.
+    """
+    found: list[tuple[str, str]] = []
+    # The archive URL of the tag to come, built from the base and the
+    # product rather than read from the remote: what is measured here is the
+    # template and the style of what it produces, and asking git for the
+    # origin would add a call to a gate that the recorded API replays hold
+    # call by call. The real URL has this shape; brew reads its shape.
+    base = git_base().rstrip("/")
+    tag = f"v{decl.version}"
+    rendered: dict[str, str] = {}
+    for name in sorted(decl.formulas):
+        template = decl.project / "packaging" / "homebrew" / f"{name}.rb.in"
+        if not template.is_file():
+            continue
+        if decl.render_command:
+            found.append(("note", f"{name}: rendered by the product's own script, which hashes the archive of a"
+                                  " tag that does not exist yet: not rendered here"))
+            continue
+        text = template.read_text(encoding="utf-8") \
+            .replace("@URL@", f"{base}/{decl.product}/archive/refs/tags/{tag}.tar.gz") \
+            .replace("@VERSION@", decl.version) \
+            .replace("@SHA256@", "0" * 64)
+        left = sorted(set(FORMULA_PLACEHOLDER.findall(text)))
+        if left:
+            found.append(("fail", f"packaging/homebrew/{name}.rb.in leaves {', '.join(left)} unrendered:"
+                                  " the tap job refuses a formula that still carries a placeholder"))
+            continue
+        if not host.HOST.which("brew"):
+            found.append(("note", f"{name}: the formula renders; brew is not installed here, so its style is"
+                                  " read at the tag and not before"))
+            continue
+        rendered[name] = text
+    if not rendered:
+        return found
+    with tempfile.TemporaryDirectory(prefix="maelys-release-formula.") as temp:
+        # Each under its own name: brew reads the class name against the
+        # file name, and a formula linted as something else is not linted.
+        paths = {name: pathlib.Path(temp) / f"{name}.rb" for name in rendered}
+        for name, path in paths.items():
+            path.write_text(rendered[name], encoding="utf-8")
+        styled = run(["brew", "style", *(str(path) for path in paths.values())])
+        output = styled.stdout + styled.stderr
+        read: list[tuple[str, str]] = []
+        attributed = False
+        for name, path in paths.items():
+            offenses, elsewhere = style_offenses(output, path)
+            attributed = attributed or bool(offenses) or bool(elsewhere)
+            if offenses:
+                read.append(("fail", f"brew style refuses the rendered {name}: {offenses[0]}"))
+            else:
+                read.append(("ok", f"{name} renders from its template and passes brew style"))
+            for offense in elsewhere:
+                read.append(("note", f"{name}: brew reports {offense.split(':')[0]} because this formula is also"
+                                     " installed in a tap on this machine; the runner that lints at the tag"
+                                     " has no tap"))
+        if styled.returncode != 0 and not attributed:
+            # brew refused and no line of its output named one of these
+            # files: whatever it is, none of them may be called passing.
+            detail = output.strip().splitlines()
+            found.append(("fail", "brew style refuses the rendered formulas: "
+                                  + (detail[-1] if detail else "no diagnostic")))
+        else:
+            found.extend(read)
+    return found
 
 
 def repository_checks(decl: Declarations) -> list[tuple[str, str]]:
