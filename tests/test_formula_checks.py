@@ -9,6 +9,7 @@ itself — the one moment nothing can be retried cheaply.
 from __future__ import annotations
 
 import pathlib
+import shutil
 import subprocess
 import unittest
 
@@ -126,9 +127,17 @@ class TheSocleHoldsItsOwnFormulaToItTest(unittest.TestCase):
         self.assertEqual(decl.formulas, ["maelys-release"], "this repository carries one formula template")
         found = formula_checks(decl)
         self.assertEqual([status for status, _ in found if status == "fail"], [], found)
-        self.assertEqual(found[0][0], "ok", found)
-        # Anything else is a note, and on a machine with the fleet's tap
-        # installed there is one: brew sees the same class twice.
+        # Both ends of the rule, and this test first read only one: the
+        # Ubuntu runner has no brew, so there the template renders and the
+        # line says its style is read at the tag -- a note, reached only once
+        # no placeholder is left, so it still proves the render. With brew,
+        # it is an ok, and on a machine with the fleet's tap installed a
+        # note follows, because brew sees the same class twice.
+        if shutil.which("brew"):
+            self.assertEqual(found[0][0], "ok", found)
+        else:
+            self.assertEqual(found[0], ("note", "maelys-release: the formula renders; brew is not installed"
+                                                " here, so its style is read at the tag and not before"), found)
         self.assertEqual({status for status, _ in found[1:]} - {"note"}, set(), found)
 
 
