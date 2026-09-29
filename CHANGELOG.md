@@ -116,6 +116,24 @@
   duplicate whose other definition is in **another file** is set aside and
   reported as a note; two methods of the same name inside the template name
   that file twice, and stay a refusal.
+- **The compiler reaches the command, not its argument list.**
+  `check-product.yml` appended `CC=clang CXX=clang++` to the fuzz and
+  sanitizer commands. For `make` that is a command-line assignment — which
+  is precisely what a Makefile that assigns `CC` itself needs, and why the
+  words were there. For anything else they are **two positional
+  arguments**, and a product's fuzzer was handed `CC=clang` as an argv
+  entry. On an `a && b` they reached the last command only.
+
+  `MAKEFLAGS` says the same thing to make without writing a word on the
+  line. Both jobs now carry `CC`, `CXX` and `MAKEFLAGS=CC=clang
+  CXX=clang++` in their environment, and run the declared line as written.
+  Measured rather than asserted: with the environment alone a Makefile
+  assigning `CC` keeps its own value — the defect the appended words were
+  covering — and with `MAKEFLAGS` clang wins, for every command of the
+  line. A script now receives no arguments it did not ask for.
+
+  Written in `docs/conventions.md` under Fuzzing too, because this is the
+  kind of thing a product otherwise discovers from a failure.
 - **Impact.** [asks: nothing] [writes: cut, migrate, tap] Nothing for a
   product to do. The rules measure what the socle already writes, and the
   fleet passes them unchanged; what changes is that `cut`, `tap` and
