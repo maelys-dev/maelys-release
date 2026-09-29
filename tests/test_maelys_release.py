@@ -4509,6 +4509,55 @@ class PackageTargetsTest(unittest.TestCase):
         self.assertNotEqual(nothing.returncode, 0)
 
 
+class NoEvidenceTest(unittest.TestCase):
+    """With no merged pull request to read, nothing of the product is observed.
+
+    A product read a plan proposing `build (…)` and `publish` -- the jobs of
+    its release, seen on the tip of its default branch because the tag
+    pointed at that commit. Applied, it would have blocked every pull
+    request, since those jobs never run on one; the operator wrote the
+    protection by hand instead, against the convention this command exists
+    to hold ("derived, never typed").
+    """
+
+    def report(self, pulls, seen=()):
+        host = protection_host(("ok", {"required_status_checks": {"contexts": []}}), seen=seen)
+        original = host.reader
+
+        def read(path):
+            if path == "repos/o/r/pulls?state=closed&per_page=30":
+                return "ok", pulls
+            if path == "repos/o/r/commits/main/check-runs?per_page=100":
+                raise AssertionError("the tip of the default branch is not evidence")
+            if path == "repos/o/r/commits/main":
+                raise AssertionError("the tip of the default branch is not read")
+            return original(path)
+
+        host.reader = read
+        with workflow_project() as project, using_host(host):
+            invocation = type("I", (), {"operands": [str(project)],
+                                        "flag": lambda self, name: False,
+                                        "option": lambda self, name, default="": default,
+                                        "format": "json"})()
+            return MODULE.handle_protect(invocation)[0]
+
+    def test_the_tip_of_the_default_branch_is_never_the_evidence(self) -> None:
+        data = self.report([{"merged_at": None, "head": {"sha": "open"}}])
+        self.assertEqual(data["observed"], [])
+        self.assertEqual(data["pullRequests"], 0)
+        self.assertIn("no merged pull request", data["note"])
+        # What it proposes is what the socle itself produces, and nothing
+        # a release ran: every proposed name is one this socle derives.
+        self.assertEqual(data["proposed"], data["socleContexts"])
+        self.assertTrue(data["socleContexts"])
+
+    def test_a_merged_pull_request_is_read_as_before(self) -> None:
+        data = self.report([{"merged_at": "x", "head": {"sha": "abc"}}], seen=("their own job",))
+        self.assertEqual(data["pullRequests"], 1)
+        self.assertIn("their own job", data["proposed"])
+        self.assertNotIn("no merged pull request", data.get("note", ""))
+
+
 class FakeProtection:
     """A classic branch protection that the fake `gh api` writes actually change.
 

@@ -650,7 +650,8 @@ def observed_contexts(repository: str, branch: str, samples: int = 3) -> tuple[l
     A branch protection can only require what a pull request produces, so
     the evidence is pull requests and never the tip of the default branch:
     that tip also carries what the tag pointing at it ran, and the push-only
-    runs besides.
+    runs besides. When there is no merged pull request to read, the answer
+    is nothing observed -- not the tip as a second best.
 
     And it is several pull requests, intersected, not one. A name seen on
     one head and not the next is either new or intermittent, and requiring
@@ -672,12 +673,15 @@ def observed_contexts(repository: str, branch: str, samples: int = 3) -> tuple[l
     heads = [pull.get("head", {}).get("sha", "") for pull in pulls
              if isinstance(pull, dict) and pull.get("merged_at")][:samples]
     if not heads:
-        read, head = github_read(f"repos/{repository}/commits/{branch}")
-        unanswered += read != "ok"
-        head = head if isinstance(head, dict) else {}
-        heads = [head.get("sha", "")] if head.get("sha") else []
-    if not heads:
-        return [], [], {"unanswered": unanswered}
+        # And nothing else. This used to fall back on the tip of the default
+        # branch -- against what the paragraph above says -- and a product
+        # read a plan proposing `build (…)` and `publish`: the jobs of its
+        # release, which had run on that tip because the tag pointed at it.
+        # Applied, that protection would have blocked every pull request,
+        # since those jobs never run on one. A repository with no merged
+        # pull request to read has no evidence of what its own checks are
+        # called, and saying so is the only honest answer.
+        return [], [], {"heads": 0, "partial": {}, "unanswered": unanswered, "ever": [], "noEvidence": True}
     per_head: list[set] = []
     from_tag: set = set()
     for sha in heads:
