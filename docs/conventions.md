@@ -1758,6 +1758,28 @@ maelys-release adopt DIR --apply     # then merge that pull request
 maelys-release protect DIR --apply   # each alias leaves in the write that requires its leg
 ```
 
+**Renaming a check of the product's own** takes the same two steps, without
+the aliases. The socle knows its legs, so a rename of its own carries one:
+the old name keeps reporting while the new one starts, and nothing locks.
+It knows nothing of `sanitizers`, `fuzz-smoke` or whatever a product calls
+its jobs — those are read from what its merged pull requests produced. So
+a product that renames one is caught twice: the old name is required and
+never reports again, which blocks every merge, and the new name is
+proposed only once a **merged** pull request has produced it, which cannot
+happen while the old one blocks.
+
+```sh
+maelys-release protect DIR --apply --allow-narrow  # drops what nothing produces
+                                                   # then merge a pull request
+maelys-release protect DIR --apply                 # requires what it produced
+```
+
+`--allow-narrow` is the whole point of that first write: `--apply` never
+narrows a protection by itself, because a check missing from three sampled
+pull requests is usually intermittent rather than gone. Passing it says
+those names are gone for good. `protect` prints this path under the `DROP`
+lines, where the problem appears.
+
 **What `protect --apply` checks after writing** (0.58.0). It re-reads the
 protection and fails on any setting that moved beyond the checks, and the plan
 names every other setting — `keeps`, or `create` line by line on a branch
@@ -2011,6 +2033,13 @@ every `mkdir` with ENOSYS, which made the x86_64 rehearsal unusable on the
 machines the fleet develops on. Untracked files are left behind, as CI
 leaves them, and the log says how many. A directory that is not a git
 repository is still rehearsed, copied whole, with a warning saying so.
+
+**A worktree is refused**, and so is a submodule checkout: in both, `.git`
+is a *file* naming a directory elsewhere on the host, which the container
+does not have, so git inside the rehearsal reads a path that is not there.
+The socle says so rather than letting it surface as whatever the product's
+build makes of a broken repository — run the rehearsal from a full clone.
+Reported by maelys-oci, who had worked around it with one.
 
 **A substitution the socle does not anchor.** `verify_command`,
 `package_command`, `render_command` and `publish_command` replace the words

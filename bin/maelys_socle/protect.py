@@ -509,6 +509,16 @@ def text_protect(data: dict) -> str:
         lines.append(f"UNREAD   GitHub did not answer for {what}: this plan is not a reading, and --apply refuses")
     for name in data.get("dropping") or []:
         lines.append(f"DROP     {name} is required and this plan leaves it out: --apply refuses without --allow-narrow")
+    if data.get("dropping"):
+        # The flag alone is half an answer. A product renaming a check of
+        # its own -- not a leg of the socle's matrix, which has aliases --
+        # is stuck twice: the old name blocks every merge, and the new one
+        # is proposed only once a *merged* pull request has produced it,
+        # which cannot happen while the old one blocks. The way through is
+        # two writes, and it is printed where the problem shows.
+        lines.append("path     a required check nothing produces blocks every merge, and a name no merged pull"
+                     " request has produced yet is never proposed: 'protect DIR --apply --allow-narrow' drops"
+                     " those, then merge a pull request, then 'protect DIR --apply' requires what it produced")
     if data.get("ruleset"):
         lines.append(f"ruleset  requires " + ", ".join(data["ruleset"])
                      + " — --apply writes this ruleset, never a classic protection beside it")

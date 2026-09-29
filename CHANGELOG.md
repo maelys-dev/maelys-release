@@ -149,6 +149,21 @@
   are all `lib*`, is told **why** it has none. And a generator that cannot
   run — an unbuilt product — leaves no file at all where it used to be able
   to write an empty one.
+- **The way out of a renamed check, printed where the problem is.** The
+  socle knows its own legs, so a rename of its own carries an alias and
+  nothing locks. It knows nothing of `sanitizers`, `fuzz-smoke` or whatever
+  a product calls its jobs — those are read from what its **merged** pull
+  requests produced. A product that renames one is therefore caught twice:
+  the old name is required and never reports again, which blocks every
+  merge, and the new name is proposed only once a merged pull request has
+  produced it, which cannot happen while the old one blocks. The path out
+  existed — `--allow-narrow`, merge, `protect --apply` again — and lived in
+  an error message. `protect` now prints it under the `DROP` lines, and
+  `docs/conventions.md` states it beside the socle's own rename.
+- **And `rehearse` says in the conventions what it refuses.** A worktree
+  and a submodule checkout carry a `.git` **file** naming a directory
+  elsewhere on the host, which the container does not have. The command has
+  refused them since the day maelys-oci reported it; only the code said so.
 - **Impact.** [asks: nothing] [writes: cut, migrate, tap] Nothing for a
   product to do. The rules measure what the socle already writes, and the
   fleet passes them unchanged; what changes is that `cut`, `tap` and
