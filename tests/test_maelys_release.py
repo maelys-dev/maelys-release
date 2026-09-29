@@ -5135,6 +5135,11 @@ class LegAliasTest(unittest.TestCase):
         text = MODULE.text_protect(report)
         self.assertIn("STALE    check / check (ubuntu-26.04) is required and no run", text)
         self.assertIn("DROP     check / check (macos-15) is required and this plan leaves it out", text)
+        # And the whole way through, not the flag alone: a product renaming
+        # a check of its own is stuck twice, since the new name is proposed
+        # only once a merged pull request has produced it.
+        self.assertIn("path     a required check nothing produces blocks every merge", text)
+        self.assertIn("--allow-narrow' drops those, then merge a pull request", text)
         with self.assertRaises(MODULE.Failure) as refused:
             self.protect(old, seen, apply=True)
         self.assertIn("--allow-narrow", refused.exception.hint)
