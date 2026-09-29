@@ -164,6 +164,24 @@
   and a submodule checkout carry a `.git` **file** naming a directory
   elsewhere on the host, which the container does not have. The command has
   refused them since the day maelys-oci reported it; only the code said so.
+- **Three more rules the socle keeps for a product, read on its own
+  files.** Every `uses:` pinned by a commit and not a moving tag; a
+  top-level `permissions:` on every workflow; and a workflow that runs on a
+  tag taking a `workflow_dispatch` with that tag, so a failed publication
+  is replayed on the tag it already has. None of the three is broken today
+  — that is the point. The three defects of 2026-09-25 were rules held for
+  nine repositories and not for the one that writes them, and each was
+  found by a release failing rather than by a test.
+
+  Writing them found two defects of their own, both in the rule and not in
+  the files. The first pattern read `uses:` and not `- uses:`, so it
+  inspected **nothing** and passed on an `actions/checkout@v7` put there to
+  catch it; it now counts what it read and refuses to pass on an empty
+  reading. And `permission_block` looked for `permissions:` at any
+  indentation, so on a workflow whose top-level block is missing it
+  answered with a job's own — `workflow_permissions` reads the top-level
+  key as a top-level key, which also corrects what a called workflow is
+  measured to ask of its caller.
 - **Impact.** [asks: nothing] [writes: cut, migrate, tap] Nothing for a
   product to do. The rules measure what the socle already writes, and the
   fleet passes them unchanged; what changes is that `cut`, `tap` and
