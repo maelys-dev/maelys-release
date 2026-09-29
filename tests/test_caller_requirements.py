@@ -92,3 +92,67 @@ class CallerRequirementTest(unittest.TestCase):
         self.assertEqual(called, ["channel.yml", "release.yml", "tap.yml"], jobs)
         for job, name in jobs:
             self.assertEqual(faults_of(text, job, name), [], f"{job} -> {name}")
+
+
+class HeldToWhatItWritesTest(unittest.TestCase):
+    """Three more rules the socle keeps for a product, read on its own files.
+
+    None of these is broken today; that is the point. The three defects of
+    2026-09-25 were all rules the socle held for nine repositories and not
+    for itself, and each was found by a release failing rather than by a
+    test. What can be read from the files can be held before the release.
+    """
+
+    def workflows(self) -> dict:
+        return {path.name: path.read_text(encoding="utf-8") for path in sorted(WORKFLOWS.glob("*.yml"))}
+
+    def test_every_action_is_pinned_by_commit(self) -> None:
+        """What the socle writes into every product's workflows: a version
+        tag moves under a repository, a commit does not."""
+        read = 0
+        for name, text in self.workflows().items():
+            for number, line in enumerate(text.splitlines(), 1):
+                # `- uses:` on a step, `uses:` on a job that calls a
+                # workflow: a pattern that read only the second inspected
+                # nothing at all and passed on an `actions/checkout@v7`
+                # put there to catch it.
+                used = re.match(r"^\s*(?:-\s+)?uses:\s*(\S+)", line)
+                if not used or used.group(1).startswith("./"):
+                    continue
+                read += 1
+                self.assertRegex(used.group(1), r"@[0-9a-f]{40}$", f"{name}:{number}")
+        self.assertGreater(read, 10, "this rule must read the uses lines, not miss them")
+
+    def test_every_workflow_declares_its_permissions(self) -> None:
+        """A workflow without one takes the repository's default, which the
+        socle neither sets nor sees."""
+        for name, text in self.workflows().items():
+            self.assertTrue(rules.workflow_permissions(text), f"{name} declares no top-level permissions")
+
+    def test_a_workflow_that_runs_on_a_tag_can_be_replayed_on_that_tag(self) -> None:
+        """A failed publication is replayed on the tag it already has, never
+        by moving one. The socle writes that on every product's release.yml;
+        its own formula.yml had to have it added by hand after v0.62.0
+        published nothing.
+        """
+        replayable = []
+        for name, text in self.workflows().items():
+            push = rules.sub_block(rules.top_block(text, "on"), "push")
+            if not rules.block_list(push, "tags"):
+                continue
+            replayable.append(name)
+            dispatch = rules.sub_block(rules.top_block(text, "on"), "workflow_dispatch")
+            self.assertTrue(re.search(r"^\s+tag:\s*$", rules.sub_block(dispatch, "inputs"), re.M),
+                            f"{name} runs on a tag and takes no tag to replay")
+        self.assertEqual(replayable, ["formula.yml"], "the tag-driven workflows of this repository")
+
+    def test_the_product_workflow_the_socle_writes_is_replayable_too(self) -> None:
+        """The other end: what a product receives carries the same input."""
+        product = Product()
+        self.addCleanup(product.close)
+        product.run("adopt", str(product.dir), "--apply")
+        text = product.read(".github/workflows/release.yml")
+        push = rules.sub_block(rules.top_block(text, "on"), "push")
+        self.assertEqual(rules.block_list(push, "tags"), ["v*"])
+        dispatch = rules.sub_block(rules.top_block(text, "on"), "workflow_dispatch")
+        self.assertTrue(re.search(r"^\s+tag:\s*$", rules.sub_block(dispatch, "inputs"), re.M), text)

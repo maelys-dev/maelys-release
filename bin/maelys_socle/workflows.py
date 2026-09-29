@@ -546,14 +546,31 @@ def workflow_jobs(text: str) -> dict:
     return {name: "\n".join(lines) for name, lines in jobs.items()}
 
 
-def permission_block(block: str) -> dict:
-    """{scope: level} of a `permissions:` mapping, ignoring its comments."""
+def permission_levels(block: str) -> dict:
+    """{scope: level} of a `permissions:` mapping's body, ignoring comments."""
     found = {}
-    for line in sub_block(block, "permissions").splitlines():
+    for line in block.splitlines():
         match = re.match(r"^\s*([a-z-]+):\s*([a-z-]+)\s*$", line)
         if match and match.group(2) in PERMISSION_ORDER:
             found[match.group(1)] = match.group(2)
     return found
+
+
+def permission_block(block: str) -> dict:
+    """{scope: level} of the `permissions:` inside a job's body."""
+    return permission_levels(sub_block(block, "permissions"))
+
+
+def workflow_permissions(text: str) -> dict:
+    """{scope: level} of the *top-level* `permissions:` of a workflow.
+
+    `sub_block` finds the first key of that name at any indentation, which
+    in a file whose top-level block is missing is a job's own: a rule
+    written on it answered "this workflow declares its permissions" for a
+    workflow that declared none. The top-level key is read as a top-level
+    key.
+    """
+    return permission_levels(top_block(text, "permissions"))
 
 
 def called_workflow_needs(text: str) -> tuple[dict, list]:
@@ -569,7 +586,7 @@ def called_workflow_needs(text: str) -> tuple[dict, list]:
     secrets are those `on.workflow_call` declares, required or not: an
     optional secret still has to be handed over by name to arrive at all.
     """
-    default = permission_block(text)
+    default = workflow_permissions(text)
     needs: dict = {}
     for body in workflow_jobs(text).values():
         for scope, level in (permission_block(body) or default).items():
