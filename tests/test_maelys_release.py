@@ -3352,6 +3352,30 @@ class ImpactLinesTest(unittest.TestCase):
         self.assertIsNone(MODULE.asks_this(decl, ["old-legs"], dict(unknown)))
         self.assertIs(MODULE.asks_this(decl, ["old-legs", "channels"], dict(unknown)), True)
 
+    def test_the_documentation_selector_answers_the_condition_not_the_visibility(self) -> None:
+        """Two products read "0.60.0 and 0.61.0 ask you a gesture", checked
+        three conditions by hand, and found that none of them held: the
+        marker said `public`, which names who could be subject to the rule,
+        where what asks is carrying the line. The socle already reads that,
+        for the violation of the same name."""
+        decl = MODULE.read_declarations(self.product.dir, "maelys-fixture", "maelys-release")
+        self.assertEqual(decl.documentation_named, [])
+        self.assertIs(MODULE.asks_this(decl, ["names-documentation"], {}), False)
+        self.product.write("docs/architecture.md", "# Architecture\n\nThe rest lives in maelys-dev/maelys-docs.\n")
+        # The rule reads what the repository tracks: a file nobody committed
+        # is a draft, and a public reader never sees it.
+        self.product.git(self.product.dir, "init", "-q")
+        self.product.git(self.product.dir, "add", "-A")
+        self.product.git(self.product.dir, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "prose")
+        named = MODULE.read_declarations(self.product.dir, "maelys-fixture", "maelys-release")
+        self.assertEqual(named.documentation_named, ["docs/architecture.md"])
+        self.assertIs(MODULE.asks_this(named, ["names-documentation"], {}), True)
+        # And the two lines that asked it now say so: the prose of a
+        # published entry is untouched, its selectors are made exact.
+        entries = {entry["version"]: entry["asks"] for entry in MODULE.socle_impact_entries("v0.59.2")}
+        self.assertEqual(entries["0.60.0"], ["old-legs", "names-documentation"])
+        self.assertEqual(entries["0.61.0"], ["names-documentation", "pins"])
+
     def test_every_marker_names_selectors_the_socle_evaluates(self) -> None:
         known = set(MODULE.impact_selectors(MODULE.Declarations(pathlib.Path("/nonexistent"), "p")))
         entries = MODULE.socle_impact_entries("v0.47.0")

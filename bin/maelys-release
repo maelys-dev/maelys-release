@@ -492,6 +492,7 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
             except (UnicodeDecodeError, OSError):
                 continue
             if lines:
+                decl.documentation_named.append(relative)
                 decl.add("missing", f"{relative} names the documentation repository at line"
                                     f"{'s' if len(lines) > 1 else ''} {', '.join(str(n) for n in lines[:8])}"
                                     f"{', …' if len(lines) > 8 else ''}, which this repository's files do not unless"
@@ -1077,6 +1078,12 @@ def impact_selectors(decl: "Declarations") -> dict:
             "cli-reference": (decl.project / CLI_DECLARATIONS).is_file() or (decl.project / CLI_REFERENCE).is_file(),
             "signed-on-default-branch": decl.commit_verification == "signed-on-default-branch",
             "old-legs": old_legs,
+            # The condition itself, not who could be subject to it: every
+            # public product read `public` as "this asks you something",
+            # and the gesture of 0.60.0 and 0.61.0 was to remove a line
+            # that only two of them carried. What the socle already knows,
+            # it answers.
+            "names-documentation": bool(decl.documentation_named),
             # Named after who is concerned, not who asked: 0.57.2's line named
             # maelys-warden for [docs] unnamed, and maelys-egress, public and
             # concerned, read "nothing".

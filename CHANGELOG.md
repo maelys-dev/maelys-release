@@ -46,6 +46,22 @@
   for the tap's one branch, where every product of the fleet publishes and
   one landing a second later must not read as a failure. Unreadable stays
   apart from absent, as it does everywhere else in this package.
+- **An Impact line asks the condition, not the visibility.** Two products
+  read "0.60.0 and 0.61.0 ask you a gesture", checked three conditions by
+  hand, and found that none of them held. The marker said `public` — which
+  names who could be subject to the rule, where what actually asks is
+  **carrying the line**: a prose file that names the documentation
+  repository. The socle already reads exactly that, for the violation of
+  the same name; it simply never offered it as a selector. It does now,
+  as `names-documentation`, and the two lines that asked it say so. Their
+  prose is untouched: a published entry keeps its words, and only its
+  selectors are made exact.
+
+  `old-legs` shows what a selector can be: it reads what the default
+  branch requires and answers **unknown** rather than false when GitHub
+  cannot be asked. A selector that names a property of the repository
+  instead of the condition costs its reader the verification it was
+  supposed to spare them.
 - **Impact.** [asks: nothing] [writes: cut, migrate, tap] Nothing for a
   product to do. The rules measure what the socle already writes, and the
   fleet passes them unchanged; what changes is that `cut`, `tap` and
@@ -331,7 +347,7 @@
   nothing from what it did not: the policies of the pages that answered
   stay violations when a later page is refused, and a list the reader did
   not finish says that the tag rule is unanswered rather than missing.
-- **Impact.** [asks: public, pins] [writes: nothing] A product that pins
+- **Impact.** [asks: names-documentation, pins] [writes: nothing] A product that pins
   another Maelys repository **re-adopts**: `scripts/checkout-dependency.sh`
   changes, and a product that moves its socle pin to this version without
   re-adopting reads `check` exit 2 on `scripts/checkout-dependency.sh:
@@ -386,7 +402,7 @@
   asks; with two exceptions the line itself says, a version that changes
   what the shared CI runs and a version marked `[writes: …]`. The rule five
   products wrote, held by the socle with them.
-- **Impact.** [asks: old-legs, public] [writes: nothing] A branch that
+- **Impact.** [asks: old-legs, names-documentation] [writes: nothing] A branch that
   still requires an old leg name blocks every pull request once this is
   adopted: `protect DIR` shows it and `protect DIR --apply` replaces it by
   its leg before adopting. A public product whose seeded `LICENSING.md`
