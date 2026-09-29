@@ -20,6 +20,7 @@ from .github import destination_is_public
 from .host import git, run
 from .project import declared_mechanism, engaged_documents, project_of
 from .texts import is_generated, names_documentation
+from .writes import confirm_ref
 
 
 def read_prose_records(source: str) -> list[dict]:
@@ -135,6 +136,10 @@ def push_branch(clone: pathlib.Path, remote: str, branch: str) -> None:
     known = run(["git", "rev-parse", "--verify", "-q", f"refs/remotes/lease/{branch}"], cwd=clone).stdout.strip()
     lease = f"--force-with-lease=refs/heads/{branch}:{known}" if known else "--force-with-lease"
     git("push", "-q", lease, remote, f"HEAD:refs/heads/{branch}", cwd=clone)
+    confirm_ref(clone, remote, f"refs/heads/{branch}", git("rev-parse", "HEAD", cwd=clone),
+                f"the branch {branch}",
+                f"Read it: git ls-remote {remote} refs/heads/{branch}. Both sides of a migration are"
+                " reviewed before anything is merged; run the command again once it is understood.")
 
 
 BUILD_FILES = ("Makefile", "makefile", "GNUmakefile", "CMakeLists.txt", "meson.build")

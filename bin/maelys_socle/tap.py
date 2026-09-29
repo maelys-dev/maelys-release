@@ -13,6 +13,7 @@ from . import host
 from .checkouts import author_identity
 from .constants import DEFAULT_TAP
 from .host import git, run
+from .writes import confirm_contains
 
 
 def push_rebased(tap: pathlib.Path, branch: str, attempts: int = 3) -> int:
@@ -29,6 +30,10 @@ def push_rebased(tap: pathlib.Path, branch: str, attempts: int = 3) -> int:
     for attempt in range(1, attempts + 1):
         pushed = run(["git", "push", "-q", "origin", f"HEAD:{branch}"], cwd=tap)
         if pushed.returncode == 0:
+            confirm_contains(tap, "origin", branch, git("rev-parse", "HEAD", cwd=tap),
+                             "the formula commit",
+                             "Read the tap's history of this formula before publishing again;"
+                             " the tag it was rendered from is unchanged and the publication replays on it.")
             return attempt
         if attempt == attempts:
             break

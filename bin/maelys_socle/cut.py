@@ -23,6 +23,7 @@ from .host import git, run
 from .identity import socle_data
 from .project import project_of
 from .release_checks import repository_checks, tag_checks
+from .writes import confirm_ref, confirm_tag
 from .texts import LABELS
 
 
@@ -522,6 +523,10 @@ def cut_open(invocation: Invocation, decl: Declarations, data: dict, log, timeou
     git("-c", "commit.gpgsign=true", "commit", "-q", "-S", "-m", f"{product} {version}", cwd=project)
     data["commit"] = git("rev-parse", "HEAD", cwd=project)
     git("push", "-q", "origin", f"HEAD:refs/heads/{branch}", cwd=project)
+    confirm_ref(project, "origin", f"refs/heads/{branch}", data["commit"],
+                f"the release commit of {version}",
+                f"Read it: git ls-remote origin refs/heads/{branch}. The commit is signed and local;"
+                " nothing is lost by running the command again.")
     with tempfile.TemporaryDirectory(prefix="maelys-release-cut.") as temp:
         # The body reaches gh through a file: a changelog entry holds
         # backticks, and a shell once read five of them as commands.
@@ -628,6 +633,9 @@ def cut_tag(invocation: Invocation, decl: Declarations, data: dict, log, timeout
         raise Failure("PROCESS_FAILED", f"the signature of {tag} does not verify: {verified.stderr.strip()}",
                       "Fix the signing key and run the command again; nothing was pushed.")
     git("push", "-q", "origin", f"refs/tags/{tag}", cwd=project)
+    confirm_tag(project, "origin", tag, merge, f"the tag {tag}",
+                f"Read it: git ls-remote origin 'refs/tags/{tag}*'. A published tag is never moved:"
+                " if it names another commit, stop and read its history before anything else.")
     data["pushed"] = True
     reference = github_api(f"repos/{repository}/git/ref/tags/{tag}") or {}
     object_sha = (reference.get("object") or {}).get("sha") or ""
