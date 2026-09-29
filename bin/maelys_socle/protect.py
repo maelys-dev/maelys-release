@@ -285,6 +285,17 @@ def handle_protect(invocation: Invocation, context: Context) -> tuple[dict, int]
     if state == "unreadable":
         report["note"] = (f"GitHub refused to say what protects {branch} of {repository}, which a private"
                           " repository of a free plan does. That is not the same fact as an open branch.")
+    # What a branch requires must be what a pull request produces. With no
+    # merged pull request to read, this command proposes the socle's own
+    # contexts and nothing else, and says why -- rather than reading the tip
+    # of the default branch, which also carries what the tag pointing at it
+    # ran. A product read a plan proposing `build (…)` and `publish` that
+    # way, and wrote its protection by hand instead.
+    if partial.get("noEvidence"):
+        evidence = (f"no merged pull request of {repository} could be read, so none of this product's own"
+                    " checks were observed: this plan proposes the socle's contexts alone. Merge a pull"
+                    " request, then run this again to add what it produced.")
+        report["note"] = f"{report['note']} {evidence}" if report.get("note") else evidence
     # A ruleset carrying the socle's own contexts is the one case --apply
     # must not touch. This command writes the classic protection; on a
     # branch already ruled, that is a second mechanism superimposed on the

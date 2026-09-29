@@ -77,6 +77,20 @@
   This page is the socle's own, not one of the managed texts a product
   receives, so the version stays a patch: nothing moves in a product, and
   nothing is asked of one.
+- **`protect` observes pull requests, and nothing else.** A product read a
+  plan proposing `build (…)` and `publish` — the jobs of its *release*,
+  which had run on the tip of its default branch because the tag pointed at
+  that commit. Applied, that protection would have blocked every pull
+  request, since those jobs never run on one; the operator wrote the
+  protection by hand instead, against the convention this command exists to
+  hold: **derived, never typed**.
+
+  The reader said in its own words that the evidence is pull requests and
+  never the tip — and then fell back on the tip when no merged pull request
+  could be read. It no longer does. A repository with nothing merged to
+  read has no evidence of what its own checks are called: the plan proposes
+  the socle's contexts alone and says so, with the sentence that ends it —
+  merge a pull request, then run this again to add what it produced.
 - **Impact.** [asks: nothing] [writes: cut, migrate, tap] Nothing for a
   product to do. The rules measure what the socle already writes, and the
   fleet passes them unchanged; what changes is that `cut`, `tap` and
