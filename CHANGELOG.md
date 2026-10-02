@@ -1,5 +1,30 @@
 # Changelog
 
+## Unreleased
+
+- **`dependencies` prints its plan when the socle's own checkout is behind
+  its pin.** A product that had just raised its pins asked for the plan and
+  got a Python trace, `KeyError: 'previous'`, where `--format json`
+  answered. The plan's entries were built in two places: the pins' wrote
+  the commit a refresh starts from, and the socle's own — written apart,
+  sixty lines below — did not. Only the text renderer reads it, so the
+  defect needed three things at once: a product that calls the socle, a
+  checkout of the socle left at the previous pin, and the text form. No
+  test covered the socle's line at all.
+
+  One function builds every entry now, for a pin or for the socle, so the
+  shape cannot be two shapes again. Three tests: the socle's line with its
+  checkout behind the pin, which fails with that `KeyError` without the
+  fix; the text and the JSON agreeing on every action, in order; and every
+  action rendered from what the builder gives it.
+
+  What this does not close: a renderer that raises still reaches the
+  terminal as a trace rather than as an agent-cli/v2 envelope. That is in
+  the vendored framework, which is not edited here; it belongs to
+  maelys-cli.
+- **Impact.** [asks: nothing] [writes: nothing] Nothing for a product: the
+  command prints what it already computed.
+
 ## 0.62.2 — 2026-09-29
 
 - **The socle obeys, on its own workflows, the rule it writes on a

@@ -4347,6 +4347,68 @@ class DependenciesTest(unittest.TestCase):
         self.assertEqual(self.product.git(path, "rev-parse", "HEAD"), self.product.tagged)
         self.assertIn("keep", self.product.git(path, "branch", "--list", "keep"))
 
+    def socle_checkout_behind_its_pin(self) -> str:
+        """The socle under the product's root, at a commit the pin has left.
+
+        What a product has the moment it moves its socle pin: the directory
+        the socle cloned for the previous one, marked as its own, detached
+        and clean.
+        """
+        self.product.run("adopt", self.dir, "--apply")
+        path = self.home / "maelys-release"
+        path.mkdir(parents=True)
+        self.product.git(path, "init", "-q")
+        (path / "file").write_text("the socle, one pin ago\n", encoding="utf-8")
+        self.product.git(path, "add", "file")
+        self.product.git(path, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "one pin ago")
+        self.product.git(path, "checkout", "-q", "--detach")
+        self.product.git(path, "remote", "add", "origin", f"{self.product.env['MAELYS_GIT_BASE']}/maelys-release.git")
+        self.product.git(path, "config", "--local", MODULE.MATERIALISED, "maelys-release")
+        return self.product.git(path, "rev-parse", "HEAD")
+
+    def test_the_socle_s_own_line_says_what_it_would_refresh(self) -> None:
+        """A product that had just moved its socle pin asked for the plan and
+        got a Python trace: `KeyError: 'previous'`. The pins' entries carried
+        the commit a refresh starts from; the socle's entry, built apart,
+        did not, and only the text renderer reads it -- so `--format json`
+        worked and hid it."""
+        behind = self.socle_checkout_behind_its_pin()
+        socle = [entry for entry in self.entries() if entry["name"] == "maelys-release"][0]
+        self.assertEqual((socle["action"], socle["previous"]), ("refresh", behind))
+        text = self.product.run("dependencies", self.dir)
+        self.assertEqual(text.stderr, "")
+        self.assertIn(f"refresh  maelys-release v9.9.9 (fffffff), here {behind[:7]}", text.stdout)
+
+    def test_the_text_and_the_json_agree_on_every_action(self) -> None:
+        """The plan is computed once and printed twice. With a pin moved and
+        the socle behind its own, both forms name the same action for the
+        same entry, in the same order -- which is the property that broke:
+        JSON listed two refreshes and the text printed none of them."""
+        self.product.run("dependencies", self.dir, "--apply")
+        self.product.write("dependencies/maelys-system.pin", f"{PINNED_TAG}\n{self.product.tagged}\n")
+        self.socle_checkout_behind_its_pin()
+        planned = [(entry["action"], entry["name"]) for entry in self.entries()]
+        self.assertEqual(planned, [("refresh", "maelys-system"), ("refresh", "maelys-release")])
+        printed = [(line.split()[0], line.split()[1])
+                   for line in self.product.run("dependencies", self.dir).stdout.splitlines()
+                   if line.split()[:1] and line.split()[0] in ("clone", "refresh", "same", "BLOCKED")]
+        self.assertEqual(printed, planned)
+
+    def test_every_entry_has_the_shape_the_text_reads(self) -> None:
+        """Whatever builds an entry, for a pin or for the socle: each action
+        carries the field its line prints."""
+        pin = {"name": "x", "tag": "v1", "commit": "c" * 40, "submodules": None}
+        build = MODULE.dependencies.dependency_entry
+        self.assertEqual(build(pin, "r", pathlib.Path("/p"), "refresh", "", "a" * 40)["previous"], "a" * 40)
+        self.assertEqual(build(pin, "r", pathlib.Path("/p"), "blocked", "why", "")["reason"], "why")
+        for action in ("clone", "same"):
+            entry = build(pin, "r", pathlib.Path("/p"), action, "", "")
+            self.assertNotIn("previous", entry)
+            self.assertNotIn("reason", entry)
+            MODULE.dependencies.text_dependencies({"dependencies": [entry], "notes": [], "mode": "plan",
+                                                   "directory": "/d", "variable": "V", "declared": True,
+                                                   "blocked": False, "socle": ""})
+
     def test_a_working_copy_is_refused_before_anything_is_written(self) -> None:
         """The incident's layout: the destination is where someone works."""
         entry = self.entries("--directory", str(self.product.work / "src"), expect=2)[0]
