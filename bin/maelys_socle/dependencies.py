@@ -239,16 +239,9 @@ def handle_dependencies(invocation: Invocation, context: Context) -> tuple[dict,
         repository = dependency_repository(pin)
         path = directory / name
         action, reason, head = checkout_state(path, pin, repository, trusted)
-        entry = {"name": name, "tag": pin["tag"], "commit": pin["commit"], "repository": repository,
-                 "path": str(path), "action": action}
-        if pin["submodules"] is not None:
-            entry["submodules"] = pin["submodules"]
+        entries.append(dependency_entry(pin, repository, path, action, reason, head))
         if action == "blocked":
-            entry["reason"] = reason
             blocked.append(reason)
-        elif action == "refresh":
-            entry["previous"] = head
-        entries.append(entry)
     if apply and blocked:
         # Before the first clone: a directory half materialised is the state
         # the report describes, and the operator frees one path and reruns.
@@ -307,12 +300,8 @@ def handle_dependencies(invocation: Invocation, context: Context) -> tuple[dict,
         socle_path = directory / SOCLE_NAME
         action, reason, head = checkout_state(socle_path, socle_pin,
                                               f"{git_base()}/{SOCLE_NAME}.git", trusted)
-        entries.append({"name": SOCLE_NAME, "tag": pinned["tag"], "commit": pinned["sha"],
-                        "repository": f"{git_base()}/{SOCLE_NAME}.git", "path": str(socle_path),
-                        "action": action, "reason": reason} if action == "blocked"
-                       else {"name": SOCLE_NAME, "tag": pinned["tag"], "commit": pinned["sha"],
-                             "repository": f"{git_base()}/{SOCLE_NAME}.git",
-                             "path": str(socle_path), "action": action})
+        entries.append(dependency_entry(socle_pin, f"{git_base()}/{SOCLE_NAME}.git", socle_path,
+                                        action, reason, head))
         if action == "blocked":
             blocked.append(socle_path.name)
         elif apply:
@@ -326,6 +315,28 @@ def handle_dependencies(invocation: Invocation, context: Context) -> tuple[dict,
             "dependencies": entries, "notes": [note for note in notes if note not in caught],
             "blocked": bool(blocked)}
     return data, EXIT_VIOLATIONS if blocked or caught else EXIT_OK
+
+
+def dependency_entry(pin: dict, repository: str, path: pathlib.Path,
+                     action: str, reason: str, head: str) -> dict:
+    """One line of the plan, for a pin or for the socle, in one shape.
+
+    There were two builders: the pins' wrote `previous` on a refresh, and
+    the socle's -- written apart, sixty lines below -- did not. JSON printed
+    either; the text renderer read `previous` and died on a KeyError, with a
+    Python trace instead of a plan, exactly when a product had just moved
+    its socle pin and asked what that would refresh. A shape built in two
+    places is two shapes, so it is built here.
+    """
+    entry = {"name": pin["name"], "tag": pin["tag"], "commit": pin["commit"], "repository": repository,
+             "path": str(path), "action": action}
+    if pin.get("submodules") is not None:
+        entry["submodules"] = pin["submodules"]
+    if action == "blocked":
+        entry["reason"] = reason
+    elif action == "refresh":
+        entry["previous"] = head
+    return entry
 
 
 def text_dependencies(data: dict) -> str:
