@@ -22,8 +22,23 @@
   terminal as a trace rather than as an agent-cli/v2 envelope. That is in
   the vendored framework, which is not edited here; it belongs to
   maelys-cli.
-- **Impact.** [asks: nothing] [writes: nothing] Nothing for a product: the
-  command prints what it already computed.
+- **A formula's own test runs, on the bottle a user pours.** Relayed from
+  maelys-oci: `tap.yml` built the bottle and linted the formula, and no job
+  of a release ever ran the formula's `test do` block. maelys-oci shipped a
+  formula whose test failed on every machine that installed it — pouring a
+  bottle rewrites a library path in the binary and re-signs it, which
+  invalidated a digest the product had recorded at build time. The machine
+  that builds a bottle never pours one, so no test there could have seen
+  it. The bottle job now pours the bottle it just attached to the release,
+  from that release, exactly as `brew install` does, and runs `brew test`
+  on what was poured. A failure stops the job, and the publish job, which
+  needs it, never pushes the formula to the tap. Not on a private
+  repository, whose release assets do not download without credentials:
+  the job says so in a notice.
+- **Impact.** [asks: nothing] [writes: tap] Nothing for a product to do. A
+  product that publishes a formula with bottles has its formula's test run
+  on a poured bottle at its next release, and a test that fails there now
+  keeps the formula out of the tap instead of shipping it.
 
 ## 0.62.2 — 2026-09-29
 

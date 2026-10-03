@@ -184,6 +184,40 @@ jobs:
           set -euo pipefail
           tag="${INPUT_TAG:-${GITHUB_REF_NAME}}"
           gh release upload "$tag" --repo "${GITHUB_REPOSITORY}" --clobber bottles/*.bottle.tar.gz bottles/*.bottle.json
+      # A formula's own `test do` block had run in no job of a release:
+      # this job built the bottle and the publish job linted the formula, and
+      # nothing installed the bottle the way a user does. maelys-oci shipped a
+      # formula whose test failed on every machine that poured it, because
+      # pouring rewrites a library path in the binary and re-signs it, which
+      # invalidated a digest the product had recorded at build time. The
+      # build machine never pours, so no test there could have seen it.
+      #
+      # So the bottle just attached to the release is poured from that
+      # release, exactly as `brew install` pours it for anyone, and the
+      # formula's test runs on what was poured. A failure stops this job, and
+      # the publish job -- which needs it -- never pushes the formula to the
+      # tap: the bottle stays an unreferenced asset of the release.
+      #
+      # Not on a private repository: its release assets do not download
+      # without credentials, which brew does not send, so the pour would fail
+      # for a reason that is not the formula's. maelys-warden is the one
+      # product this concerns today; the line says so rather than skipping in
+      # silence.
+      - name: Pour the published bottle as a user would, and run the formula's test
+        shell: bash
+        env:
+          PRODUCT: ${{ inputs.product }}
+          PRIVATE: ${{ github.event.repository.private }}
+        run: |
+          set -euo pipefail
+          if [ "$PRIVATE" = true ]; then
+            echo "::notice::${PRODUCT}: not poured here -- a private release's bottle does not download without credentials, so the formula's test runs on no installed bottle"
+            exit 0
+          fi
+          brew bottle --merge --write --no-commit bottles/*.bottle.json
+          brew uninstall --formula "maelys-dev/staging/${PRODUCT}"
+          brew install --force-bottle "maelys-dev/staging/${PRODUCT}"
+          brew test "maelys-dev/staging/${PRODUCT}"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: homebrew-bottle-${{ inputs.product }}-${{ matrix.runner }}
