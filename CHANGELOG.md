@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.62.3 — 2026-10-03
 
 - **`dependencies` prints its plan when the socle's own checkout is behind
   its pin.** A product that had just raised its pins asked for the plan and
