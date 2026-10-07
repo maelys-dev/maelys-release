@@ -25,8 +25,32 @@
   framework at v0.5.35 does not implement yet. And not closed: a text
   renderer that raises still reaches the terminal as a Python trace — that
   code is unchanged upstream.
-- **Impact.** [asks: nothing] [writes: nothing] Nothing for a product: the
-  vendored framework is this command's own, and no managed file moves.
+- **A pin one job reads is cloned by that job, and by nothing that clones
+  them all.** Asked by maelys-http, with the measurement: its second
+  Mbed TLS pin, `mbedtls-4`, serves one job of its own, and the socle's five
+  shared jobs and three release builds cloned it too — submodules and all,
+  without reading a file of it. `check (linux)` went from 6 s to 52 s,
+  `check (linux-arm64)` from 6 s to 39 s, `check (macos)` from 9 s to 19 s;
+  on a private repository those macOS seconds are billed tenfold. And the
+  cost was invisible: it took comparing two runs to find it.
+
+  A pin may now say `on-request`, a third attribute beside `repository` and
+  `submodules`. The loop of `scripts/checkout-dependencies.sh` skips it and
+  says so; `scripts/checkout-dependency.sh NAME` clones it as before, which
+  is what the job that reads it already calls. It is still one declaration:
+  `check` and `cut` judge its tag and its commit as any other, and `check`
+  says what it is. `dependencies DIR` names it and leaves it; `--all`
+  brings it. A release build of the older layout, which names its pins in
+  `release.yml`, leaves it out. An older socle ignores the line and clones
+  as before, so the pin and the adoption can come in either order.
+
+  And the loop prints how long each clone took, on stderr, for every pin of
+  every product: `checkout-dependencies: NAME cloned in Ns`.
+- **Impact.** [asks: checkout-script] [writes: nothing] A minor version: a
+  managed file moves. A product that carries `scripts/checkout-dependencies.sh`
+  **re-adopts** to receive the new loop — moving its socle pin without
+  re-adopting reads `check` exit 2 on that file. Nothing else: `on-request`
+  is opt-in, and a product that writes it nowhere clones what it cloned.
 
 ## 0.62.3 — 2026-10-03
 

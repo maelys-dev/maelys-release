@@ -234,10 +234,17 @@ def handle_dependencies(invocation: Invocation, context: Context) -> tuple[dict,
     # location is proof enough and a checkout made before the mark existed is
     # marked in place. A root the operator chose gets no such benefit.
     trusted = directory == dependencies_home(product)
+    everything = invocation.flag("--all")
     for name in decl.dependencies:
         pin = decl.pins[name]
         repository = dependency_repository(pin)
         path = directory / name
+        if pin.get("on_request") and not everything:
+            # What the managed script does in a job, done here: the pin is
+            # named, with what would bring it, and nothing clones it. A
+            # developer who runs the one job that reads it passes --all.
+            entries.append(dependency_entry(pin, repository, path, "on-request", "", ""))
+            continue
         action, reason, head = checkout_state(path, pin, repository, trusted)
         entries.append(dependency_entry(pin, repository, path, action, reason, head))
         if action == "blocked":
@@ -250,11 +257,13 @@ def handle_dependencies(invocation: Invocation, context: Context) -> tuple[dict,
                       " --directory; the socle never deletes a checkout.")
     if apply:
         for entry in entries:
+            if entry["action"] == "on-request":
+                continue
             materialise(pathlib.Path(entry["path"]), decl.pins[entry["name"]],
                         entry["repository"], entry["action"])
     notes: list[str] = []
     for entry in entries:
-        if entry["action"] == "blocked" or (entry["action"] == "clone" and not apply):
+        if entry["action"] in ("blocked", "on-request") or (entry["action"] == "clone" and not apply):
             continue
         path = pathlib.Path(entry["path"])
         # Left in place: a build, most likely, and the fleet builds its
@@ -349,6 +358,8 @@ def text_dependencies(data: dict) -> str:
             lines.append(f"{'refresh':<8} {head}, here {entry['previous'][:7]}")
         elif entry["action"] == "blocked":
             lines.append(f"{'BLOCKED':<8} {entry['name']}: {entry['reason']}")
+        elif entry["action"] == "on-request":
+            lines.append(f"{'request':<8} {head} is cloned on request only: pass --all to bring it here")
         else:
             lines.append(f"{'same':<8} {head}")
     lines.extend(f"{'REFUSED':<8} {message}" for message in data.get("refused", []))

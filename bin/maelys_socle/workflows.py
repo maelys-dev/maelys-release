@@ -188,7 +188,13 @@ def release_workflow(decl: Declarations, sha: str, tag: str, version: str) -> st
         "      tag: ${{ inputs.tag || github.ref_name }}",
         *runner_inputs(decl),
     ]
-    if decl.dependencies:
+    # The pins a release build clones: every one but those a job clones by
+    # name. A product whose only pins are of that kind has nothing to clone
+    # here, and an empty block would say there was something.
+    # .get on the pins: a name with no pin read behind it is cloned, as it
+    # always was -- only a pin that says so is left out.
+    cloned = [name for name in decl.dependencies if not decl.pins.get(name, {}).get("on_request")]
+    if cloned:
         lines.append("      dependency_checkout: |")
         if decl.dependencies_apart:
             # release.yml never fetches the socle, so this cannot call the
@@ -204,7 +210,7 @@ def release_workflow(decl: Declarations, sha: str, tag: str, version: str) -> st
             lines.append('        sh scripts/checkout-dependencies.sh'
                          ' "$RUNNER_TEMP/dependencies" >>"$GITHUB_ENV"')
         else:
-            lines.extend(f"        sh scripts/checkout-dependency.sh {name}" for name in decl.dependencies)
+            lines.extend(f"        sh scripts/checkout-dependency.sh {name}" for name in cloned)
     if decl.verify_command:
         lines.append(f"      verify_command: {decl.verify_command}")
     if decl.linux_packages:

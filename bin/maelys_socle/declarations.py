@@ -163,6 +163,14 @@ def parse_pin(name: str, text: str) -> tuple[dict, list[str]]:
     superproject, but its URL comes from a .gitmodules this pin does not
     name, so fetching one is declared, never automatic.
 
+    A pin that one job alone reads says `on-request`: it is cloned when it
+    is asked for by name, and by nothing that clones "every pin". maelys-http
+    pins Mbed TLS twice, and its second pin serves one job of its own; the
+    five shared jobs and the three release builds cloned it, submodules and
+    all, without reading a file of it -- forty seconds a job on Linux, and
+    on a private repository the macOS seconds are billed tenfold. The pin is
+    still a pin: `check` and `cut` judge its tag and its commit as any other.
+
     Read here rather than in read_declarations alone, because the command
     that materialises the pins needs the same reading and a second one would
     drift from it.
@@ -173,7 +181,7 @@ def parse_pin(name: str, text: str) -> tuple[dict, list[str]]:
     if len(lines) < 2 or not re.fullmatch(r"[0-9a-f]{40}", lines[1].strip()):
         return {}, [f"dependencies/{name}.pin: line 2 must be the pinned commit (line 1 its tag)"]
     pin: dict = {"name": name, "tag": lines[0].strip(), "commit": lines[1].strip(),
-                 "repository": "", "submodules": None}
+                 "repository": "", "submodules": None, "on_request": False}
     problems: list[str] = []
     for attribute in lines[2:]:
         if attribute.startswith("repository "):
@@ -188,6 +196,11 @@ def parse_pin(name: str, text: str) -> tuple[dict, list[str]]:
                 problems.append(f"dependencies/{name}.pin: the submodules line takes nothing, or recursive")
             else:
                 pin["submodules"] = mode
+        elif attribute.split(" ")[0] == "on-request":
+            if attribute.strip() != "on-request":
+                problems.append(f"dependencies/{name}.pin: the on-request line takes nothing")
+            else:
+                pin["on_request"] = True
     return pin, problems
 
 
