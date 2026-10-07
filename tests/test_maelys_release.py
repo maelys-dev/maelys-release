@@ -392,10 +392,14 @@ class ContractTest(unittest.TestCase):
     def test_completion(self) -> None:
         self.assertEqual(self.product.run("__complete", "--", "ad").stdout, "adopt\n")
         self.assertIn("--apply", self.product.run("__complete", "--", "adopt", "x", "--").stdout.split())
-        self.assertEqual(self.product.run("__complete", "--", "rehearse", "x", "li").stdout, "linux-arm64\nlinux-x86_64\n")
+        # The candidates, not their order: the contract fixes none and its
+        # kit compares sets. The framework sorted them until 0.5.34 and
+        # prints them as declared since; this test had frozen the first.
+        self.assertEqual(sorted(self.product.run("__complete", "--", "rehearse", "x", "li").stdout.split()),
+                         ["linux-arm64", "linux-x86_64"])
         completed = self.product.run("__complete", "--format", "json", "--compact", "--", "de")
-        self.assertEqual(json.loads(completed.stdout)["data"]["records"],
-                         [{"word": "declarations"}, {"word": "dependencies"}, {"word": "describe"}])
+        self.assertEqual(sorted(record["word"] for record in json.loads(completed.stdout)["data"]["records"]),
+                         ["declarations", "dependencies", "describe"])
         jsonl = self.product.run("__complete", "--format", "jsonl", "--", "ver").stdout
         self.assertEqual(json.loads(jsonl), {"word": "version"})
         for shell in ("bash", "zsh", "fish"):

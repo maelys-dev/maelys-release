@@ -36,12 +36,9 @@ import fcntl
 import json
 import os
 import re
-import shlex
 import stat
-import subprocess
 import sys
-import tempfile
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Union
 
 CONTRACT = "agent-cli/v2"
 SCHEMA_VERSION = 2
@@ -137,20 +134,49 @@ class Failure(Exception):
 
 # ---- declarations ------------------------------------------------------------------
 
-def argument(name: str, kind: str = "string", choices: Optional[list] = None, minimum: Optional[int] = None,
-             maximum: Optional[int] = None, algorithms: Optional[list] = None, pattern: Optional[str] = None) -> dict:
-    entry: dict = {"name": name, "type": kind}
+def _describe_value(entry: dict, where: str, kind: Optional[str], choices: Optional[list], minimum: Optional[int],
+                    maximum: Optional[int], algorithms: Optional[list], pattern: Optional[str],
+                    digits: Union[int, list, None]) -> dict:
+    """The value members an argument and an operand share (spec 2.6), in the
+    shape the C reference emits: a hex value states its width as `digits`, an
+    integer or a pair of widths, never a length range."""
+    if pattern is not None and kind not in ("string", "path"):
+        raise ValueError(f"{where} declares a pattern on a kind that is not string or path")
+    if kind == "hex":
+        if minimum is not None or maximum is not None:
+            raise ValueError(f"{where} bounds a hex value with minimum/maximum; a hex width is digits")
+        if digits is None:
+            raise ValueError(f"{where} is a hex value without digits")
+        widths = [digits] if isinstance(digits, int) else list(digits)
+        if not widths or len(widths) > 2 or any(not isinstance(w, int) or w < 1 for w in widths) \
+                or len(set(widths)) != len(widths):
+            raise ValueError(f"{where} digits must be a positive width or two distinct widths, not {digits!r}")
+    elif digits is not None:
+        raise ValueError(f"{where} declares digits on a kind that is not hex")
     if choices is not None:
         entry["choices"] = list(choices)
-    if minimum is not None:
+    # An unsigned kind's floor is 0 whether declared or not; describe states
+    # a bound only when the declaration does, as the C reference does.
+    if minimum is not None and not (minimum == 0 and kind in ("unsigned", "size", "duration")):
         entry["minimum"] = minimum
     if maximum is not None:
         entry["maximum"] = maximum
     if algorithms is not None:
         entry["algorithms"] = list(algorithms)
+    if digits is not None:
+        entry["digits"] = digits if isinstance(digits, int) else list(digits)
     if pattern is not None:
         entry["pattern"] = pattern
     return entry
+
+
+def argument(name: str, kind: str = "string", choices: Optional[list] = None, minimum: Optional[int] = None,
+             maximum: Optional[int] = None, algorithms: Optional[list] = None, pattern: Optional[str] = None,
+             digits: Union[int, list, None] = None) -> dict:
+    """One option argument. A `hex` states its width with `digits`, an integer
+    or a pair such as `[40, 64]`, as MAELYS_CLI_HEX and MAELYS_CLI_HEX_OR do."""
+    return _describe_value({"name": name, "type": kind}, f"argument {name}", kind, choices, minimum, maximum,
+                           algorithms, pattern, digits)
 
 
 def option(long: str, summary: str, argument: Optional[dict] = None, default: Optional[str] = None,
@@ -181,26 +207,59 @@ def flag(long: str, summary: str, **keywords: Any) -> dict:
 
 
 def operand(name: str, summary: str, required: bool = True, variadic: bool = False, kind: Optional[str] = None,
-            choices: Optional[list] = None, minimum: Optional[int] = None, maximum: Optional[int] = None) -> dict:
+            choices: Optional[list] = None, minimum: Optional[int] = None, maximum: Optional[int] = None,
+            algorithms: Optional[list] = None, pattern: Optional[str] = None,
+            digits: Union[int, list, None] = None) -> dict:
+    """One operand; `kind` and its limits type it like an option's argument.
+    An operand describes its value exactly as an argument does (spec 2.6):
+    `digits` for a `hex`, `algorithms` for a `digest`, `pattern` for a
+    `string` or `path`, enforced by the parser and exposed by describe."""
     entry: dict = {"name": name, "required": required, "variadic": variadic, "summary": summary}
     if kind is not None or choices is not None:
         entry["type"] = kind or "choice"
-    if choices is not None:
-        entry["choices"] = list(choices)
-    if minimum is not None:
-        entry["minimum"] = minimum
-    if maximum is not None:
-        entry["maximum"] = maximum
-    return entry
+    return _describe_value(entry, f"operand {name}", kind, choices, minimum, maximum, algorithms, pattern, digits)
+
+
+CONSTRAINT_KINDS = ("requires", "at-most-one", "exactly-one")
+
+
+def constraint(kind: str, *options: str) -> dict:
+    """One `input.constraints` entry the command states itself (spec 2.5):
+    `kind` among `requires` (the first option requires every other),
+    `at-most-one`, `exactly-one`, over at least two options of the command.
+    `exactly-one` has no option-level form, so this is its only site.
+    `all-or-none` is declared with `group=` on the options, its option-level
+    form, and is refused here so that a rule has one declaration."""
+    if kind == "all-or-none":
+        raise ValueError("an all-or-none rule is declared with group= on its options, not as a constraint")
+    if kind not in CONSTRAINT_KINDS:
+        raise ValueError(f"a constraint kind is one of {', '.join(CONSTRAINT_KINDS)}, not {kind!r}")
+    if len(options) < 2:
+        raise ValueError(f"a {kind} constraint names at least two options")
+    if len(set(options)) != len(options):
+        raise ValueError(f"a {kind} constraint names each option once")
+    for long in options:
+        if not long.startswith("--") or len(long) < 3:
+            raise ValueError(f"a constraint names options as --name, not {long!r}")
+    return {"kind": kind, "options": list(options)}
 
 
 def _command(identifier: str, pattern: str, purpose: str, handler: Optional[Handler], effect: Any,
              operands: tuple = (), options: tuple = (), schema: Optional[dict] = None, mode: str = "json-envelope",
              protocol: Optional[str] = None, external: bool = False, hidden: bool = False,
-             unavailable: Optional[str] = None, passthrough: bool = False,
-             synopsis: Optional[str] = None) -> dict:
+             unavailable: Optional[str] = None, unavailable_code: Optional[str] = None,
+             passthrough: bool = False,
+             synopsis: Optional[str] = None, constraints: tuple = ()) -> dict:
     if not IDENTIFIER.match(identifier):
         raise ValueError(f"a command identifier is [a-z][a-z0-9.-]*, not {identifier!r}")
+    # The code an unavailable command answers: UNSUPPORTED says "absent from
+    # this build or version" and is wrong for a cause that is not absence,
+    # so the declaration names the one that fits (C: .unavailable_code).
+    if unavailable_code is not None:
+        if unavailable is None:
+            raise ValueError(f"{identifier}: an unavailable code needs an unavailable reason")
+        if unavailable_code not in STABLE_CODES:
+            raise ValueError(f"{identifier}: {unavailable_code!r} is not one of the stable codes")
     words = pattern.split()
     operands = list(operands)
     options = list(options)
@@ -225,7 +284,9 @@ def _command(identifier: str, pattern: str, purpose: str, handler: Optional[Hand
         raise ValueError(f"{identifier}: a synopsis starts with the pattern {pattern!r}, not {synopsis!r}")
     return {"id": identifier, "pattern": words, "usage": synopsis, "purpose": purpose, "effect": effect,
             "outputMode": mode, "protocol": protocol, "external": external, "hidden": hidden,
-            "unavailable": unavailable, "operands": operands, "options": options, "passthrough": passthrough,
+            "unavailable": unavailable, "unavailableCode": unavailable_code,
+            "operands": operands, "options": options, "passthrough": passthrough,
+            "constraints": list(constraints),
             "outputSchema": schema or {"type": "object"}, "handler": handler}
 
 
@@ -291,6 +352,439 @@ INVARIANTS = [
 ]
 
 
+
+# ---- completion scripts ---------------------------------------------------------------
+# A static script carries the candidates of the catalog it was generated from and launches no process
+# at a Tab (agent-cli/v2 2.7, section 6): a Python program pays its interpreter at every launch, which a
+# completion feels. Each of the three is builtin_complete of src/app.c, and _complete below, written in
+# its shell over one table of rows, `|`-separated:
+#   C|INDEX|PATTERN WORDS|ID|KIND    one shown, available command, in catalog order; KIND is c, s for a
+#                                    stream (no shared option) or d for a delegate (__complete is called)
+#   O|INDEX|--LONG|FLAGS|VALUES      one option of command INDEX, or of every command when INDEX is g;
+#                                    FLAGS among a (takes an argument), e (its argument is a choice),
+#                                    h (hidden), r (repeatable), or - for none; VALUES space-separated
+#   P|INDEX|FLAG|VALUES              one operand of command INDEX, in order; FLAG is v when variadic
+# A word the user typed is compared behind an `x` in fish, whose test would read `!`, `(` or `-n` as an
+# operator; bash and zsh compare inside [[ ]], which reads none. And fish 4 reads `?` in a pattern as
+# itself, not as one character: its script tests `--*` where the two others test `--?*`, the word `--`
+# having been taken just above.
+# Every word of a row matches _STATIC_WORD, so a row is inert inside single quotes in the three shells; a
+# catalog holding anything else gets the script that calls __complete, which is always exact.
+_STATIC_WORD = re.compile(r"^[A-Za-z0-9._:/+@%,=-]+$")
+
+_STATIC_BASH = r"""# bash completion for @PROG@ @VERSION@, generated from its catalog
+# Carries the candidates of that catalog: regenerate it when @PROG@ changes.
+_@ID@_rows=(
+@ROWS@
+)
+_@ID@_complete() {
+    local IFS=$' \t\n' cur="${COMP_WORDS[COMP_CWORD]}" row rest idx pat id kind word name flags
+    local best= bid= bkind= last= given=' ' found= len=0 n i k m pos np
+    local -a prev pw out after olong oflags ovals pflags pvals
+    COMPREPLY=()
+    (( COMP_CWORD > 0 )) || return 0
+    prev=("${COMP_WORDS[@]:1:COMP_CWORD-1}")
+    n=${#prev[@]}
+    for row in "${_@ID@_rows[@]}"; do
+        case $row in 'C|'*) ;; *) continue ;; esac
+        rest=${row#*|}; idx=${rest%%|*}; rest=${rest#*|}; pat=${rest%%|*}; rest=${rest#*|}
+        id=${rest%%|*}; kind=${rest#*|}
+        pw=($pat); k=${#pw[@]}
+        (( k <= n && k > len )) || continue
+        for (( i = 0; i < k; i++ )); do [[ ${prev[i]} == "${pw[i]}" ]] || continue 2; done
+        best=$idx; len=$k; bid=$id; bkind=$kind
+    done
+    if [[ -z $best ]]; then
+        for row in "${_@ID@_rows[@]}"; do
+            case $row in 'C|'*) ;; *) continue ;; esac
+            rest=${row#*|}; rest=${rest#*|}; pat=${rest%%|*}
+            pw=($pat)
+            (( ${#pw[@]} > n )) || continue
+            for (( i = 0; i < n; i++ )); do [[ ${prev[i]} == "${pw[i]}" ]] || continue 2; done
+            out[${#out[@]}]=${pw[n]}
+        done
+    elif [[ $bkind == d ]]; then
+        IFS=$'\n'
+        COMPREPLY=($("@PROG@" __complete -- "${prev[@]}" "$cur" 2>/dev/null))
+        if [ ${#COMPREPLY[@]} -eq 0 ]; then
+            COMPREPLY=($(compgen -f -- "$cur"))
+        fi
+        return 0
+    else
+        after=("${prev[@]:len}"); m=${#after[@]}
+        (( m > 0 )) && last=${after[m-1]}
+        for row in "${_@ID@_rows[@]}"; do
+            case $row in
+                "O|$best|"*|'O|g|'*)
+                    rest=${row#*|}; idx=${rest%%|*}; rest=${rest#*|}; name=${rest%%|*}; rest=${rest#*|}
+                    flags=${rest%%|*}; [[ $idx == g ]] && flags=${flags}g
+                    olong[${#olong[@]}]=$name; oflags[${#oflags[@]}]=$flags; ovals[${#ovals[@]}]=${rest#*|} ;;
+                "P|$best|"*)
+                    rest=${row#*|}; rest=${rest#*|}
+                    pflags[${#pflags[@]}]=${rest%%|*}; pvals[${#pvals[@]}]=${rest#*|} ;;
+            esac
+        done
+        if [[ $last == --* && $last != *=* ]]; then
+            for (( i = 0; i < ${#olong[@]}; i++ )); do
+                if [[ ${olong[i]} == "$last" && ${oflags[i]} == *a* ]]; then
+                    found=1; out=(${ovals[i]}); break
+                fi
+            done
+        fi
+        if [[ -n $found ]]; then
+            :
+        elif [[ $cur == --*=* ]]; then
+            name=${cur%%=*}
+            for (( i = 0; i < ${#olong[@]}; i++ )); do
+                [[ ${olong[i]} == "$name" && ${oflags[i]} == *e* && ${oflags[i]} != *[hg]* ]] || continue
+                for word in ${ovals[i]}; do out[${#out[@]}]="$name=$word"; done
+            done
+        elif [[ $cur == --* ]]; then
+            for (( i = 0; i < m; i++ )); do
+                [[ ${after[i]} == --* ]] && given="$given${after[i]%%=*} "
+            done
+            for (( i = 0; i < ${#olong[@]}; i++ )); do
+                [[ ${oflags[i]} == *h* ]] && continue
+                [[ ${oflags[i]} == *g* && $bkind == s ]] && continue
+                [[ ${oflags[i]} == *r* || $given != *" ${olong[i]} "* ]] && out[${#out[@]}]=${olong[i]}
+            done
+        elif [[ ( $bid == help || $bid == describe ) && $m -eq 0 ]]; then
+            for row in "${_@ID@_rows[@]}"; do
+                case $row in 'C|'*) ;; *) continue ;; esac
+                rest=${row#*|}; rest=${rest#*|}; rest=${rest#*|}
+                out[${#out[@]}]=${rest%%|*}
+            done
+        elif (( ${#pflags[@]} > 0 )); then
+            pos=0; np=${#pflags[@]}
+            for (( i = 0; i < m; i++ )); do
+                word=${after[i]}
+                if [[ $word == -- ]]; then pos=$(( pos + m - i - 1 )); break; fi
+                if [[ $word == --?* ]]; then
+                    for (( k = 0; k < ${#olong[@]}; k++ )); do
+                        [[ ${olong[k]} == "$word" ]] || continue
+                        [[ ${oflags[k]} == *a* ]] && i=$(( i + 1 ))
+                        break
+                    done
+                    continue
+                fi
+                pos=$(( pos + 1 ))
+            done
+            if (( pos < np )) || [[ ${pflags[np-1]} == v ]]; then
+                (( pos < np )) || pos=$(( np - 1 ))
+                out=(${pvals[pos]})
+            fi
+        fi
+    fi
+    for (( i = 0; i < ${#out[@]}; i++ )); do
+        word=${out[i]}
+        [[ $word == "$cur"* ]] || continue
+        for (( k = 0; k < ${#COMPREPLY[@]}; k++ )); do [[ ${COMPREPLY[k]} == "$word" ]] && continue 2; done
+        COMPREPLY[${#COMPREPLY[@]}]=$word
+    done
+    if [ ${#COMPREPLY[@]} -eq 0 ]; then
+        IFS=$'\n'
+        COMPREPLY=($(compgen -f -- "$cur"))
+    fi
+}
+complete -o filenames -F _@ID@_complete @PROG@
+"""
+
+_STATIC_ZSH = r"""#compdef @PROG@
+# zsh completion for @PROG@ @VERSION@, generated from its catalog
+# Carries the candidates of that catalog: regenerate it when @PROG@ changes.
+typeset -ga _@ID@_rows
+_@ID@_rows=(
+@ROWS@
+)
+_@ID@_complete() {
+    local cur=${words[CURRENT]} row word name best= bid= bkind= last= given=' ' found=
+    local -i len=0 n=0 i=0 k=0 m=0 pos=0 np=0
+    local -a prev f pw out after olong oflags ovals pflags pvals keep
+    (( CURRENT > 2 )) && prev=("${(@)words[2,CURRENT-1]}")
+    n=${#prev}
+    for row in "${_@ID@_rows[@]}"; do
+        [[ $row == 'C|'* ]] || continue
+        f=("${(@s:|:)row}"); pw=(${=f[3]}); k=${#pw}
+        (( k <= n && k > len )) || continue
+        for (( i = 1; i <= k; i++ )); do [[ ${prev[i]} == "${pw[i]}" ]] || continue 2; done
+        best=${f[2]}; len=$k; bid=${f[4]}; bkind=${f[5]}
+    done
+    if [[ -z $best ]]; then
+        for row in "${_@ID@_rows[@]}"; do
+            [[ $row == 'C|'* ]] || continue
+            f=("${(@s:|:)row}"); pw=(${=f[3]})
+            (( ${#pw} > n )) || continue
+            for (( i = 1; i <= n; i++ )); do [[ ${prev[i]} == "${pw[i]}" ]] || continue 2; done
+            out+=("${pw[n+1]}")
+        done
+    elif [[ $bkind == d ]]; then
+        out=(${(f)"$("@PROG@" __complete -- "${(@)words[2,CURRENT]}" 2>/dev/null)"})
+        if (( ${#out} )); then
+            compadd -- "${out[@]}"
+        else
+            _files
+        fi
+        return
+    else
+        (( len < n )) && after=("${(@)prev[len+1,n]}")
+        m=${#after}
+        (( m > 0 )) && last=${after[m]}
+        for row in "${_@ID@_rows[@]}"; do
+            case $row in
+                ("O|$best|"*|'O|g|'*)
+                    f=("${(@s:|:)row}")
+                    [[ ${f[2]} == g ]] && f[4]=${f[4]}g
+                    olong+=("${f[3]}"); oflags+=("${f[4]}"); ovals+=("${f[5]}") ;;
+                ("P|$best|"*)
+                    f=("${(@s:|:)row}")
+                    pflags+=("${f[3]}"); pvals+=("${f[4]}") ;;
+            esac
+        done
+        if [[ $last == --* && $last != *=* ]]; then
+            for (( i = 1; i <= ${#olong}; i++ )); do
+                if [[ ${olong[i]} == "$last" && ${oflags[i]} == *a* ]]; then
+                    found=1; out=(${=ovals[i]}); break
+                fi
+            done
+        fi
+        if [[ -n $found ]]; then
+            :
+        elif [[ $cur == --*=* ]]; then
+            name=${cur%%=*}
+            for (( i = 1; i <= ${#olong}; i++ )); do
+                [[ ${olong[i]} == "$name" && ${oflags[i]} == *e* && ${oflags[i]} != *[hg]* ]] || continue
+                for word in ${=ovals[i]}; do out+=("$name=$word"); done
+            done
+        elif [[ $cur == --* ]]; then
+            for (( i = 1; i <= m; i++ )); do
+                [[ ${after[i]} == --* ]] && given+="${after[i]%%=*} "
+            done
+            for (( i = 1; i <= ${#olong}; i++ )); do
+                [[ ${oflags[i]} == *h* ]] && continue
+                [[ ${oflags[i]} == *g* && $bkind == s ]] && continue
+                [[ ${oflags[i]} == *r* || $given != *" ${olong[i]} "* ]] && out+=("${olong[i]}")
+            done
+        elif [[ ( $bid == help || $bid == describe ) && $m -eq 0 ]]; then
+            for row in "${_@ID@_rows[@]}"; do
+                [[ $row == 'C|'* ]] || continue
+                f=("${(@s:|:)row}"); out+=("${f[4]}")
+            done
+        elif (( ${#pflags} > 0 )); then
+            np=${#pflags}
+            for (( i = 1; i <= m; i++ )); do
+                word=${after[i]}
+                if [[ $word == '--' ]]; then pos=$(( pos + m - i )); break; fi
+                if [[ $word == --?* ]]; then
+                    for (( k = 1; k <= ${#olong}; k++ )); do
+                        [[ ${olong[k]} == "$word" ]] || continue
+                        [[ ${oflags[k]} == *a* ]] && i=$(( i + 1 ))
+                        break
+                    done
+                    continue
+                fi
+                pos=$(( pos + 1 ))
+            done
+            if (( pos < np )) || [[ ${pflags[np]} == v ]]; then
+                (( pos < np )) || pos=$(( np - 1 ))
+                out=(${=pvals[pos+1]})
+            fi
+        fi
+    fi
+    for word in "${out[@]}"; do
+        [[ -n $word && $word == "$cur"* ]] || continue
+        (( ${keep[(Ie)$word]} )) && continue
+        keep+=("$word")
+    done
+    if (( ${#keep} )); then
+        compadd -- "${keep[@]}"
+    else
+        _files
+    fi
+}
+if [[ ${funcstack[1]} == _@PROG@ ]]; then
+    _@ID@_complete "$@"
+else
+    compdef _@ID@_complete @PROG@
+fi
+"""
+
+_STATIC_FISH = r"""# fish completion for @PROG@ @VERSION@, generated from its catalog
+# Carries the candidates of that catalog: regenerate it when @PROG@ changes.
+set -g __@ID@_rows \
+@ROWS@
+function __@ID@_complete
+    set -l tokens (commandline -opc)
+    set -l current (commandline -ct)
+    set -l cur "$current"
+    set -l prev $tokens[2..-1]
+    set -l n (count $prev)
+    set -l best ''
+    set -l len 0
+    set -l bid ''
+    set -l bkind ''
+    set -l out
+    for row in $__@ID@_rows
+        string match -q -- 'C|*' $row; or continue
+        set -l f (string split -- '|' $row)
+        set -l pw (string split -- ' ' $f[3])
+        set -l k (count $pw)
+        test $k -le $n -a $k -gt $len; or continue
+        set -l same 1
+        set -l i 1
+        while test $i -le $k
+            test "x$prev[$i]" = "x$pw[$i]"; or set same 0
+            set i (math $i + 1)
+        end
+        test $same -eq 1; or continue
+        set best $f[2]
+        set len $k
+        set bid $f[4]
+        set bkind $f[5]
+    end
+    if test -z "$best"
+        for row in $__@ID@_rows
+            string match -q -- 'C|*' $row; or continue
+            set -l f (string split -- '|' $row)
+            set -l pw (string split -- ' ' $f[3])
+            test (count $pw) -gt $n; or continue
+            set -l same 1
+            set -l i 1
+            while test $i -le $n
+                test "x$prev[$i]" = "x$pw[$i]"; or set same 0
+                set i (math $i + 1)
+            end
+            test $same -eq 1; and set -a out $pw[(math $n + 1)]
+        end
+    else if test "$bkind" = d
+        set out ("@PROG@" __complete -- $prev "$cur" 2>/dev/null)
+        if test (count $out) -gt 0
+            printf '%s\n' $out
+        else
+            __fish_complete_path "$cur"
+        end
+        return
+    else
+        set -l after
+        test $len -lt $n; and set after $prev[(math $len + 1)..$n]
+        set -l m (count $after)
+        set -l last ''
+        test $m -gt 0; and set last $after[$m]
+        set -l olong
+        set -l oflags
+        set -l ovals
+        set -l pflags
+        set -l pvals
+        for row in $__@ID@_rows
+            set -l f (string split -- '|' $row)
+            if test "$f[1]" = O; and test "$f[2]" = "$best" -o "$f[2]" = g
+                set -a olong $f[3]
+                if test "$f[2]" = g
+                    set -a oflags "$f[4]g"
+                else
+                    set -a oflags "$f[4]"
+                end
+                set -a ovals "$f[5]"
+            else if test "$f[1]" = P; and test "$f[2]" = "$best"
+                set -a pflags "$f[3]"
+                set -a pvals "$f[4]"
+            end
+        end
+        set -l no (count $olong)
+        set -l found 0
+        if string match -q -- '--*' "$last"; and not string match -q -- '*=*' "$last"
+            set -l i 1
+            while test $i -le $no
+                if test "x$olong[$i]" = "x$last"; and string match -q -- '*a*' "$oflags[$i]"
+                    set found 1
+                    set out (string split -n -- ' ' "$ovals[$i]")
+                    break
+                end
+                set i (math $i + 1)
+            end
+        end
+        if test $found -eq 1
+            true
+        else if string match -q -- '--*=*' "$cur"
+            set -l name (string replace -r -- '=.*$' '' "$cur")
+            set -l i 1
+            while test $i -le $no
+                if test "x$olong[$i]" = "x$name"; and string match -q -- '*e*' "$oflags[$i]"; and not string match -qr -- '[hg]' "$oflags[$i]"
+                    for word in (string split -n -- ' ' "$ovals[$i]")
+                        set -a out "$name=$word"
+                    end
+                end
+                set i (math $i + 1)
+            end
+        else if string match -q -- '--*' "$cur"
+            set -l given
+            for word in $after
+                string match -q -- '--*' "$word"; and set -a given (string replace -r -- '=.*$' '' "$word")
+            end
+            set -l i 1
+            while test $i -le $no
+                if string match -q -- '*h*' "$oflags[$i]"
+                    true
+                else if string match -q -- '*g*' "$oflags[$i]"; and test "$bkind" = s
+                    true
+                else if string match -q -- '*r*' "$oflags[$i]"; or not contains -- "$olong[$i]" $given
+                    set -a out $olong[$i]
+                end
+                set i (math $i + 1)
+            end
+        else if test "$bid" = help -o "$bid" = describe; and test $m -eq 0
+            for row in $__@ID@_rows
+                set -l f (string split -- '|' $row)
+                test "$f[1]" = C; and set -a out $f[4]
+            end
+        else if test (count $pflags) -gt 0
+            set -l pos 0
+            set -l np (count $pflags)
+            set -l i 1
+            while test $i -le $m
+                set -l word "$after[$i]"
+                if test "x$word" = x--
+                    set pos (math $pos + $m - $i)
+                    break
+                end
+                if string match -q -- '--*' "$word"
+                    set -l j 1
+                    while test $j -le $no
+                        if test "x$olong[$j]" = "x$word"
+                            string match -q -- '*a*' "$oflags[$j]"; and set i (math $i + 1)
+                            break
+                        end
+                        set j (math $j + 1)
+                    end
+                else
+                    set pos (math $pos + 1)
+                end
+                set i (math $i + 1)
+            end
+            if test $pos -lt $np; or test "$pflags[$np]" = v
+                set -l slot $np
+                test $pos -lt $np; and set slot (math $pos + 1)
+                set out (string split -n -- ' ' "$pvals[$slot]")
+            end
+        end
+    end
+    set -l keep
+    set -l width (string length -- "$cur")
+    for word in $out
+        if test $width -gt 0
+            set -l head (string sub -l $width -- "$word")
+            test "x$head" = "x$cur"; or continue
+        end
+        contains -- "$word" $keep; or set -a keep $word
+    end
+    if test (count $keep) -gt 0
+        printf '%s\n' $keep
+    else
+        __fish_complete_path "$cur"
+    end
+end
+complete -c @PROG@ -f -a '(__@ID@_complete)'
+"""
+
 # ---- values ---------------------------------------------------------------------------
 
 def parse_value(kind: str, text: str, spec: dict, where: str, usage: str) -> Any:
@@ -336,9 +830,10 @@ def parse_value(kind: str, text: str, spec: dict, where: str, usage: str) -> Any
             raise refuse(", ".join(spec.get("choices", [])))
         return text
     elif kind == "hex":
-        if not re.fullmatch(r"[0-9a-f]+", text) or ("minimum" in spec and len(text) < spec["minimum"]) \
-                or ("maximum" in spec and len(text) > spec["maximum"]):
-            raise refuse("lowercase hexadecimal" + (f" of {spec['minimum']} characters" if spec.get("minimum") == spec.get("maximum") and "minimum" in spec else ""))
+        # The width is `digits`, one or two, as the C parser reads it.
+        widths = spec["digits"] if isinstance(spec["digits"], list) else [spec["digits"]]
+        if not re.fullmatch(r"[0-9a-f]+", text) or len(text) not in widths:
+            raise refuse(" or ".join(str(w) for w in widths) + " lowercase hexadecimal digits")
         return text
     elif kind == "sha256":
         if not re.fullmatch(r"[0-9a-f]{64}", text):
@@ -382,6 +877,7 @@ FILE_PRIVATE = 1 << 4
 FILE_EXECUTABLE = 1 << 5
 FILE_SINGLE_LINK = 1 << 6
 FILE_OWNER_CALLER = 1 << 7
+FILE_TRUSTED_DIRECTORY = 1 << 8
 
 WRITE_REPLACE = "replace"
 WRITE_NO_REPLACE = "no-replace"
@@ -437,6 +933,50 @@ def _judge(status: os.stat_result, requirements: int) -> Optional["tuple[int, st
     return None
 
 
+def _judge_resolved_directory(path: str, status: os.stat_result) -> Optional["tuple[int, str]"]:
+    """The directory that holds the file once symbolic links are resolved must be
+    owned by root or the caller, closed to group and world, and still hold that
+    very object (judge_resolved_directory of src/files.c). It answers who may
+    replace a file, which its own modes do not, and is what makes following a
+    link worth as much as refusing one."""
+    resolved = os.path.realpath(path)
+    try:
+        os.lstat(resolved)
+    except OSError as error:
+        return error.errno or errno.ENOENT, "path does not resolve to an existing file"
+    parent, name = os.path.split(resolved)
+    if not name:
+        return errno.EINVAL, "resolved path has no file name"
+    try:
+        directory = os.open(parent or "/", os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    except OSError as error:
+        return error.errno, "directory of the file is not accessible"
+    try:
+        try:
+            directory_status = os.fstat(directory)
+        except OSError as error:
+            return error.errno, "directory status of the file is not accessible"
+        if not stat.S_ISDIR(directory_status.st_mode) or \
+                directory_status.st_uid not in (0, os.geteuid()) or \
+                directory_status.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+            # Which directory, in the words an operator can act on: when the
+            # path itself is a link, the directory at fault is the one at the
+            # other end. The question is the last component, not whether
+            # realpath() moved: an ancestor that is a link moves it too.
+            return errno.EPERM, ("file resolves into a directory owned or writable by an untrusted user"
+                                 if os.path.islink(path) else
+                                 "file is in a directory owned or writable by an untrusted user")
+        try:
+            entry = os.stat(name, dir_fd=directory, follow_symlinks=False)
+        except OSError as error:
+            return error.errno, "file is not an entry of the directory it resolves to"
+        if (entry.st_dev, entry.st_ino) != (status.st_dev, status.st_ino):
+            return errno.EPERM, "file changed while its directory was judged"
+    finally:
+        os.close(directory)
+    return None
+
+
 def check_file(path: str, requirements: int) -> None:
     """Judges the path by lstat/stat without opening it (maelys_cli_check_file);
     for a file that is not read here. Raises FileError."""
@@ -454,6 +994,8 @@ def check_file(path: str, requirements: int) -> None:
         except OSError as error:
             raise FileError(error.errno, "symbolic link target is not accessible", path) from None
     verdict = _judge(status, requirements)
+    if not verdict and requirements & FILE_TRUSTED_DIRECTORY:
+        verdict = _judge_resolved_directory(path, status)
     if verdict:
         raise FileError(verdict[0], verdict[1], path)
 
@@ -477,6 +1019,8 @@ def _open_trusted(path: str, requirements: int) -> "tuple[int, os.stat_result]":
         except OSError as error:
             raise FileError(error.errno, "file status is not accessible", path) from None
         verdict = _judge(status, requirements | FILE_REGULAR)
+        if not verdict and requirements & FILE_TRUSTED_DIRECTORY:
+            verdict = _judge_resolved_directory(path, status)
         if verdict:
             raise FileError(verdict[0], verdict[1], path)
         try:
@@ -493,8 +1037,9 @@ def open_trusted(path: str, requirements: int) -> int:
     """Opens one regular file read-only and applies the requirements to the
     descriptor opened (maelys_cli_open_trusted): the open never blocks, a FIFO or
     a device is refused as not regular, FILE_NO_SYMLINK opens with O_NOFOLLOW,
-    otherwise a link is followed and its target judged. The descriptor is
-    close-on-exec, blocking, at offset zero."""
+    otherwise a link is followed and its target judged, FILE_TRUSTED_DIRECTORY
+    saying where that target may lie. The descriptor is close-on-exec,
+    blocking, at offset zero."""
     return _open_trusted(path, requirements)[0]
 
 
@@ -554,6 +1099,7 @@ def write_file_atomic(path: str, data: bytes, mode: int, policy: str) -> None:
         raise FileError(errno.EINVAL, "write arguments are invalid", path)
     if policy == WRITE_NO_REPLACE and os.path.lexists(path):
         raise FileError(errno.EEXIST, "path already exists", path)
+    import tempfile  # here, not at the top: no command but a write pays for it
     directory = os.path.dirname(path) or "."
     descriptor, temporary = tempfile.mkstemp(prefix=os.path.basename(path) + ".tmp.", dir=directory)
     published = False
@@ -639,6 +1185,7 @@ def pager_command() -> Optional[list]:
     setting = os.environ.get("PAGER")
     if setting is None:
         return ["less"]
+    import shlex  # here, not at the top: only a terminal with PAGER set pays for it
     try:
         words = shlex.split(setting)
     except ValueError:
@@ -662,6 +1209,7 @@ def page_text(text: str, invocation: "Invocation") -> bool:
     env = dict(os.environ)
     if "PAGER" not in env:
         env.setdefault("LESS", "FRX")
+    import subprocess  # here, not at the top: only a paged terminal pays for it
     sys.stdout.flush()
     try:
         subprocess.run(words, input=text, text=True, check=False, env=env)
@@ -759,11 +1307,15 @@ class Invocation:
 
 class Program:
     def __init__(self, program: str, product: str, version: str, commands: list, guide: str = "",
-                 text: Optional[dict] = None, framework: str = FRAMEWORK) -> None:
+                 text: Optional[dict] = None, framework: str = FRAMEWORK, static_completion: bool = True) -> None:
         self.program = program
         self.product = product
         self.version = version
         self.framework = framework
+        # False for a program whose catalog depends on the machine it runs on -- commands made
+        # unavailable by what is installed, say: a script generated where the package was built would
+        # carry that machine's catalog under the same version.
+        self.static_completion = static_completion
         self.guide_line = guide or product
         self.text = dict(text or {})
         self.catalog = [
@@ -816,6 +1368,12 @@ class Program:
             for reference in item["conflictsWith"]:
                 if not (reference in names or (not reference.startswith("--") and reference in operands)):
                     raise ValueError(f"{command['id']}: {item['long']} conflicts with unknown {reference}")
+        # A stated rule names options of the command itself, as C does.
+        own = {item["long"] for item in command["options"]}
+        for rule in command["constraints"]:
+            for reference in rule["options"]:
+                if reference not in own:
+                    raise ValueError(f"{command['id']}: {rule['kind']} constraint names unknown option {reference}")
 
     # ---- catalog views ----
 
@@ -849,6 +1407,9 @@ class Program:
             if "group" in item:
                 groups.setdefault(item["group"], []).append(item["long"])
         entries.extend({"kind": "all-or-none", "options": members} for members in groups.values())
+        # The rules the command states itself (spec 2.5), after the derived
+        # ones: exactly-one has no other site.
+        entries.extend({"kind": rule["kind"], "options": list(rule["options"])} for rule in command["constraints"])
         return entries
 
     def command_by_id(self, identifier: str) -> dict:
@@ -952,14 +1513,72 @@ class Program:
 
     def _completion(self, invocation: Invocation) -> "tuple[dict, int]":
         shell = invocation.operands[0]
+        return {"shell": shell, "script": self.completion_script(shell)}, EXIT_OK
+
+    def completion_script(self, shell: str, static: Optional[bool] = None) -> str:
+        """The completion script `completion SHELL` prints, for bash, zsh or fish. Static by default: it
+        carries the candidates of this catalog and its version, launches no process at a Tab, and calls
+        `__complete` only after a delegate's pattern. `static=False`, or `static_completion=False` on the
+        program, gives the script that calls `__complete` at every completion, which is also what a
+        catalog with a word the static form cannot carry receives. Both offer the words `__complete`
+        returns."""
+        if shell not in SHELLS:
+            raise ValueError(f"a completion script is for one of {', '.join(SHELLS)}, not {shell!r}")
+        rows = self._static_rows() if (self.static_completion if static is None else static) else None
+        if rows is None:
+            return self._dynamic_script(shell)
+        template = {"bash": _STATIC_BASH, "zsh": _STATIC_ZSH, "fish": _STATIC_FISH}[shell]
+        quoted = [f"'{row}'" for row in rows]
+        table = " \\\n".join(quoted) if shell == "fish" else "\n".join(quoted)
+        identifier = re.sub(r"[^A-Za-z0-9]", "_", self.program)
+        return (template.replace("@ROWS@", table).replace("@ID@", identifier)
+                .replace("@PROG@", self.program).replace("@VERSION@", self.version))
+
+    def _static_rows(self) -> Optional[list]:
+        """The table a static script carries (see _STATIC_WORD), or None when a word of this catalog
+        would not be inert in a shell: the script that calls __complete is exact for any catalog."""
+        shown = [item for item in self.catalog if not item["hidden"] and item["unavailable"] is None]
+        rows, details, words = [], [], [self.program, self.version]
+
+        def option_rows(index: str, options: list) -> None:
+            for item in options:
+                value = item.get("argument")
+                flags = ("a" if value is not None else "") + ("e" if (value or {}).get("type") == "choice" else "") \
+                    + ("h" if item.get("hidden") else "") + ("r" if item["repeatable"] else "")
+                values = self._value_candidates(value) if value is not None else []
+                words.extend([item["long"], *values])
+                details.append(f"O|{index}|{item['long']}|{flags or '-'}|{' '.join(values)}")
+
+        for index, command in enumerate(shown):
+            kind = "d" if command["external"] else "s" if command["outputMode"] == "protocol-stream" else "c"
+            words.extend([command["id"], *command["pattern"]])
+            rows.append(f"C|{index}|{' '.join(command['pattern'])}|{command['id']}|{kind}")
+            if command["external"]:
+                continue
+            option_rows(str(index), command["options"])
+            for item in command["operands"]:
+                values = self._value_candidates(item)
+                words.extend(values)
+                details.append(f"P|{index}|{'v' if item['variadic'] else '-'}|{' '.join(values)}")
+        option_rows("g", GLOBAL_OPTIONS)
+        if not all(_STATIC_WORD.match(word) for word in words):
+            return None
+        return rows + details
+
+    def _dynamic_script(self, shell: str) -> str:
+        """The script that calls __complete at every completion."""
+        # The three scripts are renderings of __complete (agent-cli/v2, section 6): they offer its words
+        # and no others, and fall back to the shell's file completion when it returns none. src/app.c
+        # prints the same text, where each line is explained; a line that differs is a defect.
         program = self.program
-        function = f"_{program.replace('-', '_')}_complete"
+        function = "_" + re.sub(r"[^A-Za-z0-9]", "_", program) + "_complete"
         if shell == "bash":
             script = "\n".join([
                 f"# bash completion for {program}, generated from its catalog",
                 f"{function}() {{",
+                "    local -a words",
+                '    words=("${COMP_WORDS[@]:1:COMP_CWORD}")',
                 "    local IFS=$'\\n'",
-                '    local words=("${COMP_WORDS[@]:1:COMP_CWORD}")',
                 f'    COMPREPLY=($("{program}" __complete -- "${{words[@]}}" 2>/dev/null))',
                 "    if [ ${#COMPREPLY[@]} -eq 0 ]; then",
                 '        COMPREPLY=($(compgen -f -- "${COMP_WORDS[COMP_CWORD]}"))',
@@ -970,51 +1589,115 @@ class Program:
         elif shell == "zsh":
             script = "\n".join([
                 f"#compdef {program}",
+                f"# zsh completion for {program}, generated from its catalog",
                 f"{function}() {{",
                 "    local -a candidates",
-                f'    candidates=("${{(@f)$("{program}" __complete -- "${{words[@]:1}}" 2>/dev/null)}}")',
-                "    if (( ${#candidates} )); then compadd -- $candidates; else _files; fi",
+                f'    candidates=(${{(f)"$("{program}" __complete -- "${{(@)words[2,CURRENT]}}" 2>/dev/null)"}})',
+                "    if (( ${#candidates} )); then",
+                '        compadd -- "${candidates[@]}"',
+                "    else",
+                "        _files",
+                "    fi",
                 "}",
-                f"compdef {function} {program}",
+                f"if [[ ${{funcstack[1]}} == _{program} ]]; then",
+                f'    {function} "$@"',
+                "else",
+                f"    compdef {function} {program}",
+                "fi",
             ]) + "\n"
         else:
             script = "\n".join([
                 f"# fish completion for {program}, generated from its catalog",
-                f"complete -c {program} -f -a '({program} __complete -- (commandline -opc)[2..-1] (commandline -ct))'",
+                f"function _{function}",
+                "    set -l words (commandline -opc)",
+                "    set -l current (commandline -ct)",
+                f'    set -l candidates ("{program}" __complete -- $words[2..-1] "$current" 2>/dev/null)',
+                "    if test (count $candidates) -gt 0",
+                "        printf '%s\\n' $candidates",
+                "    else",
+                '        __fish_complete_path "$current"',
+                "    end",
+                "end",
+                f"complete -c {program} -f -a '(_{function})'",
             ]) + "\n"
-        return {"shell": shell, "script": script}, EXIT_OK
+        return script
 
     def _complete(self, invocation: Invocation) -> "tuple[dict, int]":
+        # The oracle of the completion scripts (agent-cli/v2, section 6). It follows builtin_complete of
+        # src/app.c step by step and returns the same words in the same order: a difference is a defect.
         words = list(invocation.raw_operands)
         current = words[-1] if words else ""
         previous = words[:-1]
+        shown = [item for item in self.catalog if not item["hidden"] and item["unavailable"] is None]
+        command = None
+        for other in shown:
+            pattern = other["pattern"]
+            if previous[:len(pattern)] == pattern and (command is None or len(pattern) > len(command["pattern"])):
+                command = other
         candidates: list = []
-        command, consumed = self.resolve(previous)
-        for other in self.catalog:
-            if other["hidden"] or other["unavailable"] is not None or len(other["pattern"]) <= len(previous):
-                continue
-            if other["pattern"][:len(previous)] == previous:
-                candidates.append(other["pattern"][len(previous)])
-        if command is not None and command["unavailable"] is None:
-            given = {word.split("=", 1)[0] for word in previous[consumed:] if word.startswith("--")}
-            if previous[consumed:] and previous[-1] == "--format":
-                candidates = list(FORMATS)
-            elif previous[consumed:] and previous[-1] == "--color":
-                candidates = list(COLORS)
-            elif previous[consumed:] and previous[-1] in ("--progress", "--pager"):
-                candidates = list(TRISTATE)
-            else:
-                if current.startswith("-") or not current:
-                    candidates.extend(item["long"] for item in command["options"] + GLOBAL_OPTIONS
-                                      if item["long"] not in given and not item.get("hidden"))
-                position = len(previous) - consumed
-                if command["id"] in ("help", "describe") and position == 0:
-                    candidates.extend(other["id"] for other in self.catalog
-                                      if not other["hidden"] and other["unavailable"] is None)
-                elif position < len(command["operands"]) and command["operands"][position].get("choices"):
-                    candidates.extend(command["operands"][position]["choices"])
-        matching = sorted({word for word in candidates if word.startswith(current)})
+        if command is None:
+            # The next pattern word of every command that starts with the words given so far.
+            candidates = [other["pattern"][len(previous)] for other in shown
+                          if len(other["pattern"]) > len(previous) and other["pattern"][:len(previous)] == previous]
+        elif command["external"]:
+            # The words after a delegate's pattern are the delegate's, which this catalog does not hold:
+            # none, and never this program's own options (section 9).
+            pass
+        else:
+            after = previous[len(command["pattern"]):]
+            shared = [] if command["outputMode"] == "protocol-stream" else GLOBAL_OPTIONS
+            expecting = None
+            if after and after[-1].startswith("--") and "=" not in after[-1]:
+                expecting = next((item for item in command["options"] + GLOBAL_OPTIONS
+                                  if item["long"] == after[-1] and "argument" in item), None)
+            if expecting is not None:
+                candidates = self._value_candidates(expecting["argument"])
+            elif current.startswith("--") and "=" in current:
+                # --option=VALUE: the value is completed with the option spelled.
+                name = current.split("=", 1)[0]
+                for item in command["options"]:
+                    if item["long"] == name and not item.get("hidden") and item.get("argument", {}).get("type") == "choice":
+                        candidates.extend(f"{name}={choice}" for choice in item["argument"].get("choices", []))
+            elif current.startswith("--"):
+                given = {word.split("=", 1)[0] for word in after if word.startswith("--")}
+                candidates = [item["long"] for item in command["options"] + shared
+                              if not item.get("hidden") and (item["repeatable"] or item["long"] not in given)]
+            elif command["id"] in ("help", "describe") and not after:
+                candidates = [other["id"] for other in shown]
+            elif command["operands"]:
+                position = self._operand_position(command, after)
+                operands = command["operands"]
+                if position < len(operands) or operands[-1]["variadic"]:
+                    candidates = self._value_candidates(operands[min(position, len(operands) - 1)])
+        matching = [word for word in dict.fromkeys(candidates) if word.startswith(current)]
         return {"count": len(matching), "records": [{"word": word} for word in matching]}, EXIT_OK
+
+    @staticmethod
+    def _value_candidates(value: dict) -> list:
+        """The words a typed value can be completed with; paths and free values fall back to files."""
+        if value.get("type") == "choice":
+            return list(value.get("choices", []))
+        if value.get("type") == "digest":
+            return [f"{algorithm}:" for algorithm in value.get("algorithms", [])]
+        return []
+
+    @staticmethod
+    def _operand_position(command: dict, after: list) -> int:
+        """How many operands the complete words after the pattern already give."""
+        position = 0
+        index = 0
+        while index < len(after):
+            word = after[index]
+            index += 1
+            if word == "--":
+                return position + len(after) - index
+            if word.startswith("--") and len(word) > 2:
+                definition = next((item for item in command["options"] + GLOBAL_OPTIONS if item["long"] == word), None)
+                if definition is not None and "argument" in definition:
+                    index += 1
+                continue
+            position += 1
+        return position
 
     # ---- parsing ----
 
@@ -1066,7 +1749,8 @@ class Program:
         # A failure envelope names the resolved command from here on (section 7).
         self.resolved_command_id = command["id"]
         if command["unavailable"] is not None:
-            raise Failure("UNSUPPORTED", f"Command '{command['id']}' is not available in this build: {command['unavailable']}",
+            raise Failure(command.get("unavailableCode") or "UNSUPPORTED",
+                          f"Command '{command['id']}' is not available in this build: {command['unavailable']}",
                           "Use another build of the product, or another command.")
         raw_operands = words[consumed:] + passthrough
         usage = command["usage"]
@@ -1166,6 +1850,21 @@ class Program:
             if present and len(present) != len(members):
                 raise Failure("VALIDATION_FAILED", f"Options {', '.join(members)} are given together or not at all.",
                               f"Use '{usage}'.")
+        # The rules the command states itself (spec 2.5), in the same causal
+        # slot as the dependencies they extend; exactly-one refuses zero as
+        # it refuses two.
+        for rule in command["constraints"]:
+            present = [name for name in rule["options"] if enabled(name)]
+            listed = ", ".join(rule["options"])
+            if rule["kind"] == "requires" and enabled(rule["options"][0]):
+                for other in rule["options"][1:]:
+                    if not enabled(other):
+                        raise Failure("VALIDATION_FAILED", f"Option {rule['options'][0]} requires {other}.",
+                                      f"Use '{usage}'.")
+            elif rule["kind"] == "at-most-one" and len(present) > 1:
+                raise Failure("VALIDATION_FAILED", f"At most one of {listed} may be given.", f"Use '{usage}'.")
+            elif rule["kind"] == "exactly-one" and len(present) != 1:
+                raise Failure("VALIDATION_FAILED", f"Exactly one of {listed} must be given.", f"Use '{usage}'.")
         for definition in command["options"]:
             if definition["required"] and definition["long"] not in options and not help_requested:
                 raise Failure("VALIDATION_FAILED", f"Option {definition['long']} is required by '{command['id']}'.",
