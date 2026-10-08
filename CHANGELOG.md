@@ -13,8 +13,21 @@
   wrapped. One test of this repository asserted the old page; it now holds
   what this repository declares — the command is listed, its usage carries
   its operands and options in order, a hidden option stays out of both.
-- **Impact.** [asks: nothing] [writes: nothing] Nothing for a product: the
-  vendored framework is this command's own, and no managed file moves.
+- **The artifact actions at one version.** `release.yml` and `channel.yml`
+  pinned `upload-artifact` at v4.6.2 and `download-artifact` at v4.3.0,
+  while the six other workflows pinned them at v7 and v8 — for a month, and
+  by nobody's choice: the two files were rewritten on 10 September, five
+  days after the pins had been refreshed, from an older memory of them.
+  All twelve uses are now at `upload-artifact` v7.0.2 and
+  `download-artifact` v8.0.2. What `release.yml` relies on is kept, and
+  read in the action's own README at that version before moving: a
+  download by `pattern` without `merge-multiple` leaves each artifact in a
+  directory of its own name, which is what keeps two targets' files apart
+  in `incoming/dist-TARGET/`. And a rule holds it from the files: one
+  action, one commit, across every workflow of this repository.
+- **Impact.** [asks: nothing] [writes: nothing] Nothing for a product to
+  do: the vendored framework is this command's own, the actions are in the
+  socle's reusable workflows, and no managed file moves.
 
 ## 0.63.0 — 2026-10-08
 
