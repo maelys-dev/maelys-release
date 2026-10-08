@@ -310,6 +310,18 @@ required: the ceremony by hand remains what it was.
   maelys-http does with Mbed TLS under its security floor, declares it once
   in the same file as every other pin instead of carrying a checkout of its
   own.
+- A dependency that **one job alone reads** says so, on an `on-request`
+  line of its pin. Everything that clones "every pin" then skips it — the
+  loop of `scripts/checkout-dependencies.sh`, which the shared CI jobs, the
+  release builds and `rehearse` run — and the job that reads it clones it
+  by name, `sh scripts/checkout-dependency.sh NAME DESTINATION`, as it
+  always could. maelys-http pins Mbed TLS twice and its second pin serves
+  one job; the other eight cloned it, submodules and all, without reading a
+  file of it. It is still a pin: one declaration, with `check` and `cut`
+  judging its tag and its commit as any other. On a developer's machine
+  `maelys-release dependencies DIR` names it and leaves it, and `--all`
+  brings it. The loop also says, on stderr, how long each clone took: that
+  cost was invisible, and it took comparing two runs to see it.
 - **A private pin travels to a runner that may not read it, instead of a
   credential travelling to the runner.** `carry-dependencies.yml`, called
   beside the check, runs on a machine that may read the pins the caller

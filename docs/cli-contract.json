@@ -2498,6 +2498,14 @@
               },
               {
                 "conflictsWith": [],
+                "long": "--all",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "Also the pins marked on-request, which a job clones by name and this command skips otherwise."
+              },
+              {
+                "conflictsWith": [],
                 "long": "--apply",
                 "repeatable": false,
                 "required": false,
@@ -2506,7 +2514,7 @@
               }
             ],
             "passthrough": false,
-            "synopsis": "dependencies DIR [--product NAME] [--directory DIR] [--apply]"
+            "synopsis": "dependencies DIR [--product NAME] [--directory DIR] [--all] [--apply]"
           },
           "outputMode": "json-envelope",
           "outputSchema": {
@@ -2527,7 +2535,8 @@
                         "clone",
                         "refresh",
                         "same",
-                        "blocked"
+                        "blocked",
+                        "on-request"
                       ]
                     },
                     "commit": {
@@ -2612,7 +2621,7 @@
             "dependencies"
           ],
           "purpose": "Materialise the product's pinned dependencies at their commits in one directory apart from any working copy, refreshing what is already there; plan without --apply.",
-          "usage": "dependencies DIR [--product NAME] [--directory DIR] [--apply]"
+          "usage": "dependencies DIR [--product NAME] [--directory DIR] [--all] [--apply]"
         },
         {
           "available": true,

@@ -434,6 +434,10 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
     for name, mode in sorted(decl.submodules.items()):
         decl.add("ok", f"dependencies/{name}.pin initialises its submodules"
                  + (" recursively" if mode else "") + ", from the URLs its .gitmodules names", "conventions")
+    for name in sorted(name for name in decl.dependencies if decl.pins.get(name, {}).get("on_request")):
+        decl.add("ok", f"dependencies/{name}.pin is cloned on request only: the jobs that clone every pin skip"
+                 f" it, and 'sh scripts/checkout-dependency.sh {name} DESTINATION' brings it to the one that"
+                 " reads it", "conventions")
     scripts = project / "scripts"
     managed_names = {name.split("/")[-1] for name in CHECKOUT_SCRIPTS}
     stray = sorted(path.name for path in scripts.glob("checkout-*.sh")
@@ -2009,7 +2013,9 @@ APP = SocleProgram(PROGRAM, PRODUCT, socle_version(), [
                     options=[SOCLE_OPTIONS[0],
                              cli.option("--directory", "Where the checkouts go;"
                                         " ~/.cache/maelys-release/dependencies/PRODUCT by default.",
-                                        cli.argument("DIR"))],
+                                        cli.argument("DIR")),
+                             cli.option("--all", "Also the pins marked on-request, which a job clones"
+                                        " by name and this command skips otherwise.")],
                     schema={"type": "object", "additionalProperties": False,
                             "required": ["mode", "product", "project", "directory", "variable",
                                          "declared", "dependencies", "notes", "blocked"],
@@ -2025,7 +2031,7 @@ APP = SocleProgram(PROGRAM, PRODUCT, socle_version(), [
                                                               "repository": {"type": "string"},
                                                               "path": {"type": "string"},
                                                               "action": {"enum": ["clone", "refresh", "same",
-                                                                                  "blocked"]},
+                                                                                  "blocked", "on-request"]},
                                                               "submodules": {"enum": ["", "recursive"]},
                                                               "previous": {"type": "string"},
                                                               "reason": {"type": "string"}}}},
