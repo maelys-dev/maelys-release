@@ -112,7 +112,7 @@ jobs:
           # One name per attempt: a re-run that carries again must not
           # collide with the artifact of the attempt before.
           echo "artifact=maelys-dependency-bundles-${GITHUB_RUN_ATTEMPT}" >>"$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ steps.bundle.outputs.artifact }}
           path: ${{ runner.temp }}/maelys-dependency-bundles

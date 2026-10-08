@@ -123,6 +123,21 @@ class HeldToWhatItWritesTest(unittest.TestCase):
                 self.assertRegex(used.group(1), r"@[0-9a-f]{40}$", f"{name}:{number}")
         self.assertGreater(read, 10, "this rule must read the uses lines, not miss them")
 
+    def test_an_action_is_pinned_at_one_commit_across_the_workflows(self) -> None:
+        """Two workflows written a week apart pinned the same two actions
+        four major versions apart, for a month: `release.yml` and
+        `channel.yml` at v4 of the artifact actions, the six other files at
+        v7 and v8. Nothing chose that; the later file was written from an
+        older memory of the pins. One action, one commit."""
+        commits: dict = {}
+        for name, text in self.workflows().items():
+            for used in re.findall(r"^\s*(?:-\s+)?uses:\s*([\w.-]+/[\w.-]+)@([0-9a-f]{40})", text, re.M):
+                commits.setdefault(used[0], {}).setdefault(used[1], []).append(name)
+        self.assertGreater(len(commits), 3, "this rule must read the actions, not miss them")
+        split = {action: {commit[:7]: sorted(set(files)) for commit, files in by.items()}
+                 for action, by in commits.items() if len(by) > 1}
+        self.assertEqual(split, {})
+
     def test_every_workflow_declares_its_permissions(self) -> None:
         """A workflow without one takes the repository's default, which the
         socle neither sets nor sees."""
