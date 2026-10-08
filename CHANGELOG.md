@@ -46,6 +46,25 @@
 
   And the loop prints how long each clone took, on stderr, for every pin of
   every product: `checkout-dependencies: NAME cloned in Ns`.
+- **A job of the socle that hangs is cut.** Reported by maelys-egress, and
+  exact: not one job of the socle's eight workflows carried
+  `timeout-minutes`, and a product cannot add one — GitHub refuses it on a
+  job that calls a reusable workflow. Three of egress's own jobs sat in
+  `apt-get update` on a hosted runner, one for an hour until it was
+  cancelled by hand; a release build doing the same would hold its runner
+  for six hours after a signed tag. The sixteen jobs that run on a runner
+  are now bounded, at about five times the longest green run measured on
+  eight repositories of the fleet: 30 minutes for `check`, `fuzz`,
+  `sanitizers`, the legs and `bottle`, 45 for a release `build`, 15 for a
+  `publish`, 10 for the short ones. `docs/conventions.md` has the table.
+
+  And `apt-get update` is cut after two minutes, by `timeout`: the form it
+  replaces, `update || warning`, covers an update that fails, and the one
+  that hung never returned to reach its `||`. Measured on Ubuntu 24.04: a
+  command that never returns is cut at the bound with exit 124, one that
+  ignores the signal is killed ten seconds later, one that returns is left
+  alone. Not proved: that the install which follows succeeds on the
+  image's own lists.
 - **Impact.** [asks: checkout-script] [writes: nothing] A minor version: a
   managed file moves. A product that carries `scripts/checkout-dependencies.sh`
   **re-adopts** to receive the new loop — moving its socle pin without

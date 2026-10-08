@@ -15,6 +15,12 @@ jobs:
       matrix:
         runner: [ubuntu-26.04, macos-15]
     runs-on: ${{ matrix.runner }}
+    # Bounded, because nothing else can bound it: GitHub refuses
+    # timeout-minutes on a job that calls a reusable workflow, so a product
+    # cannot cut a job of the socle that hangs, and the default is six hours.
+    # About five times the longest green run measured across the fleet --
+    # docs/conventions.md, under Continuous integration, has the table.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -22,7 +28,7 @@ jobs:
       - name: Install shellcheck and actionlint
         if: runner.os == 'Linux'
         run: |
-          sudo apt-get update || echo "::warning::apt-get update reported errors; the install decides"
+          sudo timeout -k 10 120 apt-get update || echo "::warning::apt-get update failed or was cut after two minutes; the install decides"
           sudo apt-get install -y shellcheck
           bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.12 /usr/local/bin >/dev/null
       - if: runner.os == 'Linux'

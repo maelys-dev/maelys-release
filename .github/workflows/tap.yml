@@ -85,6 +85,12 @@ permissions:
 jobs:
   render:
     runs-on: ${{ fromJSON(inputs.macos_runner) }}
+    # Bounded, because nothing else can bound it: GitHub refuses
+    # timeout-minutes on a job that calls a reusable workflow, so a product
+    # cannot cut a job of the socle that hangs, and the default is six hours.
+    # About five times the longest green run measured across the fleet --
+    # docs/conventions.md, under Continuous integration, has the table.
+    timeout-minutes: 10
     env:
       HOMEBREW_NO_AUTO_UPDATE: "1"
     steps:
@@ -133,6 +139,7 @@ jobs:
       matrix:
         runner: ${{ fromJSON(inputs.bottles) }}
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
     permissions:
       contents: write
       id-token: write
@@ -227,6 +234,7 @@ jobs:
     needs: [render, bottle]
     if: always() && needs.render.result == 'success' && (needs.bottle.result == 'success' || needs.bottle.result == 'skipped')
     runs-on: ${{ fromJSON(inputs.macos_runner) }}
+    timeout-minutes: 15
     # One publication at a time per tap in this repository: the formula jobs
     # of one release, or a replay during a release, wait for each other
     # instead of racing on the push. GitHub scopes the group to the

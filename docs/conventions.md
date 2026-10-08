@@ -1075,6 +1075,35 @@ does not say where either came from.
 - Before the first tag of a product, and after any change to
   `dependencies/packages` or `package-release.sh`, `maelys-release rehearse DIR
   TARGET` replays the Linux build job in Docker.
+- **Every job of the socle is bounded, because nobody else can bound it.**
+  GitHub refuses `timeout-minutes` on a job that calls a reusable workflow,
+  so a product cannot cut a job of the socle that hangs, and the default is
+  six hours — on a release, six hours of a runner after a signed tag.
+  maelys-egress watched three of its own jobs sit in `apt-get update` on a
+  hosted runner, one for an hour, and found that not one job of the socle's
+  eight workflows carried a bound. They do now, at about five times the
+  longest green run measured on eight repositories of the fleet:
+
+  | jobs | longest green run | bound |
+  |---|---|---|
+  | `check`, `fuzz`, `sanitizers`, a product's own legs | 6.3 min | 30 min |
+  | `build` of a release | 8.1 min | 45 min |
+  | `bottle` | 1.6 min | 30 min |
+  | `verify`, `render`, `record`, `said` | under 1 min | 10 min |
+  | every `publish` | 1.9 min | 15 min |
+  | the socle's own (`check.yml`, `formula.yml`, the carry) | — | 20 min |
+
+  The bounds are fixed, not declared by a product: a build that legitimately
+  outgrows one is reported here, and the answer is a declaration then, not
+  a guess now. A product bounds **its own** jobs in its own `ci.yml`, where
+  `timeout-minutes` is its to write.
+- **`apt-get update` is cut after two minutes.** The steps read
+  `sudo timeout -k 10 120 apt-get update || warning`, where they read
+  `sudo apt-get update || warning`. The second form covers an update that
+  fails; the one egress saw never returned, so the `||` was never reached.
+  Whether the install that follows succeeds on the image's own lists is not
+  proved — the mirror could not be made to hang on demand — and the job's
+  bound is what holds if it does not.
 
 ## Runners
 
