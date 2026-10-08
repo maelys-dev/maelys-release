@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.63.0 — 2026-10-08
 
 - **`maelys-release completion` completes.** The framework this command is
   built on moves from maelys-cli v0.5.23 to v0.5.35, and the contract's kit
