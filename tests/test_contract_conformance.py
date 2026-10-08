@@ -56,9 +56,16 @@ class ConformanceTest(unittest.TestCase):
                                    env=env, check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         self.assertIn(completed.returncode, (0, 1), completed.stderr)
         report = json.loads(completed.stdout)
-        failed = [f"{check['name']} ({check['detail']})" for check in report["checks"] if not check["passed"]]
+        # Three verdicts since the kit of 2.7.0, not two: a check it could
+        # not run says `passed: null`. Read as "not passed", a shell absent
+        # from this machine was a failure of the program -- fish, here.
+        failed = [f"{check['name']} ({check['detail']})" for check in report["checks"] if check["passed"] is False]
         self.assertEqual(failed, [], "\n".join(failed))
-        self.assertGreater(report["counts"]["passed"], 60)
+        # And a skip is only ever a tool this machine lacks: anything else
+        # the kit declines to judge is something to read, not to wave through.
+        skipped = [f"{check['name']} ({check['detail']})" for check in report["checks"] if check["passed"] is None]
+        self.assertEqual([entry for entry in skipped if "is not installed" not in entry], [], "\n".join(skipped))
+        self.assertGreater(report["counts"]["passed"], 500)
 
 
 if __name__ == "__main__":

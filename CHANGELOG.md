@@ -1,5 +1,33 @@
 # Changelog
 
+## Unreleased
+
+- **`maelys-release completion` completes.** The framework this command is
+  built on moves from maelys-cli v0.5.23 to v0.5.35, and the contract's kit
+  from agent-cli/v2 2.4.0 to 2.8.1 — the pair that framework implements.
+  Measured before moving anything: the kit of 2.8.1 run against the socle
+  **as released** fails twice. Under the bash that macOS ships, 3.2, the
+  completion script offered file names where it should offer the command's
+  words; under zsh it did not fall back to files when the command had
+  nothing to say. Twelve versions of the framework had passed, one of them
+  saying in its own changelog that the scripts did not complete, for every
+  product built on it — and this command has been installable by Homebrew
+  since 0.62.0. With the pair moved: 509 checks pass, none fails.
+
+  Two tests of this repository had frozen what the contract does not fix.
+  One read the kit's third verdict — `passed: null`, a check it could not
+  run — as a failure, so a shell absent from the machine failed the
+  program; a skip is now accepted only when it says a tool is not
+  installed. The other asserted completion candidates in sorted order,
+  where the contract fixes none and the kit compares sets.
+
+  Not moved: the kit of 2.9.0, published the day before this, which the
+  framework at v0.5.35 does not implement yet. And not closed: a text
+  renderer that raises still reaches the terminal as a Python trace — that
+  code is unchanged upstream.
+- **Impact.** [asks: nothing] [writes: nothing] Nothing for a product: the
+  vendored framework is this command's own, and no managed file moves.
+
 ## 0.62.3 — 2026-10-03
 
 - **`dependencies` prints its plan when the socle's own checkout is behind
