@@ -244,12 +244,28 @@ def constraint(kind: str, *options: str) -> dict:
     return {"kind": kind, "options": list(options)}
 
 
+def example(words: str, summary: str) -> dict:
+    """One example of a command, for `examples=` of a declaration (spec 2.12,
+    section 2; C: MAELYS_CLI_EXAMPLE). `words` is the command line without
+    the program's name, starting with the command's pattern, its words
+    separated by single spaces: a word cannot hold a space, so an example
+    carries values that have none. `summary` says in one sentence what that
+    line does. An example is an invocation the command accepts, with real
+    values; the program parses it when it is built and refuses it otherwise,
+    and nothing runs it."""
+    if not words or not summary or _terminal_safe(words) != words or _terminal_safe(summary) != summary:
+        raise ValueError("an example has words and a summary, without a control character")
+    if words != words.strip(" ") or "  " in words:
+        raise ValueError(f"the words of an example are separated by single spaces: {words!r}")
+    return {"words": words.split(" "), "summary": summary}
+
+
 def _command(identifier: str, pattern: str, purpose: str, handler: Optional[Handler], effect: Any,
              operands: tuple = (), options: tuple = (), schema: Optional[dict] = None, mode: str = "json-envelope",
              protocol: Optional[str] = None, external: bool = False, hidden: bool = False,
              unavailable: Optional[str] = None, unavailable_code: Optional[str] = None,
              passthrough: bool = False,
-             synopsis: Optional[str] = None, constraints: tuple = ()) -> dict:
+             synopsis: Optional[str] = None, constraints: tuple = (), examples: tuple = ()) -> dict:
     if not IDENTIFIER.match(identifier):
         raise ValueError(f"a command identifier is [a-z][a-z0-9.-]*, not {identifier!r}")
     # The code an unavailable command answers: UNSUPPORTED says "absent from
@@ -263,6 +279,20 @@ def _command(identifier: str, pattern: str, purpose: str, handler: Optional[Hand
     words = pattern.split()
     operands = list(operands)
     options = list(options)
+    # On a transaction --expect has one meaning and one shape (spec 2.9,
+    # section 4): what transaction(expect=True) declares, and a fingerprint
+    # the schema requires. Refused here as C refuses it at startup.
+    for item in options if isinstance(effect, dict) else ():
+        if item["long"] != "--expect":
+            continue
+        value = item.get("argument", {})
+        if value.get("type") != "digest" or value.get("algorithms") != ["sha256"] \
+                or "--apply" not in item["requires"] or item["repeatable"] or item["required"] or item.get("hidden"):
+            raise ValueError(f"{identifier}: --expect is reserved on a transaction for binding a plan; "
+                             "declare it with transaction(expect=True), or name the option otherwise")
+        if "fingerprint" not in ((schema or {}).get("required") or []):
+            raise ValueError(f"{identifier}: a transaction that declares --expect lists \"fingerprint\" "
+                             "in the required of its schema")
     variadic = [item for item in operands if item["variadic"]]
     if len(variadic) > 1 or (variadic and operands[-1] is not variadic[0]):
         raise ValueError(f"{identifier}: at most one operand is variadic, and it is the last one")
@@ -286,7 +316,7 @@ def _command(identifier: str, pattern: str, purpose: str, handler: Optional[Hand
             "outputMode": mode, "protocol": protocol, "external": external, "hidden": hidden,
             "unavailable": unavailable, "unavailableCode": unavailable_code,
             "operands": operands, "options": options, "passthrough": passthrough,
-            "constraints": list(constraints),
+            "constraints": list(constraints), "examples": list(examples),
             "outputSchema": schema or {"type": "object"}, "handler": handler}
 
 
@@ -301,11 +331,61 @@ def records(identifier: str, pattern: str, purpose: str, handler: Handler, **key
 
 
 def transaction(identifier: str, pattern: str, purpose: str, handler: Handler, commit: bool = False,
-                options: tuple = (), **keywords: Any) -> dict:
-    """Plans by default, writes with --apply; the handler reads invocation.apply."""
+                options: tuple = (), expect: bool = False, **keywords: Any) -> dict:
+    """Plans by default, writes with --apply; the handler reads invocation.apply.
+    `expect=True` binds the application to the reviewed plan (spec 2.9, section
+    4; C: MAELYS_CLI_EXPECT_OPTION): it declares `--expect FINGERPRINT`, and
+    the schema must then list `fingerprint` in its `required`. The handler
+    computes the fingerprint with Fingerprint and calls
+    invocation.expect(fingerprint) before it writes anything."""
     effect = {"plan": "preview", "apply": "commit" if commit else "apply"}
     options = list(options) + [flag("--apply", "Apply the reviewed plan instead of only planning it.")]
+    if expect:
+        options.append(option("--expect", "Apply only the plan this fingerprint names; a plan that has changed "
+                              "since is refused before anything is written.",
+                              argument("FINGERPRINT", "digest", algorithms=["sha256"]), requires=("--apply",)))
     return _command(identifier, pattern, purpose, handler, effect, options=options, **keywords)
+
+
+class Fingerprint:
+    """The fingerprint of a plan (spec 2.9, section 4): a `sha256:HEX` string
+    over the action the plan describes and over the state of the resources
+    that action would touch. The same writes on the same state give the same
+    fingerprint; another write, or the same write on another state, gives
+    another. What goes in is the product's business; this is how it goes in,
+    and it is the framing of maelys_cli_fingerprint_*() in C, byte for byte:
+    each entry is its label, a presence byte and its value, the two strings
+    preceded by their length on eight bytes. Add the entries in a fixed order."""
+
+    def __init__(self) -> None:
+        import hashlib  # here, not at the top: only a transaction that binds its plan pays for it
+        self._hash = hashlib.sha256()
+
+    def add(self, label: str, value: Union[bytes, str, None]) -> "Fingerprint":
+        """One entry; `None` is an absent value, which differs from an empty one."""
+        name = label.encode("utf-8")
+        data = value.encode("utf-8", "surrogateescape") if isinstance(value, str) else value
+        self._hash.update(len(name).to_bytes(8, "big") + name)
+        self._hash.update(b"\x00" if data is None else b"\x01")
+        self._hash.update(len(data or b"").to_bytes(8, "big") + bytes(data or b""))
+        return self
+
+    def add_file(self, label: str, path: str, maximum_size: int) -> "Fingerprint":
+        """The state of a file the action would touch: absent when nothing is
+        at `path`, the sha256 of its content when it is a regular file read
+        within `maximum_size`. Anything else raises the OSError: a state that
+        cannot be read is not a state to bind a plan to."""
+        import hashlib
+        try:
+            content = read_regular_file(path, 0, maximum_size)
+        except OSError as error:
+            if error.errno != errno.ENOENT:
+                raise
+            return self.add(label, None)
+        return self.add(label, hashlib.sha256(content).hexdigest())
+
+    def finish(self) -> str:
+        return "sha256:" + self._hash.hexdigest()
 
 
 def execute(identifier: str, pattern: str, purpose: str, handler: Handler, **keywords: Any) -> dict:
@@ -352,6 +432,91 @@ INVARIANTS = [
 ]
 
 
+
+
+# ---- help layout ----------------------------------------------------------------------
+# The help is read by a person, in a terminal: it fits the width, puts a description beside a short
+# label and below a long one, and breaks a line between words. This is the layout of src/app.c
+# (help_wrap, help_entry), with the same widths and the same table of character widths.
+HELP_WIDTH = 80
+HELP_WIDTH_MINIMUM = 60
+HELP_WIDTH_MAXIMUM = 100
+HELP_LABEL_MAXIMUM = 28
+_ZERO_WIDTH = ((0x0300, 0x036F), (0x1AB0, 0x1AFF), (0x1DC0, 0x1DFF), (0x20D0, 0x20FF), (0xFE00, 0xFE0F),
+               (0xFE20, 0xFE2F), (0x200B, 0x200F), (0x2060, 0x2060), (0xFEFF, 0xFEFF))
+_DOUBLE_WIDTH = ((0x1100, 0x115F), (0x2E80, 0xA4CF), (0xAC00, 0xD7A3), (0xF900, 0xFAFF), (0xFE30, 0xFE4F),
+                 (0xFF00, 0xFF60), (0xFFE0, 0xFFE6), (0x1F300, 0x1F64F), (0x1F900, 0x1F9FF), (0x20000, 0x3FFFD))
+
+
+def display_width(text: str) -> int:
+    """Columns `text` takes in a terminal: none for a combining mark or a
+    zero-width character, two for the East Asian wide and fullwidth ranges
+    and for emoji, one otherwise."""
+    width = 0
+    for character in text:
+        code = ord(character)
+        if any(low <= code <= high for low, high in _ZERO_WIDTH):
+            continue
+        width += 2 if any(low <= code <= high for low, high in _DOUBLE_WIDTH) else 1
+    return width
+
+
+def _help_words(text: str, groups: bool) -> list:
+    """The words of `text`; with `groups`, a space inside [...] does not separate two."""
+    words, word, depth = [], "", 0
+    for character in text:
+        if character == " " and not (groups and depth > 0):
+            if word:
+                words.append(word)
+            word = ""
+            continue
+        depth += 1 if character == "[" else -1 if character == "]" and depth > 0 else 0
+        word += character
+    return words + ([word] if word else [])
+
+
+def _help_wrap(text: str, column: int, indent: int, width: int, groups: bool = False) -> str:
+    """`text` wrapped between words so that no line passes `width`: the first
+    line goes on at `column`, the following ones start after `indent` spaces."""
+    out, at, first = "", column, True
+    for word in _help_words(text, groups):
+        wide = display_width(word)
+        if not first and at + 1 + wide > width and at > indent:
+            out += "\n" + " " * indent
+            at = indent
+        elif not first:
+            out += " "
+            at += 1
+        out += word
+        at += wide
+        first = False
+    return out
+
+
+def _help_entry(label: str, text: str, label_width: int, width: int, groups: bool = False) -> str:
+    """One entry of a list: the text beside the label when the label fits its column, below it otherwise."""
+    wide = display_width(label)
+    if wide <= label_width:
+        column = label_width + 4
+        return "  " + label + " " * (label_width - wide + 2) + _help_wrap(text, column, column, width) + "\n"
+    return "  " + _help_wrap(label, 2, 8, width, groups) + "\n" + " " * 6 + _help_wrap(text, 6, 6, width) + "\n"
+
+
+def _help_paragraph(text: str, width: int, groups: bool = False) -> str:
+    return "  " + _help_wrap(text, 2, 6 if groups else 2, width, groups) + "\n"
+
+
+def help_width(fmt: str = "text") -> int:
+    """The width help is rendered at: the terminal's when stdout is one,
+    within bounds that keep it readable; 80 anywhere else, so that what goes
+    into a pipe, a file or data.text does not depend on a window."""
+    if fmt != "text" or not sys.stdout.isatty():
+        return HELP_WIDTH
+    try:
+        columns = int(os.environ.get("COLUMNS") or os.get_terminal_size(sys.stdout.fileno()).columns)
+    except (OSError, ValueError):
+        return HELP_WIDTH
+    return max(HELP_WIDTH_MINIMUM, min(HELP_WIDTH_MAXIMUM, columns)) if columns > 0 else HELP_WIDTH
 
 # ---- completion scripts ---------------------------------------------------------------
 # A static script carries the candidates of the catalog it was generated from and launches no process
@@ -1239,6 +1404,7 @@ class Invocation:
         self.color = color
         self.field = field
         self._progress_shown = False
+        self._expect_checked = False
 
     @property
     def color_stdout(self) -> bool:
@@ -1304,6 +1470,22 @@ class Invocation:
     def apply(self) -> bool:
         return self.flag("--apply")
 
+    def expect(self, fingerprint: str) -> None:
+        """Binds --apply to the reviewed plan (transaction(expect=True); C:
+        maelys_cli_expect). `fingerprint` is what the handler has just computed
+        for the action it is about to perform on the state as it now is.
+        Returns when --expect was not given or names it, and the handler puts
+        the same string in data["fingerprint"]; raises PRECONDITION_FAILED
+        otherwise. Call it before the first write, in plan mode as well: a
+        caller that reads that code concludes that nothing changed."""
+        self._expect_checked = True
+        expected = self.options.get("--expect")
+        if expected is not None and expected != fingerprint:
+            raise Failure("PRECONDITION_FAILED",
+                          f"The plan --expect names is no longer the one '{self.command['id']}' would apply: "
+                          "the action or the state it touches has changed. Nothing was written.",
+                          "Plan again without --apply, review the new plan, then apply it with its fingerprint.")
+
 
 class Program:
     def __init__(self, program: str, product: str, version: str, commands: list, guide: str = "",
@@ -1320,7 +1502,8 @@ class Program:
         self.text = dict(text or {})
         self.catalog = [
             read("help", "help", "Show the help of the program or of one command.", self._help,
-                 operands=[operand("COMMAND_ID", "Command identifier.", required=False)],
+                 operands=[operand("COMMAND_ID", "Command identifier, the family of commands under one, "
+                                   "or `conventions`.", required=False)],
                  schema={"type": "object", "required": ["text", "commands"],
                          "properties": {"text": {"type": "string"},
                                         "commands": {"type": "array", "items": {"type": "string"}}}}),
@@ -1340,6 +1523,8 @@ class Program:
                     self._complete, operands=[operand("WORDS", "Words typed so far.", required=False, variadic=True)],
                     hidden=True, schema={"type": "object", "required": ["count", "records"]}),
         ]
+        self._builtin_count = len(self.catalog)
+        self._family_words: Optional[list] = None
         seen = set()
         for command in commands:
             if command["id"] in seen or any(command["id"] == built["id"] for built in self.catalog):
@@ -1357,6 +1542,45 @@ class Program:
         # usage in help; describe uses the catalog's synopsis
         self.catalog[0]["usage"] = "help [COMMAND_ID] | --help"
         self.catalog[1]["usage"] = "version | --version"
+        # The examples last: parsing one needs the whole catalog.
+        for command in self.catalog:
+            self._check_examples(command)
+
+    def _check_examples(self, command: dict) -> None:
+        """An example is an invocation the command accepts (spec 2.12, section
+        2; C: validate_examples): it starts with the command's pattern and
+        parses as any command line does, and shows no hidden option. It is
+        parsed, never run. After the pattern of a delegate the words are the
+        other executable's."""
+        hidden = {item["long"] for item in command["options"] if item.get("hidden")}
+        for item in command["examples"]:
+            words = item["words"]
+            spelled = " ".join(words)
+            if words[:len(command["pattern"])] != command["pattern"]:
+                raise ValueError(f"{command['id']}: an example does not start with the pattern "
+                                 f"'{' '.join(command['pattern'])}': '{spelled}'")
+            if command["passthrough"]:
+                continue
+            before = words[:words.index("--")] if "--" in words else words
+            if "--help" in before:
+                raise ValueError(f"{command['id']}: an example invokes the command, it does not ask for its help: "
+                                 f"'{spelled}'")
+            unavailable, command["unavailable"] = command["unavailable"], None
+            try:
+                invocation, resolved = self.parse(list(words))
+            except Failure as failure:
+                raise ValueError(f"{command['id']}: an example the command does not accept: '{spelled}': "
+                                 f"{failure.message}") from None
+            finally:
+                command["unavailable"] = unavailable
+                self.resolved_command_id = ""
+                self._family_words = None
+            if resolved is not command:
+                raise ValueError(f"{command['id']}: an example names another command: '{spelled}'")
+            shown = sorted(name for name in invocation.options if name in hidden
+                           and any(word.split("=", 1)[0] == name for word in before))
+            if shown:
+                raise ValueError(f"{command['id']}: an example shows the hidden option {shown[0]}: '{spelled}'")
 
     def _check_references(self, command: dict) -> None:
         names = {item["long"] for item in command["options"]} | {item["long"] for item in GLOBAL_OPTIONS}
@@ -1389,6 +1613,11 @@ class Program:
         entry["input"] = {"synopsis": command["usage"], "operands": command["operands"],
                           "options": command["options"], "constraints": self.constraints(command),
                           "passthrough": command["passthrough"]}
+        if not summary and command["examples"]:
+            # The summary omits them, as it omits the schema: it is the form
+            # an agent pays for on every discovery (spec 2.12, section 1).
+            entry["examples"] = [{"words": list(item["words"]), "summary": item["summary"]}
+                                 for item in command["examples"]]
         if not summary:
             entry["outputSchema"] = command["outputSchema"]
             entry["exitCodes"] = dict(EXIT_CODES)
@@ -1427,45 +1656,132 @@ class Program:
                 best = command
         return best, len(best["pattern"]) if best else 0
 
-    def command_help(self, command: dict) -> str:
-        lines = [f"{self.program} {command['usage']}", "", command["purpose"], ""]
+    @staticmethod
+    def _option_label(item: dict) -> str:
+        value = item.get("argument")
+        if value and value.get("choices"):
+            spelled = f"{item['long']} {'|'.join(value['choices'])}"
+        elif value:
+            spelled = f"{item['long']} {value['name']}"
+        else:
+            spelled = item["long"]
+        return spelled + (" (repeatable)" if item["repeatable"] else "")
+
+    @staticmethod
+    def _option_text(item: dict) -> str:
+        text = item["summary"]
+        if "default" in item:
+            text += f" Default: {item['default']}."
+        if item["required"]:
+            text += " Required."
+        text += "".join(f" Requires {name}." for name in item["requires"])
+        text += "".join(f" Conflicts with {name}." for name in item["conflictsWith"])
+        return text
+
+    def _options_help(self, options: list, width: int) -> str:
+        shown = [(self._option_label(item), self._option_text(item)) for item in options if not item.get("hidden")]
+        column = max([display_width(label) for label, _ in shown if display_width(label) <= HELP_LABEL_MAXIMUM] or [0])
+        return "".join(_help_entry(label, text, column, width) for label, text in shown)
+
+    def command_help(self, command: dict, width: int = HELP_WIDTH) -> str:
+        """The help of one command: its usage, purpose, effect, output mode,
+        operands and options, laid out within `width` columns."""
+        text = "USAGE\n" + _help_paragraph(f"{self.program} {command['usage']}", width, groups=True)
+        text += "\n" + _help_wrap(command["purpose"], 0, 0, width) + "\n\n"
+        if command["unavailable"] is not None:
+            text += "UNAVAILABLE IN THIS BUILD\n" + _help_paragraph(command["unavailable"], width) + "\n"
+        effect = command["effect"]
+        text += "EFFECT\n  " + (f"{effect['plan']} by default; {effect['apply']} with --apply"
+                                if isinstance(effect, dict) else effect) + "\n"
+        output = command["outputMode"] + (f" owned by protocol {command['protocol']}" if command["protocol"] else "") \
+            + (" (arguments are passed to an external program)" if command["external"] else "")
+        text += "\nOUTPUT\n" + _help_paragraph(output, width)
         if command["operands"]:
-            lines.append("OPERANDS")
-            lines.extend(f"  {item['name']:<18} {item['summary']}" for item in command["operands"])
-            lines.append("")
-        shown = [item for item in command["options"] if not item.get("hidden")]
-        if shown:
-            lines.append("OPTIONS")
-            for item in shown:
-                spelled = item["long"] + (f" {item['argument']['name']}" if "argument" in item else "")
-                default = f" (default {item['default']})" if "default" in item else ""
-                lines.append(f"  {spelled:<28} {item['summary']}{default}")
-            lines.append("")
-        return "\n".join(lines).rstrip("\n") + "\n"
+            column = max([display_width(item["name"]) for item in command["operands"]
+                          if display_width(item["name"]) <= HELP_LABEL_MAXIMUM] or [0])
+            text += "\nOPERANDS\n" + "".join(
+                _help_entry(item["name"], item["summary"] + ("" if item["required"] else " Optional."), column, width)
+                for item in command["operands"])
+        if any(not item.get("hidden") for item in command["options"]):
+            text += "\nOPTIONS\n" + self._options_help(command["options"], width)
+        if command["examples"]:
+            # Never beside: a line to copy stands alone.
+            text += "\nEXAMPLES\n" + "".join(
+                _help_entry(f"{self.program} {' '.join(item['words'])}", item["summary"], 0, width)
+                for item in command["examples"])
+        text += "\nGLOBAL OPTIONS\n" + _help_paragraph(
+            f"Run '{self.program} help conventions' for --format, --json, --compact, --non-interactive, --color "
+            "and the others.", width)
+        return text
+
+    def _family(self, prefix: Optional[str] = None, words: Optional[list] = None) -> list:
+        """The shown commands of a family: under the identifier `prefix`, the
+        namespace describe --prefix selects, or whose pattern starts with
+        `words` and has more."""
+        shown = [command for command in self.catalog if not command["hidden"]]
+        if prefix is not None:
+            return [command for command in shown if command["id"] == prefix or command["id"].startswith(f"{prefix}.")]
+        return [command for command in shown
+                if len(command["pattern"]) > len(words or []) and command["pattern"][:len(words or [])] == words]
+
+    def family_help(self, name: str, commands: list, width: int = HELP_WIDTH) -> str:
+        """The help of a family: each of its commands with its usage, the purpose below."""
+        text = f"{self.program} {name} - commands\n\nCOMMANDS\n"
+        for command in commands:
+            purpose = command["purpose"] + (" (unavailable in this build)" if command["unavailable"] is not None else "")
+            text += _help_entry(command["usage"], purpose, 0, width, groups=True)
+        return text + "\n" + _help_wrap(
+            f"Run '{self.program} help COMMAND_ID' or '{self.program} COMMAND --help' for the operands and options "
+            "of one command.", 0, 0, width) + "\n"
 
     def warn(self, message: str) -> None:
         """A diagnostic on stderr, `program: warning: message`, as maelys_cli_warn(); never stdout."""
         sys.stderr.write(f"{self.program}: warning: {_terminal_safe(message)}\n")
         sys.stderr.flush()
 
-    def guide(self) -> str:
-        visible = [command for command in self.catalog if not command["hidden"]]
-        lines = [f"{self.program} {self.version} - {self.guide_line}", "", "USAGE",
-                 f"  {self.program} COMMAND [OPERANDS] [OPTIONS]", "", "COMMANDS"]
-        width = max(len(command["usage"]) for command in visible)
-        lines.extend(f"  {command['usage']:<{width}}  {command['purpose']}" for command in visible)
-        lines.extend(["", "GLOBAL OPTIONS"])
-        for item in GLOBAL_OPTIONS:
-            argument = item.get("argument")
-            if argument and argument.get("choices"):
-                spelled = f"{item['long']} {'|'.join(argument['choices'])}"
-            elif argument:
-                spelled = f"{item['long']} {argument['name']}"
-            else:
-                spelled = item["long"]
-            lines.append(f"  {spelled:<28} {item['summary']}")
-        lines.extend(["", f"Run '{self.program} describe --format json' for the machine-readable catalog."])
-        return "\n".join(lines) + "\n"
+    def guide(self, width: int = HELP_WIDTH) -> str:
+        """The general help: each command by its pattern and its purpose, the
+        product's first, then the ones every program has; the usage of a
+        command is in its own help, the usage of a family in the family's."""
+        text = _help_wrap(f"{self.program} {self.version} - {self.guide_line}", 0, 0, width) + "\n\n"
+        text += f"USAGE\n  {self.program} COMMAND [OPERANDS] [OPTIONS]\n"
+        column = display_width(f"{self.program} help conventions")
+        text += _help_entry(f"{self.program} help COMMAND_ID", "the operands and options of one command", column, width)
+        text += _help_entry(f"{self.program} help FAMILY", "the commands of one family, with their usage", column, width)
+        text += _help_entry(f"{self.program} help conventions",
+                            "the options every command takes, and the agent contract", column, width)
+        text += "\nCOMMANDS\n"
+        visible = [(index, command) for index, command in enumerate(self.catalog) if not command["hidden"]]
+        column = max([display_width(" ".join(command["pattern"])) for _, command in visible
+                      if display_width(" ".join(command["pattern"])) <= HELP_LABEL_MAXIMUM] or [0])
+        own = [command for index, command in visible if index >= self._builtin_count]
+        built_in = [command for index, command in visible if index < self._builtin_count]
+        for group in (own, built_in):
+            if group is built_in and own and built_in:
+                text += "\n"
+            for command in group:
+                purpose = command["purpose"] + (" (unavailable in this build)" if command["unavailable"] is not None else "")
+                text += _help_entry(" ".join(command["pattern"]), purpose, column, width)
+        # What every program has in common is named, not repeated: spelled
+        # out, the options and the contract were two thirds of this screen.
+        names = ", ".join(item["long"] for item in GLOBAL_OPTIONS if not item.get("hidden"))
+        text += "\nGLOBAL OPTIONS\n" + _help_paragraph(
+            f"{names}. Run '{self.program} help conventions' for what each one does.", width)
+        text += "\nAGENT CONTRACT\n" + _help_paragraph(
+            f"Use --format json --non-interactive, and run '{self.program} describe --summary --format json' first. "
+            f"'{self.program} help conventions' has the rest of the contract.", width)
+        return text
+
+    def conventions_help(self, width: int = HELP_WIDTH) -> str:
+        """What every program built on the framework has in common: the options
+        every command takes and the contract an agent relies on, whole."""
+        return f"{self.program} - conventions\n\nGLOBAL OPTIONS\n" + self._options_help(GLOBAL_OPTIONS, width) \
+            + "\nAGENT CONTRACT\n" + _help_paragraph(
+                f"Use --format json --non-interactive. Run '{self.program} describe --summary --format json' first, "
+                f"then '{self.program} describe COMMAND_ID --format json' for the exact input and output contract. "
+                "Exit 0 is success, 1 is execution failure, and 2 is a completed validation report with violations. "
+                "Transactions plan by default and require --apply. Stream commands reserve stdout for their "
+                "protocol. Success data is written to stdout only; diagnostics and failures go to stderr.", width)
 
     # ---- built-in handlers ----
 
@@ -1474,10 +1790,29 @@ class Program:
                 "cliApi": CLI_API, "framework": self.framework}, EXIT_OK
 
     def _help(self, invocation: Invocation) -> "tuple[dict, int]":
+        width = help_width(invocation.format)
+        words, self._family_words = self._family_words, None
+        if words:
+            # `PROGRAM note --help`: the words named no command, but a family.
+            family = self._family(words=words)
+            return {"text": self.family_help(" ".join(words), family, width),
+                    "commands": [command["id"] for command in family]}, EXIT_OK
         if invocation.operands:
-            command = self.command_by_id(invocation.operands[0])
-            return {"text": self.command_help(command), "commands": [command["id"]]}, EXIT_OK
-        return {"text": self.guide(), "commands": [c["id"] for c in self.catalog if not c["hidden"]]}, EXIT_OK
+            query = invocation.operands[0]
+            command = next((item for item in self.catalog if item["id"] == query), None)
+            if command is not None:
+                return {"text": self.command_help(command, width), "commands": [command["id"]]}, EXIT_OK
+            # Not a command: a family, the namespace describe --prefix selects;
+            # or the one topic, which a command or a family of that name hides.
+            family = self._family(prefix=query)
+            if not family and query == "conventions":
+                return {"text": self.conventions_help(width), "commands": []}, EXIT_OK
+            if not family:
+                raise Failure("INVALID_COMMAND", f"Unknown command identifier or family: {query}.",
+                              "Run 'help' without operands to list the commands and their families.")
+            return {"text": self.family_help(query, family, width),
+                    "commands": [command["id"] for command in family]}, EXIT_OK
+        return {"text": self.guide(width), "commands": [c["id"] for c in self.catalog if not c["hidden"]]}, EXIT_OK
 
     def _describe(self, invocation: Invocation) -> "tuple[dict, int]":
         data: dict = {"schemaVersion": CATALOG_SCHEMA, "program": self.program, "product": self.product,
@@ -1743,6 +2078,13 @@ class Program:
         if not words:
             raise Failure("INVALID_COMMAND", "No command given.", f"Run '{self.program} help' or 'describe --summary'.")
         command, consumed = self.resolve(words)
+        if command is None and any(name == "--help" for name, _ in raw) and self._family(words=words):
+            # `PROGRAM note --help`: the words name no command, but a family of
+            # them, and help was asked for: the help of that family.
+            self._family_words = list(words)
+            words = ["help"]
+            raw = [(name, value) for name, value in raw if name != "--help"]
+            command, consumed = self.resolve(words)
         if command is None:
             raise Failure("INVALID_COMMAND", f"Unknown command '{' '.join(words)}'.",
                           "Run describe --summary and use one of the listed command identifiers.")
@@ -1960,18 +2302,49 @@ class Program:
             if command["outputMode"] == "protocol-stream":
                 result = command["handler"](invocation)
                 return int(result[1] if isinstance(result, tuple) else result)
-            data, exit_code = command["handler"](invocation)
-            invocation.progress_done()
             if invocation.field is not None:
-                # Reached with fmt == "json" only via an environment
-                # MAELYS_CLI_FORMAT=json the parser could not see; an explicit
-                # --format json was already refused there. A name absent from
-                # data is discoverable only now, once the handler has run.
+                # The refusals --field brings that the parser could not make,
+                # decided on the catalog and before the handler (spec 2.9,
+                # section 5; C: field_refused): a caller that reads
+                # VALIDATION_FAILED concludes that nothing changed.
                 if fmt == "json":
+                    # Reached only via an environment MAELYS_CLI_FORMAT=json;
+                    # an explicit --format json was refused by the parser.
                     raise Failure("VALIDATION_FAILED",
                                   "--field conflicts with --format json: a filtered envelope "
                                   "would not validate against the command's outputSchema.",
                                   "Use --format text or --format jsonl with --field.")
+                if command["effect"] != "read":
+                    # A command that can write -- a transaction, with or
+                    # without --apply, or an execute -- accepts only a member
+                    # its output schema requires: one it leaves optional is
+                    # refused even when this run would have carried it.
+                    required = command["outputSchema"].get("required")
+                    if not isinstance(required, list) or not required:
+                        raise Failure("VALIDATION_FAILED",
+                                      f"Option --field is not accepted by '{command_id}': the command can "
+                                      "write and its output schema requires no member.",
+                                      "Run the command without --field and read the member from its result.")
+                    if invocation.field not in required:
+                        raise Failure("VALIDATION_FAILED",
+                                      f"Option --field names '{invocation.field}', which '{command_id}' does "
+                                      "not always return: a command that can write accepts only a member "
+                                      "its output schema requires.",
+                                      "Use a member the command's output schema requires; describe lists them.")
+            data, exit_code = command["handler"](invocation)
+            invocation.progress_done()
+            if invocation.options.get("--expect") is not None and not invocation._expect_checked \
+                    and isinstance(command["effect"], dict):
+                # --expect was given and the handler answers without having
+                # asked invocation.expect(): the caller would believe a
+                # binding nobody checked (C: succeed_with).
+                raise Failure("UNEXPECTED",
+                              f"Command '{command_id}' answered without checking --expect: what it did is "
+                              "not known to be the plan the fingerprint names.",
+                              "Report this defect to the command implementation.")
+            if invocation.field is not None:
+                # A name absent from data is discoverable only now, once the
+                # handler has run.
                 if invocation.field not in data:
                     raise Failure("VALIDATION_FAILED",
                                   f"Option --field names '{invocation.field}', which "
