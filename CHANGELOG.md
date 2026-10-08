@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.63.1 — 2026-10-08
 
 - **The latest framework and the contract it implements.** maelys-cli moves
   from v0.5.35 to v0.6.0, and agent-cli-spec from v2.8.1 to v2.12.0 — again
