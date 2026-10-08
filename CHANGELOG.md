@@ -4,7 +4,8 @@
 
 - **`maelys-release completion` completes.** The framework this command is
   built on moves from maelys-cli v0.5.23 to v0.5.35, and the contract's kit
-  from agent-cli/v2 2.4.0 to 2.8.1 — the pair that framework implements.
+  from agent-cli-spec v2.4.0 to v2.8.1 — the pair that framework
+  implements. Both pins of `dependencies/` move with it.
   Measured before moving anything: the kit of 2.8.1 run against the socle
   **as released** fails twice. Under the bash that macOS ships, 3.2, the
   completion script offered file names where it should offer the command's
