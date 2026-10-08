@@ -148,6 +148,12 @@ jobs:
     # product out before it verifies anything, so a repository that forbids
     # hosted runners was blocked here, before its first build.
     runs-on: ${{ fromJSON(inputs.linux_x86_64_runner) }}
+    # Bounded, because nothing else can bound it: GitHub refuses
+    # timeout-minutes on a job that calls a reusable workflow, so a product
+    # cannot cut a job of the socle that hangs, and the default is six hours.
+    # About five times the longest green run measured across the fleet --
+    # docs/conventions.md, under Continuous integration, has the table.
+    timeout-minutes: 10
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
       matrix: ${{ steps.matrix.outputs.matrix }}
@@ -331,6 +337,7 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.verify.outputs.matrix) }}
     runs-on: ${{ fromJSON(matrix.runner) }}
+    timeout-minutes: 45
     permissions:
       # The job that runs the product's own package_command holds no write
       # token. contents: write here is repository-wide: it can rewrite the
@@ -357,7 +364,7 @@ jobs:
         # them breaking must not fail an install of Ubuntu archive packages.
         # The update reports, the install decides.
         run: |
-          sudo apt-get update || echo "::warning::apt-get update reported errors; the install decides"
+          sudo timeout -k 10 120 apt-get update || echo "::warning::apt-get update failed or was cut after two minutes; the install decides"
           sudo apt-get install -y ${{ inputs.linux_packages }}
       - name: Install macOS packages
         if: runner.os == 'macOS' && inputs.macos_packages != ''
@@ -548,6 +555,7 @@ jobs:
     # declares its runner puts that token on its own machine, which is its
     # choice to make and the release environment still stands in front.
     runs-on: ${{ fromJSON(inputs.linux_x86_64_runner) }}
+    timeout-minutes: 15
     environment: ${{ inputs.release_environment }}
     permissions:
       contents: write

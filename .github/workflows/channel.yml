@@ -57,6 +57,12 @@ permissions:
 jobs:
   publish:
     runs-on: ${{ fromJSON(inputs.linux_x86_64_runner) }}
+    # Bounded, because nothing else can bound it: GitHub refuses
+    # timeout-minutes on a job that calls a reusable workflow, so a product
+    # cannot cut a job of the socle that hangs, and the default is six hours.
+    # About five times the longest green run measured across the fleet --
+    # docs/conventions.md, under Continuous integration, has the table.
+    timeout-minutes: 15
     environment: ${{ inputs.release_environment }}
     permissions:
       contents: read
@@ -128,6 +134,7 @@ jobs:
   record:
     needs: publish
     runs-on: ${{ fromJSON(inputs.linux_x86_64_runner) }}
+    timeout-minutes: 10
     permissions:
       contents: write
     steps:
@@ -209,6 +216,7 @@ jobs:
     needs: [publish, record]
     if: always() && (needs.publish.result != 'success' || needs.record.result != 'success')
     runs-on: ${{ fromJSON(inputs.linux_x86_64_runner) }}
+    timeout-minutes: 10
     permissions:
       contents: write
     steps:

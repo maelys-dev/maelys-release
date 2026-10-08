@@ -56,6 +56,12 @@ jobs:
     # The name is the leg's, as declared: a protection requires it by that
     # name, and the platform it runs on can change without the name moving.
     name: ${{ matrix.name }}
+    # Bounded, because nothing else can bound it: GitHub refuses
+    # timeout-minutes on a job that calls a reusable workflow, so a product
+    # cannot cut a job of the socle that hangs, and the default is six hours.
+    # About five times the longest green run measured across the fleet --
+    # docs/conventions.md, under Continuous integration, has the table.
+    timeout-minutes: 30
     runs-on: >-
       ${{ fromJSON(matrix.platform == 'macos'
         && (github.event.repository.private && inputs.macos_runner || '"macos-15"')
@@ -114,7 +120,7 @@ jobs:
       - name: Install Linux packages
         if: runner.os == 'Linux'
         run: |
-          sudo apt-get update || echo "::warning::apt-get update reported errors; the install decides"
+          sudo timeout -k 10 120 apt-get update || echo "::warning::apt-get update failed or was cut after two minutes; the install decides"
           sudo apt-get install -y build-essential clang ${{ steps.socle.outputs.linux_packages }}
       - name: Install macOS packages
         if: runner.os == 'macOS' && steps.socle.outputs.macos_packages != ''

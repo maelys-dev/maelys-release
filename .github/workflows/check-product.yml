@@ -134,6 +134,12 @@ jobs:
     # change without anyone's protection noticing.
     name: check (${{ matrix.leg }})
     runs-on: ${{ fromJSON(matrix.runner) }}
+    # Bounded, because nothing else can bound it: GitHub refuses
+    # timeout-minutes on a job that calls a reusable workflow, so a product
+    # cannot cut a job of the socle that hangs, and the default is six hours.
+    # About five times the longest green run measured across the fleet --
+    # docs/conventions.md, under Continuous integration, has the table.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -227,7 +233,7 @@ jobs:
         # them breaking must not fail an install of Ubuntu archive packages.
         # The update reports, the install decides.
         run: |
-          sudo apt-get update || echo "::warning::apt-get update reported errors; the install decides"
+          sudo timeout -k 10 120 apt-get update || echo "::warning::apt-get update failed or was cut after two minutes; the install decides"
           sudo apt-get install -y build-essential clang ${{ steps.socle.outputs.linux_packages }}
       - name: Install macOS packages
         if: runner.os == 'macOS' && steps.socle.outputs.macos_packages != ''
@@ -251,6 +257,7 @@ jobs:
   fuzz:
     if: inputs.fuzz_command != ''
     runs-on: ${{ fromJSON(github.event.repository.private && inputs.linux_x86_64_runner || '"ubuntu-26.04"') }}
+    timeout-minutes: 30
     env:
       CC: clang
       CXX: clang++
@@ -325,7 +332,7 @@ jobs:
         # them breaking must not fail an install of Ubuntu archive packages.
         # The update reports, the install decides.
         run: |
-          sudo apt-get update || echo "::warning::apt-get update reported errors; the install decides"
+          sudo timeout -k 10 120 apt-get update || echo "::warning::apt-get update failed or was cut after two minutes; the install decides"
           # libclang-rt carries the compiler-rt static libraries, libFuzzer's
           # among them: without it a harness linked with -fsanitize=fuzzer
           # does not link, and a product whose smoke target is a libFuzzer
@@ -343,6 +350,7 @@ jobs:
   sanitizers:
     if: inputs.sanitizer_command != ''
     runs-on: ${{ fromJSON(github.event.repository.private && inputs.linux_x86_64_runner || '"ubuntu-26.04"') }}
+    timeout-minutes: 30
     env:
       CC: clang
       CXX: clang++
@@ -421,7 +429,7 @@ jobs:
         # them breaking must not fail an install of Ubuntu archive packages.
         # The update reports, the install decides.
         run: |
-          sudo apt-get update || echo "::warning::apt-get update reported errors; the install decides"
+          sudo timeout -k 10 120 apt-get update || echo "::warning::apt-get update failed or was cut after two minutes; the install decides"
           sudo apt-get install -y build-essential clang libclang-rt-18-dev ${{ steps.socle.outputs.linux_packages }}
       - name: Sanitizers with clang
         shell: bash

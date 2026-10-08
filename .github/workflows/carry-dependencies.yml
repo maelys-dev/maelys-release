@@ -70,6 +70,12 @@ jobs:
     # pull request to a public repository can carry.
     if: github.event.repository.private
     runs-on: ${{ fromJSON(inputs.runner) }}
+    # Bounded, because nothing else can bound it: GitHub refuses
+    # timeout-minutes on a job that calls a reusable workflow, so a product
+    # cannot cut a job of the socle that hangs, and the default is six hours.
+    # About five times the longest green run measured across the fleet --
+    # docs/conventions.md, under Continuous integration, has the table.
+    timeout-minutes: 20
     outputs:
       artifact: ${{ steps.bundle.outputs.artifact }}
     steps:

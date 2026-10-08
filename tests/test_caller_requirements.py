@@ -156,3 +156,47 @@ class HeldToWhatItWritesTest(unittest.TestCase):
         self.assertEqual(rules.block_list(push, "tags"), ["v*"])
         dispatch = rules.sub_block(rules.top_block(text, "on"), "workflow_dispatch")
         self.assertTrue(re.search(r"^\s+tag:\s*$", rules.sub_block(dispatch, "inputs"), re.M), text)
+
+
+class NoJobHangsForSixHoursTest(unittest.TestCase):
+    """Every job of the socle is bounded, because nobody else can bound it.
+
+    GitHub refuses `timeout-minutes` on a job that calls a reusable workflow,
+    so a product cannot cut a job of the socle that hangs: it has the default,
+    six hours. maelys-egress watched three of its own jobs sit in
+    `apt-get update` on a hosted runner, one for an hour until it was
+    cancelled by hand, and found that not one job of these eight workflows
+    carried a bound -- nor could its own `uses:` lines be given one.
+    """
+
+    def workflows(self) -> dict:
+        return {path.name: path.read_text(encoding="utf-8") for path in sorted(WORKFLOWS.glob("*.yml"))}
+
+    def test_every_job_that_runs_on_a_runner_is_bounded(self) -> None:
+        read = 0
+        for name, text in self.workflows().items():
+            for job, body in rules.workflow_jobs(text).items():
+                bound = re.search(r"^    timeout-minutes: (\d+)\s*$", body, re.M)
+                if re.search(r"^    uses:", body, re.M):
+                    # The one place a bound cannot be written, which is the
+                    # whole reason the called workflow must carry it.
+                    self.assertIsNone(bound, f"{name}:{job} calls a workflow; GitHub refuses a bound there")
+                    continue
+                read += 1
+                self.assertIsNotNone(bound, f"{name}:{job} has no timeout-minutes")
+                # Far under the six hours it replaces, and not so tight that
+                # the longest green build of the fleet (8 minutes) meets it.
+                self.assertTrue(10 <= int(bound.group(1)) <= 60, f"{name}:{job} {bound.group(1)}")
+        self.assertEqual(read, 16, "the jobs of this repository that run on a runner")
+
+    def test_apt_get_update_is_cut_when_it_never_returns(self) -> None:
+        """`update || warning` covers an update that fails. The one egress
+        saw did not fail: it never returned, so the `||` was never reached."""
+        read = 0
+        for name, text in self.workflows().items():
+            for number, line in enumerate(text.splitlines(), 1):
+                if "apt-get update" not in line or line.lstrip().startswith("#"):
+                    continue
+                read += 1
+                self.assertRegex(line, r"sudo timeout -k \d+ \d+ apt-get update \|\| ", f"{name}:{number}")
+        self.assertEqual(read, 6, "the apt-get update steps of this repository")
