@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+- **The latest framework and the contract it implements.** maelys-cli moves
+  from v0.5.35 to v0.6.0, and agent-cli-spec from v2.8.1 to v2.12.0 — again
+  the pair, since v0.6.0 implements exactly v2.12.0. The kit of v2.12.0
+  passes 513 checks against this command and fails none; fish is skipped
+  where it is not installed. The catalog `describe` returns is unchanged.
+
+  The framework changed how help is laid out: the overview names each
+  command with its summary, and a command's usage is on its own page,
+  wrapped. One test of this repository asserted the old page; it now holds
+  what this repository declares — the command is listed, its usage carries
+  its operands and options in order, a hidden option stays out of both.
+- **Impact.** [asks: nothing] [writes: nothing] Nothing for a product: the
+  vendored framework is this command's own, and no managed file moves.
+
 ## 0.63.0 — 2026-10-08
 
 - **`maelys-release completion` completes.** The framework this command is

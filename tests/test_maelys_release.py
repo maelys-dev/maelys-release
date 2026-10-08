@@ -360,8 +360,17 @@ class ContractTest(unittest.TestCase):
 
     def test_help(self) -> None:
         text = self.product.run("help").stdout
-        self.assertIn("adopt DIR [--product NAME] [--mechanism MECHANISM] [--allow-untagged] [--allow-lock] [--apply]", text)
+        # The framework owns the page's layout, and changed it in 0.6.0: the
+        # overview names each command with its summary, and the usage is on
+        # the command's own page, wrapped. What this repository holds is what
+        # it declared -- the command is listed, its usage carries these
+        # words in this order, and a hidden option stays out of both.
+        self.assertRegex(text, r"(?m)^  adopt\s+Write the conventions of the socle into a product")
+        usage = " ".join(self.product.run("help", "adopt").stdout.split())
+        self.assertIn("adopt DIR [--product NAME] [--mechanism MECHANISM] [--allow-untagged] [--allow-lock] [--apply]",
+                      usage)
         self.assertNotIn("--socle-sha", text)                       # hidden: parsed, described, never shown
+        self.assertNotIn("--socle-sha", usage)
         self.assertEqual(self.product.run("--help").stdout, text)
         self.assertIn("OPTIONS", self.product.run("help", "adopt").stdout)
         self.assertEqual(self.product.run("adopt", "--help").stdout, self.product.run("help", "adopt").stdout)

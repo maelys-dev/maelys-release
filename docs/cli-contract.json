@@ -21,7 +21,7 @@
               {
                 "name": "COMMAND_ID",
                 "required": false,
-                "summary": "Command identifier.",
+                "summary": "Command identifier, the family of commands under one, or `conventions`.",
                 "variadic": false
               }
             ],
