@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.63.2 — 2026-10-09
 
 - **`migrate` describes the commit it clones.** Reported by maelys-system
   after its own migration, and all three reproduced on a fixture before
