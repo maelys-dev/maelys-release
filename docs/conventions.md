@@ -514,6 +514,25 @@ runner nobody named is a hole and a label too many is a nuisance.
   signed tag and `SHA256SUMS` without attestation, because GitHub reserves
   attestations there to paid plans; the workflow skips the step by
   itself (`attestation: auto`) and `preflight` says so before the tag.
+- The provenance is verified per file, with the command `RELEASING.md`
+  gives: `gh attestation verify FILE --repo OWNER/REPO --signer-repo
+  maelys-dev/maelys-release`. Both options are needed: the attestation
+  belongs to the product's repository and is signed by the socle's reusable
+  workflow, so without `--signer-repo` the verification looks for a signer
+  in the product and refuses. The release runs that command itself, on
+  every file `SHA256SUMS` names, **before** it publishes: a package that
+  cannot be verified is not announced.
+- `gh release verify vX.Y.Z` is another question and answers "no
+  attestations for tag": it reads a *release* attestation, which GitHub
+  writes only for an immutable release, and the fleet's releases are not
+  immutable. They cannot be made so by a setting alone. GitHub documents
+  that the assets of a published immutable release can no longer be
+  modified or deleted, and tells a workflow to attach every asset to the
+  draft before publishing it. This workflow writes to a published release
+  in three places: `tap.yml` uploads the bottles to it, `channel.yml`
+  uploads each channel's marker, and a replay redrafts it and deletes its
+  assets before filling it again. Read from the files, not tried: no
+  repository of the fleet has the setting on.
 
 ### Where a repository declares, and what the socle never does to it
 
@@ -1423,17 +1442,30 @@ review.
   `--allow-unrelated-histories`, so `git log -- <product>/<file>.md` reads
   there. `git subtree add` was tried and rejected: it grafts the history but
   the old commits keep the old path, so the log on the new path is empty.
-- **It also receives the pin**, `dependencies/<product>.pin` at the
-  product's latest tag and commit, and `<product>/VERSION`. A product with
-  no tag is refused: its prose would describe no release. The pin is the
-  fleet's one format, tag on line 1 and commit on line 2; the socle refuses
+- **It also receives the pin**, `dependencies/<product>.pin`, and
+  `<product>/VERSION`, and both describe the commit that was cloned: HEAD.
+  Line 2 is that commit and line 1 is what `git describe --tags` says of
+  it — the tag itself when HEAD carries it, `vX.Y.Z-N-gSHA` past it, which
+  names the same commit and never the tag's. `VERSION` is read at that
+  commit too. A product with no tag is refused: its prose would describe no
+  release. The pin is the fleet's one format; the socle refuses
   `adapter/<NAME>_PIN` in a product since 0.14.0, so it writes none here.
+- **`--apply` moves what is committed, and refuses a tree that differs from
+  it.** The plan is read from the working tree and both sides are cloned
+  from HEAD, so an uncommitted change to a tracked file is refused before
+  anything is written, as is a listed document that was never committed: it
+  has no history to move. The plan itself writes nothing and is answered on
+  any tree.
   The documentation policy of maelys-platform still names the old layout,
   which is a correction for that repository.
 - **The product loses the documents**, on a branch for a pull request, never
   a write into the operator's checkout. The README's links to the moved
   documents are replaced by one line naming where they went; the socle
-  rewrites no other part of a README it cannot write.
+  rewrites no other part of a README it cannot write. The commit that
+  carries this is under the rule of the files it carries: it names the
+  documentation repository only for a product that declares `[docs] named`,
+  because a commit message of a public repository is as public as its
+  README.
 - **Every Markdown file of the product is pointed away**, not the README
   alone. A link whose target left keeps its text and loses its link, since
   the destination is a private repository; a path named in prose becomes the

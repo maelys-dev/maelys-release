@@ -1756,6 +1756,70 @@ class MigrateTest(unittest.TestCase):
         self.assertIn("include/fixture.h:1 names docs/guide.md", message)
         self.assertIn("Makefile:2", message)
 
+    def test_the_commit_names_no_destination_unless_declared(self) -> None:
+        """The message is as public as the files, and was held to nothing:
+        maelys-system, which does not declare the word, received the name in
+        the one line the refusal did not read (maelys-system#43)."""
+        data = self.migrate("--apply")["data"]
+        message = self.product.git(pathlib.Path(data["kept"]) / "product", "log", "-1", "--format=%B")
+        self.assertFalse(MODULE.names_documentation(message), message)
+        self.assertNotIn("maelys-docs", message)
+        self.assertIn("docs: the prose leaves this repository", message)
+        self.assertIn("2 documents are no longer kept here", message)
+        # The other side is the repository being named: it says where from.
+        theirs = self.product.git(pathlib.Path(data["kept"]) / "documents", "log", "-1", "--format=%s")
+        self.assertEqual(theirs, "maelys-fixture: the prose of v1.2.3, with its history")
+
+    def test_the_commit_names_the_destination_of_a_product_that_declares_it(self) -> None:
+        self.product.write("maelys-release.conf", "[docs]\nnamed maelys-dev/maelys-docs\n" + APART)
+        self.commit()
+        data = self.migrate("--apply")["data"]
+        message = self.product.git(pathlib.Path(data["kept"]) / "product", "log", "-1", "--format=%B")
+        self.assertIn("docs: the prose moves to maelys-dev/maelys-docs/maelys-fixture/", message)
+
+    def test_a_tree_that_differs_from_head_is_refused(self) -> None:
+        """Both sides are cloned from HEAD and the plan is read from the
+        tree. maelys-system's VERSION said 0.12.3, uncommitted, over a HEAD
+        at 0.12.2: the prose of one arrived under the version of the other."""
+        self.product.write("VERSION", "1.2.4\n")
+        error = self.migrate("--apply", expect=1)["error"]
+        self.assertEqual(error["code"], "PRECONDITION_FAILED")
+        self.assertIn("uncommitted changes to VERSION", error["message"])
+        self.assertIn("Commit or stash", error["hint"])
+        kept = self.product.work / "cache" / "maelys-release" / "migrate-maelys-fixture"
+        self.assertFalse(kept.exists(), "refused before either side was written")
+        # The plan writes nothing and is still answered.
+        self.assertEqual(self.migrate()["data"]["mode"], "plan")
+
+    def test_a_document_that_was_never_committed_is_refused(self) -> None:
+        self.product.write("docs/draft.md", "# Draft\n")
+        error = self.migrate("--apply", names=("guide.md", "draft.md"), expect=1)["error"]
+        self.assertEqual(error["code"], "PRECONDITION_FAILED")
+        self.assertIn("docs/draft.md of maelys-fixture is not committed", error["message"])
+
+    def test_past_its_tag_the_pin_names_one_commit_and_not_two(self) -> None:
+        """Line 1 was the nearest tag and line 2 was HEAD: past the tag, two
+        commits in one pin -- which `dependencies` refuses, in the repository
+        this writes it into, as a tag that moved."""
+        tagged = self.product.git(self.product.dir, "rev-parse", "HEAD")
+        self.product.write("VERSION", "1.2.4\n")
+        self.commit("the next version begins")
+        head = self.product.git(self.product.dir, "rev-parse", "HEAD")
+        self.assertNotEqual(head, tagged)
+        data = self.migrate("--apply")["data"]
+        documents = pathlib.Path(data["kept"]) / "documents"
+        described, commit = (documents / "dependencies" / "maelys-fixture.pin").read_text().splitlines()
+        self.assertEqual(commit, head)
+        self.assertEqual(described, f"v1.2.3-1-g{head[:7]}")
+        # The socle's own reading of a pin, on the pin the socle wrote.
+        self.assertEqual(self.product.git(self.product.dir, "rev-list", "-n", "1", described), commit)
+        self.assertEqual(MODULE.parse_pin("maelys-fixture", f"{described}\n{commit}\n")[1], [])
+        # The version of the commit that was cloned, and the same word in
+        # the commit that carries it.
+        self.assertEqual((documents / "maelys-fixture" / "VERSION").read_text(), "1.2.4\n")
+        self.assertEqual(self.product.git(documents, "log", "-1", "--format=%s"),
+                         f"maelys-fixture: the prose of {described}, with its history")
+
     def test_a_prose_already_migrated_is_refused_instead_of_failing_opaquely(self) -> None:
         # Pushing needs both sides to have a remote, as a real product does.
         remotes = self.product.work / "remotes"
