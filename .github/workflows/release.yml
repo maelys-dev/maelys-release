@@ -559,6 +559,8 @@ jobs:
     environment: ${{ inputs.release_environment }}
     permissions:
       contents: write
+      # To read the attestations it verifies below, and nothing more.
+      attestations: read
     steps:
       - name: Collect what build produced
         # Each target keeps its own incoming/dist-TARGET/ directory. Merged
@@ -624,6 +626,38 @@ jobs:
           (cd dist && find . -maxdepth 1 -type f \( "$@" \) \
             | sed 's|^\./||' | sort | xargs sha256sum >SHA256SUMS)
           test -s dist/SHA256SUMS
+      - name: Verify the provenance with the command a user is given
+        # RELEASING.md tells whoever downloads a package to run this, and
+        # nothing ever had: a reader outside the fleet tried
+        # `gh release verify` on maelys-system v0.12.2, was told "no
+        # attestations for tag", and nobody could say the documented command
+        # answered otherwise, because it had never been run end to end. It
+        # runs here on every file SHA256SUMS names, before the release is
+        # published: a package that cannot be verified is not announced.
+        # The attestation is found by digest, so these bytes are the test --
+        # they are the ones uploaded below.
+        if: inputs.attestation == 'always' || (inputs.attestation == 'auto' && !github.event.repository.private)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # The workflow that signed them: the socle, as job.workflow_*
+          # names it (see the verify job on why not github.job_workflow_sha).
+          SOCLE: ${{ job.workflow_repository }}
+        run: |
+          set -euo pipefail
+          test -n "$SOCLE" || { echo "the socle's repository is not known to this job" >&2; exit 1; }
+          verified=0
+          while read -r _ name; do
+            name="${name#\*}"
+            if ! said="$(gh attestation verify "dist/$name" --repo "${GITHUB_REPOSITORY}" --signer-repo "$SOCLE" 2>&1)"; then
+              printf '%s\n' "$said" >&2
+              echo "::error::$name does not verify: gh attestation verify $name --repo ${GITHUB_REPOSITORY} --signer-repo $SOCLE" >&2
+              exit 1
+            fi
+            verified=$((verified + 1))
+          done <dist/SHA256SUMS
+          test "$verified" -gt 0 || { echo "SHA256SUMS names no file to verify" >&2; exit 1; }
+          echo "::notice::provenance verified on $verified files: gh attestation verify FILE --repo ${GITHUB_REPOSITORY} --signer-repo $SOCLE"
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}

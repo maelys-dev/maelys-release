@@ -514,6 +514,25 @@ runner nobody named is a hole and a label too many is a nuisance.
   signed tag and `SHA256SUMS` without attestation, because GitHub reserves
   attestations there to paid plans; the workflow skips the step by
   itself (`attestation: auto`) and `preflight` says so before the tag.
+- The provenance is verified per file, with the command `RELEASING.md`
+  gives: `gh attestation verify FILE --repo OWNER/REPO --signer-repo
+  maelys-dev/maelys-release`. Both options are needed: the attestation
+  belongs to the product's repository and is signed by the socle's reusable
+  workflow, so without `--signer-repo` the verification looks for a signer
+  in the product and refuses. The release runs that command itself, on
+  every file `SHA256SUMS` names, **before** it publishes: a package that
+  cannot be verified is not announced.
+- `gh release verify vX.Y.Z` is another question and answers "no
+  attestations for tag": it reads a *release* attestation, which GitHub
+  writes only for an immutable release, and the fleet's releases are not
+  immutable. They cannot be made so by a setting alone. GitHub documents
+  that the assets of a published immutable release can no longer be
+  modified or deleted, and tells a workflow to attach every asset to the
+  draft before publishing it. This workflow writes to a published release
+  in three places: `tap.yml` uploads the bottles to it, `channel.yml`
+  uploads each channel's marker, and a replay redrafts it and deletes its
+  assets before filling it again. Read from the files, not tried: no
+  repository of the fleet has the setting on.
 
 ### Where a repository declares, and what the socle never does to it
 
