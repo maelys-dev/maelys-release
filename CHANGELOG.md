@@ -1,5 +1,53 @@
 # Changelog
 
+## Unreleased
+
+- **`migrate` describes the commit it clones.** Reported by maelys-system
+  after its own migration, and all three reproduced on a fixture before
+  anything was changed. The plan was read from the working tree while both
+  sides were cloned from HEAD, so the two disagreed wherever the tree did.
+  With `VERSION` at 0.12.3 uncommitted over a HEAD at 0.12.2, the prose of
+  HEAD arrived under the version of the tree. And the pin took line 1 from
+  the nearest tag and line 2 from HEAD: past the tag, one pin naming two
+  commits — which `dependencies` refuses, as a tag that moved, in the very
+  repository `migrate` writes it into. `--apply` now refuses an uncommitted
+  change to a tracked file and a listed document that was never committed,
+  before anything is written; `VERSION` is read at HEAD; and line 1 is what
+  `git describe --tags` says of HEAD — the tag when HEAD carries it,
+  `vX.Y.Z-N-gSHA` past it, which resolves to line 2. The plan is unchanged
+  and is still answered on any tree.
+- **The commit on the product's side is under the rule of its files.**
+  `migrate` refuses to write the name of the documentation repository into
+  a file of a product that does not declare `[docs] named`, and wrote it
+  into the commit message of that same product without asking: the one line
+  the refusal did not read. maelys-system is public and rewrote the message
+  by hand before merging (maelys-system#43). The message now names the
+  destination only where the files may.
+- **The release verifies its provenance with the command a user is given.**
+  A reader outside the fleet tried `gh release verify` on maelys-system
+  v0.12.2 and was told "no attestations for tag". Measured: the release is
+  not immutable (`immutable: false`, the setting is off on the repository
+  and on the organisation), and that command reads an attestation GitHub
+  writes only for an immutable release. The per-file attestations are
+  there, and `RELEASING.md` has given the command that reads them since it
+  was first written — `gh attestation verify FILE --repo OWNER/REPO
+  --signer-repo maelys-dev/maelys-release` — but nothing had ever run it
+  from one end to the other. `release.yml` now runs it on every file
+  `SHA256SUMS` names, in the publishing job and **before** the release is
+  published: a package that cannot be verified is not announced. The job
+  takes `attestations: read` for it, which every caller already grants
+  above. The conventions say what each of the two commands answers, and why
+  the fleet's releases cannot be made immutable by a setting alone: three
+  places of these workflows write to a release after it is published.
+- **Impact.** [asks: nothing] [writes: migrate] Nothing for a product to
+  do. The release step arrives with the next adoption and asks the caller
+  for no new permission. What `migrate` already wrote is not rewritten, and
+  two pins it wrote are in the shape described above: in the documentation
+  repository, the pin of maelys-cli names `v0.5.29` and a commit two past
+  it, and the pin of maelys-http names `v0.1.14` and a commit six past it.
+  Each is corrected there, by writing on line 1 what `git describe --tags`
+  says of the commit on line 2.
+
 ## 0.63.1 — 2026-10-08
 
 - **The latest framework and the contract it implements.** maelys-cli moves
