@@ -227,6 +227,27 @@ def migration_notes(data: dict) -> str:
     return "\n".join(lines) + ("\n" if lines else "")
 
 
+def product_message(product: str, data: dict, named: bool) -> str:
+    """The commit on the product's side, under the rule its files are under.
+
+    A commit message of a public repository is as public as its README. The
+    files were held to `[docs] named` and this was not: maelys-system, which
+    does not declare the word, received the name of the documentation
+    repository in the one line the refusal above did not read, and its
+    operator rewrote the message by hand before merging.
+    """
+    documents = f"{data['documents']} document{'s' if data['documents'] != 1 else ''}"
+    if named:
+        return (f"docs: the prose moves to {data['repository']}/{product}/\n\n"
+                f"{documents}, with their history, are now in {data['repository']}."
+                " This side removes them, points the README there and rewrites the Markdown that"
+                " named them.\n" + migration_notes(data))
+    return ("docs: the prose leaves this repository\n\n"
+            f"{documents} are no longer kept here; their history is kept with them."
+            " This side removes them, says so in the README and rewrites the Markdown that"
+            " named them.\n" + migration_notes(data))
+
+
 def rewrite_readme(clone: pathlib.Path, product: str, data: dict) -> str:
     """Point the README at the prose that left, and say nothing more.
 
@@ -274,6 +295,36 @@ def rewrite_readme(clone: pathlib.Path, product: str, data: dict) -> str:
             f" {data['repository']} {reason}. Point the README at the product's site by hand")
 
 
+def describe_the_clone(project: pathlib.Path, product: str, data: dict) -> None:
+    """Hold what the migration says to the commit it clones, which is HEAD.
+
+    The plan is read from the working tree and both sides are cloned from
+    HEAD, so the two disagreed wherever the tree did. maelys-system migrated
+    with VERSION at 0.12.3 uncommitted over a HEAD at 0.12.2: the prose of
+    HEAD arrived under the version of the tree. And the pin took its tag
+    from the nearest one and its commit from HEAD -- past the tag, a line 1
+    and a line 2 that name two commits, which `dependencies` refuses in the
+    repository that receives it.
+    """
+    changed = [line[3:] for line in run(["git", "status", "--porcelain", "--untracked-files=no"],
+                                        cwd=project).stdout.splitlines() if line.strip()]
+    if changed:
+        raise Failure("PRECONDITION_FAILED",
+                      f"{project} has uncommitted changes to {', '.join(changed)}: the migration clones HEAD,"
+                      " so it would move a prose and state a version that are not the ones in this tree.",
+                      "Commit or stash them, then run migrate again.")
+    committed = set(git("ls-tree", "-r", "--name-only", "HEAD", "--", "docs", cwd=project, check=False).splitlines())
+    absent = [entry["path"] for entry in data["moving"] if entry["path"] not in committed]
+    if absent:
+        raise Failure("PRECONDITION_FAILED",
+                      f"{', '.join(absent)} of {product} is not committed: it has no history to move.",
+                      "Commit it, or take it out of the list, then run migrate again.")
+    data["version"] = git("show", "HEAD:VERSION", cwd=project).strip()
+    # The nearest tag when HEAD is that tag, and `vX.Y.Z-N-gSHA` past it:
+    # both resolve to the commit on line 2, which a bare nearest tag did not.
+    data["tag"] = git("describe", "--tags", "HEAD", cwd=project)
+
+
 def handle_migrate(invocation: Invocation, context: Context) -> tuple[dict, int]:
     """Move a product's prose into maelys-docs, with its history, and out of the product.
 
@@ -292,6 +343,7 @@ def handle_migrate(invocation: Invocation, context: Context) -> tuple[dict, int]
                       "Release the product first: maelys-docs pins the tag whose prose it carries.")
     project = pathlib.Path(data["project"])
     product = data["product"]
+    describe_the_clone(project, product, data)
     base = os.environ.get("MAELYS_GIT_BASE", "https://github.com/maelys-dev")
     branch = f"migrate/{product}"
     with tempfile.TemporaryDirectory(prefix="maelys-release-migrate.") as temp:
@@ -362,11 +414,7 @@ def handle_migrate(invocation: Invocation, context: Context) -> tuple[dict, int]
                                   f" {relative}, and {product} does not declare [docs] named.",
                                   "This is a defect of the socle's rewriting, not of the product: report it.")
         git("add", "-A", cwd=product_clone)
-        git("commit", "-q", "-m",
-            f"docs: the prose moves to {data['repository']}/{product}/\n\n"
-            f"{data['documents']} documents, with their history, are now in {data['repository']}."
-            " This side removes them, points the README there and rewrites the Markdown that"
-            " named them.\n" + migration_notes(data), cwd=product_clone)
+        git("commit", "-q", "-m", product_message(product, data, decl.docs_named), cwd=product_clone)
         data["productBranch"] = branch
         data["productCommit"] = git("rev-parse", "HEAD", cwd=product_clone)
 
