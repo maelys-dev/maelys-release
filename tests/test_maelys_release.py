@@ -2521,12 +2521,21 @@ class CutTest(unittest.TestCase):
         script = directory / "gh"
         script.write_text(
             "#!/bin/sh\n"
+            "here=$(dirname \"$0\")\n"
             "case \"$1\" in\n"
-            "api) printf '%s' '" + self.CHECK_RUNS + "' ;;\n"
+            # What GitHub says of one commit is a file a test writes; absent,
+            # the answer carries no verification, as from a GitHub that did
+            # not say. The pull requests of a branch are a file too.
+            "api) case \"$2\" in\n"
+            "      */check-runs*) printf '%s' '" + self.CHECK_RUNS + "' ;;\n"
+            "      repos/*/commits/*) cat \"$here/commit.json\" 2>/dev/null"
+            " || printf '%s' '" + self.CHECK_RUNS + "' ;;\n"
+            "      *) printf '%s' '" + self.CHECK_RUNS + "' ;;\n"
+            "    esac ;;\n"
             "pr) case \"$2\" in\n"
             "      create) echo 'https://example.invalid/pull/1' ;;\n"
             "      view) echo '{\"number\":1,\"url\":\"https://example.invalid/pull/1\",\"state\":\"OPEN\"}' ;;\n"
-            "      list) echo '[]' ;;\n"
+            "      list) cat \"$here/pulls.json\" 2>/dev/null || echo '[]' ;;\n"
             "      *) exit 1 ;;\n"
             "    esac ;;\n"
             "*) exit 1 ;;\n"
@@ -2583,6 +2592,139 @@ class CutTest(unittest.TestCase):
         self.assertIn("SIGNATURE", self.product.git(self.dir, "cat-file", "-p", "HEAD"))
         # The worktree is clean: nothing the command touched was left behind.
         self.assertEqual([path for path, code in MODULE.worktree_paths(self.dir).items() if code != "??"], [])
+
+    def github_says(self, verified: bool, reason: str) -> None:
+        (self.product.work / "fake-bin" / "commit.json").write_text(json.dumps(
+            {"commit": {"verification": {"verified": verified, "reason": reason}}}), encoding="utf-8")
+
+    def ready_to_cut(self) -> None:
+        self.fake_gh()
+        self.product.write("CHANGELOG.md",
+                           "# Changelog\n\n## 1.3.0 — 2026-09-03\n\n- Next.\n\n## 1.2.3 — 2026-09-03\n\n- Something.\n")
+        self.product.git(self.dir, "add", "-A")
+        self.product.git(self.dir, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "the entry of 1.3.0")
+        self.product.git(self.dir, "push", "-q", "origin", "main")
+
+    def test_the_release_commit_is_read_back_as_github_sees_its_signature(self) -> None:
+        """maelys-harness cut its 0.1.0 from a clone with no user.email: git
+        signed as user@hostname, GitHub answered `no_user`, and the commit
+        was merged signed and unverified. Nothing had asked."""
+        if not self.signing_key():
+            self.skipTest("ssh-keygen is needed to sign the bump commit")
+        self.ready_to_cut()
+        self.github_says(False, "no_user")
+        data, code = self.cut(**{"--apply": True})
+        self.assertEqual(code, MODULE.EXIT_VIOLATIONS, data)
+        self.assertFalse(data["ready"])
+        refused = [item["message"] for item in data["gate"] if item["status"] == "fail"]
+        self.assertEqual(len(refused), 1, data["gate"])
+        self.assertIn(f"does not verify the release commit {data['commit'][:7]} (no_user)", refused[0])
+        self.assertIn("user.email", refused[0])
+        # What to do is a line to run, and it ends on this command again.
+        self.assertIn("commit --amend --reset-author -S --no-edit", data["next"])
+        self.assertIn("push --force-with-lease origin release/v1.3.0", data["next"])
+        self.assertIn("cut", data["next"])
+        self.assertIn(f"cut: fix it, then sign the commit again", MODULE.text_cut(data))
+        # Refused before the wait: the checks of a commit about to be
+        # replaced are nobody's. And nothing is undone -- the pull request
+        # is open, the commit is on its branch, the entry it carries is safe.
+        self.assertEqual(data["checks"], [])
+        self.assertEqual(data["pullRequest"]["number"], 1)
+        self.assertEqual(self.product.git(self.dir, "rev-parse", "--abbrev-ref", "HEAD"), "release/v1.3.0")
+        self.assertEqual(self.product.git(self.origin, "rev-parse", "refs/heads/release/v1.3.0"), data["commit"])
+
+    def test_a_key_github_does_not_know_is_fixed_on_github_and_not_in_the_commit(self) -> None:
+        if not self.signing_key():
+            self.skipTest("ssh-keygen is needed to sign the bump commit")
+        self.ready_to_cut()
+        self.github_says(False, "unknown_key")
+        data, code = self.cut(**{"--apply": True})
+        self.assertEqual(code, MODULE.EXIT_VIOLATIONS)
+        self.assertIn("not registered on GitHub as a signing key", data["gate"][-1]["message"])
+        self.assertNotIn("--amend", data["next"])
+        self.assertIn("the commit itself need not change", data["next"])
+
+    def test_the_commit_that_replaces_a_refused_one_is_read_when_the_command_runs_again(self) -> None:
+        """The refusal leaves a state the same command resumes from."""
+        if not self.signing_key():
+            self.skipTest("ssh-keygen is needed to sign the bump commit")
+        self.ready_to_cut()
+        self.github_says(False, "no_user")
+        refused, _ = self.cut(**{"--apply": True})
+        # What `next` said: the commit again, under an identity, on its
+        # branch. Through the module's git and not the fixture's, which
+        # forces its own address on every call: amended within the same
+        # second under the same one, an Ed25519 signature is the same bytes
+        # and the "replaced" commit is the refused one.
+        MODULE.git("config", "user.email", "known@example.invalid", cwd=self.dir)
+        MODULE.git("commit", "-q", "--amend", "--reset-author", "-S", "--no-edit", cwd=self.dir)
+        MODULE.git("push", "-q", "--force-with-lease", "origin", "release/v1.3.0", cwd=self.dir)
+        self.assertEqual(self.product.git(self.dir, "log", "-1", "--format=%ce"), "known@example.invalid")
+        replaced = self.product.git(self.dir, "rev-parse", "HEAD")
+        self.assertNotEqual(replaced, refused["commit"])
+        (self.product.work / "fake-bin" / "pulls.json").write_text(json.dumps(
+            [{"number": 1, "url": "https://example.invalid/pull/1", "state": "OPEN",
+              "mergeCommit": None, "headRefOid": replaced}]), encoding="utf-8")
+        # GitHub still says no: the second run reads the new commit and stops again.
+        again, code = self.cut(**{"--apply": True})
+        self.assertEqual((code, again["commit"]), (MODULE.EXIT_VIOLATIONS, replaced))
+        self.assertIn(replaced[:7], again["gate"][-1]["message"])
+        self.github_says(True, "valid")
+        data, code = self.cut(**{"--apply": True})
+        self.assertEqual(code, MODULE.EXIT_OK, data)
+        self.assertEqual(data["commit"], replaced)
+        self.assertIn({"status": "ok", "message": f"GitHub verifies the release commit {replaced[:7]}"}, data["gate"])
+        self.assertTrue(data["ready"])
+
+    def test_a_github_that_does_not_say_is_a_note_and_stops_nothing(self) -> None:
+        if not self.signing_key():
+            self.skipTest("ssh-keygen is needed to sign the bump commit")
+        self.ready_to_cut()
+        data, code = self.cut(**{"--apply": True})
+        self.assertEqual(code, MODULE.EXIT_OK, data)
+        said = [item for item in data["gate"] if "release commit" in item["message"]]
+        self.assertEqual([item["status"] for item in said], ["note"], data["gate"])
+        self.assertIn("did not say", said[0]["message"])
+
+    def test_the_tag_is_verified_against_the_fleets_file_whatever_git_names(self) -> None:
+        """A new clone passed the whole gate, signed its tag, and could not
+        verify it: `git tag -v` reads gpg.ssh.allowedSignersFile, one more
+        setting nothing had asked for, while the gate had read the file of
+        the fleet. The verification now reads that same file."""
+        if not self.signing_key():
+            self.skipTest("ssh-keygen is needed to sign the tag")
+        self.ready_to_cut()
+        self.assertEqual(MODULE.git("config", "--get", "gpg.ssh.allowedSignersFile", cwd=self.dir, check=False), "")
+        # What GitHub would hold once the pull request of 1.3.0 is merged.
+        self.product.git(self.dir, "switch", "-q", "-c", "release/v1.3.0")
+        self.product.write("VERSION", "1.3.0\n")
+        self.product.git(self.dir, "-c", "commit.gpgsign=false", "commit", "-q", "-am", "maelys-fixture 1.3.0")
+        head = self.product.git(self.dir, "rev-parse", "HEAD")
+        self.product.git(self.dir, "switch", "-q", "main")
+        self.product.git(self.dir, "-c", "commit.gpgsign=false", "merge", "-q", "--no-ff", "-m", "merge",
+                         "release/v1.3.0")
+        merge = self.product.git(self.dir, "rev-parse", "HEAD")
+        self.product.git(self.dir, "push", "-q", "origin", "main")
+        (self.product.work / "fake-bin" / "pulls.json").write_text(json.dumps(
+            [{"number": 1, "url": "https://example.invalid/pull/1", "state": "MERGED",
+              "mergeCommit": {"oid": merge}, "headRefOid": head}]), encoding="utf-8")
+        data = {"mode": "apply", "stage": "tag", "product": "maelys-fixture", "project": str(self.dir),
+                "repository": "maelys-dev/maelys-fixture", "version": "1.3.0", "tag": "v1.3.0",
+                "branch": "release/v1.3.0", "base": "main", "gate": [], "checks": [], "ready": False}
+        data, code = MODULE.cut_tag(self.Stub(**{"--apply": True, "--tag": True}), self.declarations(), data,
+                                    self.log, 1, 1, self.product.signers)
+        self.assertEqual(code, MODULE.EXIT_OK, data)
+        self.assertTrue(data["pushed"])
+        self.assertEqual(self.product.git(self.origin, "rev-parse", "refs/tags/v1.3.0^{commit}"), merge)
+        self.assertEqual(self.product.git(self.origin, "cat-file", "-t", "refs/tags/v1.3.0"), "tag")
+        # The difference this makes, on the tag just signed: git's own
+        # reading of it, in this checkout, has no file to verify against.
+        bare = MODULE.run(["git", "tag", "-v", "v1.3.0"], cwd=self.dir)
+        self.assertNotEqual(bare.returncode, 0)
+        self.assertIn("allowedSignersFile", bare.stderr)
+        named = MODULE.run(["git", "-c", f"gpg.ssh.allowedSignersFile={self.product.signers}", "tag", "-v", "v1.3.0"],
+                           cwd=self.dir)
+        self.assertEqual(named.returncode, 0, named.stderr)
 
     def test_a_failing_after_version_restores_version_and_writes_nothing(self) -> None:
         if not self.signing_key():
