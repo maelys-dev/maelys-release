@@ -299,8 +299,8 @@ def release_commit_signature(project: pathlib.Path, repository: str, branch: str
     """(status, message, what to do) of the release commit, as GitHub reads its signature.
 
     `cut` signs that commit and had never asked whether the signature was
-    worth anything where it lands. maelys-harness cut its 0.1.0 from a clone
-    with no user.email: git signed as david@<hostname>, GitHub answered
+    worth anything where it lands. A new product cut its first release from a
+    clone with no user.email: git signed as user@<hostname>, GitHub answered
     `no_user`, and the commit was merged signed and unverified -- found
     afterwards, by reading the history. The gate reads the key and cannot
     know this: only GitHub ties an address to an account, and only once the
@@ -701,7 +701,7 @@ def cut_tag(invocation: Invocation, decl: Declarations, data: dict, log, timeout
     # not whichever one this checkout's git names -- or none: a new clone
     # passed the whole gate, signed, and then could not verify its own tag,
     # because gpg.ssh.allowedSignersFile is one more setting nothing had
-    # asked for. maelys-harness pointed it into a dependencies directory
+    # asked for. One product pointed it into a dependencies directory
     # that a clean removes.
     verified = run(["git", "-c", f"gpg.ssh.allowedSignersFile={signers}", "tag", "-v", tag], cwd=project)
     if verified.returncode != 0:
