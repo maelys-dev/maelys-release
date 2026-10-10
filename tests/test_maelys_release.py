@@ -2606,7 +2606,7 @@ class CutTest(unittest.TestCase):
         self.product.git(self.dir, "push", "-q", "origin", "main")
 
     def test_the_release_commit_is_read_back_as_github_sees_its_signature(self) -> None:
-        """maelys-harness cut its 0.1.0 from a clone with no user.email: git
+        """A new product cut its first release from a clone with no user.email: git
         signed as user@hostname, GitHub answered `no_user`, and the commit
         was merged signed and unverified. Nothing had asked."""
         if not self.signing_key():

@@ -3,7 +3,7 @@
 ## 0.63.3 — 2026-10-10
 
 - **`cut` reads back what GitHub says of the signature it pushed.**
-  Reported from the first release of maelys-harness, and read on GitHub
+  Reported from the first release of a new product, and read on GitHub
   before anything changed: its release commit is signed and unverified,
   reason `no_user`, because the clone had no `user.email` and git signed as
   `user@hostname`. The gate reads the key and cannot know that: only
