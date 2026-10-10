@@ -24,6 +24,8 @@ class CutHost(fixtures.FakeHost):
         self.pull = None
         self.conclusion = "success"
         self.fail_verification = False
+        # What GitHub says of the signature of the pull request's head.
+        self.signature = {"verified": True, "reason": "valid"}
         self.events = []
         self.body = ""
 
@@ -46,7 +48,7 @@ class CutHost(fixtures.FakeHost):
             raise AssertionError(f"command outside fixture: {command!r}, {cwd}")
         if command == ["git", "remote", "get-url", "origin"]:
             return subprocess.CompletedProcess(command, 0, "https://github.com/o/r.git\n", "")
-        if command[:3] == ["git", "tag", "-v"] and self.fail_verification:
+        if command[0] == "git" and command[-3:-1] == ["tag", "-v"] and self.fail_verification:
             return subprocess.CompletedProcess(command, 1, "", "fixture rejects signature")
         if command[0] == "git":
             # Real origin is the fixture's bare directory. Every transport
@@ -71,6 +73,8 @@ class CutHost(fixtures.FakeHost):
         if path == "repos/o/r":
             return "ok", {"default_branch": "main"}
         heads = [self.pull["headRefOid"]] if self.pull else []
+        if heads and path == f"repos/o/r/commits/{heads[0]}":
+            return "ok", {"sha": heads[0], "commit": {"verification": dict(self.signature)}}
         if self.pull and "mergeCommit" in self.pull:
             heads.append(self.pull["mergeCommit"]["oid"])
         if path in [f"repos/o/r/commits/{sha}/check-runs?per_page=100&page=1" for sha in heads]:
@@ -99,9 +103,9 @@ class CutHostTest(unittest.TestCase):
         self.addCleanup(self.fixture.tearDown)
         self.product, self.dir = self.fixture.product, self.fixture.dir
         self.assertTrue(self.fixture.signing_key())
-        allowed = self.product.work / "allowed-signers"
-        allowed.write_text("test@example.invalid " + (self.product.work / "signing-key.pub").read_text())
-        self.product.git(self.dir, "config", "gpg.ssh.allowedSignersFile", str(allowed))
+        # No gpg.ssh.allowedSignersFile: the tag is verified against the
+        # file the gate read, which is the fleet's and here the fixture's.
+        self.assertEqual(MODULE.git("config", "--get", "gpg.ssh.allowedSignersFile", cwd=self.dir, check=False), "")
         self.product.write("CHANGELOG.md", "# Changelog\n\n## 1.3.0 — 2026-09-03\n\n- Next.\n\n"
                            "## 1.2.3 — 2026-09-03\n\n- Previous.\n")
         # Cut also releases repositories with their own publication workflow.
@@ -151,6 +155,31 @@ class CutHostTest(unittest.TestCase):
         self.host.events.clear()
         return merge
 
+    def test_the_first_stop_asks_github_about_the_signature_before_it_waits(self):
+        """Through the entry point: the read comes after the pull request
+        exists and before any check is read, and a refusal reads none."""
+        code, envelope = self.invoke("--apply")
+        self.assertEqual(code, 0, envelope)
+        commit = envelope["data"]["commit"]
+        opened = next(i for i, (kind, value) in enumerate(self.host.events)
+                      if kind == "run" and value[:3] == ["gh", "pr", "create"])
+        asked = self.host.events.index(("read", f"repos/o/r/commits/{commit}"))
+        waited = self.host.events.index(("read", f"repos/o/r/commits/{commit}/check-runs?per_page=100&page=1"))
+        self.assertLess(opened, asked)
+        self.assertLess(asked, waited)
+        self.assertIn({"status": "ok", "message": f"GitHub verifies the release commit {commit[:7]}"},
+                      envelope["data"]["gate"])
+        # The same pull request, and GitHub now says the address is nobody's:
+        # the resumption stops on it and reads no check.
+        self.host.signature = {"verified": False, "reason": "no_user"}
+        self.host.events.clear()
+        code, refused = self.invoke("--apply")
+        self.assertEqual(code, 2, refused)
+        self.assertFalse(refused["data"]["ready"])
+        self.assertIn("(no_user)", refused["data"]["gate"][-1]["message"])
+        self.assertIn("--amend --reset-author -S", refused["data"]["next"])
+        self.assertEqual([value for kind, value in self.host.events if kind == "read" and "check-runs" in value], [])
+
     def assert_no_tag(self):
         self.assertEqual(self.product.git(self.dir, "tag", "--list", "v1.3.0"), "")
         self.assertEqual(self.product.git(self.fixture.origin, "tag", "--list", "v1.3.0"), "")
@@ -172,7 +201,8 @@ class CutHostTest(unittest.TestCase):
         self.assertNotEqual(self.product.git(self.fixture.origin, "rev-parse", "main"), merge)
         checked = self.host.events.index(("read", f"repos/o/r/commits/{merge}/check-runs?per_page=100&page=1"))
         signed = next(i for i, (kind, value) in enumerate(self.host.events) if kind == "run" and value[:3] == ["git", "tag", "-s"])
-        verified = self.host.events.index(("run", ["git", "tag", "-v", "v1.3.0"]))
+        verified = self.host.events.index(
+            ("run", ["git", "-c", f"gpg.ssh.allowedSignersFile={self.product.signers}", "tag", "-v", "v1.3.0"]))
         pushed = self.host.events.index(("run", ["git", "push", "-q", "origin", "refs/tags/v1.3.0"]))
         # The tag is read back from the remote before anything is reported:
         # the exit status of a push says the transport worked, not which

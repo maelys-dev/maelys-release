@@ -279,6 +279,19 @@ yet reports green on a release nobody has built. A wait that times out
 leaves the branch and its pull request behind, and running the first stop
 again re-enters that wait rather than refusing the state it created.
 
+Between the pull request and the wait, the first stop **reads back what
+GitHub says of the signature it just pushed**. The gate reads the key;
+only GitHub ties a committer address to an account, and only once the
+commit is there. A clone with no `user.email` signs as `user@hostname`,
+GitHub answers `no_user`, and the commit is signed and unverified — one
+product merged its first release that way and found out by reading its
+history. A commit GitHub does not verify stops the command before the
+wait, with GitHub's reason and the lines to run: the commit is signed
+again and replaced on its branch, or the key is registered on GitHub, and
+the same command reads the result. Nothing is undone, because the commit
+may carry a changelog entry that exists nowhere else. An answer GitHub did
+not give is a note and stops nothing.
+
 The middle stop is GitHub's. `cut` never merges its own pull request: a
 command that did would work only where the default branch is
 unprotected, and would teach the whole fleet that the releaser approves
@@ -292,6 +305,16 @@ for every one of its checks to be green, then signs the tag on it and
 pushes. The annotation is the changelog entry unless `--message FILE`
 gives another. Both stops plan without `--apply`, and neither is
 required: the ceremony by hand remains what it was.
+
+Before it pushes, the second stop verifies the tag it signed **against
+the allowed signers the gate read** — the file of the socle, which the
+release workflow reads too — and not against whichever file this
+checkout's git names. `gpg.ssh.allowedSignersFile` is therefore not a
+setting a release needs: a new clone used to pass the whole gate, sign,
+and then fail to verify its own tag for want of it. What a clone needs to
+cut is `user.name`, `user.email` (an address of the GitHub account that
+holds the key), `gpg.format ssh`, `user.signingkey` and `tag.gpgsign
+true`.
 
 ## Dependencies and packages
 

@@ -279,6 +279,66 @@ def cut_gate(decl: Declarations, version: str, signers: pathlib.Path) -> list:
     return gate
 
 
+# Why GitHub reports a commit unverified, in the words that say what to fix.
+# The reasons are GitHub's own (`commit.verification.reason`).
+UNVERIFIED = {
+    "unsigned": "it carries no signature",
+    "no_user": "its committer address belongs to no GitHub account. Set user.email to an address of the"
+               " account that holds the signing key",
+    "unverified_email": "its committer address is not verified on the account that holds the signing key",
+    "bad_email": "its committer address is not one of the account that holds the signing key",
+    "unknown_key": "the key that signed it is not registered on GitHub as a signing key; one registered for"
+                   " authentication alone does not count",
+}
+# The ones the commit itself carries: fixed by committing again, not on GitHub.
+IN_THE_COMMIT = ("unsigned", "no_user", "unverified_email", "bad_email")
+
+
+def release_commit_signature(project: pathlib.Path, repository: str, branch: str, sha: str,
+                             version: str) -> tuple[str, str, str]:
+    """(status, message, what to do) of the release commit, as GitHub reads its signature.
+
+    `cut` signs that commit and had never asked whether the signature was
+    worth anything where it lands. maelys-harness cut its 0.1.0 from a clone
+    with no user.email: git signed as david@<hostname>, GitHub answered
+    `no_user`, and the commit was merged signed and unverified -- found
+    afterwards, by reading the history. The gate reads the key and cannot
+    know this: only GitHub ties an address to an account, and only once the
+    commit is there. So it is read back, like every other write.
+
+    An answer GitHub did not give is a note and never a refusal: what stops
+    a release is what was read, not what could not be.
+    """
+    answer = github_api(f"repos/{repository}/commits/{sha}") or {}
+    verification = (answer.get("commit") or {}).get("verification")
+    if not isinstance(verification, dict) or not isinstance(verification.get("verified"), bool):
+        return "note", f"GitHub did not say whether it verifies the release commit {sha[:7]}", ""
+    if verification["verified"]:
+        return "ok", f"GitHub verifies the release commit {sha[:7]}", ""
+    reason = str(verification.get("reason") or "")
+    again = f"'{PROGRAM} cut {project} {version} --apply'"
+    if reason in IN_THE_COMMIT:
+        remedy = (f"fix it, then sign the commit again and replace it: git -C {project} commit --amend"
+                  f" --reset-author -S --no-edit && git -C {project} push --force-with-lease origin {branch};"
+                  f" then {again}")
+    else:
+        remedy = f"fix it on GitHub, then {again}: the commit itself need not change"
+    return ("fail", f"GitHub does not verify the release commit {sha[:7]} ({reason or 'no reason given'}): "
+                    + UNVERIFIED.get(reason, "read its verification on GitHub"), remedy)
+
+
+def signature_gate(project: pathlib.Path, data: dict) -> bool:
+    """Add the line above to the gate; False when it refuses, with what to do next."""
+    status, message, remedy = release_commit_signature(project, data["repository"], data["branch"],
+                                                       data["commit"], data["version"])
+    data["gate"].append({"status": status, "message": message})
+    if status != "fail":
+        return True
+    data["ready"] = False
+    data["next"] = remedy
+    return False
+
+
 def one_pull(project: pathlib.Path, repository: str, branch: str) -> dict | None:
     """The single pull request coming from BRANCH, whatever its state."""
     listed = run(["gh", "pr", "list", "--repo", repository, "--head", branch, "--state", "all",
@@ -351,6 +411,10 @@ def cut_resume(invocation: Invocation, decl: Declarations, data: dict, log, time
     gate = cut_gate(decl, version, signers)
     data["gate"] = [{"status": status, "message": message} for status, message in gate]
     if any(status == "fail" for status, _ in gate):
+        return data, EXIT_VIOLATIONS
+    # The commit may have been replaced since the first stop refused it:
+    # this is where the replacement is read.
+    if not signature_gate(project, data):
         return data, EXIT_VIOLATIONS
     if invocation.flag("--apply"):
         print(f"cut      waiting for the checks of {head[:7]} in {repository}", file=log)
@@ -544,6 +608,12 @@ def cut_open(invocation: Invocation, decl: Declarations, data: dict, log, timeou
     pull = json.loads(viewed.stdout) if viewed.returncode == 0 else {"url": created.stdout.strip()}
     data["pullRequest"] = {"number": pull.get("number", 0), "url": pull.get("url", ""),
                            "state": pull.get("state", "OPEN")}
+    # Read once the pull request exists, so that a refusal leaves a state
+    # this command resumes from: the commit is replaced on its branch and
+    # the same command reads the new one. Before the wait, because the
+    # checks of a commit about to be replaced are nobody's.
+    if not signature_gate(project, data):
+        return data, EXIT_VIOLATIONS
     print(f"cut      waiting for the checks of {data['commit'][:7]} in {repository}", file=log)
     log.flush()
     return cut_report(data, await_checks(repository, data["commit"], timeout, poll, log))
@@ -627,7 +697,13 @@ def cut_tag(invocation: Invocation, decl: Declarations, data: dict, log, timeout
     annotation = pathlib.Path(str(message)).read_text(encoding="utf-8") if message \
         else f"{product} {version}\n\n{body}\n"
     git("tag", "-s", "-m", annotation, tag, merge, cwd=project)
-    verified = run(["git", "tag", "-v", tag], cwd=project)
+    # Against the file the gate read and the release workflow will read, and
+    # not whichever one this checkout's git names -- or none: a new clone
+    # passed the whole gate, signed, and then could not verify its own tag,
+    # because gpg.ssh.allowedSignersFile is one more setting nothing had
+    # asked for. maelys-harness pointed it into a dependencies directory
+    # that a clean removes.
+    verified = run(["git", "-c", f"gpg.ssh.allowedSignersFile={signers}", "tag", "-v", tag], cwd=project)
     if verified.returncode != 0:
         git("tag", "-d", tag, cwd=project)
         raise Failure("PROCESS_FAILED", f"the signature of {tag} does not verify: {verified.stderr.strip()}",
