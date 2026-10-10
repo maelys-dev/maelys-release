@@ -23,13 +23,34 @@
   setting into a dependencies directory that a clean removes. The
   verification is now given the socle's allowed signers, the file the gate
   and the release workflow read. The setting is no longer needed to cut.
+- **The framework of 0.7.0 and the contract it implements.** maelys-cli
+  moves from v0.6.0 to v0.7.0, and agent-cli-spec from v2.12.0 to v2.15.1
+  — the pair, and in that order: measured before moving anything, the kit
+  of v2.14.0 fails two checks against the module of v0.6.0 and the kit of
+  v2.15.1 three, and none against the module of v0.7.0. The kit of v2.15.1
+  passes 543 checks against this command and fails none; fish is skipped
+  where it is not installed. Not a line of this repository's own code or
+  tests moved for it, and the catalog `describe` returns is unchanged, so
+  `docs/cli.md` and `docs/cli-contract.json` are the same bytes.
+
+  What a caller of this command may notice comes from the framework:
+  `COMMAND --help --format jsonl` is refused as `help COMMAND --format
+  jsonl` is, where it used to exit 0 having written nothing; an option
+  given without its value at the end of the line, and a word starting with
+  one dash, are refused in the name of the command and no longer of
+  `unknown`; `--help` on a line whose option requires another that is
+  absent gives the help instead of failing. `render TEMPLATE OUTPUT
+  [KEY=VALUE...]` takes an operand that starts with a dash after `--`, as
+  it already refused one before it; no workflow of the socle passes one.
 - **Not done here:** `preflight` does not say that `user.email` is unset.
   It would be one more read of git's configuration in a command whose
   every host call is recorded in the reference, and that recording is its
   own change. `cut` holds the release either way.
 - **Impact.** [asks: nothing] [writes: cut] Nothing for a product to do.
   A release cut from a clone whose identity GitHub does not know now stops
-  at its pull request instead of merging an unverified commit.
+  at its pull request instead of merging an unverified commit. The
+  vendored framework is this command's own: a product pins and adopts its
+  own maelys-cli, and no managed file moves.
 
 ## 0.63.2 — 2026-10-09
 
