@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.63.3 — 2026-10-10
 
 - **`cut` reads back what GitHub says of the signature it pushed.**
   Reported from the first release of maelys-harness, and read on GitHub
