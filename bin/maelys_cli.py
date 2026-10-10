@@ -53,15 +53,28 @@ EXIT_VIOLATIONS = 2
 EXIT_CODES = {"0": "command completed", "1": "execution failed", "2": "valid report with violations"}
 STABLE_CODES = ("INVALID_COMMAND", "VALIDATION_FAILED", "PRECONDITION_FAILED", "POLICY_FAILED", "ACCESS_DENIED",
                 "NOT_FOUND", "IO_FAILED", "PROCESS_FAILED", "PROTOCOL_FAILED", "UNSUPPORTED", "UNEXPECTED")
-IDENTIFIER = re.compile(r"^[a-z][a-z0-9.-]*$")
+# Segments that are not empty, separated by one dot (spec, section 2; C:
+# valid_identifier). `unknown` is what an envelope names when no command was
+# resolved, and no command may be called that.
+IDENTIFIER = re.compile(r"^[a-z][a-z0-9-]*(\.[a-z0-9][a-z0-9-]*)*$")
 PREFIX_GRAMMAR = re.compile(r"^[a-z]([a-z0-9.-]*[a-z0-9-])?$")
 FORMATS = ("text", "json", "jsonl")
 COLORS = ("auto", "always", "never")
 SHELLS = ("bash", "zsh", "fish")
-RENDERING = ("--format", "--json", "--compact", "--pretty", "--color", "--pager", "--field")
+# Marks, among the options read from a line, a word that starts with one dash.
+_DASH_WORD = object()
+
+# What a stream command refuses, as the C parser does: the options that shape
+# stdout. --color shapes the diagnostics on stderr and is accepted.
+RENDERING = ("--format", "--json", "--compact", "--pretty", "--pager", "--field")
 TRISTATE = ("auto", "always", "never")
 SIZE_UNITS = {"": 1, "K": 1024, "M": 1024 ** 2, "G": 1024 ** 3, "T": 1024 ** 4}
 DURATION_UNITS = {"ms": 1, "s": 1000, "m": 60_000, "h": 3_600_000, "d": 86_400_000}
+# The values C holds in 64 bits: a number past them is refused there, and here.
+UNSIGNED_MAXIMUM = 2 ** 64 - 1
+INTEGER_MINIMUM, INTEGER_MAXIMUM = -(2 ** 63), 2 ** 63 - 1
+# The hexadecimal digits of a digest, by algorithm (C: maelys_cli_digest_hex_digits).
+DIGEST_DIGITS = {"sha1": 40, "sha256": 64, "sha384": 96, "sha512": 128}
 
 Handler = Callable[["Invocation"], "tuple[Any, int]"]
 
@@ -266,8 +279,9 @@ def _command(identifier: str, pattern: str, purpose: str, handler: Optional[Hand
              unavailable: Optional[str] = None, unavailable_code: Optional[str] = None,
              passthrough: bool = False,
              synopsis: Optional[str] = None, constraints: tuple = (), examples: tuple = ()) -> dict:
-    if not IDENTIFIER.match(identifier):
-        raise ValueError(f"a command identifier is [a-z][a-z0-9.-]*, not {identifier!r}")
+    if not IDENTIFIER.match(identifier) or identifier == "unknown":
+        raise ValueError("a command identifier is letters, digits and dashes in segments separated by one dot, "
+                         f"starts with a letter and is not 'unknown': not {identifier!r}")
     # The code an unavailable command answers: UNSUPPORTED says "absent from
     # this build or version" and is wrong for a cause that is not absence,
     # so the declaration names the one that fits (C: .unavailable_code).
@@ -535,6 +549,20 @@ def help_width(fmt: str = "text") -> int:
 # having been taken just above.
 # Every word of a row matches _STATIC_WORD, so a row is inert inside single quotes in the three shells; a
 # catalog holding anything else gets the script that calls __complete, which is always exact.
+_SHELL_BARE = re.compile(r"[A-Za-z0-9_@%+=:,./-]+\Z")
+
+
+def _shell_word(word: str) -> str:
+    """One word of an example as a shell reads it back (C: help_shell_words).
+    A word made of the characters no shell interprets goes as it is; any
+    other is single-quoted, a quote and a backslash leaving the quotes to be
+    written \\' and \\\\, the one spelling sh, bash, zsh and fish read as the
+    same word."""
+    if _SHELL_BARE.match(word) and not word.startswith("="):
+        return word
+    return "'" + "".join("'\\" + character + "'" if character in "'\\" else character for character in word) + "'"
+
+
 _STATIC_WORD = re.compile(r"^[A-Za-z0-9._:/+@%,=-]+$")
 
 _STATIC_BASH = r"""# bash completion for @PROG@ @VERSION@, generated from its catalog
@@ -966,18 +994,22 @@ def parse_value(kind: str, text: str, spec: dict, where: str, usage: str) -> Any
         if "pattern" in spec and not re.search(spec["pattern"], text):
             raise refuse(f"a value matching {spec['pattern']}")
         return text
+    # Digits are the ten ASCII ones: `\d` also reads the digits of other
+    # scripts, which C refuses. And a number is one C holds in 64 bits.
     if kind in ("integer", "unsigned"):
-        if not re.fullmatch(r"-?\d+" if kind == "integer" else r"\d+", text):
+        if not re.fullmatch(r"-?[0-9]+" if kind == "integer" else r"[0-9]+", text):
             raise refuse("an integer" if kind == "integer" else "an unsigned integer")
         value = int(text)
+        if not (INTEGER_MINIMUM <= value <= INTEGER_MAXIMUM if kind == "integer" else value <= UNSIGNED_MAXIMUM):
+            raise refuse("an integer" if kind == "integer" else "an unsigned integer")
     elif kind == "size":
-        match = re.fullmatch(r"(\d+)([KMGT]?)", text)
-        if not match:
+        match = re.fullmatch(r"([0-9]+)([KMGT]?)", text)
+        if not match or int(match.group(1)) * SIZE_UNITS[match.group(2)] > UNSIGNED_MAXIMUM:
             raise refuse("a size such as 512, 4K, 16M, 2G or 1T")
         value = int(match.group(1)) * SIZE_UNITS[match.group(2)]
     elif kind == "duration":
-        match = re.fullmatch(r"(\d+)(ms|s|m|h|d)", text)
-        if not match:
+        match = re.fullmatch(r"([0-9]+)(ms|s|m|h|d)", text)
+        if not match or int(match.group(1)) * DURATION_UNITS[match.group(2)] > UNSIGNED_MAXIMUM:
             raise refuse("a duration with its unit: ms, s, m, h or d")
         value = int(match.group(1)) * DURATION_UNITS[match.group(2)]
     elif kind == "path":
@@ -1006,7 +1038,9 @@ def parse_value(kind: str, text: str, spec: dict, where: str, usage: str) -> Any
         return text
     elif kind == "digest":
         match = re.fullmatch(r"([a-z0-9-]+):([0-9a-f]+)", text)
-        if not match or (spec.get("algorithms") and match.group(1) not in spec["algorithms"]):
+        if not match or (spec.get("algorithms") and match.group(1) not in spec["algorithms"]) \
+                or len(match.group(2)) != DIGEST_DIGITS.get(match.group(1), len(match.group(2))):
+            # The length is the algorithm's, as in C: `sha256:ab` is no digest.
             raise refuse("ALGORITHM:HEX with " + ", ".join(spec.get("algorithms", ["a declared algorithm"])))
         return text
     else:
@@ -1705,9 +1739,14 @@ class Program:
         if any(not item.get("hidden") for item in command["options"]):
             text += "\nOPTIONS\n" + self._options_help(command["options"], width)
         if command["examples"]:
-            # Never beside: a line to copy stands alone.
+            # A line to copy: on one line whatever the width, the one place
+            # the help passes it on purpose. Wrapped, the first half was a
+            # command of its own and the second another. The sentence wraps.
+            # And spelled for a shell: a word holding `$`, `*` or a quote,
+            # copied as declared, would be another word once pasted.
             text += "\nEXAMPLES\n" + "".join(
-                _help_entry(f"{self.program} {' '.join(item['words'])}", item["summary"], 0, width)
+                f"  {self.program} {' '.join(_shell_word(word) for word in item['words'])}\n"
+                + " " * 6 + _help_wrap(item["summary"], 6, 6, width) + "\n"
                 for item in command["examples"])
         text += "\nGLOBAL OPTIONS\n" + _help_paragraph(
             f"Run '{self.program} help conventions' for --format, --json, --compact, --non-interactive, --color "
@@ -2038,6 +2077,9 @@ class Program:
 
     def parse(self, argv: list) -> "tuple[Invocation, dict]":
         """Validate the command line in the contract's causal order."""
+        # One line, one family: a line refused after `FAMILY --help` was read
+        # must not hand its family to the next help this program is asked.
+        self._family_words = None
         words: list = []
         raw: list = []
         passthrough: list = []
@@ -2059,20 +2101,30 @@ class Program:
                 if definition is None and command is not None:
                     definition = next((item for item in command["options"] if item["long"] == name), None)
                 index += 1
-                if definition and "argument" in definition and not separator:
-                    if index >= len(argv):
-                        raise Failure("VALIDATION_FAILED", f"Option {name} needs a value {definition['argument']['name']}.",
-                                      "Run describe for this command and pass the option's argument.")
+                if definition and "argument" in definition and not separator and index < len(argv):
                     value, separator = argv[index], "="
                     index += 1
+                # An option that ends the line without its value is kept without
+                # one and refused below, at its turn: after the command is
+                # resolved, so that the failure names it and an unknown command
+                # is said first, and after the options written before it.
                 raw.append((name, value if separator else None))
                 continue
             if word.startswith("-") and word != "-":
-                raise Failure("VALIDATION_FAILED", f"Option {word} is not supported: options are spelled --name.",
-                              "Run describe for this command and use only its declared options.")
+                # There is no short option, and such a word is no operand either
+                # (spec, section 8). It is kept and refused below at its turn,
+                # as an option without its value is: after the command is
+                # resolved, so that the failure names it, and after an unknown
+                # command, which is said first.
+                raw.append((word, _DASH_WORD))
+                index += 1
+                continue
             words.append(word)
             index += 1
-        if not words and any(name in ("--help", "--version") for name, _ in raw):
+        # A word that starts with one dash names no command and selects none:
+        # `-x --help` resolves nothing, as in C.
+        if not words and any(name in ("--help", "--version") for name, _ in raw) \
+                and not any(value is _DASH_WORD for _, value in raw):
             words = ["help"] if any(name == "--help" for name, _ in raw) else ["version"]
             raw = [(name, value) for name, value in raw if name not in ("--help", "--version")]
         if not words:
@@ -2090,10 +2142,6 @@ class Program:
                           "Run describe --summary and use one of the listed command identifiers.")
         # A failure envelope names the resolved command from here on (section 7).
         self.resolved_command_id = command["id"]
-        if command["unavailable"] is not None:
-            raise Failure(command.get("unavailableCode") or "UNSUPPORTED",
-                          f"Command '{command['id']}' is not available in this build: {command['unavailable']}",
-                          "Use another build of the product, or another command.")
         raw_operands = words[consumed:] + passthrough
         usage = command["usage"]
         fmt = environment_format()
@@ -2113,7 +2161,14 @@ class Program:
         for name, value in raw:
             if name in seen and not (name in known and known[name]["repeatable"]):
                 raise Failure("VALIDATION_FAILED", f"Option {name} is given twice.", "Give each option once.")
+            if value is _DASH_WORD:
+                raise Failure("VALIDATION_FAILED", f"Option {name} is not supported: options are spelled --name.",
+                              "Spell an option --name; write an operand that starts with a dash after --.")
             seen.add(name)
+            declared = known.get(name) or next((item for item in GLOBAL_OPTIONS if item["long"] == name), None)
+            if declared is not None and "argument" in declared and value is None:
+                raise Failure("VALIDATION_FAILED", f"Option {name} needs a value {declared['argument']['name']}.",
+                              "Run describe for this command and pass the option's argument.")
             if name in RENDERING:
                 rendering.append(name)
             if name == "--format":
@@ -2137,9 +2192,6 @@ class Program:
             elif name == "--pager":
                 pager = parse_value("choice", value or "", {"choices": list(TRISTATE)}, "Option --pager", usage)
             elif name == "--field":
-                if value is None:
-                    raise Failure("VALIDATION_FAILED", "Option --field needs a value NAME.",
-                                  "Pass the option's argument.")
                 field = value
             elif name == "--help":
                 help_requested = _parse_flag(value, name, usage)
@@ -2152,9 +2204,6 @@ class Program:
             else:
                 definition = known[name]
                 if "argument" in definition:
-                    if value is None:
-                        raise Failure("VALIDATION_FAILED", f"Option {name} needs a value {definition['argument']['name']}.",
-                                      "Pass the option's argument.")
                     typed = parse_value(definition["argument"]["type"], value, definition["argument"],
                                         f"Option {name}", usage)
                     if definition["repeatable"]:
@@ -2163,6 +2212,21 @@ class Program:
                         options[name] = typed
                 else:
                     options[name] = _parse_flag(value, name, usage)
+        # The order of the refusals (spec, section 8). What one option says
+        # alone was judged above, in the name of the command. --help comes
+        # next: asked how a command is used, the program answers, whatever the
+        # line lacks as a whole -- a dependency, a required option, an operand
+        # -- and whether or not this build can run the command.
+        if help_requested:
+            # The line is an invocation of `help` from here on, and its rendering
+            # is validated as one (C: maelys_cli_run after the substitution).
+            help_command = self.command_by_id("help")
+            self.resolved_command_id = help_command["id"]
+            if fmt == "jsonl" and field is None:
+                raise Failure("VALIDATION_FAILED", "--format jsonl is accepted only by json-records commands, not "
+                              "'help'; add --field to render one member in jsonl.", "Use --format json.")
+            return Invocation(self, help_command, [command["id"]], {}, fmt, compact, non_interactive,
+                              [command["id"]], verbose, progress, pager, color, field), help_command
         # dependencies, conflicts, groups; then required; then operands
         def enabled(option_name: str) -> bool:
             return option_name in options and options[option_name] is not False
@@ -2208,13 +2272,9 @@ class Program:
             elif rule["kind"] == "exactly-one" and len(present) != 1:
                 raise Failure("VALIDATION_FAILED", f"Exactly one of {listed} must be given.", f"Use '{usage}'.")
         for definition in command["options"]:
-            if definition["required"] and definition["long"] not in options and not help_requested:
+            if definition["required"] and definition["long"] not in options:
                 raise Failure("VALIDATION_FAILED", f"Option {definition['long']} is required by '{command['id']}'.",
                               f"Use '{usage}'.")
-        if help_requested:
-            help_command = self.command_by_id("help")
-            return Invocation(self, help_command, [command["id"]], {}, fmt, compact, non_interactive,
-                              [command["id"]], verbose, progress, pager, color, field), help_command
         operands: list = []
         if not command["passthrough"]:
             required = sum(1 for item in command["operands"] if item["required"])
@@ -2228,6 +2288,13 @@ class Program:
                 operands.append(parse_value(kind, value, item, item["name"], usage) if kind else value)
         else:
             operands = list(raw_operands)
+        # Then whether this build can run it: a line the command would refuse
+        # is refused as such first, and a rendering flag is not what stops a
+        # command that cannot run at all.
+        if command["unavailable"] is not None:
+            raise Failure(command.get("unavailableCode") or "UNSUPPORTED",
+                          f"Command '{command['id']}' is not available in this build: {command['unavailable']}",
+                          "Use another build of the product, or another command.")
         if command["outputMode"] == "protocol-stream" and rendering:
             raise Failure("VALIDATION_FAILED", f"Command '{command['id']}' owns its stdout and refuses {rendering[0]}.",
                           "Set MAELYS_CLI_FORMAT=json in the environment to receive its failure envelope as JSON.")
