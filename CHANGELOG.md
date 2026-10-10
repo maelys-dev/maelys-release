@@ -1,5 +1,36 @@
 # Changelog
 
+## Unreleased
+
+- **`cut` reads back what GitHub says of the signature it pushed.**
+  Reported from the first release of maelys-harness, and read on GitHub
+  before anything changed: its release commit is signed and unverified,
+  reason `no_user`, because the clone had no `user.email` and git signed as
+  `user@hostname`. The gate reads the key and cannot know that: only
+  GitHub ties an address to an account, and only once the commit is there.
+  The first stop now asks, between the pull request and the wait. A commit
+  GitHub does not verify stops the command with GitHub's reason and the
+  lines to run — the commit signed again and replaced on its branch, or
+  the key registered on GitHub — and the same command then reads the
+  result, on the first stop or on its resumption. Nothing is undone: the
+  release commit may carry a changelog entry that exists nowhere else. An
+  answer GitHub did not give is a note.
+- **The tag is verified against the file the gate read.** After signing,
+  the second stop ran `git tag -v`, which reads
+  `gpg.ssh.allowedSignersFile` from git's configuration — a setting the
+  gate never asked for. A new clone passed every check, signed, and could
+  not verify its own tag; the product that reported it had pointed the
+  setting into a dependencies directory that a clean removes. The
+  verification is now given the socle's allowed signers, the file the gate
+  and the release workflow read. The setting is no longer needed to cut.
+- **Not done here:** `preflight` does not say that `user.email` is unset.
+  It would be one more read of git's configuration in a command whose
+  every host call is recorded in the reference, and that recording is its
+  own change. `cut` holds the release either way.
+- **Impact.** [asks: nothing] [writes: cut] Nothing for a product to do.
+  A release cut from a clone whose identity GitHub does not know now stops
+  at its pull request instead of merging an unverified commit.
+
 ## 0.63.2 — 2026-10-09
 
 - **`migrate` describes the commit it clones.** Reported by maelys-system
