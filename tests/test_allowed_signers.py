@@ -21,16 +21,29 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "bin"))
 
 from maelys_socle.release_checks import (  # noqa: E402
-    allowed_signer_keys, public_key, signer_date, signer_options, signing_key_named,
+    allowed_signer_keys, public_key, signer_date, signer_options, signing_key_named, tag_checks,
 )
 
 SIGNERS = ROOT / "share" / "allowed-signers"
 WORKFLOW = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+
+# What a line to run looks like, whatever the words around it: git's own
+# command on its configuration, with or without options before it, the two
+# tools that make a key, and the sentence that told a reader to write one
+# into the allowed signers. "git configuration" is prose and is not one.
+COMMAND_SHAPES = tuple(re.compile(shape, re.IGNORECASE) for shape in (
+    r"\bgit\b(\s+-\S+(\s+\S+)?)*\s+config\b", r"ssh-keygen", r"gpg\s+--", r"\badd the key\b"))
+
+
+def lines_to_run(line: str) -> list[str]:
+    """The command shapes LINE holds; [] for a line that gives nothing to run."""
+    return [shape.pattern for shape in COMMAND_SHAPES if shape.search(line)]
 
 
 def git(*arguments: str, cwd: pathlib.Path) -> str:
@@ -147,6 +160,8 @@ class SigningKeyNamedTest(unittest.TestCase):
                 self.assertEqual([status for status, _ in found], ["fail"], found)
                 self.assertIn(said, found[0][1])
                 self.assertIn("refused after the push", found[0][1])
+                self.assertTrue(found[0][1].endswith("; the line is maelys-release's to change and the key the"
+                                                     " signer's own, and anyone else leaves both"), found[0][1])
 
     def test_every_shape_git_accepts_for_the_key_is_read(self) -> None:
         """A path to the public half, a path to the private one beside it,
@@ -188,6 +203,121 @@ class SigningKeyNamedTest(unittest.TestCase):
     def test_no_key_declared_says_nothing_here(self) -> None:
         # The missing user.signingkey has its own verdict beside this one.
         self.assertEqual(self.verdicts(""), [])
+
+
+class SignersOwnLinesTest(unittest.TestCase):
+    """A refusal on the signing configuration says whose it is, and gives no line to run.
+
+    The texts the socle installs say that the gate's lines on `tag.gpgsign`,
+    `user.signingkey` and the signing key "are the signer's own", and to
+    anyone else: "leave them, and never configure a key to turn them
+    green". The gate printed `git config tag.gpgsign true` beside the first
+    of them and `Add the key there` beside the last, which is that very
+    correction, ready to copy: run in a clone that holds no key, or with
+    one made up for the occasion, it turns an honest refusal into a release
+    nobody signed for.
+
+    What is held is what `tag_checks` prints, in each state of the signing
+    configuration a scratch clone can be put in. The line `cut` adds once
+    GitHub has read the release commit is held in test_cut_host.
+    """
+
+    KEY = "ssh-ed25519 " + "A" * 68
+
+    def setUp(self) -> None:
+        # Neither the machine's configuration nor a repository named from
+        # outside is read or written here. git exports GIT_DIR to a hook,
+        # and `git -C` does not win over it: with only the global and the
+        # system files set aside, the states below went into the config of
+        # the repository the hook ran for, a made-up signing key included.
+        kept = {name: value for name, value in os.environ.items() if not name.startswith("GIT_")}
+        isolated = mock.patch.dict(os.environ, {**kept, "GIT_CONFIG_GLOBAL": os.devnull,
+                                                "GIT_CONFIG_SYSTEM": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"},
+                                   clear=True)
+        isolated.start()
+        self.addCleanup(isolated.stop)
+        self.dir = pathlib.Path(tempfile.mkdtemp(prefix="maelys-signers-own-")).resolve()
+        self.addCleanup(shutil.rmtree, self.dir, True)
+        self.named = self.dir / "allowed-signers"
+        self.named.write_text(f'other@example.org namespaces="git" ssh-ed25519 {"B" * 68}\n', encoding="utf-8")
+        self.empty = self.dir / "empty"
+        self.empty.write_text("# nothing but a comment\n", encoding="utf-8")
+        self.absent = self.dir / "absent"
+
+    def refused(self, state: str, settings: dict, signers: "pathlib.Path | None" = None) -> list[str]:
+        """What the gate refuses in a new scratch clone carrying SETTINGS and nothing else."""
+        clone = self.dir / state
+        clone.mkdir()
+        git("init", "-q", cwd=clone)
+        # Asked of git before anything is written: the clone it would write
+        # to is this one.
+        self.assertEqual(pathlib.Path(git("rev-parse", "--absolute-git-dir", cwd=clone)), clone / ".git")
+        for key, value in settings.items():
+            git("config", key, value, cwd=clone)
+        return [message for status, message in tag_checks(clone, "1.2.3", signers or self.named)
+                if status == "fail"]
+
+    def states(self) -> dict:
+        """Each state of the signing configuration, with the refusals it gets, word for word."""
+        signs, ssh = {"tag.gpgsign": "true"}, {"tag.gpgsign": "true", "gpg.format": "ssh"}
+        key = {**ssh, "user.signingkey": self.KEY}
+        unset = ("user.signingkey is not set (gpg.format = {}): a release is signed with an ssh key that"
+                 " allowed-signers names and that the signer's GitHub account holds as a signing key. gpg.format"
+                 " and user.signingkey are the signer's own to set; anyone else leaves them")
+        published = "; the file is maelys-release's to publish, and anyone else leaves it"
+        return {
+            "nothing set": (self.refused("nothing", {}), [
+                "tag.gpgsign is not true: the signer sets it to true themselves; anyone else leaves it",
+                unset.format("openpgp")]),
+            "tag.gpgsign alone": (self.refused("signs", signs), [unset.format("openpgp")]),
+            "no key": (self.refused("ssh", ssh), [unset.format("ssh")]),
+            "an openpgp key": (self.refused("openpgp", {**signs, "user.signingkey": "ABCDEF0123456789"}), [
+                "gpg.format = openpgp: a release is signed with an ssh key named in allowed-signers, and the"
+                " release workflow verifies the tag against that file; gpg.format is the signer's own to set,"
+                " and anyone else leaves it"]),
+            "a key the file does not name": (self.refused("unnamed", key), [
+                f"the signing key is not named in {self.named}: the release workflow verifies the tag's"
+                " signature against that file and would refuse this one. Two states pass: user.signingkey,"
+                " the signer's own, names a key of theirs that this file already holds; or maelys-release"
+                " names this key in its share/allowed-signers, by a pull request reviewed there, and a"
+                " product receives the line when it adopts the release that carries it. A key written into"
+                " the file read here is neither, and anyone else leaves both"]),
+            "no file": (self.refused("missing", key, self.absent), [
+                f"{self.absent} is missing: nothing says which key may sign a release, and the release"
+                " workflow refuses a tag it cannot match" + published]),
+            "a file that names no key": (self.refused("blank", key, self.empty), [
+                f"{self.empty} names no key: the release workflow would refuse every tag" + published]),
+        }
+
+    def test_each_refusal_is_pinned_word_for_word(self) -> None:
+        for state, (said, expected) in self.states().items():
+            with self.subTest(state=state):
+                self.assertEqual(said, expected)
+
+    def test_no_refusal_gives_a_line_to_run_and_each_says_whose_it_is(self) -> None:
+        """The rule, apart from the words: a refusal written tomorrow is held by it too.
+
+        One refusal is outside it and pinned where it is produced, in
+        SigningKeyNamedTest: the line of a retired key names ssh-keygen as
+        the reader of its options, which is a fact about the workflow.
+        """
+        refusals = [line for said, _ in self.states().values() for line in said]
+        self.assertEqual(len(refusals), 8, refusals)
+        for line in refusals:
+            with self.subTest(line=line[:40]):
+                self.assertEqual(lines_to_run(line), [], line)
+                self.assertIn("anyone else leaves", line)
+                if re.search(r"tag\.gpgsign|gpg\.format|user\.signingkey|the signing key", line):
+                    self.assertIn("signer", line)
+        # And the rule sees the lines it was written against.
+        for line in ("tag.gpgsign is not true: git config tag.gpgsign true",
+                     "tag.gpgsign is not true: git -C . config tag.gpgsign true",
+                     "would refuse this one. Add the key there, or sign with one it names",
+                     "user.signingkey is not set: ssh-keygen -t ed25519 -f release-key",
+                     "user.signingkey is not set: gpg --full-generate-key"):
+            with self.subTest(line=line):
+                self.assertTrue(lines_to_run(line), line)
+        self.assertEqual(lines_to_run("in the author's own git configuration, before the next commit"), [])
 
 
 class ReleaseWorkflowSignatureTest(unittest.TestCase):

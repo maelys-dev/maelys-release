@@ -8,7 +8,7 @@ import re
 import tempfile
 
 from . import host
-from .constants import DECLARATION_FILE
+from .constants import DECLARATION_FILE, PROGRAM
 from .declarations import Declarations
 from .checkouts import git_base
 from .github import (branch_protection, channel_visibility, environment_gate, github_repository,
@@ -143,15 +143,22 @@ def signing_key_named(project: pathlib.Path, declared: str, fmt: str,
     """
     if not declared:
         return []
+    # Each refusal ends on whose it is to change, and gives no line to run:
+    # see tag_checks. The file read here may be the copy of a pinned socle
+    # in a cache, which anyone can write: a key added to it turns this
+    # gate green and changes nothing of what the release workflow reads.
+    published = f"; the file is {PROGRAM}'s to publish, and anyone else leaves it"
     if fmt != "ssh":
         return [("fail", f"gpg.format = {fmt}: a release is signed with an ssh key named in"
-                         f" {allowed_signers.name}, and the release workflow verifies the tag against that file")]
+                         f" {allowed_signers.name}, and the release workflow verifies the tag against that file;"
+                         " gpg.format is the signer's own to set, and anyone else leaves it")]
     if not allowed_signers.is_file():
         return [("fail", f"{allowed_signers} is missing: nothing says which key may sign a release,"
-                         " and the release workflow refuses a tag it cannot match")]
+                         " and the release workflow refuses a tag it cannot match" + published)]
     entries = allowed_signer_keys(allowed_signers.read_text(encoding="utf-8"))
     if not entries:
-        return [("fail", f"{allowed_signers} names no key: the release workflow would refuse every tag")]
+        return [("fail", f"{allowed_signers} names no key: the release workflow would refuse every tag"
+                         + published)]
     text = public_key(project, declared)
     if not text:
         return [("note", f"user.signingkey names {declared}, which is not a key this command can read:"
@@ -172,10 +179,14 @@ def signing_key_named(project: pathlib.Path, declared: str, fmt: str,
     if refusals:
         return [("fail", f"the signing key is in {allowed_signers} on a line that would not sign this tag"
                          " today -- " + "; ".join(refusals) + ". ssh-keygen reads those options and the"
-                         " release workflow runs it, so the tag would be refused after the push")]
+                         " release workflow runs it, so the tag would be refused after the push; the line is"
+                         f" {PROGRAM}'s to change and the key the signer's own, and anyone else leaves both")]
     return [("fail", f"the signing key is not named in {allowed_signers}: the release workflow verifies the"
-                     " tag's signature against that file and would refuse this one. Add the key there, or sign"
-                     " with one it names")]
+                     " tag's signature against that file and would refuse this one. Two states pass:"
+                     " user.signingkey, the signer's own, names a key of theirs that this file already holds;"
+                     f" or {PROGRAM} names this key in its share/allowed-signers, by a pull request reviewed"
+                     " there, and a product receives the line when it adopts the release that carries it. A"
+                     " key written into the file read here is neither, and anyone else leaves both")]
 
 
 def tag_checks(project: pathlib.Path, version: str, allowed_signers: pathlib.Path,
@@ -192,15 +203,28 @@ def tag_checks(project: pathlib.Path, version: str, allowed_signers: pathlib.Pat
     def config(key: str) -> str:
         return git("config", "--get", key, cwd=project, check=False)
 
+    # A refusal on tag.gpgsign, gpg.format, user.signingkey or the key
+    # they name ends on whose it is to change, and gives no line to run;
+    # the first three say the state that passes. The texts the socle
+    # installs say that the lines on `tag.gpgsign`, `user.signingkey` and
+    # the signing key "are the signer's own", and to anyone else: "leave
+    # them, and never configure a key to turn them green". A command
+    # printed beside one invites the opposite: signing switched on in a
+    # clone that holds no key, or a key made up for the occasion, which
+    # turns an honest refusal into a release nobody signed for. The lines
+    # on tags further down are about the repository and name no owner.
     signs = config("tag.gpgsign") == "true"
     found.append(("ok", "tag.gpgsign = true") if signs
-                 else ("fail", "tag.gpgsign is not true: git config tag.gpgsign true"))
+                 else ("fail", "tag.gpgsign is not true: the signer sets it to true themselves; anyone else leaves it"))
     fmt = config("gpg.format") or "openpgp"
     declared = config("user.signingkey")
     if declared:
         found.append(("ok", f"gpg.format = {fmt}, user.signingkey set"))
     else:
-        found.append(("fail", f"user.signingkey is not set (gpg.format = {fmt}); the key must be registered on GitHub"))
+        found.append(("fail", f"user.signingkey is not set (gpg.format = {fmt}): a release is signed with an ssh"
+                              f" key that {allowed_signers.name} names and that the signer's GitHub account holds"
+                              " as a signing key. gpg.format and user.signingkey are the signer's own to set;"
+                              " anyone else leaves them"))
     found.extend(signing_key_named(project, declared, fmt, allowed_signers))
     if git("rev-parse", "--is-shallow-repository", cwd=project, check=False) == "true":
         found.append(("fail", "shallow clone: previous tags are not visible; run from a full clone"))

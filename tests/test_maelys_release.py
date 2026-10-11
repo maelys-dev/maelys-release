@@ -15,16 +15,22 @@ import ast
 import atexit
 import io
 import base64
+import http.server
 import json
 import os
 import pathlib
 import re
 import shutil
+import signal
+import socket
 import subprocess
 import tempfile
 import textwrap
+import threading
+import time
 import unittest
-from contextlib import contextmanager
+from contextlib import contextmanager, redirect_stdout
+from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 CLI = ROOT / "bin" / "maelys-release"
@@ -183,6 +189,28 @@ def formula_template(klass: str, name: str) -> str:
             f'    bin.install "{name}"\n'
             f"  end\n"
             f"end\n")
+
+
+def track_raw_name(directory: pathlib.Path, name: bytes, content: bytes) -> bool:
+    """Track CONTENT under NAME, bytes that are not UTF-8; whether the working tree holds the file.
+
+    A Linux file system holds any name, and the file is written and added.
+    APFS refuses to create it: the blob is then written and named in the
+    index alone, which is what a clone of such a repository is on that
+    machine -- the file tracked, and absent.
+    """
+    git, path = [b"git", b"-C", os.fsencode(directory)], os.fsencode(directory) + b"/" + name
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as held:
+            held.write(content)
+    except OSError:
+        blob = subprocess.run([*git, b"hash-object", b"-w", b"--stdin"], input=content, check=True,
+                              capture_output=True).stdout.strip()
+        subprocess.run([*git, b"update-index", b"--add", b"--cacheinfo", b"100644," + blob + b"," + name], check=True)
+        return False
+    subprocess.run([*git, b"add", b"--", name], check=True)
+    return True
 
 
 class Product:
@@ -1894,6 +1922,26 @@ class DocsContractTest(unittest.TestCase):
         prose = [note.split(":")[0] for note in self.notes() if "maelys-docs" in note]
         self.assertEqual(prose, ["docs/d.md"])
 
+    def test_a_document_that_is_not_utf_8_is_said_and_sorted_like_any_other(self) -> None:
+        """A decoding error here ended every command that reads the declarations.
+
+        What is asked of a document is in ASCII and in its first lines, so it
+        is still answered: the prose is prose, to the strict contract too,
+        and the generated file is not. Each is said not to be UTF-8.
+        """
+        (self.product.dir / "docs").mkdir()
+        (self.product.dir / "docs" / "latin.md").write_bytes(b"# Caf\xe9\n\nProse.\n")
+        (self.product.dir / "docs" / "made.md").write_bytes(b"<!-- GENERATED; do not edit -->\n\n# R\xe9f\xe9rence\n")
+        self.product.write("docs/plain.md", "# Café\n\nProse.\n")
+        self.product.run("adopt", self.dir, "--apply")
+        notes = self.notes()
+        self.assertEqual(sorted(note.split(":")[0] for note in notes if "is not UTF-8" in note),
+                         ["docs/latin.md is not UTF-8", "docs/made.md is not UTF-8"])
+        self.assertEqual(sorted(note.split(":")[0] for note in notes if "prose belongs in maelys-docs" in note),
+                         ["docs/latin.md", "docs/plain.md"])
+        strict = self.product.json("check", self.dir, "--docs-contract", expect=2)["data"]["conventions"]["violations"]
+        self.assertEqual(sorted(violation.split(":")[0] for violation in strict), ["docs/latin.md", "docs/plain.md"])
+
     def test_a_document_licensing_engages_stays(self) -> None:
         self.product.write("docs/open-core.md", "# Open core\n\nProse, but engaged.\n")
         self.product.write("LICENSING.md", "# Licensing\n\nSee [open core](docs/open-core.md).\n")
@@ -2124,7 +2172,7 @@ class GoldenTest(unittest.TestCase):
         ok       dependencies/packages: linux [pkg-config libjansson-dev] macos [jansson]
         ok       maelys-release.conf [dependencies] apart: the pins are materialised under $MAELYS_DEPENDENCIES_DIR, never beside the product
         note     no fuzzing detected by the conventions: neither tests/fuzz/ nor fuzz/ exists, and no job of .github/workflows/ci.yml runs a fuzz target
-        note     neither a name nor an address is set here: git writes into each commit this account's name as the system holds it, and an address it composes from the login and this machine's name where it can, and a push publishes both. Set them before the next commit: 'git config --global user.name NAME' and 'git config --global user.email ADDRESS' -- on GitHub, the account's noreply address (ID+LOGIN@users.noreply.github.com) names no machine
+        note     neither a name nor an address is set here: git writes into each commit this account's name as the system holds it, and an address it composes from the login and this machine's name where it can, and a push publishes both. They are their author's to set, in the author's own git configuration, before the next commit: user.name and user.email -- on GitHub, the account's noreply address (ID+LOGIN@users.noreply.github.com) names no machine
         """) + ("note     " + COMING_NOTE + "\n" if COMING_NOTE else "") + (
         # The one line that depends on where the test runs: whether this
         # machine has a name specific enough to look for is the machine's
@@ -2259,8 +2307,8 @@ class GoldenTest(unittest.TestCase):
                                    r" and (the [0-9]+ that held one read|none held one); ")
         self.assertEqual(completed.stdout, contract + self.FILES + self.VERDICTS + textwrap.dedent("""\
             check: maelys-fixture is on maelys-release v9.9.9
-            FAIL     tag.gpgsign is not true: git config tag.gpgsign true
-            FAIL     user.signingkey is not set (gpg.format = openpgp); the key must be registered on GitHub
+            FAIL     tag.gpgsign is not true: the signer sets it to true themselves; anyone else leaves it
+            FAIL     user.signingkey is not set (gpg.format = openpgp): a release is signed with an ssh key that allowed-signers names and that the signer's GitHub account holds as a signing key. gpg.format and user.signingkey are the signer's own to set; anyone else leaves them
             note     no v* tag yet
             ok       tag v1.2.3 is free
             ok       libmaelys-fixture renders from its template and passes brew style
@@ -3334,8 +3382,12 @@ class WhatTheScriptRecordedTest(unittest.TestCase):
         written to prevent, in the command written to prevent it.
         """
         source = (ROOT / "bin" / "maelys_socle" / "protect.py").read_text(encoding="utf-8")
+        # The write is built in a function of its own, from the contexts it
+        # is given: what holds the rule is what the one call gives it.
         body = source.split("PROTECTION_SHAPE, \"required_status_checks\"", 1)[1].split("}", 1)[0]
-        self.assertIn("proposed", body)
+        self.assertIn('"contexts": contexts', body)
+        self.assertEqual(source.count("classic_write(repository, branch, state, holds, proposed)"), 1)
+        self.assertEqual(source.count("classic_write("), 2, "one definition and one call")
         self.assertNotIn('"contexts": seen', source)
 
 
@@ -4471,6 +4523,40 @@ class DependenciesApartTest(unittest.TestCase):
         self.assertEqual(len(notes), 1, notes)
         self.assertIn("nobody ever sees taken", notes[0])
 
+    def test_a_line_that_is_not_utf_8_beside_the_match_is_read_and_refuses_nothing(self) -> None:
+        """git writes the matched line as the file holds it, and a line need not be UTF-8.
+
+        A comment in Latin-1 beside the line raised a decoding error, which
+        was read as a refusal of the declaration file: on any file system,
+        with git as it is installed. The search is a note, the line is
+        spelled, and a UTF-8 line beside it reads as it always did.
+        """
+        (self.product.dir / "build.sh").write_bytes(b"# \xe9t\xe9\ncd ../maelys-system # d\xe9p\xf4t\n")
+        self.product.write("other.sh", "cd ../maelys-system # dépôt\n")
+        # Opened by its own name for what exempts it, as before: it reads the root.
+        (self.product.dir / "Makefile").write_bytes(
+            b"# ../maelys-system est parti, d\xe9finitivement.\nMAELYS_DEPENDENCIES_DIR ?=\n"
+            b"SYSTEM_DIR ?= $(MAELYS_DEPENDENCIES_DIR)/maelys-system\n")
+        self.tracked()
+        data = self.product.json("check", self.dir)["data"]
+        self.assertTrue(data["valid"], data["violations"])
+        notes = sorted(check["message"] for check in data["checks"]
+                       if check["status"] == "note" and " reads ../maelys-system" in check["message"])
+        self.assertEqual([(note.split(" reads ")[0], note.rpartition("': ")[2]) for note in notes],
+                         [("build.sh line 2", "cd ../maelys-system # d\\xe9p\\xf4t"),
+                          ("other.sh line 1", "cd ../maelys-system # dépôt")])
+
+    def test_a_name_that_is_not_utf_8_is_the_refusal_of_the_search_and_never_a_path_it_opens(self) -> None:
+        """Under core.quotePath=false git writes the name as it is, and no file is opened by a spelled one."""
+        self.tracked()
+        self.product.git(self.product.dir, "config", "core.quotePath", "false")
+        if not track_raw_name(self.product.dir, b"tools/caf\xe9.sh", b"cd ../maelys-system # d\xe9p\xf4t\n"):
+            self.skipTest("this file system holds no such name, and git grep reads the working tree")
+        with self.assertRaises(MODULE.Failure) as refusal:
+            MODULE.sibling_readers(self.product.dir, ["maelys-system"])
+        self.assertEqual(refusal.exception.code, "PRECONDITION_FAILED")
+        self.assertIn("tracks a file whose name is not UTF-8: tools/caf\\xe9.sh.", refusal.exception.message)
+
     def test_prose_and_the_managed_scripts_are_exempt(self) -> None:
         """What every product carries, and would carry a note for forever.
 
@@ -4743,6 +4829,498 @@ class DependenciesTest(unittest.TestCase):
         """One object, whether CI made it next to the product or this made it here."""
         template = (ROOT / "share" / "templates" / "checkout-dependency.sh").read_text(encoding="utf-8")
         self.assertIn(" ".join(MODULE.CLONE_FLAGS), template)
+
+
+class RealGitHost(FakeHost):
+    """Real git in a fixture's environment, with every command written down before it runs.
+
+    What a run asked of a repository is read from what it ran, and never
+    from what it happened to say. The socle hands a call the environment of
+    its own process and what it adds to it: the fixture's environment takes
+    the place of the first, and the second is kept and written down.
+
+    `as_written` answers `git remote get-url` without the fixture's
+    `insteadOf`: git expands it there, the socle compares the answer with
+    the pin's URL, and a third party served from a directory would
+    otherwise read as cloned from somewhere else on its second run.
+    """
+
+    REACHING = {"clone", "fetch", "ls-remote", "pull", "push"}
+
+    def __init__(self, env: dict, as_written: bool = False) -> None:
+        super().__init__()
+        self.env, self.as_written = env, as_written
+        self.fed: list[dict] = []
+
+    def environment(self, command: list, env: "dict | None") -> tuple[dict, dict]:
+        added = {key: value for key, value in (env or {}).items() if os.environ.get(key) != value}
+        base = self.env
+        if self.as_written and command[1:3] == ["remote", "get-url"]:
+            base = {key: value for key, value in base.items()
+                    if key not in ("GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0")}
+        return {**base, **added}, added
+
+    def run(self, command, cwd=None, env=None):
+        self.commands.append(command)
+        return MODULE.Host.run(self, command, cwd=cwd, env=self.environment(command, env)[0])
+
+    def feed(self, command, data, cwd=None, env=None, timeout=None):
+        self.commands.append(command)
+        environment, added = self.environment(command, env)
+        done = MODULE.Host.feed(self, command, data, cwd=cwd, env=environment, timeout=timeout)
+        self.fed.append({"command": command, "added": added, "timeout": timeout, "said": done.stderr})
+        return done
+
+    def reaching(self) -> list[list[str]]:
+        return [command for command in self.commands if self.REACHING & set(command)]
+
+    def dependencies(self, product: "Product", *arguments: str) -> tuple[int, dict]:
+        """One run of `dependencies` in this process, through this host: (exit code, data)."""
+        out = io.StringIO()
+        located = {key: product.env[key] for key in ("MAELYS_GIT_BASE", "XDG_CACHE_HOME")}
+        with mock.patch.dict(os.environ, located), using_host(self), redirect_stdout(out):
+            code = MODULE.APP.main(["dependencies", str(product.dir), *arguments, "--format", "json"])
+        return code, json.loads(out.getvalue())["data"]
+
+
+class TagMadeSinceTheCloneTest(unittest.TestCase):
+    """A commit its repository has tagged is not said to carry no tag.
+
+    A checkout holds the tags of the day it was cloned. A refresh fetches
+    the commit by its hash, which follows no tag, so a pin moved to a
+    release cut since the clone was told, at every run and for good, that
+    its commit "carries no tag" -- and before the refresh too, where git
+    answers nothing for a commit the checkout does not hold. A plan reads
+    the checkout, asks nothing, and says so; `--apply` asks the repository,
+    by the clock and with nobody to prompt, and what it answers is what is
+    said.
+    """
+
+    def setUp(self) -> None:
+        self.product = Product()
+        self.addCleanup(self.product.close)
+        self.dir = str(self.product.dir)
+        self.home = (self.product.work / "cache" / "maelys-release" / "dependencies" / "maelys-fixture").resolve()
+        self.checkout = self.home / "maelys-system"
+        self.source = self.product.work / "src" / "maelys-system"
+        self.remote = self.product.work / "remotes" / "maelys-system.git"
+        self.repository = f"{self.product.env['MAELYS_GIT_BASE']}/maelys-system.git"
+        self.none = "carries no tag. A rewritten branch takes an untagged commit with it"
+
+    def pin(self, tag: str, commit: str) -> None:
+        self.product.write("dependencies/maelys-system.pin", f"{tag}\n{commit}\n")
+
+    def commit(self, content: str) -> str:
+        """A commit the dependency makes after the clone: on its branch, under no tag."""
+        (self.source / "file").write_text(content + "\n", encoding="utf-8")
+        self.product.git(self.source, "commit", "-q", "-am", content)
+        self.product.git(self.source, "push", "-q", str(self.remote), "main")
+        return self.product.git(self.source, "rev-parse", "HEAD")
+
+    def release(self, tag: str, commit: str, annotated: bool = False, moved: bool = False) -> None:
+        """The dependency tags a commit after the clone, as a release is cut."""
+        self.product.git(self.source, "tag", *(("-f",) if moved else ()), *(("-a", "-m", tag) if annotated else ()),
+                         tag, commit)
+        self.product.git(self.source, "push", "-q", *(("--force",) if moved else ()), str(self.remote), tag)
+
+    def said(self, *arguments: str, expect: int = 0) -> tuple[str, list[str], list[str]]:
+        """(action, refusals, notes) of one run."""
+        data = self.product.json("dependencies", self.dir, *arguments, expect=expect)["data"]
+        return data["dependencies"][0]["action"], data["refused"], data["notes"]
+
+    def recorded(self, *arguments: str, expect: int = 0) -> tuple[tuple[str, list[str], list[str]], list[list[str]]]:
+        """What `said` returns, of a run in this process, and the commands of it that reach a repository."""
+        self.host = RealGitHost(self.product.env)
+        code, data = self.host.dependencies(self.product, *arguments)
+        self.assertEqual(code, expect, data)
+        self.assertTrue(self.host.commands, "the host was asked nothing: the test proves nothing")
+        return (data["dependencies"][0]["action"], data["refused"], data["notes"]), self.host.reaching()
+
+    def unasked(self, commit: str) -> str:
+        return (f"maelys-system: this checkout holds no tag on {commit[:7]}, and {self.repository} was not asked"
+                " for one: --apply asks")
+
+    def unanswered(self, commit: str) -> str:
+        return (f"maelys-system: this checkout holds no tag on {commit[:7]}, and {self.repository} could not be"
+                " asked for one: not verified")
+
+    def wrong(self, line: str, commit: str, tags: str, where: str = "") -> str:
+        return (f"maelys-system: line 1 names {line}, which this checkout does not hold, and {commit[:7]} carries"
+                f" {tags} in {where or self.repository}: line 1 is wrong")
+
+    def here(self, commit: str = "") -> str:
+        """The tags the checkout holds, on one commit or on any."""
+        return self.product.git(self.checkout, "tag", *(("--points-at", commit) if commit else ())).replace("\n", " ")
+
+    def serve(self, handler: type) -> str:
+        """The checkout's repository is now a local server that answers as `handler` does."""
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        return self.moved_to(f"http://127.0.0.1:{server.server_address[1]}")
+
+    def moved_to(self, base: str) -> str:
+        """The checkout was cloned from there, as far as anything can tell."""
+        self.product.git(self.checkout, "remote", "set-url", "origin", f"{base}/maelys-system.git")
+        self.product.env["MAELYS_GIT_BASE"] = base
+        for name in ("http_proxy", "HTTP_PROXY", "all_proxy", "ALL_PROXY"):
+            self.product.env.pop(name, None)
+        self.product.env["no_proxy"] = self.product.env["NO_PROXY"] = "127.0.0.1"
+        self.repository = f"{base}/maelys-system.git"
+        return base
+
+    def test_a_plan_asks_nothing_of_a_commit_tagged_since_the_clone_and_does_not_say_it_carries_none(self) -> None:
+        """The checkout is at the pin and was cloned before the tag existed."""
+        self.assertEqual(self.said("--apply"), ("clone", [], []))
+        self.release("v0.0.2", self.product.pinned, annotated=True)
+        self.pin("v0.0.2", self.product.pinned)
+        self.assertEqual(self.recorded(), (("same", [], [self.unasked(self.product.pinned)]), []))
+        self.assertEqual(self.here(self.product.pinned), "", "a plan writes nothing either")
+        text = self.product.run("dependencies", self.dir).stdout
+        self.assertIn(f"note     {self.unasked(self.product.pinned)}\n", text)
+        self.assertNotIn("carries no tag", text)
+        # Asked, the repository answers, and nothing is left to say.
+        self.assertEqual(self.said("--apply"), ("same", [], []))
+        self.assertEqual(self.here(self.product.pinned), "v0.0.2")
+        self.assertEqual(self.recorded(), (("same", [], []), []))
+
+    def test_a_plan_asks_nothing_of_a_commit_no_tag_carries_and_apply_says_the_note_it_had(self) -> None:
+        """The other end: the same sentence on a plan, which knows no more,
+        and the repository's answer under --apply."""
+        self.said("--apply")
+        self.pin("v0.0.2", self.product.pinned)
+        self.assertEqual(self.recorded(), (("same", [], [self.unasked(self.product.pinned)]), []))
+        for _ in range(2):
+            action, refused, notes = self.said("--apply")
+            self.assertEqual((action, refused, len(notes)), ("same", [], 1), notes)
+            self.assertIn(f"maelys-system: {self.product.pinned[:7]} {self.none}", notes[0])
+        # Nothing was brought, so the next plan knows what the first one did.
+        self.assertEqual(self.recorded(), (("same", [], [self.unasked(self.product.pinned)]), []))
+
+    def test_a_plan_before_a_refresh_asks_nothing_whatever_the_commit_carries(self) -> None:
+        """Of a commit the checkout does not hold yet git answers nothing,
+        which read "carries no tag" for a pin on a release."""
+        self.pin(PINNED_TAG, self.product.tagged)
+        self.assertEqual(self.said("--apply"), ("clone", [], []))
+        self.assertEqual(self.recorded(), (("same", [], []), []), "a tag the checkout holds is read where it is")
+        untagged = self.commit("three")
+        newer = self.commit("four")
+        self.release("v0.0.2", newer)
+        self.release("v0.0.3", self.commit("five"))
+        self.pin("v0.0.2", newer)
+        self.assertEqual(self.recorded(), (("refresh", [], [self.unasked(newer)]), []))
+        self.assertEqual(self.said("--apply"), ("refresh", [], []))
+        self.assertEqual(self.product.git(self.checkout, "rev-parse", "HEAD"), newer)
+        self.assertEqual(self.here(), f"{PINNED_TAG} v0.0.2", "the tag of that commit, and no other")
+        # The other end, before a refresh too. A release cut on another
+        # commit says nothing of this one.
+        self.pin("v0.0.3", untagged)
+        self.assertEqual(self.recorded(), (("refresh", [], [self.unasked(untagged)]), []))
+        action, refused, notes = self.said("--apply")
+        self.assertEqual((action, refused, len(notes)), ("refresh", [], 1), notes)
+        self.assertIn(f"maelys-system: {untagged[:7]} {self.none}", notes[0])
+
+    def test_what_git_describe_says_of_a_commit_the_checkout_does_not_hold_yet_stays_silent(self) -> None:
+        """The shape `migrate` writes names the commit by its hash, which a
+        checkout that does not hold the commit cannot read. A plan said
+        "carries no tag" of it and --apply then said nothing: --apply asks
+        nothing of that shape, so a plan does not say that it would."""
+        self.pin(PINNED_TAG, self.product.tagged)
+        self.said("--apply")
+        newer = self.commit("three")
+        # In either case, as git reads it back.
+        for line in (f"{PINNED_TAG}-2-g{newer[:7]}", f"{PINNED_TAG}-2-g{newer[:7].upper()}", newer[:7]):
+            with self.subTest(line=line):
+                self.pin(line, newer)
+                self.assertEqual(self.recorded(), (("refresh", [], []), []))
+        said, reaching = self.recorded("--apply")
+        self.assertEqual(said, ("refresh", [], []))
+        self.assertEqual(reaching, [["git", "fetch", "--quiet", "origin", newer]], "the refresh, and no question")
+        # Read from the two lines, as this git reads it once it holds the commit.
+        named = MODULE.dependencies.by_its_hash
+        for line in (f"{PINNED_TAG}-2-g{newer[:7]}", f"a-b-10-g{newer[:4]}", f"{PINNED_TAG}-2-g{newer.upper()}",
+                     newer[:12].upper(), newer):
+            with self.subTest(line=line):
+                self.assertTrue(named(line, newer))
+                self.assertEqual(MODULE.dependencies.named_by(line, self.checkout, fetching=False), newer)
+        for line in ("", "v0.0.2", f"{PINNED_TAG}-2-g", f"{PINNED_TAG}-2-g{newer[:3]}", f"anything-g{newer[:7]}",
+                     f"{PINNED_TAG}-2-G{newer[:7]}", f"{PINNED_TAG}-2-g{self.product.tagged[:7]}",
+                     f"{newer[:7]}-dirty"):
+            with self.subTest(line=line):
+                self.assertFalse(named(line, newer))
+
+    def test_apply_asks_once_by_the_clock_with_nobody_to_prompt_and_the_next_run_asks_nothing(self) -> None:
+        """The question and the tag it brings back are the two calls that
+        carry the bound, and a checkout that holds the tag is read where it is."""
+        self.pin(PINNED_TAG, self.product.tagged)
+        self.said("--apply")
+        self.release("v0.0.2", self.product.pinned)
+        self.pin("v0.0.2", self.product.pinned)
+        said, reaching = self.recorded("--apply")
+        self.assertEqual(said, ("refresh", [], []))
+        question = ["git", "ls-remote", "--tags", "origin"]
+        bringing = ["git", "fetch", "--quiet", "--no-tags", "origin", "refs/tags/v0.0.2:refs/tags/v0.0.2"]
+        self.assertEqual(reaching, [["git", "fetch", "--quiet", "origin", self.product.pinned], question, bringing])
+        bounded = [(call["command"], call["added"], call["timeout"]) for call in self.host.fed if call["timeout"]]
+        unattended = {"GIT_TERMINAL_PROMPT": "0"}
+        self.assertEqual(bounded, [(question, unattended, 10), (bringing, unattended, 10)])
+        # The repository is gone, and nobody notices: nothing is asked of it.
+        self.remote.rename(self.remote.with_suffix(".gone"))
+        for arguments in ((), ("--apply",)):
+            with self.subTest(arguments=arguments):
+                self.assertEqual(self.recorded(*arguments), (("same", [], []), []))
+
+    def test_a_clone_of_this_run_is_the_repository_s_answer_and_is_not_asked_again(self) -> None:
+        self.pin("v0.0.2", self.product.pinned)
+        (action, refused, notes), reaching = self.recorded("--apply")
+        self.assertEqual((action, refused, len(notes)), ("clone", [], 1))
+        self.assertIn(f"maelys-system: {self.product.pinned[:7]} {self.none}", notes[0])
+        self.assertEqual([command[1] for command in reaching], ["clone"], reaching)
+
+    def test_a_repository_that_does_not_answer_is_said_and_the_run_succeeds(self) -> None:
+        """Offline nothing is known of the commit, and nothing is claimed of it."""
+        self.said("--apply")
+        self.release("v0.0.2", self.product.pinned)
+        self.pin("v0.0.2", self.product.pinned)
+        self.remote.rename(self.remote.with_suffix(".gone"))
+        self.assertEqual(self.said(), ("same", [], [self.unasked(self.product.pinned)]))
+        self.assertEqual(self.said("--apply"), ("same", [], [self.unanswered(self.product.pinned)]))
+        text = self.product.run("dependencies", self.dir, "--apply").stdout
+        self.assertIn(f"note     {self.unanswered(self.product.pinned)}\n", text)
+        self.assertNotIn("carries no tag", text)
+
+    def test_a_line_1_the_repository_does_not_carry_on_that_commit_is_wrong_and_said_so(self) -> None:
+        self.said("--apply")
+        self.release("v0.0.2", self.product.pinned)
+        self.pin("v0.0.9", self.product.pinned)
+        self.assertEqual(self.said(), ("same", [], [self.unasked(self.product.pinned)]))
+        asked = self.wrong("v0.0.9", self.product.pinned, "v0.0.2")
+        # Asked again at each --apply, and answered the same; a plan reads
+        # the tag that was brought, in the words it had.
+        for _ in range(2):
+            (action, refused, notes), reaching = self.recorded("--apply")
+            self.assertEqual((action, refused, notes), ("same", [], [asked]))
+            self.assertIn(["git", "ls-remote", "--tags", "origin"], reaching)
+        self.assertEqual(self.recorded(), (("same", [], [
+            self.wrong("v0.0.9", self.product.pinned, "v0.0.2", "it")
+            + ", or names a tag made since this checkout last fetched its tags"]), []))
+
+    def test_a_tag_added_to_a_commit_the_checkout_holds_another_tag_on_is_asked_for(self) -> None:
+        """The same defect one shape over: the checkout holds the release
+        candidate's tag on the commit, the release was cut on it since, and
+        a pin that is right was told at every run that line 1 was wrong."""
+        self.release("v0.0.2-rc1", self.product.pinned)
+        self.pin("v0.0.2-rc1", self.product.pinned)
+        self.assertEqual(self.said("--apply"), ("clone", [], []))
+        self.pin("v0.0.2", self.product.pinned)
+        hedged = (self.wrong("v0.0.2", self.product.pinned, "v0.0.2-rc1", "it")
+                  + ", or names a tag made since this checkout last fetched its tags")
+        # The other end first: the repository does not carry it, and says so.
+        self.assertEqual(self.recorded(), (("same", [], [hedged]), []))
+        (action, refused, notes), reaching = self.recorded("--apply")
+        self.assertEqual((action, refused, notes), ("same", [], [self.wrong("v0.0.2", self.product.pinned,
+                                                                              "v0.0.2-rc1")]))
+        self.assertEqual(reaching, [["git", "ls-remote", "--tags", "origin"]], "asked, and nothing to bring")
+        # It does: a plan still reads the checkout, and one --apply settles it.
+        self.release("v0.0.2", self.product.pinned, annotated=True)
+        self.assertEqual(self.recorded(), (("same", [], [hedged]), []))
+        self.assertEqual(self.said("--apply"), ("same", [], []))
+        self.assertEqual(self.here(self.product.pinned), "v0.0.2 v0.0.2-rc1")
+        for arguments in ((), ("--apply",)):
+            with self.subTest(arguments=arguments):
+                self.assertEqual(self.recorded(*arguments), (("same", [], []), []))
+
+    def test_a_tag_only_the_checkout_holds_on_the_commit_is_said_to_be_the_checkout_s(self) -> None:
+        """Asked, the repository carries none on the commit: line 1 is wrong,
+        with no "or" left, and the tag named is the one held here."""
+        self.said("--apply")
+        self.product.git(self.checkout, "tag", "kept-here", self.product.pinned)
+        self.pin("v0.0.2", self.product.pinned)
+        (action, refused, notes), reaching = self.recorded("--apply")
+        self.assertEqual((action, refused, notes), ("same", [], [self.wrong("v0.0.2", self.product.pinned,
+                                                                              "kept-here", "it")]))
+        self.assertEqual(reaching, [["git", "ls-remote", "--tags", "origin"]])
+
+    def test_every_tag_the_repository_carries_on_the_commit_is_brought(self) -> None:
+        """Two tags made on one commit since the clone, and line 1 names one."""
+        self.said("--apply")
+        self.release("v0.0.2", self.product.pinned)
+        self.release("v0.0.2-alias", self.product.pinned, annotated=True)
+        self.release("v0.0.3", self.commit("three"))
+        self.pin("v0.0.2-alias", self.product.pinned)
+        self.assertEqual(self.said("--apply"), ("same", [], []))
+        self.assertEqual(self.here(), f"{PINNED_TAG} v0.0.2 v0.0.2-alias", "those of that commit, and no other")
+        self.assertEqual(self.recorded(), (("same", [], []), []))
+
+    def test_a_tag_the_repository_moved_is_not_moved_here(self) -> None:
+        """The checkout holds a tag on another commit and the repository has
+        since moved it onto the pinned one. A published tag never moves:
+        git declines it, the checkout keeps what it had, and what the
+        checkout holds is still what refuses a line 1 that names it."""
+        self.release("v0.0.2", self.product.tagged)
+        self.said("--apply")
+        self.release("v0.0.2", self.product.pinned, moved=True)
+        self.release("v0.0.3", self.product.pinned)
+        there = self.product.git(self.checkout, "rev-parse", "v0.0.2")
+        # Line 1 names the other tag of that commit: right, and brought alone.
+        self.pin("v0.0.3", self.product.pinned)
+        self.assertEqual(self.said("--apply"), ("same", [], []))
+        self.assertEqual(self.here(self.product.pinned), "v0.0.3")
+        self.assertEqual(self.product.git(self.checkout, "rev-parse", "v0.0.2"), there)
+        # Line 1 names the moved one: refused on what the checkout holds, and nothing is asked.
+        self.pin("v0.0.2", self.product.pinned)
+        (action, refused, notes), reaching = self.recorded("--apply", expect=2)
+        self.assertEqual((action, notes, reaching), ("same", [], []))
+        self.assertEqual(len(refused), 1, refused)
+        self.assertIn(f"line 1 names v0.0.2, which is {self.product.tagged[:7]}, and line 2 is"
+                      f" {self.product.pinned[:7]}", refused[0])
+        self.assertEqual(self.product.git(self.checkout, "rev-parse", "v0.0.2"), there)
+
+    def test_a_tag_whose_name_is_not_utf_8_ends_no_run(self) -> None:
+        """A repository holds a tag named in Latin-1 on some old commit, and
+        the listing of its tags was read as text: a traceback at every
+        --apply, for a pin that is right, until the checkout was deleted."""
+        def latin(commit: str) -> None:
+            # Written where git keeps its refs packed, sorted: no file of
+            # this machine could carry the name.
+            self.product.git(self.remote, "pack-refs", "--all")
+            packed = self.remote / "packed-refs"
+            lines = packed.read_bytes().split(b"\n")
+            lines = [line for line in lines if not line.endswith(b" refs/tags/caf\xe9")]
+            lines.insert(next(index for index, line in enumerate(lines) if b" refs/tags/" in line),
+                         commit.encode() + b" refs/tags/caf\xe9")
+            packed.write_bytes(b"\n".join(lines))
+        self.said("--apply")
+        self.release("v0.0.2", self.product.pinned)
+        latin(self.product.tagged)
+        self.pin("v0.0.2", self.product.pinned)
+        self.assertEqual(self.said(), ("same", [], [self.unasked(self.product.pinned)]))
+        self.assertEqual(self.said("--apply"), ("same", [], []))
+        self.assertEqual(self.here(), f"{PINNED_TAG} v0.0.2")
+        # On the pinned commit itself it is a tag that commit carries, which
+        # line 1 cannot name and no refspec can bring: said, and left there.
+        self.product.git(self.remote, "tag", "-d", "v0.0.2")
+        self.product.git(self.checkout, "tag", "-d", "v0.0.2")
+        latin(self.product.pinned)
+        for _ in range(2):
+            self.assertEqual(self.said("--apply"), ("same", [], [self.wrong("v0.0.2", self.product.pinned,
+                                                                              "caf\\xe9")]))
+        self.assertEqual(self.here(), PINNED_TAG)
+        # And held here from the day of the clone, it is read as it is listed.
+        shutil.rmtree(self.checkout)
+        self.assertEqual(self.said("--apply"), ("clone", [], [
+            self.wrong("v0.0.2", self.product.pinned, "caf\\xe9", "it")
+            + ", or names a tag made since this checkout last fetched its tags"]))
+        self.assertEqual(self.said()[0], "same")
+
+    def test_an_empty_listing_is_an_answer_only_from_a_repository_the_checkout_holds_no_tag_of(self) -> None:
+        """A portal or a proxy answers 200 and nothing, git reads a
+        repository with no tag at all, and "carries no tag" was said on an
+        answer that was not the repository's."""
+        class Nothing(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *arguments) -> None:
+                pass
+
+            def do_GET(self) -> None:
+                self.send_response(200)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+        self.said("--apply")
+        self.assertEqual(self.here(), PINNED_TAG)
+        self.pin("v0.0.2", self.product.pinned)
+        self.serve(Nothing)
+        (action, refused, notes), reaching = self.recorded("--apply")
+        self.assertEqual((action, refused, notes), ("same", [], [self.unanswered(self.product.pinned)]))
+        self.assertEqual(reaching, [["git", "ls-remote", "--tags", "origin"]])
+        self.assertEqual(self.host.fed[-1]["said"], b"", "git took it for an answer, and said nothing against it")
+
+    def test_a_repository_with_no_tag_at_all_still_answers_that_the_commit_carries_none(self) -> None:
+        """The other end: an empty listing that is the repository's own."""
+        self.product.git(self.remote, "tag", "-d", PINNED_TAG)
+        self.pin("v0.0.2", self.product.pinned)
+        self.said("--apply")
+        self.assertEqual(self.here(), "")
+        (action, refused, notes), reaching = self.recorded("--apply")
+        self.assertEqual((action, refused, len(notes)), ("same", [], 1), notes)
+        self.assertIn(f"maelys-system: {self.product.pinned[:7]} {self.none}", notes[0])
+        self.assertEqual(reaching, [["git", "ls-remote", "--tags", "origin"]], "asked, and answered")
+
+    def test_a_repository_that_asks_for_a_name_is_not_answered_by_anybody(self) -> None:
+        """401: git would ask for a name on the terminal of whoever runs
+        this, and wait for it. It is told not to, and says that it was."""
+        class Guarded(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *arguments) -> None:
+                pass
+
+            def do_GET(self) -> None:
+                self.send_response(401)
+                self.send_header("WWW-Authenticate", 'Basic realm="fixture"')
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+        self.said("--apply")
+        self.pin("v0.0.2", self.product.pinned)
+        self.serve(Guarded)
+        (action, refused, notes), _ = self.recorded("--apply")
+        self.assertEqual((action, refused, notes), ("same", [], [self.unanswered(self.product.pinned)]))
+        self.assertIn(b"terminal prompts disabled", self.host.fed[-1]["said"])
+
+    def test_the_refusal_is_the_checkout_s_own_and_asks_nothing(self) -> None:
+        """A line 1 that names another commit here is refused as it was."""
+        self.said("--apply")
+        self.pin(PINNED_TAG, self.product.pinned)
+        refusal = (f"maelys-system: line 1 names {PINNED_TAG}, which is {self.product.tagged[:7]}, and line 2 is"
+                   f" {self.product.pinned[:7]}. A published tag never moves, so one of the two is wrong; re-pin on"
+                   " the tag's own commit")
+        for arguments in ((), ("--apply",)):
+            with self.subTest(arguments=arguments):
+                self.assertEqual(self.recorded(*arguments, expect=2), (("same", [refusal], []), []))
+
+    def test_a_repository_that_accepts_and_says_nothing_is_given_up_on_by_the_clock(self) -> None:
+        """Over git://, which git itself never gives up on: the question is
+        cut after the ten seconds the conventions state, whatever it is
+        waiting for, the note says the repository could not be asked, and
+        the run succeeds all the same. A run that is not cut is stopped
+        here, and fails."""
+        self.said("--apply")
+        self.pin("v0.0.2", self.product.pinned)
+        listener = socket.socket()
+        self.addCleanup(listener.close)
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(8)
+        held: list[socket.socket] = []
+        self.addCleanup(lambda: [connection.close() for connection in held])
+
+        def accept() -> None:
+            while True:
+                try:
+                    held.append(listener.accept()[0])
+                except OSError:
+                    return
+        threading.Thread(target=accept, daemon=True).start()
+        self.moved_to(f"git://127.0.0.1:{listener.getsockname()[1]}")
+        started = time.monotonic()
+        child = subprocess.Popen([str(CLI), "dependencies", self.dir, "--apply", "--format", "json"],
+                                 cwd=self.product.work, env=self.product.env, text=True, stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE, start_new_session=True)
+        try:
+            out, _ = child.communicate(timeout=40)
+        except subprocess.TimeoutExpired:
+            # The session this test started, by its PID: the run and the git it is waiting on.
+            os.killpg(child.pid, signal.SIGKILL)
+            child.communicate()
+            self.fail("--apply was still waiting on a repository that says nothing after 40 seconds")
+        elapsed = time.monotonic() - started
+        data = json.loads(out)["data"]
+        self.assertEqual((child.returncode, data["refused"], data["notes"]),
+                         (0, [], [self.unanswered(self.product.pinned)]))
+        self.assertTrue(held, "the note was said of a repository nothing reached")
+        self.assertGreaterEqual(elapsed, 10, "cut by the clock, and not by a refusal that came at once")
+        # And nothing is left waiting behind the run: the other end reads
+        # what git asked and then the end of the connection, or this raises.
+        held[0].settimeout(5)
+        while held[0].recv(4096):
+            pass
 
 
 class ProtectByRulesetTest(unittest.TestCase):
@@ -5240,7 +5818,10 @@ class LegRenameTest(unittest.TestCase):
             return MODULE.write_ruleset("o/r", "main", applied, contexts), sent
 
     def test_the_ruleset_is_written_whole_with_only_its_checks_changed(self) -> None:
-        ok, sent = self.write(["check / check (linux)", "check / sanitizers"])
+        # One context more than it holds: a ruleset that lists them all
+        # already is not written again, and this used to send that write.
+        wanted = ["check / check (linux)", "check / check (macos)", "check / sanitizers"]
+        ok, sent = self.write(wanted)
         self.assertTrue(ok)
         self.assertEqual(sent["request"], ("PUT", "repos/o/r/rulesets/7"))
         body = sent["body"]
@@ -5248,7 +5829,10 @@ class LegRenameTest(unittest.TestCase):
         self.assertEqual(body["conditions"], self.RULESET["conditions"])
         self.assertEqual([rule["type"] for rule in body["rules"]], ["deletion", "required_status_checks"])
         checks = body["rules"][1]["parameters"]["required_status_checks"]
-        self.assertEqual([check["context"] for check in checks], ["check / check (linux)", "check / sanitizers"])
+        self.assertEqual([check["context"] for check in checks], wanted)
+        # And asked for what it holds, it sends nothing and says so.
+        ok, sent = self.write(["check / sanitizers", "check / check (linux)"])
+        self.assertEqual((ok, sent), (False, {}))
         # The integration that was allowed to report stays the one allowed:
         # a new context takes it from its neighbours, not from nowhere.
         self.assertTrue(all(check["integration_id"] == 15368 for check in checks))
@@ -6959,6 +7543,29 @@ class DocumentationNameRuleTest(unittest.TestCase):
         product.write("maelys-release.conf", product.read("maelys-release.conf") + "\n[docs]\nnamed example/docs-fixture\n")
         self.assertEqual(self.notes(product), [])
 
+    def test_the_name_in_a_prose_that_is_not_utf_8_is_noted_and_refuses_nothing(self) -> None:
+        """The rule says it searched every tracked file, and skipped this one without a word.
+
+        It is read with what does not decode replaced, and the name found
+        there is a note: the file was never refused, and stays so.
+        """
+        product = self.repository()
+        (product.dir / "NOTES.txt").write_bytes(b"D\xe9plac\xe9.\nVoir maelys-docs.\n")
+        product.write("PLAIN.txt", "Déplacé.\nNothing named.\n")
+        product.git(product.dir, "add", "NOTES.txt", "PLAIN.txt")
+        data = product.json("check", str(product.dir))["data"]
+        self.assertTrue(data["valid"], data["violations"])
+        said = [check["status"] + ": " + check["message"] for check in data["checks"]
+                if "names the documentation repository" in check["message"]]
+        self.assertEqual([line.split(",")[0] for line in said],
+                         ["note: NOTES.txt is not UTF-8 and was read with what does not decode replaced: it names the"
+                          " documentation repository at line 2"])
+        # The same line in a file that is UTF-8 is the refusal it was.
+        product.write("PLAIN.txt", "Déplacé.\nVoir maelys-docs.\n")
+        refused = product.json("check", str(product.dir), expect=2)["data"]["conventions"]["violations"]
+        self.assertEqual([line.split(",")[0] for line in refused],
+                         ["PLAIN.txt names the documentation repository at line 2"])
+
     def test_plan_refuses_to_write_the_name_into_an_undeclared_repository(self) -> None:
         product = self.repository()
         decl = MODULE.read_declarations(product.dir, "maelys-fixture", "custom")
@@ -6978,6 +7585,154 @@ class DocumentationNameRuleTest(unittest.TestCase):
         staged = MODULE.stage(decl, "a" * 40, "v9.9.9")
         for relative, (content, _) in staged.items():
             self.assertFalse(MODULE.names_documentation(content), relative)
+
+
+class TrackedNameNotUtf8Test(unittest.TestCase):
+    """A tracked name that is not UTF-8 ends `check` in words, and `adopt` writes nothing it cannot finish.
+
+    `check` ended on a decoding error where the tracked files are listed
+    for the name of the documentation repository. Reading through it is
+    not a patch: the readers of a tracked name open the file by it and
+    write it back, and a name that does not encode emptied the workflow
+    `adopt` was rewriting. One refusal at that listing, in the bytes of
+    the name spelled out; where `[docs] named` is declared the listing is
+    not made, and `check` answers as it did.
+    """
+
+    NAME = b"packaging/homebrew/caf\xe9.rb.in"
+    MESSAGE = ("This repository tracks a file whose name is not UTF-8: packaging/homebrew/caf\\xe9.rb.in. The socle"
+               " reads tracked names as UTF-8, and says nothing of a repository until every name it tracks is one.")
+    HINT = "Renaming it is this repository's own to do: rename, commit, and run the command again."
+
+    def repository(self, conf: str = "") -> "Product":
+        product = Product()
+        self.addCleanup(product.close)
+        if conf:
+            product.write("maelys-release.conf", product.read("maelys-release.conf") + conf)
+        product.run("adopt", str(product.dir), "--apply")
+        product.git(product.dir, "init", "-q")
+        product.git(product.dir, "add", "-A")
+        product.git(product.dir, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "fixture")
+        return product
+
+    def name(self, product, content: bytes = b"class Caf < Formula\nend\n", name: bytes = NAME) -> bool:
+        held = track_raw_name(product.dir, name, content)
+        product.git(product.dir, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "a name from another age")
+        return held
+
+    def state(self, product) -> dict:
+        """Every file of the working tree by its bytes, and what git says changed."""
+        held = {}
+        for directory, _, names in os.walk(os.fsencode(product.dir)):
+            if b"/.git" not in directory:
+                for name in names:
+                    with open(os.path.join(directory, name), "rb") as file:
+                        held[os.path.join(directory, name)] = file.read()
+        held[b"status"] = subprocess.run(["git", "-C", str(product.dir), "status", "--porcelain"], check=True,
+                                         capture_output=True).stdout
+        return held
+
+    def test_several_names_are_counted_and_the_first_five_named(self) -> None:
+        refusal = MODULE.unread_names([b"notes/caf\xe9.txt", *(b"notes/\xff%d.txt" % number for number in range(6))])
+        self.assertIn("tracks 7 files whose name is not UTF-8: notes/caf\\xe9.txt, notes/\\xff0.txt, notes/\\xff1.txt,"
+                      " notes/\\xff2.txt, notes/\\xff3.txt, and 2 more. The socle", refusal.message)
+        self.assertTrue(refusal.hint.startswith("Renaming them is"))
+        # Nothing of it is a lone surrogate: the envelope that carries it can be written again.
+        json.dumps([refusal.message, refusal.hint], ensure_ascii=False).encode("utf-8")
+
+    def test_the_commands_that_ended_on_the_listing_refuse_in_text_and_in_json(self) -> None:
+        product = self.repository()
+        self.name(product)
+        # To an output that refuses what it cannot encode, as a terminal does.
+        product.env["PYTHONIOENCODING"] = "utf-8:strict"
+        for command in ("check", "declarations", "preflight", "adopt", "dependencies"):
+            with self.subTest(command=command):
+                body = product.json(command, str(product.dir), expect=1)
+                self.assertEqual(body["error"], {"code": "PRECONDITION_FAILED", "message": self.MESSAGE,
+                                                 "hint": self.HINT})
+                # What a reader of the envelope holds can be written again.
+                json.dumps(body, ensure_ascii=False).encode("utf-8")
+                said = product.run(command, str(product.dir), expect=1)
+                self.assertEqual((said.stdout, said.stderr),
+                                 ("", f"maelys-release: [PRECONDITION_FAILED] {self.MESSAGE}\nHint: {self.HINT}\n"))
+
+    def test_adopt_apply_writes_nothing(self) -> None:
+        product = self.repository()
+        workflow = product.dir / ".github" / "workflows" / "release.yml"
+        workflow.write_text(workflow.read_text(encoding="utf-8") + "# drifted\n", encoding="utf-8")
+        # There is something to write: the plan says so while every name is UTF-8.
+        planned = {entry["path"]: entry["action"] for entry in product.json("adopt", str(product.dir))["data"]["files"]}
+        self.assertEqual(planned[".github/workflows/release.yml"], "update")
+        self.name(product)
+        before = self.state(product)
+        for output in ("text", "json"):
+            refused = product.run("adopt", str(product.dir), "--apply", "--format", output, expect=1)
+            self.assertNotIn("Traceback", refused.stderr)
+            self.assertIn("packaging/homebrew/caf\\xe9.rb.in", refused.stderr.replace("\\\\", "\\"))
+            self.assertEqual(self.state(product), before)
+        self.assertTrue(workflow.read_bytes().endswith(b"# drifted\n"))
+
+    def test_where_the_documentation_repository_is_named_check_answers_as_it_did(self) -> None:
+        """With `[docs] named` the rule that lists the files is not applied, and nothing ends there.
+
+        The guard is then the one reader of the list, and it has its own
+        answer: the file is counted as left unread, and `check` is green.
+        Held here so that it stays: a refusal placed where every answer of
+        git is read turned this green product red.
+        """
+        product = self.repository("\n[docs]\nnamed example/docs-fixture\n")
+        self.name(product, b"plain words\n", name=b"notes/caf\xe9.txt")
+        counted = "(not read, and nothing is said of them: 1 under a name that is not UTF-8)"
+        self.assertIn(counted, product.run("check", str(product.dir)).stdout)
+        data = product.json("check", str(product.dir))["data"]
+        self.assertTrue(data["valid"], data["violations"])
+        self.assertEqual(data["privacy"]["files"]["unread"], [{"path": "(1 tracked name(s))", "reason": "undecodable"}])
+        self.assertIn(counted, product.run("check", str(product.dir), "--history").stdout)
+
+    def test_no_managed_file_is_opened_before_every_one_of_them_encodes(self) -> None:
+        """Where no rule lists the tracked files, the name reaches what `adopt` writes.
+
+        With `[docs] named` nothing but the guard reads the list, and
+        `adopt` does not run the guard. A formula template is named in
+        release.yml: writing it opened the file, which empties it, and then
+        failed to encode. The seam is the list of the templates, which a
+        directory gives with one lone surrogate a byte where the file
+        system holds such a name; here it is given so wherever it is run.
+        """
+        product = self.repository("\n[docs]\nnamed example/docs-fixture\n")
+        decl = MODULE.read_declarations(product.dir, "maelys-fixture", "maelys-release")
+        decl.formulas = sorted([*decl.formulas, b"caf\xe9".decode("utf-8", "surrogateescape")])
+        staged = MODULE.stage(decl, "f" * 40, "v9.9.9")
+        before = self.state(product)
+        for apply in (True, False):
+            with self.assertRaises(MODULE.Failure) as refused:
+                MODULE.plan(decl, staged, apply=apply)
+            self.assertEqual(
+                (refused.exception.code, refused.exception.message, refused.exception.hint),
+                ("PRECONDITION_FAILED",
+                 "The socle would write a name that is not UTF-8 into .github/workflows/release.yml, where it reads"
+                 " tap-caf\\xe9: -- it writes UTF-8, and encodes every file before it opens the first: nothing was"
+                 " written.",
+                 "A file of this repository carries that name, and the managed files are written from it. Renaming"
+                 " it is this repository's own to do: rename, commit, and run the command again."))
+            json.dumps([refused.exception.message, refused.exception.hint], ensure_ascii=False).encode("utf-8")
+            self.assertEqual(self.state(product), before)
+        # And what encodes is written as it was: the bytes of the text.
+        del staged[".github/workflows/release.yml"], staged["AGENTS.md"], staged["CLAUDE.md"]
+        del staged[".claude/skills/maelys-release/SKILL.md"]
+        staged["scripts/checkout-dependency.sh"] = ("#!/bin/sh\n# café\n", True)
+        MODULE.plan(decl, staged, apply=True)
+        self.assertEqual((product.dir / "scripts" / "checkout-dependency.sh").read_bytes(), "#!/bin/sh\n# café\n".encode())
+        # Through the executable, where the file system holds the name.
+        if not self.name(product):
+            return
+        before = self.state(product)
+        for output in ("text", "json", "text"):
+            refused = product.run("adopt", str(product.dir), "--apply", "--format", output, expect=1)
+            self.assertEqual(refused.stdout, "")
+            self.assertNotIn("Traceback", refused.stderr)
+            self.assertIn("would write a name that is not UTF-8 into .github/workflows/release.yml", refused.stderr)
+            self.assertEqual(self.state(product), before)
 
 
 class DocumentationNameGrammarTest(unittest.TestCase):

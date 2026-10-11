@@ -459,8 +459,8 @@ def cut_gate(decl: Declarations, version: str, signers: pathlib.Path) -> list:
 # The reasons are GitHub's own (`commit.verification.reason`).
 UNVERIFIED = {
     "unsigned": "it carries no signature",
-    "no_user": "its committer address belongs to no GitHub account. Set user.email to an address of the"
-               " account that holds the signing key",
+    "no_user": "its committer address belongs to no GitHub account. user.email is the signer's own to set, to"
+               " an address of the account that holds the signing key; anyone else leaves it",
     "unverified_email": "its committer address is not verified on the account that holds the signing key",
     "bad_email": "its committer address is not one of the account that holds the signing key",
     "unknown_key": "the key that signed it is not registered on GitHub as a signing key; one registered for"
@@ -883,7 +883,8 @@ def cut_tag(invocation: Invocation, decl: Declarations, data: dict, log, timeout
     if verified.returncode != 0:
         git("tag", "-d", tag, cwd=project)
         raise Failure("PROCESS_FAILED", f"the signature of {tag} does not verify: {verified.stderr.strip()}",
-                      "Fix the signing key and run the command again; nothing was pushed.")
+                      "The signing key is the signer's own to fix before the command is run again; anyone"
+                      " else leaves it. Nothing was pushed.")
     git("push", "-q", "origin", f"refs/tags/{tag}", cwd=project)
     confirm_tag(project, "origin", tag, merge, f"the tag {tag}",
                 f"Read it: git ls-remote origin 'refs/tags/{tag}*'. A published tag is never moved:"

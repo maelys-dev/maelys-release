@@ -28,7 +28,7 @@ Common contract: `agent-cli/v2`. For the machine-readable detail run
 | rehearse | `rehearse DIR [TARGET] [--product NAME] [--image IMAGE] [--package-command COMMAND] [--check] [--check-command COMMAND] [--keep] [--channel NAME] [--tag TAG]` | execute | json-envelope | Replay one step of one Linux job in a Docker container on a copy of the working tree: the packaging of the release, the check of a leg of the shared CI with --check, or a channel's publish script against a published release with --channel. The result names the step it replayed, and the steps and jobs it did not. |
 | render | `render TEMPLATE OUTPUT [KEY=VALUE...]` | execute | json-envelope | Replace @KEY@ placeholders of a template, refusing to leave one unrendered. |
 | tap | `tap PRODUCT TAG FORMULA [--skip-style] [--apply]` | preview then commit with --apply | json-envelope | Publish a rendered formula into the Homebrew tap with a signed commit; plan without --apply. |
-| self-test | `self-test [--verbose]` | execute | json-envelope | Run the socle's own tests. |
+| self-test | `self-test [--verbose] [--jobs N]` | execute | json-envelope | Run the socle's own tests. |
 | vendor | `vendor` | execute | json-envelope | Refresh bin/maelys_cli.py from maelys-cli at dependencies/maelys-cli.pin and record its digest. |
 
 Global options:

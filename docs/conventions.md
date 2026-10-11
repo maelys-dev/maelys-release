@@ -705,14 +705,41 @@ established, with what was measured said apart from what was reported:
   | past a tag, as `migrate` writes it into the documentation repository | what `git describe --tags` says of the commit, `vX.Y.Z-N-gSHA` | it names the commit of line 2, which that form does by its hash alone: the tag spelled in it is not read |
   | a third party's commit no tag carries, with an `unreleased <branch>` line | the last tag before the commit | it is a tag, an ancestor of the commit, and not the commit itself |
 
-  A line 1 that names another commit is refused. One that names nothing in
-  the checkout is a note, whatever the commit carries: "carries no tag"
-  over an untagged commit, and over a tagged one what the checkout holds —
-  said as read, because a tag made since the checkout last fetched its
-  tags reads the same as a wrong one. `check` reads the product's files
-  and holds no clone of what they pin, so none of this is `check`'s to
-  say: it reads line 2 as a commit and the attribute lines as grammar, and
-  the rest belongs to the one command that has the checkout.
+  A line 1 that names another commit in the checkout is refused. One that
+  names nothing there is a note, unless `--apply` finds it in the
+  repository on that commit. The checkout does not decide alone: it holds
+  the tags of the day it was cloned, and a refresh fetches a commit by its
+  hash, which follows none.
+
+  A plan reads the checkout and asks nothing, and git is kept from asking
+  on its behalf. In the partial clone the socle makes, git fetches by
+  itself an object it is asked about and does not hold, and a line 1 that
+  is a whole hash names one: the hash of line 2 is read from the two lines
+  and never given to git, and for any other git is told not to fetch,
+  which git 2.45 and later obeys — an older git fetches that one object.
+  Over a commit the checkout holds no tag on, a plan says so, and that
+  `--apply` asks. Over one it holds another tag on, it says what the
+  checkout holds: "line 1 is wrong, or names a tag made since this
+  checkout last fetched its tags".
+
+  `--apply` asks the repository which tags it carries on that commit,
+  wherever the checkout does not settle it: no tag there on the commit, or
+  a line 1 that names nothing there. The question has ten seconds by the
+  clock, whatever it is waiting on, and nobody to prompt; so has the fetch
+  that brings back, by name, every tag the repository carries on the
+  commit, after which a later run reads them in the checkout and asks
+  nothing. A tag the checkout holds on another commit is not moved. When
+  line 1 is one of the tags the repository carries on the commit, nothing
+  is said. When it carries others there, "line 1 is wrong", with their
+  names. When it carries none, "carries no tag". When it does not answer
+  in time, or answers with an empty listing where the checkout holds a
+  tag of it — a portal's answer, not the repository's — the note says it
+  could not be asked, "not verified", and never "carries no tag".
+
+  `check` reads the product's files and holds no clone of what they pin,
+  so none of this is `check`'s to say: it reads line 2 as a commit and the
+  attribute lines as grammar, and the rest belongs to the one command that
+  has the checkout.
 - **A pin has one reading, and it is the managed script's.** The script is
   the reader that clones: it matches an attribute from the first column of
   a line to the last, takes the first `repository` line, and clones from
@@ -2908,6 +2935,48 @@ GitHub did not answer for the protection, the rulesets or a check-run read
 (`UNREAD`), and when the write would stop requiring a check other than an
 alias retiring for its leg (`DROP`, allowed with `--allow-narrow`).
 
+**The whole protection is put only where nothing protects the branch**: no
+classic protection and no ruleset, the state the plan announces with its
+`create` lines. It used to be put in three other states, each under a plan
+that said otherwise, and each is now a refusal of this half — `REFUSED`,
+exit 2, in the plan as under `--apply` and in the same words — or a reading
+that is not one:
+
+- **A protection that exists and requires no check**, its reviews, its
+  linear history and its rule for administrators set by the repository and
+  required status checks never turned on. The plan printed `keeps every
+  other setting as it is`, and `--apply` put the socle's shape over all of
+  them, the read-back passing because it compared with the body just sent.
+  Refused: this command changes the required checks of a protection that
+  already requires some, and creates a protection where none exists; it
+  does not turn required status checks on in a protection that exists, and
+  never replaces one. Turning that setting on is the repository's to do.
+  What GitHub answers to a change of required checks on a protection that
+  requires none was not measured, and no write is built on it. This refusal
+  does not apply where a ruleset carries a check of the socle: `--apply`
+  writes that ruleset there, and leaves the classic protection as it is.
+- **No classic protection, beside a ruleset that requires none of the
+  socle's checks.** The plan printed no `create` line and said `--apply
+  writes this ruleset, never a classic protection beside it`; `--apply`
+  created a classic protection beside it. Refused: this command does not
+  create a classic protection beside a ruleset, and does not choose which
+  ruleset should require the socle's checks. Once one requires any of them,
+  `--apply` keeps the checks of the first ruleset that requires checks: it
+  writes a ruleset of the repository and refuses one of the organisation.
+  The `ruleset` line of the plan says `--apply writes this ruleset` of a
+  ruleset that carries a check of the socle, and of no other.
+- **An answer that is no protection, and a default branch GitHub did not
+  name**, are `UNREAD`. A 200 carrying nothing was read as a protection
+  that requires no check. And when the repository could not be described,
+  the branch fell back to `main`, every reading was of that guess, and
+  `--apply` created a protection on it: the default branch is now one of
+  the readings nothing is written without. The environment half reads its
+  own endpoints by the name of the repository, none of them by the branch,
+  and is armed all the same.
+
+`--without-legs` in the first two states is told what it always was where
+no protection exists: nothing requires the legs, adopt first.
+
 **What `protect` writes of the release environment.** For a product the
 socle releases — one whose `release.yml` is the generated one — the plan
 also reads the `release` environment, through the reader `preflight`
@@ -3040,10 +3109,50 @@ gh api -X POST repos/OWNER/REPO/environments/release/deployment-branch-policies 
   a write is not prevented: this command has no way to make a write
   conditional on what it read. It is detected by the read-back, and said,
   with what the run had written.
-- **A second run writes nothing to the environment and says so**:
-  `environment: nothing to change`. The protection half is not silent in
-  the same way: `--apply` sends the required checks again even when nothing
-  differs, reads them back and says `protect: applied`.
+- **A second run writes nothing and says so**, in each half:
+  `environment: nothing to change`, and `protect: nothing to change`. The
+  protection half used to send the required checks again even when nothing
+  differed, read them back and say `protect: applied`. It now compares what
+  it would send with what it read, member by member of the body. For a
+  classic protection, `strict` as the boolean GitHub answered, and the
+  required contexts: the same names, each as many times, in any order — a
+  name listed twice is a difference. For a ruleset, each context with the
+  integration bound to it, compared the same way in every rule that
+  requires checks, on two readings that must both hold: the ruleset's own,
+  the one the body is made from, which only `--apply` takes; and the rules
+  of the branch, where every rule that requires checks, whichever ruleset
+  it comes from, must name these contexts and no other — what the read-back
+  after a write requires. Where the two disagree the write is sent and read
+  back as before, and fails as before when the rules of the branch do not
+  show it: a ruleset that holds its checks while the branch does not is
+  not passed. Equal, nothing is sent, nothing is read
+  back, and `--apply` ends on `protect: nothing to change`. A member GitHub
+  did not answer is never an equal one, and the whole protection, put only
+  where nothing protects the branch, has no reading to equal: those are
+  written as before.
+- **`writes` is what `--apply` with the same flags would send for the
+  protection**, in the plan as under `--apply`, as the environment half
+  says its own: empty where the half refuses, empty on a reading that is
+  not there, and empty where nothing differs. `nothingToChange` tells the
+  third from the other two, and the last line follows it: a plan ends on
+  `nothing to change` only where `--apply` would send nothing and refuse
+  nothing, and keeps `nothing written; add --apply` where `--apply` would
+  refuse — the refusal is `--apply`'s to say, as before.
+- **The plan of a ruleset never says `nothing to change`.** A plan reads
+  the rules of the branch and not the ruleset they come from, and the two
+  readings can differ: it names the write, without its body, and where the
+  rules of the branch already list the checks a `note` says that the
+  ruleset itself is read under `--apply`, which sends nothing when it lists
+  them too and empties `writes`. No note where the rules of the branch do
+  not list them, another ruleset's among them: `--apply` writes there.
+- **The app bound to each context of a classic protection is neither
+  compared nor verified.** The body names contexts alone, and GitHub's
+  reference says a context sent that way may be bound to the app that
+  recently set it: not sending keeps the bindings the repository has, and
+  skips no write that the list of names needs.
+- **Held by a scripted host, and not yet by a second run on a repository**:
+  `tests/test_protect_host.py`, whose host answers the rules of a branch
+  and the ruleset as the two readings they are.
 
 **Since 0.57.0 the old names are aliases, and nothing is narrowed.**
 0.54.0 to 0.56.0 printed another order — narrow, adopt, merge, widen — and

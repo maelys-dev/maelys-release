@@ -2,6 +2,76 @@
 
 ## Unreleased
 
+Five corrections found by reading 0.64.0 again, each reproduced before it
+was changed and read a second time by someone who had not written it. Two
+are writes that did more than their plan said; the others are readings
+that answered wrong.
+
+- **`protect` puts the whole protection only where nothing protects the
+  branch.** The whole protection, with the socle's shape, was put in three
+  states where the plan said otherwise: over a protection that exists and
+  requires no check, whose every setting it replaced under a plan that
+  printed `keeps every other setting as it is`; beside a ruleset that
+  requires none of the socle's checks, under a plan that said `never a
+  classic protection beside it`; and on `main` where GitHub had not
+  described the repository. It is now put only where there is neither a
+  classic protection nor a ruleset. The first two states are refused, in
+  the plan as under `--apply`, in the same words, exit 2, nothing
+  written; the default branch is a reading nothing is written without;
+  and a 200 that carries no protection is unread. On one scripted host
+  and 142 312 runs, the whole protection was put 11 912 times before and
+  112 after, each of those where nothing protects the branch. What GitHub
+  answers to a change of required checks where none are required was
+  not measured, so no write is guessed in place of the one refused.
+- **`protect --apply` sends nothing for a protection that already holds
+  what it would write.** It sent its write on every run, and a second run
+  reported a write that had changed nothing. It compares the body with
+  the reading, member by member, and never calls equal a member GitHub
+  did not answer; equal, nothing is sent and the run ends on `protect:
+  nothing to change`. A plan ends on those words only where `--apply`
+  would send nothing and refuse nothing, and the plan of a ruleset never
+  says them, since it does not read the ruleset. The result gains
+  `writes` -- what `--apply` with the same flags would send --,
+  `written` and `nothingToChange`.
+- **A commit its repository has tagged is not said to carry no tag.**
+  `dependencies` judged from the checkout, which holds the tags of the
+  day it was cloned, so a pin moved to a release cut since then got the
+  note at every run. A plan reads the checkout, asks nothing, and says
+  that it did not ask. `--apply` asks the repository once, with ten
+  seconds by the clock and nobody to prompt, brings the tags the commit
+  carries, and says `carries no tag` only of a commit the repository
+  answered for. `--apply` over a checkout already at its pin reached no
+  repository before; it now waits that long at most for each pin it
+  asks about. A plan that git itself made fetch, in the partial clone
+  the socle makes, no longer does, with git 2.45 or later.
+- **The gate of `cut` leaves the signing configuration to the signer.**
+  It answered a clone that signs nothing with a `git config` line to
+  copy, and a key the fleet does not name with `Add the key there`, where
+  the texts the socle installs say those lines are the signer's own.
+  Every refusal on `tag.gpgsign`, `gpg.format`, `user.signingkey`, the
+  key and the allowed signers now says whose it is to change and gives
+  no line to run; the address notes of `check` and `new` name the keys
+  instead of printing `git config --global user.name NAME`. What is
+  checked, the exit codes and the members of the result are unchanged.
+- **A tracked name that is not UTF-8 ends `check` in words, and `adopt`
+  writes nothing it cannot finish.** One such name ended `check`,
+  `declarations`, `adopt`, `preflight` and `dependencies` on a decoding
+  error; they end on a refusal that names the file, with nothing
+  written, where the tracked files are listed. Reading through such a
+  name is not done here: tried, it let `adopt --apply` empty
+  `release.yml` and then fail. That write is closed where it was already
+  open, with `[docs] named`: every managed file is encoded before the
+  first is opened. Two readings beside it: a line that is not UTF-8
+  next to a sibling's path was a false violation and is read; a document
+  or a prose that is not UTF-8 ended the command or was skipped without
+  a word, and is read with a note. Left as they were: `migrate` and
+  `cut` on their own git answers, and the other files read strictly.
+- **The self-test runs its classes side by side.** A thousand tests
+  that each build a repository took nine minutes one after the other.
+  `self-test` runs one test class per process, as many at a time as the
+  machine has processors, or `--jobs N`; a class that fails is printed
+  whole with the line that runs it alone. `--verbose` reports every
+  test again: asked of the command alone, it had never been passed on.
 - **The cost test of the privacy guard holds on a shared runner.** One of
   the socle's own tests bounded a reading by a clock: two mebibytes in under
   a second of processor time. The worst shape takes 0.57 s where the test
@@ -11,8 +81,14 @@
   linear is the ratio between two sizes, and it stays as it was; the clock
   now stops at three seconds, which the two readings that took most of a
   minute still exceed.
-- **Impact.** [asks: nothing] [writes: nothing] Nothing for a product to
-  do: a test of this repository, and no code a product runs.
+- **Impact.** [asks: nothing] [writes: protect, dependencies]
+  Nothing for a product to do. `protect --apply` writes less than it
+  did and refuses two states it wrote over; `dependencies --apply` may
+  ask a repository for its tags. No managed text and no workflow moves.
+  A repository whose protection exists without required checks, or that
+  a ruleset protects without any of the socle's checks, is now refused
+  by `protect` where it was written to: that refusal replaces a write
+  its plan denied.
 
 ## 0.64.0 — 2026-10-11
 

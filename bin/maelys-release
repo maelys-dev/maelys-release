@@ -87,8 +87,8 @@ from maelys_socle.dependencies import (
     neighbour_pins, series, sibling_readers, text_dependencies,
 )
 from maelys_socle.project import (
-    declared_mechanism, declared_value, declared_word, engaged_documents, pinned_product, project_of,
-    require_socle_mechanism,
+    declared_mechanism, declared_value, declared_word, engaged_documents, is_utf8, pinned_product, project_of,
+    require_socle_mechanism, spelled, unread_names,
 )
 from maelys_socle.migration import (
     BUILD_FILES, migration_notes, push_branch, read_prose_records, referencing_files, rewrite_markdown,
@@ -549,7 +549,20 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
         # is not one yet, .git apart -- a check that read nothing without a
         # repository would have said nothing where it had said something.
         if (project / ".git").exists():
-            tracked = git("ls-files", "-z", cwd=project, check=False).split("\0")
+            try:
+                tracked = git("ls-files", "-z", cwd=project, check=False).split("\0")
+            except UnicodeDecodeError as error:
+                # A tracked name that is not UTF-8 ended here `check`,
+                # `declarations`, `adopt`, `preflight` and `dependencies`: a
+                # decoding error, exit 1 and no verdict. Reading through it
+                # is not a patch -- the readers of a name open the file by it
+                # and write it back -- so the command ends here in words. git
+                # has answered and the error holds the answer: the names are
+                # read from its bytes, and git is not asked again.
+                names = sorted(name for name in bytes(error.object).split(b"\0") if not is_utf8(name))
+                if not names:
+                    raise
+                raise unread_names(names) from None
         else:
             tracked = [path.relative_to(project).as_posix() for path in project.rglob("*")
                        if path.is_file() and ".git/" not in path.as_posix()]
@@ -564,11 +577,30 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
             path = project / relative
             if not path.is_file():
                 continue
+            # The name is ASCII, and is looked for whatever the rest of the
+            # file is written in: a prose in Latin-1 was skipped here
+            # without a word, by a rule that says it searched every file.
+            # It is read with what does not decode replaced, and what is
+            # found there is a note: the file was never refused, and a
+            # patch turns no green product red.
+            decoded = True
             try:
-                lines = documentation_name_lines(path.read_text(encoding="utf-8"))
-            except (UnicodeDecodeError, OSError):
+                try:
+                    text = path.read_text(encoding="utf-8")
+                except UnicodeDecodeError:
+                    text, decoded = path.read_text(encoding="utf-8", errors="replace"), False
+            except OSError:
                 continue
-            if lines:
+            lines = documentation_name_lines(text)
+            if lines and not decoded:
+                decl.add("note", f"{relative} is not UTF-8 and was read with what does not decode replaced: it names"
+                                 f" the documentation repository at line{'s' if len(lines) > 1 else ''}"
+                                 f" {', '.join(str(n) for n in lines[:8])}{', …' if len(lines) > 8 else ''}, which"
+                                 f" this repository's files do not unless {DECLARATION_FILE} declares [docs] named"
+                                 " OWNER/NAME. Noted, where a file that is UTF-8 is refused for it: remove the name"
+                                 " (a public reader may see it), or declare the repository on a private one",
+                         "conventions")
+            elif lines:
                 decl.documentation_named.append(relative)
                 decl.add("missing", f"{relative} names the documentation repository at line"
                                     f"{'s' if len(lines) > 1 else ''} {', '.join(str(n) for n in lines[:8])}"
@@ -924,7 +956,17 @@ def read_docs(decl: Declarations) -> None:
             continue
         if path.suffix.lower() != ".md":
             continue  # data, never prose
-        text = path.read_text(encoding="utf-8")
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            # A document in another encoding ended every command that reads
+            # the declarations on a decoding error. What is asked of it
+            # here is in ASCII -- that it says it is generated, or what
+            # verifies it -- and is read through what does not decode; the
+            # file is said not to be UTF-8, and is sorted like any other.
+            text = path.read_text(encoding="utf-8", errors="replace")
+            decl.add("note", f"{relative} is not UTF-8: it is read with what does not decode replaced, for what"
+                     " its first lines say of it, and is sorted as any other document", "conventions")
         if is_generated(text):
             continue
         check = verified_by(text)
@@ -1292,9 +1334,44 @@ def socle_impact(pinned: str) -> list[tuple[str, str]]:
     return list(reversed(impacts))
 
 
+def staged_bytes(staged: dict[str, tuple[str, bool]]) -> dict[str, bytes]:
+    """What `plan` writes, as the bytes it writes: every file encoded before the first is opened.
+
+    A file the working tree holds under a name that is not UTF-8 reaches
+    the staged texts as that name, each byte a lone surrogate: a formula
+    template is listed in release.yml by its name. Writing the text opened
+    the file, which empties it, and then failed to encode: `adopt --apply`
+    left a product without its release workflow, and a second run wrote the
+    blocks of a repository that has none. Nothing is opened until every
+    file encodes, and what does not is refused in words, the name spelled
+    from its bytes.
+    """
+    encoded: dict[str, bytes] = {}
+    for relative, (content, _) in staged.items():
+        try:
+            encoded[relative] = content.encode("utf-8")
+        except UnicodeEncodeError as error:
+            head = max(content.rfind(space, 0, error.start) for space in " \t\n") + 1
+            ends = [end for end in (content.find(space, error.start) for space in " \t\n") if end >= 0]
+            word = content[max(head, error.start - 80):min([*ends, error.start + 80])]
+            try:
+                raw = word.encode("utf-8", "surrogateescape")
+            except UnicodeEncodeError:
+                raw = word.encode("utf-8", "backslashreplace")
+            raise Failure("PRECONDITION_FAILED",
+                          f"The socle would write a name that is not UTF-8 into {relative}, where it reads"
+                          f" {spelled(raw)} -- it writes UTF-8, and encodes every file before it opens the"
+                          " first: nothing was written.",
+                          "A file of this repository carries that name, and the managed files are written from"
+                          " it. Renaming it is this repository's own to do: rename, commit, and run the command"
+                          " again.") from None
+    return encoded
+
+
 def plan(decl: Declarations, staged: dict[str, tuple[str, bool]], apply: bool) -> list[dict]:
     """One entry per managed file: create, update or same; written when applying."""
     files: list[dict] = []
+    encoded = staged_bytes(staged)
     for relative in MANAGED:
         if relative not in staged:
             continue
@@ -1342,7 +1419,7 @@ def plan(decl: Declarations, staged: dict[str, tuple[str, bool]], apply: bool) -
                 entry["action"] = "same"
         if apply and entry["action"] != "same":
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(content, encoding="utf-8")
+            path.write_bytes(encoded[relative])
             if executable:
                 path.chmod(path.stat().st_mode | 0o111)
         files.append(entry)
@@ -1702,9 +1779,19 @@ def handle_self_test(invocation: Invocation) -> tuple[dict, int]:
     tests = socle_root() / "tests"
     if not tests.is_dir():
         raise Failure("NOT_FOUND", f"{tests} is not part of this installation.", "Run from a maelys-release checkout.")
-    command = [sys.executable, "-W", "error", "-m", "unittest", "discover", "-s", str(tests)]
-    if invocation.flag("--verbose"):
-        command.append("-v")
+    # One class per process, several at a time: the suite builds a
+    # repository for almost every test and took nine minutes one after the
+    # other, on a machine with processors to spare.
+    jobs = str(invocation.option("--jobs", "")) or str(os.cpu_count() or 1)
+    if not jobs.isdigit() or int(jobs) < 1:
+        raise Failure("VALIDATION_FAILED", f"--jobs takes a number of processes, 1 or more, not {jobs!r}.",
+                      "Leave it out to run as many classes at a time as this machine has processors.")
+    command = [sys.executable, "-W", "error", str(tests / "side_by_side.py"), "--jobs", jobs]
+    # --verbose is also a global option, which the framework reads first:
+    # asked of the command alone, it was never passed on and no run
+    # reported its tests.
+    if invocation.flag("--verbose") or invocation.verbose:
+        command.append("--verbose")
     log = sys.stderr if invocation.format != "text" else sys.stdout
     log.flush()
     with host.HOST.self_test_environment() as environment:
@@ -2250,6 +2337,12 @@ APP = SocleProgram(PROGRAM, PRODUCT, socle_version(), [
                                        "kept": {"type": "array", "items": {"type": "string"}},
                                        "unread": {"type": "array", "items": {"type": "string"}},
                                        "keeps": {"type": "object"}, "creates": {"type": "object"},
+                                       "writes": {"type": "array", "items": {
+                                           "type": "object", "required": ["method", "endpoint"],
+                                           "properties": {"method": {"enum": ["PATCH", "PUT"]},
+                                                          "endpoint": {"type": "string"},
+                                                          "body": {"type": "object"}}}},
+                                       "written": STRINGS, "nothingToChange": {"type": "boolean"},
                                        "before": {"type": "object", "required": ["classic", "required", "rulesets"],
                                                   "properties": {"classic": {"type": ["object", "null"]},
                                                                  "required": {"type": "array",
@@ -2341,7 +2434,9 @@ APP = SocleProgram(PROGRAM, PRODUCT, socle_version(), [
                                            "formula": {"type": "string"}, "changed": {"type": "boolean"},
                                            "diff": {"type": "string"}, "commit": {"type": "string"}, "install": {"type": "string"}}}),
     cli.execute("self-test", "self-test", "Run the socle's own tests.", handle_self_test,
-                options=[cli.flag("--verbose", "Report every test.")],
+                options=[cli.flag("--verbose", "Report every test."),
+                         cli.option("--jobs", "Test classes run at a time; defaults to the number of processors.",
+                                    cli.argument("N"))],
                 schema={"type": "object", "additionalProperties": False, "required": ["tests", "passed"],
                         "properties": {"tests": {"type": "string"}, "passed": {"type": "boolean"}}}),
     cli.execute("vendor", "vendor", "Refresh bin/maelys_cli.py from maelys-cli at dependencies/maelys-cli.pin and record its digest.",
