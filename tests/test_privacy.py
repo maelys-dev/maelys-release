@@ -837,9 +837,13 @@ class CostTest(Tree):
     def test_every_shape_is_read_in_time_linear_in_its_size(self) -> None:
         """Measured where it was written: 4 MiB of any of these in under a second, 0.73 s for the worst.
 
-        Held here at half the size and the same bound, on processor time: a
-        machine twice as slow still passes, and a reading that stopped being
-        linear does not -- the three that were not took 2.3 s, 53 s and 58 s.
+        Held here at half the size, on processor time, by two bounds. The
+        ratio is the one that says linear: twice the text in less than three
+        times the time, which each of the three readings that were not linear
+        failed -- they took 2.3 s, 53 s and 58 s. The clock only says bounded,
+        and is held wide: the worst shape at this size takes 0.57 s where this
+        was written and took 1.04 s on a shared macOS runner, which a bound of
+        one second called a failure of a reading that had not changed.
         """
         mebibyte = 1024 * 1024
         who = local([MACHINE], [(1, TERM)])
@@ -848,7 +852,7 @@ class CostTest(Tree):
             with self.subTest(name=name):
                 first = self.cpu(name, one[name], who)
                 second = self.cpu(name, two[name], who)
-                self.assertLess(second, 1.0)
+                self.assertLess(second, 3.0)
                 self.assertLess(second, 3 * first + 0.05)
 
     def test_a_file_that_holds_too_much_is_read_up_to_there_and_said_to_be(self) -> None:
