@@ -106,9 +106,9 @@ from maelys_socle.github import (
     FORMULA_REPOSITORY, FORMULA_VERSIONS, TAG_WORKFLOWS, TAP_SECRETS, WITHDRAWN_FILE,
     branch_protection, channel_visibility, check_runs, classic_protection, cut_repository, default_branch,
     deployment_policies, destination_is_public, environment_gate, github_api, github_list, github_read,
-    github_repository, observed_contexts, protection_settings, publication_record, read_repository,
-    repository_visibility, required_contexts, ruleset_shape, tag_deployments, tap_drift, tap_secrets,
-    verify_protection,
+    github_repository, observed_contexts, policy_verdicts, protection_settings, publication_record,
+    read_release_environment, read_repository, repository_visibility, required_contexts, ruleset_shape,
+    tag_deployments, tap_drift, tap_secrets, verify_protection,
 )
 
 Failure = cli.Failure
@@ -1784,6 +1784,9 @@ VERDICT_SCHEMA = {"type": "object", "required": ["valid", "violations"],
 SOCLE_SCHEMA = {"type": "object", "required": ["version", "tag", "sha"],
                 "properties": {"version": {"type": "string"}, "tag": {"type": "string"}, "sha": {"type": "string"}}}
 STRINGS = {"type": "array", "items": {"type": "string"}}
+# One line of a gate or of a verdict: ok, note or fail, and what it says.
+STATUS_LINE = {"type": "object", "required": ["status", "message"],
+               "properties": {"status": {"type": "string"}, "message": {"type": "string"}}}
 SOCLE_OPTIONS = (
     cli.option("--product", "Product name; defaults to the directory name.", cli.argument("NAME")),
     cli.option("--socle-sha", "Socle commit to pin instead of this checkout's HEAD (trials and tests).",
@@ -2182,14 +2185,18 @@ APP = SocleProgram(PROGRAM, PRODUCT, socle_version(), [
                                            "notes": STRINGS, "blocked": {"type": "boolean"}}}),
     cli.execute("protect", "protect",
                 "Report what the default branch should require, derived from the workflows and the runs it"
-                " carries rather than typed by hand; --apply writes it.",
+                " carries rather than typed by hand, and what the release environment of a product the"
+                " socle releases should admit; --apply writes each, and a refusal of one does not stop"
+                " the other.",
                 handle_protect,
                 operands=[DIR_OPERAND],
-                options=[cli.flag("--apply", "Write the protection instead of only reporting it."),
+                options=[cli.flag("--apply", "Write the protection and the release environment instead of"
+                                  " only reporting them; exit 2 when either is refused."),
                          cli.flag("--allow-lock", "Require names no merged pull request has produced yet."),
                          cli.flag("--allow-narrow", "Stop requiring checks the plan leaves out, beyond alias replacements."),
                          cli.flag("--without-legs", "Propose the required list minus the socle's matrix legs:"
-                                  " the narrowing that comes before an adoption renames them.")],
+                                  " the narrowing that comes before an adoption renames them. The release"
+                                  " environment is neither read nor written.")],
                 schema={"type": "object", "additionalProperties": False,
                         "required": ["repository", "branch", "proposed"],
                         "properties": {"repository": {"type": "string"}, "branch": {"type": "string"},
@@ -2222,7 +2229,30 @@ APP = SocleProgram(PROGRAM, PRODUCT, socle_version(), [
                                            "type": "object", "required": ["required", "by"],
                                            "properties": {"required": {"type": "string"},
                                                           "by": {"type": "string"}}}},
-                                       "gone": {"type": "array", "items": {"type": "string"}}}}),
+                                       "gone": {"type": "array", "items": {"type": "string"}},
+                                       "refused": {"type": "object", "required": ["message", "hint"],
+                                                   "properties": {"message": {"type": "string"},
+                                                                  "hint": {"type": "string"}}},
+                                       "environment": {
+                                           "type": "object", "additionalProperties": False,
+                                           "required": ["name", "exists", "state", "writes", "refused", "applied"],
+                                           "properties": {
+                                               "name": {"type": "string"},
+                                               "exists": {"type": ["boolean", "null"]},
+                                               "policy": {"enum": ["custom", "protected-branches", "all", None]},
+                                               "rules": {"type": "array", "items": {"type": "object"}},
+                                               "holds": {"type": ["object", "null"]},
+                                               "state": {"type": "string"}, "becomes": {"type": "string"},
+                                               "writes": {"type": "array", "items": {
+                                                   "type": "object", "required": ["method", "endpoint", "body"],
+                                                   "properties": {"method": {"enum": ["PUT", "POST"]},
+                                                                  "endpoint": {"type": "string"},
+                                                                  "body": {"type": "object"}}}},
+                                               "refused": STRINGS, "unread": STRINGS,
+                                               "gate": {"type": "array", "items": STATUS_LINE},
+                                               "note": {"type": "string"},
+                                               "applied": {"type": "boolean"}, "written": STRINGS,
+                                               "before": {"type": "object"}}}}}),
     cli.execute("rehearse", "rehearse",
                 "Replay the Linux build job of the release in a Docker container on a copy of the working"
                 " tree, make check with --check, or a channel's publish script against a published release"

@@ -4972,11 +4972,12 @@ class WidenAfterTheMergeTest(unittest.TestCase):
             return MODULE.handle_protect(invocation)[0]
 
     def test_widening_before_the_merge_is_refused_and_names_the_open_pulls(self) -> None:
-        with self.assertRaises(MODULE.Failure) as refusal:
-            self.protect(absent=True, open_pulls=(12, 15))
-        self.assertIn("no merged pull request", refusal.exception.message)
-        self.assertIn("Merge the adoption first", refusal.exception.hint)
-        self.assertIn("#12, #15", refusal.exception.hint)
+        # A refusal is a line of the result since the two halves of protect
+        # stopped waiting for each other: REFUSED, nothing written, exit 2.
+        refusal = self.protect(absent=True, open_pulls=(12, 15))["refused"]
+        self.assertIn("no merged pull request", refusal["message"])
+        self.assertIn("Merge the adoption first", refusal["hint"])
+        self.assertIn("#12, #15", refusal["hint"])
 
     def test_once_merged_it_widens(self) -> None:
         report = self.protect(absent=False, fake_writes=True)
@@ -5461,9 +5462,11 @@ class LegAliasTest(unittest.TestCase):
         # only once a merged pull request has produced it.
         self.assertIn("path     a required check nothing produces blocks every merge", text)
         self.assertIn("--allow-narrow' drops those, then merge a pull request", text)
-        with self.assertRaises(MODULE.Failure) as refused:
-            self.protect(old, seen, apply=True)
-        self.assertIn("--allow-narrow", refused.exception.hint)
+        (refused, code), written = self.protect(old, seen, apply=True)
+        self.assertIn("--allow-narrow", refused["refused"]["hint"])
+        self.assertEqual((code, written, refused["applied"]), (MODULE.EXIT_VIOLATIONS, [], False))
+        self.assertIn("REFUSED  this write would stop requiring", MODULE.text_protect(refused))
+        self.assertIn("protect: refused; the protection is not written", MODULE.text_protect(refused))
 
     def test_the_output_keeps_what_the_branch_required_before(self) -> None:
         old = ["check / check (linux)", "mine"]
@@ -5573,18 +5576,19 @@ class LegAliasTest(unittest.TestCase):
         required = ["check / check (ubuntu-26.04)", "mutation", "macos-gates"]
         seen = ["check / check (linux)", "check / check (ubuntu-26.04)", "mutation", "macos-gates"]
         for timeout in (("/protection",), ("/check-runs",), ("pulls?",)):
-            with self.assertRaises(MODULE.Failure) as refusal:
-                self.protect_with(self.answers(required, seen, timeout=timeout), required, seen)
-            self.assertIn("did not answer", refusal.exception.message, timeout)
+            report, commands = self.protect_with(self.answers(required, seen, timeout=timeout), required, seen)
+            self.assertIn("did not answer", report["refused"]["message"], timeout)
+            self.assertEqual((commands, report["applied"]), ([], False), timeout)
 
     def test_apply_does_not_narrow_by_itself(self) -> None:
         required = ["check / check (ubuntu-26.04)", "mutation", "macos-gates"]
         seen = ["check / check (linux)", "check / check (ubuntu-26.04)", "mutation"]
-        with self.assertRaises(MODULE.Failure) as refusal:
-            self.protect_with(self.answers(required, seen), required, seen)
-        self.assertIn("macos-gates", refusal.exception.message)
+        report, commands = self.protect_with(self.answers(required, seen), required, seen)
+        self.assertIn("macos-gates", report["refused"]["message"])
+        self.assertEqual((commands, report["applied"]), ([], False))
         report, commands = self.protect_with(self.answers(required, seen), required, seen, flags=("--allow-narrow",))
         self.assertTrue(report["applied"])
+        self.assertNotIn("refused", report)
 
     def test_an_existing_protection_changes_in_its_checks_alone(self) -> None:
         """maelys-oci: "require branches to be up to date" went from true to
@@ -5597,8 +5601,10 @@ class LegAliasTest(unittest.TestCase):
         self.assertEqual(body, {"strict": True, "contexts": [*ALL_LEGS, "mutation"]})
 
     def test_before_the_adoption_merges_the_swap_is_still_refused(self) -> None:
-        with self.assertRaises(MODULE.Failure):
-            self.protect(["check / check (ubuntu-26.04)"], ["check / check (ubuntu-26.04)"], apply=True)
+        (report, code), written = self.protect(["check / check (ubuntu-26.04)"], ["check / check (ubuntu-26.04)"],
+                                               apply=True)
+        self.assertTrue(report["refused"]["message"])
+        self.assertEqual((code, written), (MODULE.EXIT_VIOLATIONS, []))
 
     def test_an_adoption_refuses_a_branch_requiring_an_old_name(self) -> None:
         # Until 0.59.2 the aliases were produced and the guard let them be;
@@ -6360,7 +6366,13 @@ class UnitTest(unittest.TestCase):
         self.assertEqual([status for status, _ in missing + unlimited + protected], ["fail"] * 3)
         self.assertIn("environment release is missing in o/r", missing[0][1])
         self.assertIn("no deployment policy", unlimited[0][1])
-        self.assertIn("no deployment policy", protected[0][1])
+        # A limit to protected branches is a limit: it used to be reported as
+        # "no deployment policy: any branch can publish", which is false of
+        # it. What is wrong with it is said -- no tag can deploy.
+        self.assertNotIn("no deployment policy", protected[0][1])
+        self.assertNotIn("any branch", protected[0][1])
+        self.assertIn("limits deployments to protected branches, not to tags v*", protected[0][1])
+        self.assertIn("a tag cannot", protected[0][1])
 
     def test_a_reading_that_failed_is_never_an_answer(self) -> None:
         """Three states told apart where two were reported: an environment

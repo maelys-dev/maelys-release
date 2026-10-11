@@ -85,7 +85,7 @@ from the manifest here:
 
 | Command | Recorded branches |
 | --- | --- |
-| `protect` plan | Classic settings, rulesets, open branch, unreadable protection, unreadable check runs, `--without-legs` |
+| `protect` plan | Classic settings, rulesets, open branch, unreadable protection, unreadable check runs, `--without-legs`; in each but the last, the release environment and its policies, read through the reader `preflight` verifies with and found with nothing to change |
 | `preflight` | Classic protection, ruleset, private visibility, open branch, absent release environment, an unreadable one, a branch policy beside the tag rule, a repository that has never published; signing configuration and tap drift reads |
 | `check` and `preflight` on a seeded name | The prose line naming the documentation repository: refused, and `preflight` stopping before its GitHub reads |
 | `adopt` plan and `check` | Old pin with public/classic-protection selectors; `current` false, true and unknown, and the resulting `check` verdicts |

@@ -11,8 +11,8 @@ from . import host
 from .constants import DECLARATION_FILE
 from .declarations import Declarations
 from .checkouts import git_base
-from .github import (branch_protection, channel_visibility, deployment_policies, environment_gate,
-                     github_read, github_repository, publication_record, read_protection,
+from .github import (branch_protection, channel_visibility, environment_gate, github_repository,
+                     policy_verdicts, publication_record, read_protection, read_release_environment,
                      read_repository, secret_scanning, tap_drift, tap_secrets)
 from .host import git, run
 
@@ -405,17 +405,17 @@ def repository_checks(decl: Declarations) -> list[tuple[str, str]]:
             found.append(("note", f"{repository} is private: the SBOM {decl_sbom} is published but not attested."
                                   " The release still refuses a document that names no subject or records a"
                                   " digest that disagrees; nothing signs the link"))
-    # Read once, with its state: an environment GitHub refused to describe
-    # was reported as an environment that does not exist, which is the
-    # collapse github_read exists to prevent.
-    state, body = github_read(f"repos/{repository}/environments/release")
-    environment = body if state == "ok" and isinstance(body, dict) else None
-    found.extend(deployment_policies(repository, environment, state))
+    # Read once, with its state, by the reader `protect` writes from: an
+    # environment GitHub refused to describe was reported as an environment
+    # that does not exist, which is the collapse github_read exists to
+    # prevent, and a second reader is how a fix reaches one command of two.
+    reading = read_release_environment(repository)
+    found.extend(policy_verdicts(reading, project))
     # A deployment policy says *what* may publish; it says nothing about
     # *who* approves. The conventions call this environment the human gate,
     # and the socle used to describe a gate it never saw closed: a product
     # published unattended and preflight said ok.
-    found.extend(environment_gate(repository, environment, gate))
+    found.extend(environment_gate(repository, reading.environment, gate))
     # The default branch is what a tag is expected to come from, and what
     # commit_verification: signed-on-default-branch relies on. It is
     # protected in two ways that do not answer on the same endpoint: the

@@ -13,7 +13,7 @@ from maelys_cli import Failure
 from . import host
 from .context import Context
 from .host import git
-from .constants import DECLARATION_FILE, DEFAULT_TAP, SOCLE_REPOSITORY
+from .constants import DECLARATION_FILE, DEFAULT_TAP, PROGRAM, SOCLE_REPOSITORY
 
 
 # A formula names its repository in its url, and the socle renders two
@@ -259,8 +259,265 @@ POLICY_PAGES = 5
 RELEASE_PAGES = 3
 
 
-def deployment_policies(repository: str, environment: dict | None,
-                        state: str = "ok") -> list[tuple[str, str]]:
+# The environment the publish job of release.yml runs in. One word, in one
+# place: the generated release.yml never passes `release_environment`, so the
+# input keeps its default, and every reader and writer below asks for that.
+RELEASE_ENVIRONMENT = "release"
+# What its deployment policy must be, and the one rule it must hold: the
+# shapes GitHub takes on `PUT environments/NAME` and on `POST
+# environments/NAME/deployment-branch-policies`.
+CUSTOM_POLICY = {"protected_branches": False, "custom_branch_policies": True}
+TAG_RULE = {"name": "v*", "type": "tag"}
+
+
+@dataclass(frozen=True)
+class ReleaseEnvironment:
+    """The release environment and its deployment policies, read once.
+
+    `preflight` verifies this environment and `protect` writes it. Two
+    readers of one setting is how this socle told a ruleset-protected
+    repository it was open, three times over; so there is one reading here,
+    and the command that writes decides on exactly what the command that
+    verifies reports. `state` is the environment's own read and `refused`
+    the page of the listing GitHub would not give: neither is collapsed into
+    an absence. Three states and no fourth: `ok` with the object GitHub
+    answered, `absent` for its 404, and anything else unreadable -- an
+    answer that is not an object included, which was once read as "no such
+    environment" and is the one reading a write must never be planned on.
+    """
+
+    repository: str
+    state: str
+    environment: dict | None
+    entries: tuple = ()
+    complete: bool = False
+    refused: str = ""
+    page: int = 1
+    total: int | None = None
+
+    @property
+    def endpoint(self) -> str:
+        return f"repos/{self.repository}/environments/{RELEASE_ENVIRONMENT}"
+
+    @property
+    def listing(self) -> str:
+        return f"{self.endpoint}/deployment-branch-policies"
+
+    @property
+    def missing(self) -> bool:
+        """GitHub answered that there is no such environment."""
+        return self.state == "absent"
+
+    @property
+    def unreadable(self) -> bool:
+        """GitHub did not describe the environment: not the same fact as none."""
+        return self.state not in ("ok", "absent")
+
+    @property
+    def policy(self) -> dict | None:
+        """`deployment_branch_policy` as GitHub answered it, in the two members a PUT takes; None for no limit."""
+        held = self.environment.get("deployment_branch_policy") if self.environment else None
+        return {key: bool(held.get(key)) for key in CUSTOM_POLICY} if isinstance(held, dict) else None
+
+    @property
+    def custom(self) -> bool:
+        """Whether deployments are limited by a list of name patterns."""
+        return bool((self.policy or {}).get("custom_branch_policies"))
+
+    @property
+    def protected_only(self) -> bool:
+        """Whether deployments are limited to protected branches: a limit, and not the one a release needs."""
+        return bool((self.policy or {}).get("protected_branches")) and not self.custom
+
+    @property
+    def tag_rule(self) -> list[dict]:
+        return [entry for entry in self.entries
+                if entry.get("type") == TAG_RULE["type"] and entry.get("name") == TAG_RULE["name"]]
+
+    @property
+    def widening(self) -> list[dict]:
+        """Every policy that is not the tag rule: each one admits something more."""
+        return [entry for entry in self.entries if entry not in self.tag_rule]
+
+
+def release_environment(repository: str, environment: object, state: str = "ok") -> ReleaseEnvironment:
+    """The reading, from what `GET environments/release` answered.
+
+    The listing is asked only of an environment with custom policies: it
+    answers 404 for any other, and the endpoint that says nothing is not the
+    endpoint that says no.
+    """
+    if state == "ok" and not isinstance(environment, dict):
+        state = "unreadable"
+    reading = ReleaseEnvironment(repository, state, environment if state == "ok" else None)
+    return with_policies(reading) if reading.custom else reading
+
+
+def with_policies(reading: ReleaseEnvironment) -> ReleaseEnvironment:
+    """READING with the list of its deployment policies, as far as GitHub gives it.
+
+    The one loop that reads that list. `preflight` asks it of an environment
+    with custom policies; `protect` also asks it of one without, before it
+    makes the policy custom, since a list GitHub kept from an earlier custom
+    policy would become the rule the moment the policy is. Measured on a
+    repository of the fleet whose environment has no deployment policy: the
+    listing answers 404 there, which is `refused == "absent"` below and says
+    nothing either way.
+
+    The whole set is read, across pages: the listing answers 30 entries
+    by default, and a first version of this read one page and named 29 of
+    the 30 policies to remove -- red, and an incomplete remedy, which is the
+    same defect one level down. `total_count` says when to stop.
+    """
+    entries: list[dict] = []
+    total, page, unread, complete = None, 1, "", False
+    while page <= POLICY_PAGES:
+        read, body = github_read(f"{reading.listing}?per_page={PAGE}&page={page}")
+        if read != "ok" or not isinstance(body, dict):
+            # Not a return: the policies already read are facts, and a
+            # refusal on page 2 used to drop the violations of page 1 --
+            # ready went back to true with a branch policy in hand.
+            unread = read if read != "ok" else "unreadable"
+            break
+        batch = [entry for entry in body.get("branch_policies") or [] if isinstance(entry, dict)]
+        entries.extend(batch)
+        if isinstance(body.get("total_count"), int):
+            total = body["total_count"]
+        if not batch or (len(entries) >= total if total is not None else len(batch) < PAGE):
+            complete = True
+            break
+        page += 1
+    return ReleaseEnvironment(reading.repository, reading.state, reading.environment, tuple(entries), complete,
+                              unread, page, total)
+
+
+def read_release_environment(repository: str) -> ReleaseEnvironment:
+    """Read the release environment of REPOSITORY and, when it has them, its policies.
+
+    Read once, with its state: an environment GitHub refused to describe
+    was reported as an environment that does not exist, which is the
+    collapse github_read exists to prevent.
+    """
+    state, body = github_read(ReleaseEnvironment(repository, "", None).endpoint)
+    return release_environment(repository, body, state)
+
+
+def environments_named(repository: str) -> tuple[bool, list[str]]:
+    """(whether the whole list was read, the names of the environments REPOSITORY has).
+
+    A second witness, on another endpoint, for the one answer a write is
+    created on: `protect` makes an environment only when the environment's
+    own read says 404 *and* this list, read whole, does not name it. One 404
+    answered in error over an environment holding two reviewers was enough,
+    on a host that replaces what a PUT omits, to lose both and report
+    `applied`.
+    """
+    names: list[str] = []
+    listing = f"repos/{repository}/environments"
+    for page in range(1, POLICY_PAGES + 1):
+        state, body = github_read(f"{listing}?per_page={PAGE}&page={page}")
+        if state != "ok" or not isinstance(body, dict) or not isinstance(body.get("environments"), list):
+            return False, names
+        batch = [str(entry.get("name")) for entry in body["environments"] if isinstance(entry, dict)]
+        names.extend(batch)
+        total = body.get("total_count")
+        if not batch or (len(names) >= total if isinstance(total, int) else len(batch) < PAGE):
+            return True, names
+    return False, names
+
+
+SENT_BACK = ("required_reviewers", "wait_timer")
+
+
+def carried(environment: dict | None) -> dict | None:
+    """What an environment holds beyond its deployment policy, as one comparable shape.
+
+    The plan prints it, a PUT sends it back, and the re-read is compared
+    with it: one shape for the three, as `protection_settings` is for a
+    branch. A rule of a type this does not know is named rather than
+    dropped, because what cannot be sent back must not be PUT over.
+    """
+    if not isinstance(environment, dict):
+        return None
+    rules = [rule for rule in environment.get("protection_rules") or [] if isinstance(rule, dict)]
+    reviewing = next((rule for rule in rules if rule.get("type") == "required_reviewers"), None)
+    timer = next((rule for rule in rules if rule.get("type") == "wait_timer"), None)
+    reviewers = []
+    for entry in (reviewing or {}).get("reviewers") or []:
+        who = entry.get("reviewer") if isinstance(entry, dict) and isinstance(entry.get("reviewer"), dict) else {}
+        reviewers.append({"type": entry.get("type") if isinstance(entry, dict) else None, "id": who.get("id"),
+                          "name": who.get("login") or who.get("slug") or who.get("name") or "?"})
+    return {"reviewers": reviewers,
+            "reviewing": reviewing is not None,
+            "preventSelfReview": reviewing.get("prevent_self_review") if reviewing else None,
+            "waitTimer": int(timer.get("wait_timer") or 0) if timer else 0,
+            "adminsBypass": environment.get("can_admins_bypass"),
+            "otherRules": sorted(str(rule.get("type")) for rule in rules
+                                 if rule.get("type") not in (*SENT_BACK, "branch_policy"))}
+
+
+def comparable(holds: dict | None) -> dict | None:
+    """HOLDS as what two readings must agree on: who reviews as a set, never as a list.
+
+    GitHub owes nobody the order of the reviewers, and a display name is
+    not an identity: the same two reviewers read back in another order
+    stopped the command after its writes, calling it a defect of the socle.
+    """
+    if holds is None:
+        return None
+    return {**{key: value for key, value in holds.items() if key != "reviewers"},
+            "reviewers": sorted(f"{entry['type']} {entry['id']}" for entry in holds["reviewers"])}
+
+
+def sent_back(holds: dict) -> tuple[dict, list[str]]:
+    """(the members of a PUT that carry HOLDS back, what cannot be carried back).
+
+    Only what is there is sent: a wait timer of zero, no reviewer and the
+    default bypass are what a PUT that omits them leaves or resets to, the
+    same state either way, so the call names nothing the environment does
+    not hold. `can_admins_bypass` is sent on the strength of what GitHub
+    returns and accepts in practice: its reference for this endpoint does
+    not list it.
+    """
+    body: dict = {}
+    lost = [f"a protection rule of type {kind}" for kind in holds["otherRules"]]
+    if holds["waitTimer"]:
+        body["wait_timer"] = holds["waitTimer"]
+    if holds["reviewing"] and not holds["reviewers"]:
+        # `prevent_self_review` with nobody to review, for one: a shape no
+        # member of the PUT is known to carry, so it is not written over.
+        lost.append("a required_reviewers rule that names no reviewer")
+    if holds["reviewers"]:
+        unnamed = [entry["name"] for entry in holds["reviewers"]
+                   if entry["type"] not in ("User", "Team") or not isinstance(entry["id"], int)]
+        lost.extend(f"the reviewer {name}, read without a type and an id" for name in unnamed)
+        body["reviewers"] = [{"type": entry["type"], "id": entry["id"]} for entry in holds["reviewers"]]
+        if holds["preventSelfReview"] is not None:
+            body["prevent_self_review"] = bool(holds["preventSelfReview"])
+    if holds["adminsBypass"] is False:
+        body["can_admins_bypass"] = False
+    return body, lost
+
+
+def widening_verdicts(reading: ReleaseEnvironment) -> list[tuple[str, str]]:
+    """One violation per policy beside the tag rule, named with what removes it.
+
+    The words `preflight` fails on and the words `protect --apply` refuses
+    with: the socle adds the tag rule and removes nothing, so a policy
+    somebody put there is the operator's to remove, by its own line.
+    """
+    found: list[tuple[str, str]] = []
+    for entry in reading.widening:
+        kind = entry.get("type") or "policy"
+        found.append(("fail", f"environment release of {reading.repository} also admits the {kind}"
+                              f" {entry.get('name') or '?'}:"
+                              " a deployment policy is a union, so that alone lets a workflow_dispatch or an edited"
+                              " release.yml publish. Remove it with 'gh api -X DELETE " + reading.listing
+                              + f"/{entry.get('id', '?')}'"))
+    return found
+
+
+def policy_verdicts(reading: ReleaseEnvironment, directory: object) -> list[tuple[str, str]]:
     """Whether the release environment admits tags v* and nothing else.
 
     The socle looked for the tag rule with `any` and said "limits
@@ -274,75 +531,76 @@ def deployment_policies(repository: str, environment: dict | None,
     it on a fixture: "tags v* only" and "tags v* + branch main" answered the
     same.
 
-    The whole set is read now, across pages: the listing answers 30 entries
-    by default, and a first version of this read one page and named 29 of
-    the 30 policies to remove -- red, and an incomplete remedy, which is the
-    same defect one level down. `total_count` says when to stop.
-
     Two states, never one: an environment GitHub refused to describe is not
     an environment that does not exist, and a listing it refused is not an
     empty listing. Both are notes naming what could not be read; only an
     absent environment and a read list missing the tag rule are violations.
+
+    What arms a missing environment is `protect`, and each remedy says so,
+    with DIRECTORY as the command was given it: it used to be two calls
+    copied by hand from the conventions, the second of which a product ran
+    twice. `protect` arms the environment whatever becomes of the branch's
+    protection in the same run, so the remedy holds for a repository whose
+    protection that command cannot write.
     """
-    if state == "absent" or (state == "ok" and environment is None):
-        return [("fail", f"environment release is missing in {repository};"
-                         " create it and limit its deployments to tags v*")]
-    if state != "ok" or not isinstance(environment, dict):
-        return [("note", f"environment release of {repository} could not be read ({state}):"
+    repository = reading.repository
+    protect = f"'{PROGRAM} protect {directory} --apply'"
+    if reading.missing:
+        return [("fail", f"environment release is missing in {repository}; {protect} creates it limited"
+                         " to tags v*")]
+    if reading.unreadable:
+        return [("note", f"environment release of {repository} could not be read ({reading.state}):"
                          " what may publish from this repository is unknown here")]
-    if not (environment.get("deployment_branch_policy") or {}).get("custom_branch_policies"):
+    if reading.protected_only:
+        # A limit, and said as one: this used to read "no deployment policy:
+        # any branch can publish", which is false of an environment that
+        # admits protected branches alone -- and what it does not admit is
+        # the tag a release is.
+        return [("fail", f"environment release of {repository} limits deployments to protected branches,"
+                         " not to tags v*: a workflow_dispatch from a protected branch can publish and a"
+                         f" tag cannot; {protect} replaces that limit by tags v*")]
+    if not reading.custom:
         return [("fail", f"environment release of {repository} has no deployment policy: any branch,"
-                         " workflow_dispatch or edited release.yml can publish; limit it to tags v*")]
-    listing = f"repos/{repository}/environments/release/deployment-branch-policies"
-    entries: list[dict] = []
-    total, page, unread, complete = None, 1, "", False
-    while page <= POLICY_PAGES:
-        read, body = github_read(f"{listing}?per_page={PAGE}&page={page}")
-        if read != "ok" or not isinstance(body, dict):
-            # Not a return: the policies already read are facts, and a
-            # refusal on page 2 used to drop the violations of page 1 --
-            # ready went back to true with a branch policy in hand.
-            unread = read
-            break
-        batch = [entry for entry in body.get("branch_policies") or [] if isinstance(entry, dict)]
-        entries.extend(batch)
-        if isinstance(body.get("total_count"), int):
-            total = body["total_count"]
-        if not batch or (len(entries) >= total if total is not None else len(batch) < PAGE):
-            complete = True
-            break
-        page += 1
-    tag_rule = [entry for entry in entries if entry.get("type") == "tag" and entry.get("name") == "v*"]
-    widening = [entry for entry in entries if entry not in tag_rule]
+                         " workflow_dispatch or edited release.yml can publish;"
+                         f" {protect} limits it to tags v*")]
+    entries, complete = reading.entries, reading.complete
     found: list[tuple[str, str]] = []
     # An absence is a conclusion about what was not seen, so it needs the
     # whole list; a policy that was seen is a fact whatever came after it.
-    if complete and not tag_rule:
+    if complete and not reading.tag_rule:
         found.append(("fail", f"environment release of {repository} has a deployment policy without the tag rule v*"))
-    for entry in widening:
-        kind = entry.get("type") or "policy"
-        found.append(("fail", f"environment release of {repository} also admits the {kind} {entry.get('name') or '?'}:"
-                              " a deployment policy is a union, so that alone lets a workflow_dispatch or an edited"
-                              " release.yml publish. Remove it with 'gh api -X DELETE " + listing
-                              + f"/{entry.get('id', '?')}'"))
+    found.extend(widening_verdicts(reading))
     if complete:
-        if tag_rule and not widening:
+        if reading.tag_rule and not reading.widening:
             found.append(("ok", f"environment release of {repository} limits deployments to tags v*"))
         return found
     # Said rather than implied: what was read, why it stopped, and which
     # question that leaves unanswered.
-    reason = (f"page {page} could not be read ({unread})" if unread
+    reason = (f"page {reading.page} could not be read ({reading.refused})" if reading.refused
               else f"the reading stopped after {POLICY_PAGES} page" + ("s" if POLICY_PAGES > 1 else ""))
     if not entries:
         found.append(("note", f"the deployment policies of {repository} could not be read: {reason}."
                               " Whether anything but tags v* may publish is unknown here"))
         return found
-    read_so_far = (f"{len(entries)} of the {total} deployment policies" if total is not None
+    read_so_far = (f"{len(entries)} of the {reading.total} deployment policies" if reading.total is not None
                    else f"{len(entries)} deployment policies")
-    unanswered = ("" if tag_rule else "; whether the tag rule v* is there at all is unanswered")
+    unanswered = ("" if reading.tag_rule else "; whether the tag rule v* is there at all is unanswered")
     found.append(("note", f"{read_so_far} of {repository} were read: {reason}. What is named above was read and"
                           f" holds, and is not necessarily everything that admits{unanswered}"))
     return found
+
+
+def deployment_policies(repository: str, environment: dict | None,
+                        state: str = "ok") -> list[tuple[str, str]]:
+    """The verdicts on an environment already fetched: the reading, then what it says.
+
+    For a caller that holds the environment and not its read: None is its
+    way of saying there is none. The reader itself never takes an answer
+    that is not an object for an absence.
+    """
+    if environment is None and state == "ok":
+        state = "absent"
+    return policy_verdicts(release_environment(repository, environment, state), ".")
 
 
 def publication_record(repository: str) -> list[tuple[str, str]]:
@@ -410,9 +668,8 @@ def environment_gate(repository: str, environment: dict | None, declared: str = 
         if declared == "none":
             return [("ok", f"environment release of {repository} requires no reviewer, as [gate] none declares")]
         unattended = (f"environment release of {repository} requires no reviewer: the publication runs"
-                      " unattended. Arm it with 'gh api -X PUT repos/" + repository + "/environments/release"
-                      " -f reviewers[][type]=User -F reviewers[][id]=ID', or declare the choice"
-                      f" with [gate] none in {DECLARATION_FILE}")
+                      f" unattended. {reviewer_remedy(repository, environment)}, or declare the choice with"
+                      f" [gate] none in {DECLARATION_FILE}")
         return [("fail" if declared == "reviewer" else "note", unattended)]
     names = " ".join((entry.get("reviewer") or {}).get("login") or "?"
                      for entry in reviewers.get("reviewers") or [])
@@ -430,6 +687,36 @@ def environment_gate(repository: str, environment: dict | None, declared: str = 
         found.append(("note", f"the reviewer of {repository} may approve their own deployment"
                               " (prevent_self_review false): the gate is a pause, not a control"))
     return found
+
+
+def reviewer_remedy(repository: str, environment: dict) -> str:
+    """How a repository names its reviewer without losing what its environment holds.
+
+    The line printed here was a PUT of the reviewer alone, then of the
+    reviewer and the deployment policy. GitHub's reference does not say what
+    that endpoint leaves of a member it omits, and on the reading where it
+    leaves nothing, the second one still erased a wait timer and reset
+    `can_admins_bypass` -- on the environment `protect` had just been
+    careful with. So the line carries everything that was read, policy
+    included, as it stands at this reading; and where something cannot be
+    carried, there is no line, only the page where one setting changes
+    alone. The reviewer stays the repository's to name: ID is not filled in.
+    """
+    settings = (f"the repository's settings (https://github.com/{repository}/settings/environments,"
+                f" environment {RELEASE_ENVIRONMENT}, Required reviewers)")
+    back, lost = sent_back(carried(environment))
+    if lost:
+        return (f"Name one in {settings}: this environment carries " + ", ".join(lost)
+                + ", which no command line is known to send back, so none is printed")
+    held = ReleaseEnvironment(repository, "ok", environment).policy
+    body = json.dumps({"reviewers": [{"type": "User", "id": 0}], "deployment_branch_policy": held, **back},
+                      separators=(",", ":")).replace('"id":0', '"id":ID')
+    return (f"Name one in {settings}, or with: gh api -X PUT repos/{repository}/environments/"
+            f"{RELEASE_ENVIRONMENT} --input - <<<'{body}'"
+            " -- replace ID by the reviewer's numeric id, which 'gh api users/LOGIN --jq .id' prints; the"
+            " line carries the deployment policy, the wait timer and the bypass setting as they were just"
+            " read, so run it as printed and not from memory. The reviewer is this repository's to choose:"
+            " the socle sets none")
 
 
 def branch_protection(repository: str, branch: str, classic: str,

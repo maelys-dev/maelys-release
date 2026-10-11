@@ -166,7 +166,9 @@ the next tag, on the developer machine before it exists: `tag.gpgsign` and a
 environment of the GitHub repository limiting its deployments to tags `v*`.
 GitHub creates a missing environment on first use without any rule, so
 presence alone is not checked. Exit 2 reports what the workflow would
-otherwise refuse.
+otherwise refuse. `protect DIR --apply` writes what that environment needs
+— a custom deployment policy and the one tag rule — and the checks the
+default branch requires, each read back, and neither waiting for the other.
 
 ## Consuming the release workflow
 

@@ -1549,15 +1549,10 @@ does not say where either came from.
   from a branch or a `release.yml` edited on a branch cannot publish. GitHub
   creates a missing environment without any rule, so `preflight` checks the
   rules and not the presence — all of them, since they are alternatives and
-  one branch policy beside the tag rule admits that branch. Set it once per
-  repository, and nothing else:
-
-  ```bash
-  gh api -X PUT repos/OWNER/REPO/environments/release \
-    --input - <<<'{"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}'
-  gh api -X POST repos/OWNER/REPO/environments/release/deployment-branch-policies \
-    -f name='v*' -f type=tag
-  ```
+  one branch policy beside the tag rule admits that branch. `maelys-release
+  protect DIR --apply` sets it, once per repository, and nothing else; what
+  it sends, and what it refuses to send, is under "What `protect` writes of
+  the release environment" below.
 
 ## What the tracked files say of their author
 
@@ -2625,6 +2620,123 @@ GitHub did not answer for the protection, the rulesets or a check-run read
 (`UNREAD`), and when the write would stop requiring a check other than an
 alias retiring for its leg (`DROP`, allowed with `--allow-narrow`).
 
+**What `protect` writes of the release environment.** For a product the
+socle releases — one whose `release.yml` is the generated one — the plan
+also reads the `release` environment, through the reader `preflight`
+verifies it with, and `--apply` arms it. The name is the default of the
+`release_environment` input, which the generated `release.yml` never passes.
+A repository that publishes its own way owns its environments as it owns its
+workflow, and `protect` neither reads nor writes them; nor does `protect
+--without-legs`, which is the narrowing half of a rename and nothing else.
+Until then this was two calls copied by hand from this document; the first
+release of a product ran the second one twice, checked by hand that the
+environment held one rule and not two, and did both again when its
+repository was created anew.
+
+**Two halves, and neither waits for the other.** The protection and the
+environment each have their reads, their refusals, their writes and their
+read-back. A half that will not write says so in the result — `REFUSED`,
+and `refused` in the JSON — and the other still does its work: a repository
+whose protection this command cannot write, because a ruleset of the
+organisation carries its checks or because a renamed check has not run yet,
+still gets its environment armed, and the reverse. A first version coupled
+them, every refusal of either before any write, and that made exactly this
+dead end. The protection is written first. When a write of either half is
+refused by GitHub or does not read back, the other half still runs, and the
+error — which replaces the report — says what each half had written and what
+each replaced.
+
+**One rule for the exit code.** 2 when something stands that `--apply` does
+not settle — a required check nothing produces, a check no pull request has
+run, a policy beside the tag rule, a reviewer declared and absent, an
+environment that cannot be sent back as read — or when `--apply` refused a
+half; 0 otherwise, a plan whose writes `--apply` would make included; 1
+when the command could not run, or a write failed or did not read back. A
+refusal of `--apply` used to be an error with exit 1: it is a result with
+exit 2, since one half refusing is no longer the end of the command. The
+plan follows the same rule in its words: what `--apply` settles is a `now`
+line and a `then` line, never a `FAIL`.
+
+What the environment half sends, and nothing else:
+
+```bash
+# an environment that does not exist: the policy alone, so nothing is set that nobody asked for
+gh api -X PUT repos/OWNER/REPO/environments/release \
+  --input - <<<'{"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}'
+# the one rule, when the list read immediately before does not hold it
+gh api -X POST repos/OWNER/REPO/environments/release/deployment-branch-policies \
+  --input - <<<'{"name":"v*","type":"tag"}'
+```
+
+- **An environment is created on two answers, not one.** Its own read must
+  say 404 and the list of the repository's environments, read whole, must
+  not name it; both are asked again at the moment of creating. One 404
+  answered in error over an environment holding reviewers would otherwise
+  be a `PUT` of the policy alone with nothing to compare afterwards. An
+  answer that is not an object is unreadable, never an absence.
+- **An environment whose policy is already custom is never `PUT`.** Its
+  missing tag rule is one `POST`, and the environment itself is not sent.
+- **An environment that exists without a custom policy is `PUT` with what
+  was read of it**: its reviewers by type and id with `prevent_self_review`,
+  its wait timer, and `can_admins_bypass` when it reads false. GitHub's
+  reference says what that endpoint sets and not what it leaves of a member
+  it omits, so nothing relies on an omission; a member that reads as its
+  default is left out, since omitting it and resetting it are then the same
+  state. What cannot be sent back as read — a reviewer without an id, a
+  reviewers rule that names nobody, a protection rule of a type this socle
+  does not know — is a refusal, with the settings page as the remedy.
+  **`can_admins_bypass` is sent on the strength of what GitHub returns, not
+  of its documentation**: the reference for "Create or update an
+  environment" does not list that member, so sending it is unproven until
+  tried on the pilot; the read-back is what holds if GitHub ignores it.
+  **Custom deployment protection rules** (GitHub Apps) live on another
+  endpoint and are neither read, sent nor compared: what a `PUT` does to
+  them is equally unproven.
+- **A limit to protected branches is replaced, and the plan says so.** An
+  environment that admits protected branches only is not one with "no
+  deployment policy", as `preflight` used to call it: it is a limit, and
+  what it does not admit is a tag. The plan names it for what it is and
+  says that the `PUT` replaces it by tags `v*` rather than adding to it.
+- **The list is read whatever the policy.** Policies GitHub kept from an
+  earlier custom policy would become the rule the moment the policy is
+  custom again — a branch admitted and no tag. Measured on an environment
+  of the fleet that has no deployment policy: the listing answers 404
+  there, so a kept list cannot be known before the `PUT`. Where GitHub does
+  give it, anything but the tag rule is a refusal before any write. Where
+  it does not, the list is read right after the `PUT`; if it holds anything
+  else, the deployment policy is put back as it was read, with everything
+  the environment carried, read back, and the half is refused. That second
+  `PUT` is the only write this command makes to undo one.
+- **The reviewer is never chosen here.** `[gate] reviewer` on an environment
+  that requires nobody is the line `preflight` prints, with exit 2, before
+  and after the write: the reviewer is the repository's to name. That line
+  points at the settings page and, where everything the environment holds
+  can be carried, gives one `PUT` that carries all of it — the deployment
+  policy, the wait timer, the bypass setting — with `ID` to replace by the
+  reviewer's numeric id. It used to carry the reviewer alone, then the
+  reviewer and the policy, and on the reading where a `PUT` leaves nothing
+  of what it omits the second still erased a wait timer. It is built from
+  the reading of that moment: run as printed, not from memory.
+- **A policy beside the tag rule is refused**, in `preflight`'s words and
+  with the `DELETE` that removes it: this half adds the tag rule and removes
+  nothing. So is a reading GitHub did not give (`UNREAD`).
+- **The list is read again immediately before the rule is posted**, on
+  every path, and the rule is posted only on a list that holds nothing.
+- **Every write is read back.** After each call the environment and its
+  whole list are read again: it must read with the policy that was sent,
+  hold the tag rule and no other policy, and carry every protection it
+  carried — the reviewers compared as a set of type and id, in whatever
+  order GitHub lists them. Anything that moved stops the command with the
+  values to restore, and `before` stays in the output of a run that wrote.
+- **What remains.** A change somebody else makes between the last read and
+  a write is not prevented: this command has no way to make a write
+  conditional on what it read. It is detected by the read-back, and said,
+  with what the run had written.
+- **A second run writes nothing to the environment and says so**:
+  `environment: nothing to change`. The protection half is not silent in
+  the same way: `--apply` sends the required checks again even when nothing
+  differs, reads them back and says `protect: applied`.
+
 **Since 0.57.0 the old names are aliases, and nothing is narrowed.**
 0.54.0 to 0.56.0 printed another order — narrow, adopt, merge, widen — and
 maelys-egress, who followed it, named its cost: main required less for a whole
@@ -2782,8 +2894,9 @@ a reader that took one page for the answer named twenty-nine of thirty
 policies to remove — red, and an incomplete remedy, which is the same defect
 one level down. Anything beyond `tag v*` is a violation, named with the `gh
 api -X DELETE` that removes it; what the reader did not reach is said rather
-than implied. The socle writes no policy here, so the remedy is the
-operator's hand either way.
+than implied. `protect --apply` adds the tag rule and removes nothing, so a
+policy beside it stays the operator's hand: the socle did not put it there
+and does not know why it is.
 
 Measured on the ten repositories of the fleet on 2026-09-23, reading each
 `release` environment and its policies only when it has custom ones: nine

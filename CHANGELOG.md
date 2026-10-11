@@ -340,7 +340,105 @@
   a tag, which passed in silence for every pin, is a note that says what
   the checkout holds. The other words a Maelys pin reads are the ones they
   were.
-- **Impact.** [asks: checkout-script] [writes: nothing] A minor version: a
+- **`protect` writes the release environment.** The first release of a
+  product was refused three things, and the third was two `gh api` calls
+  copied by hand from the conventions to arm its `release` environment.
+  The second was run twice, which cost a reading of the list to know it
+  held one rule and not two, and both were run again when the repository
+  was created anew. For a product the socle releases, `protect DIR` now
+  plans the environment beside the checks the branch requires — what it
+  admits today, what it would admit, and each call `--apply` would send,
+  body included — and `--apply` arms it: a custom deployment policy and
+  exactly one rule, tag `v*`. It reads through the reader `preflight`
+  verifies with, so the two commands cannot describe two environments. A
+  repository that publishes its own way is neither read nor written, and
+  neither is anything under `--without-legs`, which is the narrowing half
+  of a rename and nothing else.
+- **Two halves, and neither waits for the other.** The protection and the
+  environment each have their reads, their refusals, their writes and
+  their read-back. A half that will not write says so in the result —
+  `REFUSED` in the text, `refused` in the JSON — and the other still does
+  its work, so a repository whose protection this command cannot write (a
+  ruleset of the organisation, a renamed check that has not run) still
+  gets its environment. When a write of either half is refused by GitHub
+  or does not read back, the other half still runs, and the error says
+  what each had written and what each replaced: the `before` record of a
+  protection was promised to the terminal of every run that wrote, and an
+  error after the write did not print it.
+- **One rule for the exit code, and a refusal is no longer an error.** 2
+  when something stands that `--apply` does not settle or when `--apply`
+  refused a half; 0 otherwise, a plan whose writes `--apply` would make
+  included; 1 when the command could not run, or a write failed or did
+  not read back. `protect --apply` refusing — a check it would stop
+  requiring, a name no merged pull request has produced, a reading GitHub
+  did not give — used to exit 1 with `PRECONDITION_FAILED`; it exits 2
+  with `refused` in its data. The withdrawal check stays an error.
+- **Nothing the environment carries is erased.** GitHub's reference says
+  what `PUT environments/NAME` sets and not what it leaves of a member it
+  omits, so nothing relies on an omission. An environment whose policy is
+  already custom is never `PUT`: its missing rule is one `POST`. One that
+  exists without a custom policy is `PUT` with what was read of it —
+  reviewers by type and id, `prevent_self_review`, the wait timer,
+  `can_admins_bypass` when it reads false — and what cannot be sent back
+  as read is a refusal: a reviewer without an id, a reviewers rule that
+  names nobody, a rule of an unknown type. An environment is created only
+  when its own read answers 404 *and* the list of the repository's
+  environments, read whole, does not name it, both asked again at the
+  moment of creating; an answer that is not an object is unreadable, not
+  an absence.
+- **The list is read whatever the policy, and again before the rule.**
+  Policies GitHub kept from an earlier custom policy would become the only
+  rule the moment the policy is custom — a branch admitted and no tag.
+  Measured on an environment of the fleet with no deployment policy, the
+  listing answers 404 there; where GitHub does give it, anything but the
+  tag rule is a refusal before any write, and where it does not, the list
+  is read right after the `PUT`, and if it holds anything else the policy
+  is put back as it was read and the half is refused. The list is read
+  again immediately before the rule is posted, on every path, and every
+  write is read back: the policy that was sent, the tag rule and no other
+  policy, and every protection where it was — the reviewers compared as a
+  set of type and id, whatever their order. **What remains:** a change
+  somebody else makes between the last read and a write is not prevented;
+  it is detected by the read-back and said.
+- **A limit to protected branches is called a limit.** `preflight` said of
+  an environment that admits protected branches only that it "has no
+  deployment policy: any branch … can publish", which is false of it. It
+  says what the limit is and that a tag cannot deploy, and `protect` says
+  that its `PUT` replaces that limit by tags `v*` rather than adding to it.
+- **The reviewer is not the socle's to choose, and the line that names one
+  erases nothing.** `[gate] reviewer` on an environment that requires
+  nobody is the line `preflight`, `cut` and `protect` print, with exit 2:
+  `protect` creates the environment and its rule, and names nobody. That
+  line was a `PUT` of the reviewer alone; on the reading where a `PUT`
+  leaves nothing of what it omits, it erased the deployment policy, the
+  wait timer and a disabled bypass. It now points at the settings page
+  and, where everything the environment holds can be carried, gives one
+  `PUT` built from the reading of that moment that carries all of it,
+  with `ID` to replace by the reviewer's numeric id and the command that
+  prints it. Where something cannot be carried, no command is printed.
+- **`preflight` names the command, on the directory it was given.** A
+  missing environment, and one that is not limited to tags, are answered
+  with `maelys-release protect DIR --apply` where the first said "create
+  it". Since the halves are independent, that remedy holds for a
+  repository whose protection `protect` refuses to write.
+- **Not proven, and said as such.** None of these writes was sent to
+  GitHub: they are proven against a host that answers as badly as the
+  reference allows — a `PUT` that replaces the whole environment, a `POST`
+  that never refuses a duplicate, a kept list that shows only once the
+  policy is custom. `can_admins_bypass` is sent on the strength of what
+  GitHub returns, not of its documentation, whose page for this endpoint
+  does not list it: unproven until tried on the pilot. Custom deployment
+  protection rules (GitHub Apps) live on another endpoint and are neither
+  read, sent nor compared. The plan was run read-only on 2026-10-10
+  against the pilot and one product declaring `[gate] none`, and said
+  nothing to change on both; the reference replays it on two more from
+  recorded answers.
+- **What a second run does.** It writes nothing to the environment and
+  says `environment: nothing to change`. The protection half is not
+  silent in the same way, and is unchanged: `--apply` sends the required
+  checks again even when nothing differs, reads them back and says
+  `protect: applied`.
+- **Impact.** [asks: checkout-script] [writes: protect] A minor version: a
   managed file moves, and in what it executes. A product that carries
   `scripts/checkout-dependency.sh` **re-adopts** to receive it, as for the
   script's moves of 0.61.0 and 0.63.0: moving its socle pin without
@@ -352,22 +450,34 @@
   bullet, for every product the socle releases, pins or no pins, and no
   selector names that: such a product reads the same exit 2 on
   `.claude/skills/maelys-release/SKILL.md` if it moves its pin by hand.
-  Nothing else asks a gesture, and nothing else turns red. `check`
-  re-executes the socle a product pins, so a product reads what `check`
-  gains only once it has adopted this version. All of it is notes, never a
-  violation: an address git made up, which `adopt` run from this version
-  also says at that adoption, said to an author and silent in CI; and one
-  line saying what the privacy guard searched and read, with a note for
-  each family it found, naming the place and never the value.
-  `declarations` answers one more key, `unreleased`, empty where no pin
-  says it. `preflight` notes a public repository whose secret scanning or
-  push protection is off. Three things are each repository's choice and
-  written by nothing otherwise: the pre-push hook, `maelys-release hook
-  DIR --apply` in a clone that wants it; the refusal, `[privacy] refuse`;
-  and a pin marked `unreleased`, which a product writes from this socle
-  with `dependencies` and which `check` reads once the product has adopted
-  — a pinned socle that predates `[privacy]` says so as a violation, and
-  one that predates `unreleased` ignores the line, grammar included. The
+  One command writes differently on GitHub. `protect DIR --apply` now also
+  reads the `release` environment of a product the socle releases and
+  writes it when it is missing, unlimited, limited to protected branches —
+  a limit it **replaces** by tags `v*` — or without its tag rule; one that
+  already limits deployments to tags `v*` is not written. A refusal of
+  `protect --apply` is now a result with exit 2 and `refused` in its data,
+  no longer an error with exit 1: a script that reads `error.code` for it
+  reads `data.refused` instead. `protect` also exits 2 for a product that
+  declares `[gate] reviewer` while its environment requires nobody, and
+  for a policy beside the tag rule. Nothing else asks a gesture, and
+  nothing else turns red. `check` re-executes the socle a product pins, so
+  a product reads what `check` gains only once it has adopted this
+  version. All of it is notes, never a violation: an address git made up,
+  which `adopt` run from this version also says at that adoption, said to
+  an author and silent in CI; and one line saying what the privacy guard
+  searched and read, with a note for each family it found, naming the
+  place and never the value. `declarations` answers one more key,
+  `unreleased`, empty where no pin says it. `preflight` words three
+  answers differently — the remedy for a missing or unlimited environment,
+  an environment limited to protected branches, the line that names a
+  reviewer — and notes a public repository whose secret scanning or push
+  protection is off. Three things are each repository's choice and written
+  by nothing otherwise: the pre-push hook, `maelys-release hook DIR
+  --apply` in a clone that wants it; the refusal, `[privacy] refuse`; and
+  a pin marked `unreleased`, which a product writes from this socle with
+  `dependencies` and which `check` reads once the product has adopted — a
+  pinned socle that predates `[privacy]` says so as a violation, and one
+  that predates `unreleased` ignores the line, grammar included. The
   strict reading of a pin asks nothing of the fleet as measured: 62 pins,
   none refused.
 

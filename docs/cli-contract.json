@@ -3475,7 +3475,7 @@
                 "repeatable": false,
                 "required": false,
                 "requires": [],
-                "summary": "Write the protection instead of only reporting it."
+                "summary": "Write the protection and the release environment instead of only reporting them; exit 2 when either is refused."
               },
               {
                 "conflictsWith": [],
@@ -3499,7 +3499,7 @@
                 "repeatable": false,
                 "required": false,
                 "requires": [],
-                "summary": "Propose the required list minus the socle's matrix legs: the narrowing that comes before an adoption renames them."
+                "summary": "Propose the required list minus the socle's matrix legs: the narrowing that comes before an adoption renames them. The release environment is neither read nor written."
               }
             ],
             "passthrough": false,
@@ -3561,6 +3561,125 @@
                 },
                 "type": "array"
               },
+              "environment": {
+                "additionalProperties": false,
+                "properties": {
+                  "applied": {
+                    "type": "boolean"
+                  },
+                  "becomes": {
+                    "type": "string"
+                  },
+                  "before": {
+                    "type": "object"
+                  },
+                  "exists": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  },
+                  "gate": {
+                    "items": {
+                      "properties": {
+                        "message": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "status",
+                        "message"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "holds": {
+                    "type": [
+                      "object",
+                      "null"
+                    ]
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "note": {
+                    "type": "string"
+                  },
+                  "policy": {
+                    "enum": [
+                      "custom",
+                      "protected-branches",
+                      "all",
+                      null
+                    ]
+                  },
+                  "refused": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "rules": {
+                    "items": {
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "state": {
+                    "type": "string"
+                  },
+                  "unread": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "writes": {
+                    "items": {
+                      "properties": {
+                        "body": {
+                          "type": "object"
+                        },
+                        "endpoint": {
+                          "type": "string"
+                        },
+                        "method": {
+                          "enum": [
+                            "PUT",
+                            "POST"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "method",
+                        "endpoint",
+                        "body"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "written": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "name",
+                  "exists",
+                  "state",
+                  "writes",
+                  "refused",
+                  "applied"
+                ],
+                "type": "object"
+              },
               "fromTag": {
                 "items": {
                   "type": "string"
@@ -3617,6 +3736,21 @@
               },
               "pullRequests": {
                 "type": "integer"
+              },
+              "refused": {
+                "properties": {
+                  "hint": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "message",
+                  "hint"
+                ],
+                "type": "object"
               },
               "replaced": {
                 "items": {
@@ -3683,7 +3817,7 @@
           "pattern": [
             "protect"
           ],
-          "purpose": "Report what the default branch should require, derived from the workflows and the runs it carries rather than typed by hand; --apply writes it.",
+          "purpose": "Report what the default branch should require, derived from the workflows and the runs it carries rather than typed by hand, and what the release environment of a product the socle releases should admit; --apply writes each, and a refusal of one does not stop the other.",
           "usage": "protect DIR [--apply] [--allow-lock] [--allow-narrow] [--without-legs]"
         },
         {
