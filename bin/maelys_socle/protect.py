@@ -416,6 +416,38 @@ def handle_protect(invocation: Invocation, context: Context) -> tuple[dict, int]
     # What this half sent, for an error that hides the report: `before` is
     # promised to the terminal and the logs of every run that wrote.
     sent: list[str] = []
+    # What --apply refuses with the flags of this run, each named once for
+    # the plan and for the refusal itself: a plan that counted them another
+    # way than --apply would end on a sentence its --apply contradicts.
+    narrows = bool(dropping) and not narrowing and not invocation.flag("--allow-narrow")
+    locks = bool(adding) and not narrowing and not invocation.flag("--allow-lock")
+    bare = bool(narrowing) and state != "ok"
+    if ours:
+        # The plan has the rules of the branch and never reads the ruleset
+        # they come from, which is what the body is made of: what the rules
+        # list decides nothing here, and `held` is --apply's alone to find.
+        write, listed, writable = ruleset_write(repository, rules, proposed)
+        held, refuses = False, bool(unread) or narrows or locks or not writable
+    else:
+        write, held = classic_write(repository, branch, state, holds, proposed)
+        listed, refuses = False, bool(unread) or narrows or locks or bare or not proposed
+    # `writes` is what --apply with the flags of this run would send for
+    # this half, in the plan and under --apply alike, as the environment
+    # half says its own: nothing where the half refuses, nothing on a reading
+    # that is not there, and nothing where what was read already holds it.
+    # Every --apply used to send its write again: a second run reported a
+    # write that had changed nothing, and touched the settings of a
+    # repository for no reason. Three ways of sending nothing, and one of
+    # them alone is `nothing to change`: sending nothing and refusing
+    # nothing. For a ruleset only --apply can say it, on the ruleset's own
+    # reading beside the rules of the branch; its plan names the write, and
+    # --apply empties `writes` when both readings hold everything.
+    report["writes"], report["written"] = [] if refuses or held else [write], sent
+    report["nothingToChange"] = held and not refuses
+    if listed and not refuses and not invocation.flag("--apply"):
+        reading = (f"the rules of {branch} list these checks already. Whether the ruleset itself does is read"
+                   " under --apply, which sends nothing when it does.")
+        report["note"] = f"{report['note']} {reading}" if report.get("note") else reading
 
     def protection() -> None:
         """The protection half of --apply: its refusals, its write, its read-back."""
@@ -429,12 +461,12 @@ def handle_protect(invocation: Invocation, context: Context) -> tuple[dict, int]
                           f"GitHub did not answer for {', '.join(unread)} of {repository}: nothing is written on a"
                           " reading that is not there.",
                           "Run protect again once GitHub answers, and read the plan before --apply.")
-        if dropping and not narrowing and not invocation.flag("--allow-narrow"):
+        if narrows:
             raise Failure("PRECONDITION_FAILED",
                           f"this write would stop requiring {', '.join(dropping)} on {branch} of {repository}.",
                           "protect --apply does not narrow a protection by itself. If those checks are gone for"
                           " good, pass --allow-narrow; otherwise let them run on a pull request first.")
-        if not narrowing and adding and not invocation.flag("--allow-lock"):
+        if locks:
             waiting = [str(pull.get("number")) for pull in github_list(
                 f"repos/{repository}/pulls?state=open&base={branch}&per_page=50") if isinstance(pull, dict)]
             raise Failure("PRECONDITION_FAILED",
@@ -450,8 +482,13 @@ def handle_protect(invocation: Invocation, context: Context) -> tuple[dict, int]
             # repository protected by a ruleset alone had every step of a rename
             # to do by hand.
             report["applied"] = write_ruleset(repository, branch, rules, proposed, sent)
+            # The ruleset as it was just read lists them already, as the
+            # rules of the branch do: nothing was sent, and the result says
+            # so instead of the write planned.
+            if not report["applied"]:
+                report["writes"], report["nothingToChange"] = [], True
             return
-        if narrowing and state != "ok":
+        if bare:
             raise Failure("PRECONDITION_FAILED", f"{branch} of {repository} has no protection to narrow.",
                           "Nothing requires the legs, so the adoption will not lock anything: adopt first.")
         if not proposed:
@@ -459,35 +496,28 @@ def handle_protect(invocation: Invocation, context: Context) -> tuple[dict, int]
                           f"no check run was seen on {branch} of {repository}.",
                           "A protection that requires nothing is not what this writes. Let the branch run"
                           " its checks once, then protect it.")
+        # What the protection already holds is not sent again, and nothing
+        # is read back of a write that was not made.
+        if held:
+            return
         # What the report showed, never what was merely observed. `seen` is
         # the intersection of recent pull requests; `proposed` is that plus
         # the socle's computed legs. Writing `seen` meant that right after an
         # adoption renaming a leg, --apply required the old name still
         # present in older pull requests -- the very lock this command was
         # written to prevent, in the command itself.
-        # An existing protection is changed in its required checks alone,
-        # through their own endpoint, and keeps every other setting as it is.
-        # The whole protection used to be PUT with the socle's shape, and
-        # maelys-oci's "require branches to be up to date" went from true to
-        # false with a plan that named three replacements and nothing else.
-        existing = holds.get("required_status_checks") if state == "ok" else None
-        if isinstance(existing, dict):
-            method, endpoint = "PATCH", f"repos/{repository}/branches/{branch}/protection/required_status_checks"
-            body = {"strict": bool(existing.get("strict")), "contexts": proposed}
-            expected = protection_settings(holds)
-        else:
-            method, endpoint = "PUT", f"repos/{repository}/branches/{branch}/protection"
-            body = {**PROTECTION_SHAPE, "required_status_checks": {"strict": False, "contexts": proposed}}
-            expected = protection_settings(body)
         with tempfile.TemporaryDirectory(prefix="maelys-release-protect.") as temp:
             payload = pathlib.Path(temp) / "protection.json"
-            payload.write_text(json.dumps(body), encoding="utf-8")
-            done = host.HOST.write(method, endpoint, payload, cwd=project)
+            payload.write_text(json.dumps(write["body"]), encoding="utf-8")
+            done = host.HOST.write(write["method"], write["endpoint"], payload, cwd=project)
         if done.returncode != 0:
             raise Failure("PROCESS_FAILED", f"the protection of {branch} was refused: {done.stderr.strip()}",
                           "A private repository needs a paid plan for branch protection; read the message above.")
-        sent.append(f"{method} {endpoint}")
-        verify_protection(repository, branch, expected, proposed)
+        sent.append(f"{write['method']} {write['endpoint']}")
+        # Every other setting reads back as it was under a protection that
+        # exists, and as the body sets it under one this created.
+        verify_protection(repository, branch,
+                          protection_settings(holds if write["method"] == "PATCH" else write["body"]), proposed)
         report["applied"] = True
 
     # Two halves, and neither waits for the other. A half that will not
@@ -526,23 +556,134 @@ def handle_protect(invocation: Invocation, context: Context) -> tuple[dict, int]
     # has run, a policy beside the tag rule, a reviewer declared and not
     # there -- or when --apply refused a half; 0 otherwise, a plan whose
     # writes --apply would make included. A ruleset just written answers for
-    # its own contexts, as it always did.
-    left = (absent or stale) and not (report["applied"] and ours)
+    # its own contexts, as it always did -- and so does one --apply found
+    # holding them already: the exit of a second run is that of the first.
+    settled = report["applied"] or report["nothingToChange"]
+    left = (absent or stale) and not (settled and ours)
     return report, (EXIT_VIOLATIONS if left or report.get("refused") or violations(environment) else EXIT_OK)
+
+
+def unordered(items: list) -> list[str]:
+    """The members of a list as comparable text, whatever order they came in."""
+    return sorted(json.dumps(item, sort_keys=True) for item in items)
+
+
+def classic_write(repository: str, branch: str, state: str, holds: dict,
+                  contexts: list[str]) -> tuple[dict, bool]:
+    """The write that makes a classic protection require CONTEXTS, and whether it holds them already.
+
+    Held is judged member by member of the body, on what GitHub answered and
+    never on what an absence was read into: a write that would set a member
+    the reading does not carry is sent as it always was.
+    """
+    # An existing protection is changed in its required checks alone,
+    # through their own endpoint, and keeps every other setting as it is.
+    # The whole protection used to be PUT with the socle's shape, and
+    # maelys-oci's "require branches to be up to date" went from true to
+    # false with a plan that named three replacements and nothing else.
+    existing = holds.get("required_status_checks") if state == "ok" else None
+    if isinstance(existing, dict):
+        method, endpoint = "PATCH", f"repos/{repository}/branches/{branch}/protection/required_status_checks"
+        body = {"strict": bool(existing.get("strict")), "contexts": contexts}
+        # `strict` goes back as it was read, so it is equal when GitHub
+        # answered a boolean; the contexts are equal when the same names
+        # are listed, each as many times, in any order. The app bound to
+        # each context is neither compared nor verified on this half: the
+        # body names contexts alone, and GitHub's reference says a context
+        # sent that way may be bound to the app that recently set it. Not
+        # sending keeps the bindings the repository has, and skips no write
+        # that the list of names needs.
+        listed = existing.get("contexts")
+        held = (existing.get("strict") is body["strict"] and isinstance(listed, list)
+                and unordered(listed) == unordered(contexts))
+    else:
+        method, endpoint = "PUT", f"repos/{repository}/branches/{branch}/protection"
+        body = {**PROTECTION_SHAPE, "required_status_checks": {"strict": False, "contexts": contexts}}
+        # Never held: this is sent when no required checks were read, and
+        # it sets some, so no reading can equal it.
+        held = False
+    return {"method": method, "endpoint": endpoint, "body": body}, held
+
+
+def carrying_rules(rules: object) -> list[dict]:
+    """The rules of a branch that require checks, in the order GitHub lists them."""
+    return [rule for rule in (rules if isinstance(rules, list) else [])
+            if isinstance(rule, dict) and rule.get("type") == "required_status_checks"]
+
+
+def ruleset_checks(rules: list, contexts: list[str]) -> list[dict]:
+    """The required checks a write gives a ruleset: each context with the integration allowed to report it.
+
+    A context the rules already carry keeps its own, and a new one takes the
+    one its neighbours carry most often.
+    """
+    integration = {}
+    for rule in rules:
+        if rule.get("type") == "required_status_checks":
+            for check in (rule.get("parameters") or {}).get("required_status_checks") or []:
+                # A check that is not an object naming a context binds
+                # nothing: the plan of a branch whose rules listed one
+                # crashed here, where `rule_contexts` had read past it.
+                if isinstance(check, dict) and isinstance(check.get("context"), str):
+                    integration[check["context"]] = check.get("integration_id")
+    known = [value for value in integration.values() if value]
+    default = max(set(known), key=known.count) if known else None
+    return [{"context": name, **({"integration_id": integration.get(name) or default}
+                                 if (integration.get(name) or default) else {})}
+            for name in contexts]
+
+
+def checks_held(rules: list, checks: list[dict]) -> bool:
+    """Whether every rule that requires checks lists CHECKS already, whatever the order.
+
+    Each check is compared whole, the integration with the context: one that
+    GitHub answered with a member the write would not send, or without one
+    it would, is not held.
+    """
+    listed = [(rule.get("parameters") or {}).get("required_status_checks") for rule in rules
+              if rule.get("type") == "required_status_checks"]
+    return bool(listed) and all(isinstance(held, list) and unordered(held) == unordered(checks) for held in listed)
+
+
+def ruleset_write(repository: str, rules: object, contexts: list[str]) -> tuple[dict, bool, bool]:
+    """The write `write_ruleset` would send, whether the rules of the branch list its checks, and whether it may.
+
+    For the plan, which reads the rules of a branch and never the ruleset
+    they come from: the write is named without its body, which is that
+    ruleset as it reads at the moment of writing. What the rules list is
+    worth a note in a plan and is half of what --apply needs to send
+    nothing, since the two readings can differ; and a ruleset of the
+    organisation is one --apply refuses, whatever it lists.
+
+    The rules list the checks when those of this ruleset hold what a write
+    would give them, and when every rule of the branch that requires
+    checks, whichever ruleset it comes from, names these contexts and no
+    other: what the read-back after a write requires of the same reading.
+    """
+    carrying = carrying_rules(rules)
+    identifier = carrying[0].get("ruleset_id") if carrying else None
+    own = [rule for rule in carrying if rule.get("ruleset_id") == identifier]
+    named = [check.get("context") if isinstance(check, dict) else None
+             for rule in carrying for check in (rule.get("parameters") or {}).get("required_status_checks") or []]
+    return ({"method": "PUT", "endpoint": f"repos/{repository}/rulesets/{identifier}"},
+            bool(own) and checks_held(own, ruleset_checks(own, contexts))
+            and all(isinstance(name, str) for name in named) and sorted(named) == sorted(contexts),
+            bool(own) and own[0].get("ruleset_source_type") in (None, "Repository"))
 
 
 def write_ruleset(repository: str, branch: str, rules: object, contexts: list[str],
                   sent: list[str] | None = None) -> bool:
-    """Set the required checks of the ruleset that protects this branch.
+    """Set the required checks of the ruleset that protects this branch, and say whether it was written.
 
     Only a ruleset of this repository: one inherited from the organisation
     cannot be written with a repository's permissions, and saying so is
     better than a 403 halfway through a rename. Every other rule of the
     ruleset is sent back as it was read, and each kept context keeps the
-    integration that was allowed to report it.
+    integration that was allowed to report it. Nothing is sent when the
+    ruleset, as it is read here, and the rules of the branch both list
+    these checks already.
     """
-    carrying = [rule for rule in (rules if isinstance(rules, list) else [])
-                if isinstance(rule, dict) and rule.get("type") == "required_status_checks"]
+    carrying = carrying_rules(rules)
     if not carrying:
         raise Failure("PRECONDITION_FAILED", f"no ruleset of {repository} requires checks on {branch}.",
                       "Nothing to write.")
@@ -556,20 +697,21 @@ def write_ruleset(repository: str, branch: str, rules: object, contexts: list[st
     if state != "ok" or not isinstance(ruleset, dict):
         raise Failure("PROCESS_FAILED", f"ruleset {identifier} of {repository} could not be read.",
                       "Read it with 'gh api repos/OWNER/REPO/rulesets/ID' and retry.")
-    integration = {}
-    for rule in ruleset.get("rules") or []:
-        if rule.get("type") == "required_status_checks":
-            for check in (rule.get("parameters") or {}).get("required_status_checks") or []:
-                integration[check.get("context")] = check.get("integration_id")
-    known = [value for value in integration.values() if value]
-    default = max(set(known), key=known.count) if known else None
+    checks = ruleset_checks(ruleset.get("rules") or [], contexts)
+    # Every other member of the body is the ruleset as it was just read,
+    # sent back untouched: its required checks are all this write can
+    # change, so a ruleset that lists them already is not written again --
+    # when the rules of the branch list them too. A ruleset that holds its
+    # checks while the branch does not show them is not one that protects
+    # the branch with them: the write is sent and read back as it always
+    # was, and fails as it always did when the rules do not follow. Not
+    # sending on the ruleset's reading alone passed that state green.
+    if ruleset_write(repository, rules, contexts)[1] and checks_held(ruleset.get("rules") or [], checks):
+        return False
     for rule in ruleset.get("rules") or []:
         if rule.get("type") != "required_status_checks":
             continue
-        rule["parameters"]["required_status_checks"] = [
-            {"context": name, **({"integration_id": integration.get(name) or default}
-                                 if (integration.get(name) or default) else {})}
-            for name in contexts]
+        rule["parameters"]["required_status_checks"] = list(checks)
     body = {key: ruleset[key] for key in ("name", "target", "enforcement", "conditions", "rules",
                                           "bypass_actors") if key in ruleset}
     with tempfile.TemporaryDirectory(prefix="maelys-release-ruleset.") as temp:
@@ -668,6 +810,11 @@ def text_protect(data: dict) -> str:
     if refused:
         lines.append(f"{'REFUSED':<8} {refused['message']} {refused['hint']}")
     lines.extend(text_environment(data.get("environment")))
+    # As the environment says it: a plan whose write would change nothing
+    # does not ask for --apply, and an --apply that sent nothing did not
+    # apply. An empty `writes` is not enough to say so: it is empty too
+    # where --apply would refuse, and on a reading that is not there.
     lines.append("protect: " + ("applied" if data["applied"] else "refused; the protection is not written"
-                                if refused else "nothing written; add --apply"))
+                                if refused else "nothing to change" if data.get("nothingToChange")
+                                else "nothing written; add --apply"))
     return "\n".join(lines) + "\n"

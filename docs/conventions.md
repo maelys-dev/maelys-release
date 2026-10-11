@@ -3067,10 +3067,50 @@ gh api -X POST repos/OWNER/REPO/environments/release/deployment-branch-policies 
   a write is not prevented: this command has no way to make a write
   conditional on what it read. It is detected by the read-back, and said,
   with what the run had written.
-- **A second run writes nothing to the environment and says so**:
-  `environment: nothing to change`. The protection half is not silent in
-  the same way: `--apply` sends the required checks again even when nothing
-  differs, reads them back and says `protect: applied`.
+- **A second run writes nothing and says so**, in each half:
+  `environment: nothing to change`, and `protect: nothing to change`. The
+  protection half used to send the required checks again even when nothing
+  differed, read them back and say `protect: applied`. It now compares what
+  it would send with what it read, member by member of the body. For a
+  classic protection, `strict` as the boolean GitHub answered, and the
+  required contexts: the same names, each as many times, in any order — a
+  name listed twice is a difference. For a ruleset, each context with the
+  integration bound to it, compared the same way in every rule that
+  requires checks, on two readings that must both hold: the ruleset's own,
+  the one the body is made from, which only `--apply` takes; and the rules
+  of the branch, where every rule that requires checks, whichever ruleset
+  it comes from, must name these contexts and no other — what the read-back
+  after a write requires. Where the two disagree the write is sent and read
+  back as before, and fails as before when the rules of the branch do not
+  show it: a ruleset that holds its checks while the branch does not is
+  not passed. Equal, nothing is sent, nothing is read
+  back, and `--apply` ends on `protect: nothing to change`. A member GitHub
+  did not answer is never an equal one, and the whole protection that is put
+  where no required checks were read is never equal to a reading: those are
+  written as before.
+- **`writes` is what `--apply` with the same flags would send for the
+  protection**, in the plan as under `--apply`, as the environment half
+  says its own: empty where the half refuses, empty on a reading that is
+  not there, and empty where nothing differs. `nothingToChange` tells the
+  third from the other two, and the last line follows it: a plan ends on
+  `nothing to change` only where `--apply` would send nothing and refuse
+  nothing, and keeps `nothing written; add --apply` where `--apply` would
+  refuse — the refusal is `--apply`'s to say, as before.
+- **The plan of a ruleset never says `nothing to change`.** A plan reads
+  the rules of the branch and not the ruleset they come from, and the two
+  readings can differ: it names the write, without its body, and where the
+  rules of the branch already list the checks a `note` says that the
+  ruleset itself is read under `--apply`, which sends nothing when it lists
+  them too and empties `writes`. No note where the rules of the branch do
+  not list them, another ruleset's among them: `--apply` writes there.
+- **The app bound to each context of a classic protection is neither
+  compared nor verified.** The body names contexts alone, and GitHub's
+  reference says a context sent that way may be bound to the app that
+  recently set it: not sending keeps the bindings the repository has, and
+  skips no write that the list of names needs.
+- **Held by a scripted host, and not yet by a second run on a repository**:
+  `tests/test_protect_host.py`, whose host answers the rules of a branch
+  and the ruleset as the two readings they are.
 
 **Since 0.57.0 the old names are aliases, and nothing is narrowed.**
 0.54.0 to 0.56.0 printed another order — narrow, adopt, merge, widen — and

@@ -2337,6 +2337,12 @@ APP = SocleProgram(PROGRAM, PRODUCT, socle_version(), [
                                        "kept": {"type": "array", "items": {"type": "string"}},
                                        "unread": {"type": "array", "items": {"type": "string"}},
                                        "keeps": {"type": "object"}, "creates": {"type": "object"},
+                                       "writes": {"type": "array", "items": {
+                                           "type": "object", "required": ["method", "endpoint"],
+                                           "properties": {"method": {"enum": ["PATCH", "PUT"]},
+                                                          "endpoint": {"type": "string"},
+                                                          "body": {"type": "object"}}}},
+                                       "written": STRINGS, "nothingToChange": {"type": "boolean"},
                                        "before": {"type": "object", "required": ["classic", "required", "rulesets"],
                                                   "properties": {"classic": {"type": ["object", "null"]},
                                                                  "required": {"type": "array",

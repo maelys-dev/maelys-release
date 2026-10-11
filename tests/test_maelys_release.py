@@ -5814,7 +5814,10 @@ class LegRenameTest(unittest.TestCase):
             return MODULE.write_ruleset("o/r", "main", applied, contexts), sent
 
     def test_the_ruleset_is_written_whole_with_only_its_checks_changed(self) -> None:
-        ok, sent = self.write(["check / check (linux)", "check / sanitizers"])
+        # One context more than it holds: a ruleset that lists them all
+        # already is not written again, and this used to send that write.
+        wanted = ["check / check (linux)", "check / check (macos)", "check / sanitizers"]
+        ok, sent = self.write(wanted)
         self.assertTrue(ok)
         self.assertEqual(sent["request"], ("PUT", "repos/o/r/rulesets/7"))
         body = sent["body"]
@@ -5822,7 +5825,10 @@ class LegRenameTest(unittest.TestCase):
         self.assertEqual(body["conditions"], self.RULESET["conditions"])
         self.assertEqual([rule["type"] for rule in body["rules"]], ["deletion", "required_status_checks"])
         checks = body["rules"][1]["parameters"]["required_status_checks"]
-        self.assertEqual([check["context"] for check in checks], ["check / check (linux)", "check / sanitizers"])
+        self.assertEqual([check["context"] for check in checks], wanted)
+        # And asked for what it holds, it sends nothing and says so.
+        ok, sent = self.write(["check / sanitizers", "check / check (linux)"])
+        self.assertEqual((ok, sent), (False, {}))
         # The integration that was allowed to report stays the one allowed:
         # a new context takes it from its neighbours, not from nowhere.
         self.assertTrue(all(check["integration_id"] == 15368 for check in checks))
