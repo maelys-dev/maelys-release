@@ -389,17 +389,21 @@
 - **The list is read whatever the policy, and again before the rule.**
   Policies GitHub kept from an earlier custom policy would become the only
   rule the moment the policy is custom — a branch admitted and no tag.
-  Measured on an environment of the fleet with no deployment policy, the
-  listing answers 404 there; where GitHub does give it, anything but the
-  tag rule is a refusal before any write, and where it does not, the list
-  is read right after the `PUT`, and if it holds anything else the policy
-  is put back as it was read and the half is refused. The list is read
-  again immediately before the rule is posted, on every path, and every
-  write is read back: the policy that was sent, the tag rule and no other
-  policy, and every protection where it was — the reviewers compared as a
-  set of type and id, whatever their order. **What remains:** a change
-  somebody else makes between the last read and a write is not prevented;
-  it is detected by the read-back and said.
+  Measured twice. On an environment of the fleet with no deployment policy
+  the listing answers 404. On the pilot's, set from a custom policy back
+  to no restriction, it answered 404 as well, and once the policy was
+  custom again the rule it had held was gone: nothing kept, on that one
+  measurement, which does not make the reading after the `PUT` less
+  necessary. Where GitHub does give the list, anything but the tag rule is
+  a refusal before any write, and where it does not, the list is read
+  right after the `PUT`, and if it holds anything else the policy is put
+  back as it was read and the half is refused. The list is read again
+  immediately before the rule is posted, on every path, and every write is
+  read back: the policy that was sent, the tag rule and no other policy,
+  and every protection where it was — the reviewers compared as a set of
+  type and id, whatever their order. **What remains:** a change somebody
+  else makes between the last read and a write is not prevented; it is
+  detected by the read-back and said.
 - **A limit to protected branches is called a limit.** `preflight` said of
   an environment that admits protected branches only that it "has no
   deployment policy: any branch … can publish", which is false of it. It
@@ -421,15 +425,31 @@
   with `maelys-release protect DIR --apply` where the first said "create
   it". Since the halves are independent, that remedy holds for a
   repository whose protection `protect` refuses to write.
-- **Not proven, and said as such.** None of these writes was sent to
-  GitHub: they are proven against a host that answers as badly as the
+- **Tried on the pilot on 2026-10-11, and what is still unproven.** The
+  writes were first proven against a host that answers as badly as the
   reference allows — a `PUT` that replaces the whole environment, a `POST`
   that never refuses a duplicate, a kept list that shows only once the
-  policy is custom. `can_admins_bypass` is sent on the strength of what
-  GitHub returns, not of its documentation, whose page for this endpoint
-  does not list it: unproven until tried on the pilot. Custom deployment
+  policy is custom — and then sent to GitHub, from this change's own code,
+  on the `release` environment of the pilot. As it stood, limited to tags
+  `v*` with its reviewer: the plan said nothing to change, `--apply` wrote
+  nothing to the environment, its reading before and after was byte for
+  byte the same, and a second run said the same; the protection half added
+  one required check and read it back. Then the environment was set by
+  hand to no restriction, its reviewer kept. The plan announced a `PUT`
+  carrying the policy, the reviewer as read, by type and id, and
+  `prevent_self_review: false`, then a `POST` of the tag rule. After
+  `--apply` the environment read with a custom policy, exactly one rule —
+  `v*`, of type tag, under a new rule id — its reviewer, the same,
+  `prevent_self_review` false and `can_admins_bypass` true. A second run
+  said nothing to change on an identical reading, and `preflight`, run by
+  the socle the pilot pins, said ready to tag. Still unproven, the pilot
+  having none of them: `can_admins_bypass` false and a wait timer
+  surviving a `PUT` — the first is sent on the strength of what GitHub
+  returns, not of its documentation, whose page for this endpoint does not
+  list it —, a reviewer of type Team, the creation of an environment that
+  does not exist, and the write that puts a policy back. Custom deployment
   protection rules (GitHub Apps) live on another endpoint and are neither
-  read, sent nor compared. The plan was run read-only on 2026-10-10
+  read, sent nor compared. The plan had been run read-only the day before
   against the pilot and one product declaring `[gate] none`, and said
   nothing to change on both; the reference replays it on two more from
   recorded answers.

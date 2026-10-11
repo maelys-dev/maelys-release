@@ -2975,11 +2975,27 @@ gh api -X POST repos/OWNER/REPO/environments/release/deployment-branch-policies 
   does not know — is a refusal, with the settings page as the remedy.
   **`can_admins_bypass` is sent on the strength of what GitHub returns, not
   of its documentation**: the reference for "Create or update an
-  environment" does not list that member, so sending it is unproven until
-  tried on the pilot; the read-back is what holds if GitHub ignores it.
+  environment" does not list that member, so sending it false is unproven —
+  the pilot's reads true, which is the default and is never sent; the
+  read-back is what holds if GitHub ignores it.
   **Custom deployment protection rules** (GitHub Apps) live on another
   endpoint and are neither read, sent nor compared: what a `PUT` does to
   them is equally unproven.
+- **What was sent to GitHub, and what was not.** On 2026-10-11, on the
+  `release` environment of the pilot. Limited to tags `v*` with its
+  reviewer, as it stood: nothing to change in the plan, nothing written to
+  it by `--apply`, a reading byte for byte the same before and after, and
+  the same from a second run. Then set by hand to no restriction with its
+  reviewer kept: one `PUT` carrying the policy, the reviewer as read and
+  `prevent_self_review: false`, one `POST` of the tag rule; read back with
+  a custom policy, exactly one rule `v*` of type tag, the same reviewer,
+  `prevent_self_review` false and `can_admins_bypass` true; nothing to
+  change at the second run, and `preflight`, run by the socle the pilot
+  pins, ready to tag. Not sent, since the pilot has none of them: a wait
+  timer and `can_admins_bypass` false through a `PUT`, a reviewer of type
+  Team, the creation of an absent environment, and the write that puts a
+  policy back. Those four are held by the scripted host of
+  `tests/test_environment_host.py` and by nothing else yet.
 - **A limit to protected branches is replaced, and the plan says so.** An
   environment that admits protected branches only is not one with "no
   deployment policy", as `preflight` used to call it: it is a limit, and
@@ -2989,7 +3005,11 @@ gh api -X POST repos/OWNER/REPO/environments/release/deployment-branch-policies 
   earlier custom policy would become the rule the moment the policy is
   custom again — a branch admitted and no tag. Measured on an environment
   of the fleet that has no deployment policy: the listing answers 404
-  there, so a kept list cannot be known before the `PUT`. Where GitHub does
+  there, so a kept list cannot be known before the `PUT`. Measured again on
+  the pilot's, set from a custom policy back to no restriction: 404 as
+  well, and the rule it had held was gone once the policy was custom again,
+  the tag rule coming back under a new id. One measurement, of one
+  transition: the reading after the `PUT` stays. Where GitHub does
   give it, anything but the tag rule is a refusal before any write. Where
   it does not, the list is read right after the `PUT`; if it holds anything
   else, the deployment policy is put back as it was read, with everything
