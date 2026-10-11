@@ -102,8 +102,15 @@ repositories were read on 2026-09-23, when both readers started asking for a
 page at a time: `maelys-dev/maelys-system` (classic protection),
 `maelys-dev/agent-cli-spec` (ruleset), and the public `homebrew-tap` formula
 listing/files read by preflight. Each response retains its decoded body and
-state, endpoint and reading timestamp. The cache keeps the first reading of
-each endpoint; these independent GETs are not an atomic GitHub snapshot.
+state, endpoint and reading timestamp. A 404 also retains the words GitHub
+answered it in, as `message`: `protect` takes a 404 for an absence only
+where it says `Branch not protected`, and a response stored without its
+words replays as an absence that says nothing. The protection of
+`agent-cli-spec` was read before the words were kept, and takes them from a
+second reading of the same endpoint that its provenance names; the two
+derived open branches carry them because the derivation is that state. The
+cache keeps the first reading of each endpoint; these independent GETs are
+not an atomic GitHub snapshot.
 The 20 derived responses explicitly name their original response and changes:
 private visibility, absent/unreadable protection, missing environment, an
 unreadable one, unreadable check runs, an added retired context, a branch

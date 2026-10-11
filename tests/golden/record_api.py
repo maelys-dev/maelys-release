@@ -29,6 +29,12 @@ before the answer is given to the recorded program -- so what is recorded
 is what the program was told, and a recorded `preflight` says nothing of
 those settings. The note `preflight` makes of them is held by tests on
 constructed answers, in tests/test_privacy.py.
+
+A 404 is stored with the words GitHub answered it in, as `message` beside
+its state: `protect` takes a 404 for an absence only where it says `Branch
+not protected`, and an answer stored without its words is given back as an
+absence that says nothing. The open branch the reference derives is that
+state, so it carries GitHub's words for it.
 """
 from __future__ import annotations
 
@@ -67,6 +73,10 @@ MACHINE = {'env': '/usr/bin/env',
 # publish: see the header. One member today; a name added here is dropped
 # from every answer at the next recording, and from nothing already stored.
 WITHHELD = ('security_and_analysis',)
+# What GitHub answers, with its 404, for a branch that carries no classic
+# protection: the words of the open branch this recorder derives. Spelled
+# here as the program spells them, and held against it by a test.
+NOT_PROTECTED = 'Branch not protected'
 
 
 def withheld(value):
@@ -239,8 +249,13 @@ class Responses:
             state, body = self.original.read(endpoint)
             if state not in ('ok', 'absent'):
                 raise RuntimeError(f'live GET {endpoint}: {state}; do not record a transient failure as live truth')
-            self.live[endpoint] = {'state': state, 'body': withheld(body), 'provenance': {'kind': 'live', 'method': 'GET',
+            self.live[endpoint] = {'state': str(state), 'body': withheld(body), 'provenance': {'kind': 'live', 'method': 'GET',
                 'endpoint': endpoint, 'recordedAt': datetime.datetime.now(datetime.timezone.utc).isoformat()}}
+            # The words of a 404, which the state alone does not keep: one
+            # status answers a branch without protection, a token that may
+            # not read one and a branch that does not exist.
+            if getattr(state, 'message', ''):
+                self.live[endpoint]['message'] = state.message
             replay.write_json(self.cache, self.live)
         answer = copy.deepcopy(self.live[endpoint])
         self.used[endpoint] = copy.deepcopy(answer)
@@ -250,8 +265,9 @@ class Responses:
             changes.append('repository visibility becomes private')
         if profile in ('open', 'private-open'):
             if endpoint.endswith('/protection'):
-                answer.update(state='absent', body=None)
+                answer.update(state='absent', body=None, message=NOT_PROTECTED)
                 changes.append('classic protection is absent')
+                changes.append(f"its 404 says '{NOT_PROTECTED}', GitHub's words for that state")
             elif '/rules/branches/' in endpoint:
                 answer.update(state='ok', body=[])
                 changes.append('no branch rules apply')
@@ -291,6 +307,10 @@ class Responses:
                         rule['parameters']['required_status_checks'].append({'context': 'check / check (retired-golden)'})
                         changes.append('ruleset additionally requires a retired socle leg')
                         break
+        # The words of a 404 are said of a 404: an answer derived into
+        # another state does not keep those of the reading it came from.
+        if answer['state'] != 'absent':
+            answer.pop('message', None)
         key = endpoint
         if changes:
             key = profile + ':' + endpoint
@@ -326,7 +346,9 @@ def recording_host(module, project, source, responses, profile):
         def read(self, path):
             key, answer = responses.read(path, profile)
             self.events.append({'call': {'kind': 'read', 'path': path}, 'response': key})
-            return answer['state'], copy.deepcopy(answer['body'])
+            # As the replay gives it back, so that what is recorded is what
+            # the program was told: a 404 with the words stored beside it.
+            return replay.state_of(module, answer), copy.deepcopy(answer['body'])
         def run(self, command, cwd=None, env=None):
             if command == COMPOSED and cwd is None and env is None:
                 self.events.append({'call': {'kind': 'run', 'argv': command, 'cwd': None},

@@ -734,7 +734,7 @@
     "cases/seeded-name-check-text.json": "4c2adb24e724720144b83324deccec7b648caa021c3690b56288157d872dd463",
     "cases/seeded-name-preflight-json.json": "a175731e09a7fb0ec60b864b0bd13681ceaafe67c68533f92bf71200bdc83056",
     "cases/seeded-name-preflight-text.json": "d3898b4d5d6cc54828f05021eb982dcf6751ba908bc7f671aa979f96da82c8d6",
-    "responses.json": "0cb95f78b6b68c83269a5600797bddfb80abccaa4cd3af855166288fdc73b519",
+    "responses.json": "f106aba05938e699213c79ec878ef6047ad0f5a0bc77163c2cdbdf80cd1d59af",
     "socle/VERSION": "9f3b241201d849aebe0a6a50fcdf0c2a0d7a9419bd7d87eab032e49f742f06a0",
     "socle/CHANGELOG.md": "734640973a92806310550a85176fd3e74577ffe99ac096d0fa3a508ae15bea9f"
   }

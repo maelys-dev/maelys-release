@@ -120,6 +120,22 @@ def run_command(module, argv, project, source, host):
                        'changedFiles': changes}, paths)
 
 
+def state_of(module, reply):
+    """The state a stored answer is given back with: a 404 with the words it was stored with.
+
+    `protect` takes a 404 for an absence only where GitHub said `Branch not
+    protected`, and reads those words beside the state (`host.Absent`). A
+    reference that kept the state alone gave every recorded 404 back as an
+    absence that says nothing, and stopped covering the open branch and the
+    repository a ruleset alone protects. An answer stored with a `message`
+    is given back carrying it; one stored without is the bare state it
+    always was.
+    """
+    if reply['state'] == 'absent' and reply.get('message'):
+        return module.host.Absent(reply['message'])
+    return reply['state']
+
+
 def replay_host(module, events, responses, project, source):
     class ReplayHost(module.Host):
         def __init__(self):
@@ -140,7 +156,7 @@ def replay_host(module, events, responses, project, source):
         def read(self, path):
             event = self.consume({'kind': 'read', 'path': path})
             reply = responses[event['response']]
-            return reply['state'], json.loads(json.dumps(reply['body']))
+            return state_of(module, reply), json.loads(json.dumps(reply['body']))
 
         def run(self, command, cwd=None, env=None):
             if env is not None:

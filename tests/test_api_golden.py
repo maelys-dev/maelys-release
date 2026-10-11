@@ -74,6 +74,31 @@ class ApiGoldenBoundaryTest(unittest.TestCase):
         self.assertEqual(host.read('repos/example/product'), ('ok', {'contexts': ['check']}))
         host.finish()
 
+    def test_a_404_is_given_back_with_the_words_it_was_stored_with_and_bare_without_any(self):
+        """`protect` reads the words of a 404 beside its state. Given back
+        without them, every recorded absence of a protection was unread."""
+        candidate = REPLAY.load_source(ROOT)
+        event = lambda key: {'call': {'kind': 'read', 'path': 'repos/example/product'}, 'response': key}
+        responses = {'said': {'state': 'absent', 'body': None, 'message': 'Branch not protected'},
+                     'other': {'state': 'absent', 'body': None, 'message': 'Not Found'},
+                     'bare': {'state': 'absent', 'body': None},
+                     'read': {'state': 'ok', 'body': {'a': 1}, 'message': 'not the words of a 404'}}
+        host = REPLAY.replay_host(candidate, [event(key) for key in responses], responses,
+                                  pathlib.Path('/fixture'), ROOT)
+        for words in ('Branch not protected', 'Not Found'):
+            state, body = host.read('repos/example/product')
+            self.assertEqual((state, body, state.message), ('absent', None, words))
+            self.assertIsInstance(state, candidate.host.Absent)
+            self.assertIs(candidate.github.Protection(state, body, 'ok', []).unprotected,
+                          words == 'Branch not protected')
+        state, body = host.read('repos/example/product')
+        self.assertEqual((state, body), ('absent', None))
+        self.assertIs(type(state), str)
+        self.assertIs(candidate.github.Protection(state, body, 'ok', []).unprotected, False)
+        state, body = host.read('repos/example/product')
+        self.assertEqual((state, body, type(state)), ('ok', {'a': 1}, str))
+        host.finish()
+
     def test_only_local_adoption_may_apply(self):
         REPLAY.validate_argv(['adopt', '/fixture', '--apply'])
         for argv in (['protect', '--apply'], ['migrate', '--push'], ['migrate', '--push=true'],
@@ -126,7 +151,10 @@ class ApiGoldenBoundaryTest(unittest.TestCase):
                               capture_output=True, text=True, timeout=90)
 
     def test_real_cli_replays_with_poisoned_parent_environment(self):
-        cases = ['protect-classic-json', 'preflight-ruleset-text', 'current-private-open-adopt-json',
+        # The open branch and the repository a ruleset alone protects among
+        # them: both rest on a 404 whose words the inputs must give back.
+        cases = ['protect-classic-json', 'protect-open-json', 'protect-open-text', 'protect-ruleset-json',
+                 'protect-ruleset-text', 'preflight-ruleset-text', 'current-private-open-adopt-json',
                  'current-private-unreadable-adopt-json', 'adoption-guard-ruleset-refused-json', 'migration-json']
         with tempfile.TemporaryDirectory() as directory:
             output = pathlib.Path(directory) / 'replay'
@@ -181,6 +209,40 @@ class ApiGoldenCoverageTest(unittest.TestCase):
         for case in manifest['cases']:
             self.assertIn(case['id'].rsplit('-', 1)[0] + '-text', {c['id'] for c in manifest['cases']})
             self.assertIn(case['id'].rsplit('-', 1)[0] + '-json', {c['id'] for c in manifest['cases']})
+
+    def test_the_reference_says_which_404_it_holds_where_protect_reads_the_words(self):
+        """Three stored answers are an absence `protect` creates or writes
+        on: the two derived open branches and the protection of the
+        repository a ruleset alone protects. Each says `Branch not
+        protected` and why it does; no other stored answer has words."""
+        responses = REPLAY.read_json(INPUTS / 'responses.json')
+        worded = {key: value for key, value in responses.items() if 'message' in value}
+        system, ruleset = ('repos/maelys-dev/' + name + '/branches/main/protection'
+                           for name in ('maelys-system', 'agent-cli-spec'))
+        self.assertEqual(sorted(worded), sorted(['open:' + system, 'private-open:' + system, ruleset]))
+        for key, value in worded.items():
+            self.assertEqual((value['state'], value['body'], value['message']),
+                             ('absent', None, 'Branch not protected'), key)
+        for key in ('open:' + system, 'private-open:' + system):
+            self.assertEqual(responses[key]['provenance'], {'kind': 'derived', 'from': system, 'changes': [
+                'classic protection is absent', "its 404 says 'Branch not protected', GitHub's words for that state"]})
+        # Read live before the words were kept: a second reading of the same
+        # endpoint supplies them, and the first keeps its date.
+        first = responses[ruleset]['provenance']
+        self.assertEqual((first['kind'], first['recordedAt']), ('live', '2026-09-17T10:43:24.156547+00:00'))
+        second = first['message']
+        self.assertEqual((second['kind'], second['method'], second['endpoint'], second['recordedAt']),
+                         ('live', 'GET', ruleset, '2026-10-11'))
+        self.assertTrue(second['changes'])
+        # Every other 404 the reference holds is an absence nobody reads the words of.
+        bare = sorted(key for key, value in responses.items() if value['state'] == 'absent' and key not in worded)
+        self.assertEqual(bare, ['missing-environment:repos/maelys-dev/maelys-system/environments/release'])
+        # And the cases that rest on those words are recorded as reading them.
+        cases = {case['id']: REPLAY.read_json(INPUTS / case['input']) for case in REPLAY.verify_inputs(INPUTS)['cases']}
+        reads = lambda name: [event['response'] for event in cases[name]['events'] if event['call']['kind'] == 'read']
+        self.assertIn('open:' + system, reads('protect-open-json'))
+        self.assertIn('private-open:' + system, reads('current-private-open-adopt-json'))
+        self.assertIn(ruleset, reads('protect-ruleset-text'))
 
     def test_nothing_recorded_tells_the_security_settings_of_a_real_repository(self):
         """The recorder withholds the member; this holds what is committed, whoever recorded it.
