@@ -2,11 +2,13 @@
 """Read dependency layouts and materialise the product's pinned checkouts."""
 from __future__ import annotations
 
+import os
 import pathlib
 import re
 
 from maelys_cli import EXIT_OK, EXIT_VIOLATIONS, Failure, Invocation
 
+from . import host
 from .checkouts import cache_root, checkout_state, git_base, materialise
 from .constants import DECLARATION_FILE, FORMER_DECLARATION_FILE, PROGRAM, SOCLE_REPOSITORY
 from .context import Context
@@ -46,6 +48,25 @@ DEPENDENCIES_READ = re.compile(r"[$({\[\"']\s*" + DEPENDENCIES_VARIABLE
 # forever. Comments are not exempt: three of the lines this rule found were
 # comments of a Dockerfile, and their author changed all three.
 SIBLING_EXEMPT = (DECLARATION_FILE, FORMER_DECLARATION_FILE) + CHECKOUT_SCRIPTS
+# What a question put to a repository may cost: answered in that many seconds
+# by the clock, or given up on. git's own low-speed settings, which the
+# managed script asks for the socle's tag with, cut one state only, an
+# http(s) transfer that has stopped moving. Measured on this very question: a
+# TLS handshake that never starts waited 300 seconds, and a remote that
+# trickles, ssh with no banner and git:// were never cut. --apply over a
+# checkout already at its pin reached no repository before this question
+# existed: it now waits this long at most for each pin it asks about, and as
+# long again where there are tags to bring.
+PATIENCE = 10
+# And it asks nobody: git is told not to prompt on a terminal, and the host
+# gives a bounded call none, which leaves ssh nothing to ask on either. An
+# askpass program and a credential helper stay as configured -- a job answers
+# through them -- and wait no longer than the clock.
+UNATTENDED = {"GIT_TERMINAL_PROMPT": "0"}
+# What `git describe` says of a commit past a tag, as git reads it back, or a
+# hash alone: measured on git 2.50, `<name>-<count>-g<hash>` with four to
+# forty digits of either case. An older git also took `<anything>-g<hash>`.
+BY_ITS_HASH = re.compile(r"(?:.+-[0-9]+-g)?([0-9a-fA-F]{4,40})")
 
 
 def sibling_readers(project: pathlib.Path, names: list[str]) -> list[tuple[str, int, str, str]]:
@@ -285,10 +306,14 @@ def handle_dependencies(invocation: Invocation, context: Context) -> tuple[dict,
         if entry["name"] not in decl.foreign:
             notes.extend(neighbour_pins(decl, entry["name"], path))
     refused: list[str] = []
-    # What line 1 says of line 2, held to the checkout in hand. Offline: a
-    # partial clone carries every ref it was given. maelys-git-core pinned
-    # an untagged commit of a branch, the branch was rewritten, the commit
-    # is gone from everywhere, and the repository no longer configures --
+    # What line 1 says of line 2, held to the checkout in hand. A plan reads
+    # that checkout and asks nothing, and git is kept from asking for it. A
+    # clone carries every ref the repository had that day and no tag made
+    # since -- a refresh fetches the commit by its hash, which follows none
+    # -- so what the checkout lacks is said of the checkout, and of the
+    # repository only once --apply has asked it. maelys-git-core pinned an
+    # untagged commit of a branch, the branch was rewritten, the commit is
+    # gone from everywhere, and the repository no longer configures --
     # nothing had ever told it that its pin was not a tag.
     for entry in entries:
         pin = decl.pins.get(entry["name"])
@@ -314,7 +339,12 @@ def handle_dependencies(invocation: Invocation, context: Context) -> tuple[dict,
                 refused.extend(caught)
                 notes.extend(said)
             continue
-        named = named_by(pin["tag"], path)
+        # A line 1 that is the whole hash of line 2 is read from the two
+        # lines. git takes forty digits for the object without looking at a
+        # ref, so the answer is git's -- and in a partial clone git fetches
+        # the object when the checkout does not hold it, from a plan too.
+        named = pin["commit"] if pin["tag"].lower() == pin["commit"] \
+            else named_by(pin["tag"], path, fetching=apply)
         # Only a third party can answer with the line: a Maelys repository
         # is tagged, and its messages are the ones they were.
         declare = (" A third party's commit that no tag carries yet says which branch holds it, on an"
@@ -325,8 +355,40 @@ def handle_dependencies(invocation: Invocation, context: Context) -> tuple[dict,
                            f" is {pin['commit'][:7]}. A published tag never moves, so one of the two is"
                            " wrong; re-pin on the tag's own commit" + ("." + declare if declare else ""))
         elif not named or pin["repository"]:
-            carried = git("tag", "--points-at", pin["commit"], cwd=path, check=False).split()
-            if not carried:
+            carried = tags_here(pin["commit"], path)
+            spelled = f"names {pin['tag']}, which this checkout does not hold" if pin["tag"] else "is empty"
+            # What the checkout holds is the checkout's answer, and it holds
+            # the tags of the day it was cloned: every pin moved to a release
+            # cut since then was told its commit carried no tag, and one
+            # whose commit carried an older tag was told for ever that line
+            # 1 was wrong. So a plan says what it read and that it did not
+            # ask, and --apply asks the repository wherever the checkout
+            # does not settle it: no tag here on the commit, or a line 1
+            # that names nothing here. The clone this run made is not asked
+            # again: its tags are that answer.
+            asked = apply and entry["action"] != "clone" and not (carried and named)
+            there = tagged_there(pin["commit"], path) if asked else []
+            # Brought by name, every tag the repository carries on the commit
+            # and no other, so that the next run reads them here and asks
+            # nothing. One that would move a tag held here is declined by
+            # git, and a name that is not UTF-8, which no refspec spells --
+            # it is shown with the backslash no ref may hold -- is left.
+            bringing = [tag for tag in there or [] if tag not in carried and "\\" not in tag]
+            if bringing:
+                unattended(["fetch", "--quiet", "--no-tags", "origin",
+                            *(f"refs/tags/{tag}:refs/tags/{tag}" for tag in bringing)], path)
+            if not carried and not apply:
+                # Said where --apply would ask, and nowhere else: a Maelys
+                # pin that names its commit by its hash is the shape
+                # `migrate` writes, silent once the checkout holds the
+                # commit and so silent before.
+                if pin["repository"] or not by_its_hash(pin["tag"], pin["commit"]):
+                    notes.append(f"{entry['name']}: this checkout holds no tag on {pin['commit'][:7]}, and"
+                                 f" {entry['repository']} was not asked for one: --apply asks")
+            elif not carried and there is None:
+                notes.append(f"{entry['name']}: this checkout holds no tag on {pin['commit'][:7]}, and"
+                             f" {entry['repository']} could not be asked for one: not verified")
+            elif not carried and not there:
                 # `named` and no tag is what `git describe` says of a commit
                 # past its tag: a name of the commit itself. A Maelys pin in
                 # that shape is what `migrate` writes, and stays silent; a
@@ -336,14 +398,19 @@ def handle_dependencies(invocation: Invocation, context: Context) -> tuple[dict,
                              " an untagged commit with it, and a pin on one stops resolving everywhere at"
                              " once -- for the socle, for CI, and for whoever clones next"
                              + ("." + declare if declare else ""))
-            elif not named:
+            elif not named and (not asked or there is None):
                 # The commit is tagged and line 1 names something else that
                 # is nothing here: said as what was read, since a tag made
                 # after this checkout last fetched its tags reads the same.
-                spelled = f"names {pin['tag']}, which this checkout does not hold" if pin["tag"] else "is empty"
                 notes.append(f"{entry['name']}: line 1 {spelled}, and {pin['commit'][:7]} carries"
                              f" {', '.join(carried)} in it: line 1 is wrong, or names a tag made since this"
                              " checkout last fetched its tags")
+            elif not named and pin["tag"] not in there:
+                # Asked, the repository settles it: the tags it carries on
+                # the commit, or the checkout's when it carries none there.
+                notes.append(f"{entry['name']}: line 1 {spelled}, and {pin['commit'][:7]} carries"
+                             f" {', '.join(there or carried)} in {entry['repository'] if there else 'it'}:"
+                             " line 1 is wrong")
     # And the socle itself, under the same root. Its commit is not a pin: it
     # is the one on the `uses:` line, which `pinned_socle` reads. CI has
     # cloned it at that commit into $RUNNER_TEMP since 0.41.0, so giving the
@@ -374,14 +441,101 @@ def handle_dependencies(invocation: Invocation, context: Context) -> tuple[dict,
     return data, EXIT_VIOLATIONS if blocked or caught else EXIT_OK
 
 
-def named_by(line: str, path: pathlib.Path) -> str:
+def named_by(line: str, path: pathlib.Path, fetching: bool = True) -> str:
     """The commit line 1 of a pin names in this checkout, or "" when it names none.
 
     A revision, and never an option, whatever the file spells on it: the
     line went to `git rev-list` bare, where `--all` is an instruction and
     answers with a commit.
+
+    Without `fetching`, what the checkout does not hold is named by nothing:
+    a plan asks no repository, and neither does git on its behalf.
     """
-    return git("rev-list", "-n", "1", "--end-of-options", line, cwd=path, check=False)
+    listed = run(["git", "rev-list", "-n", "1", "--end-of-options", line], cwd=path,
+                 env=None if fetching else without_fetching())
+    return listed.stdout.strip() if listed.returncode == 0 else ""
+
+
+def without_fetching() -> dict[str, str]:
+    """The environment of a git read that must not turn into a fetch.
+
+    In the partial clone the socle makes, git fetches by itself an object it
+    is asked about and does not hold. One read of a plan names such an
+    object: line 1, when it is the whole hash of a commit the checkout does
+    not hold. GIT_NO_LAZY_FETCH stops that in git 2.45 and later; an older
+    git does not know the variable and fetches, which is why the one shape
+    that is a correct pin -- the hash of line 2 itself -- is never given to
+    git at all. An abbreviated hash is not fetched by any git.
+    """
+    return {**os.environ, "GIT_NO_LAZY_FETCH": "1"}
+
+
+def spelling(raw: bytes) -> str:
+    """A tag's name as it can be printed: a name that is not UTF-8 keeps its bytes behind a backslash."""
+    return raw.decode("utf-8", "backslashreplace")
+
+
+def tags_here(commit: str, path: pathlib.Path) -> list[str]:
+    """The tags this checkout holds on the commit; none for a commit it does not hold.
+
+    Read as bytes, since a tag is named in whatever bytes its author
+    typed, and never by way of a fetch.
+    """
+    listed = host.HOST.feed(["git", "tag", "--points-at", commit], b"", cwd=path, env=without_fetching())
+    return [spelling(raw) for raw in listed.stdout.split(b"\n") if raw] if listed.returncode == 0 else []
+
+
+def by_its_hash(line: str, commit: str) -> bool:
+    """Whether line 1 names this commit by its hash, as `git describe` writes it past a tag.
+
+    Read from the two lines, as git reads them: a checkout that does not
+    hold the commit yet cannot resolve the name, and `named_by` answers
+    nothing for it there. Four digits are enough for git and so for this,
+    which does not know whether another object of that repository starts
+    with the same four.
+    """
+    spelled = BY_ITS_HASH.fullmatch(line)
+    return bool(spelled) and commit.startswith(spelled.group(1).lower())
+
+
+def unattended(arguments: list[str], path: pathlib.Path) -> "bytes | None":
+    """What git answers a question put to a repository, or None when it gave no answer in time.
+
+    By the clock, and with nobody to prompt: the same call whether it is
+    the question or the tags it brings back.
+    """
+    done = host.HOST.feed(["git", *arguments], b"", cwd=path, env={**os.environ, **UNATTENDED}, timeout=PATIENCE)
+    return done.stdout if done.returncode == 0 else None
+
+
+def tagged_there(commit: str, path: pathlib.Path) -> "list[str] | None":
+    """The tags the repository carries on this commit, asked now; None when it gave no answer.
+
+    Every tag, and not line 1's alone: the question is whether the commit
+    carries one, whatever the pin calls it. The listing is read as bytes: a
+    repository holds a tag named in Latin-1 on some commit of 2009, and
+    that is not a reason for a run to end.
+
+    An empty listing is an answer from a repository this checkout holds no
+    tag of, and none from one it holds a tag of: a portal or a proxy
+    answers 200 and nothing, git reads that as a repository with no tag,
+    and "carries no tag" would be said on an answer that is not the
+    repository's.
+    """
+    listed = unattended(["ls-remote", "--tags", "origin"], path)
+    if listed is None or not listed.strip() and git("for-each-ref", "--count=1", "--format=%(objectname)",
+                                                    "refs/tags", cwd=path, check=False):
+        return None
+    commits: dict[bytes, bytes] = {}
+    for line in listed.split(b"\n"):
+        target, _, ref = line.partition(b"\t")
+        # A tag object is listed twice, and its `^{}` line is the commit it
+        # names, whichever of the two comes first.
+        if ref.endswith(b"^{}"):
+            commits[ref[:-3]] = target
+        else:
+            commits.setdefault(ref, target)
+    return [spelling(ref[len(b"refs/tags/"):]) for ref, target in commits.items() if target == commit.encode()]
 
 
 def unreleased_pin(pin: dict, repository: str, path: pathlib.Path,

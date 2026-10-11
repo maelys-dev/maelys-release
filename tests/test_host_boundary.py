@@ -8,9 +8,11 @@ import io
 import json
 import os
 import pathlib
+import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 
 from test_maelys_release import (CLI, MODULE, ROOT, ALL_LEGS, FakeHost, FakeProtection,
@@ -232,6 +234,45 @@ module.host.HOST.run(["gh", "pr", "create"])
                 completed = host.run(command, cwd=cwd)
                 self.assertEqual(completed.returncode, 0, completed.stderr)
             self.assertTrue(host.run(["git", "rev-parse", "refs/heads/main"], cwd=origin).stdout.strip())
+
+    def test_a_bounded_call_is_stopped_with_everything_it_started(self):
+        """git talks to a repository through a helper. A server accepts the
+        connection and says nothing: the call comes back when its time is
+        up, with the code of a process that was stopped, and the other end
+        sees the connection close -- the helper went with git, and holds
+        neither the pipes this call reads nor the repository's line."""
+        listener = socket.socket()
+        self.addCleanup(listener.close)
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(8)
+        held = []
+        self.addCleanup(lambda: [connection.close() for connection in held])
+
+        def accept():
+            while True:
+                try:
+                    held.append(listener.accept()[0])
+                except OSError:
+                    return
+        threading.Thread(target=accept, daemon=True).start()
+        env = {key: value for key, value in os.environ.items()
+               if key.lower() not in ("http_proxy", "https_proxy", "all_proxy")}
+        env.update({"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null", "NO_PROXY": "127.0.0.1",
+                    "no_proxy": "127.0.0.1"})
+        with tempfile.TemporaryDirectory() as directory:
+            done = MODULE.Host().feed(["git", "ls-remote", f"http://127.0.0.1:{listener.getsockname()[1]}/x.git"],
+                                      b"", cwd=pathlib.Path(directory), env=env, timeout=2)
+            self.assertLess(done.returncode, 0, done)
+            self.assertEqual(done.stdout, b"")
+            self.assertTrue(held, "nothing reached the server: the test proves nothing")
+            # What the helper asked, then the end of the connection: a
+            # helper still holding it makes this raise.
+            held[0].settimeout(5)
+            while held[0].recv(4096):
+                pass
+            # Without a time, the call is the one it was.
+            plain = MODULE.Host().feed(["git", "--version"], b"", cwd=pathlib.Path(directory))
+            self.assertEqual((plain.returncode, plain.stdout[:11]), (0, b"git version"))
 
     def test_public_wrappers_share_the_installed_host_and_restore_it(self):
         original = MODULE.host.HOST

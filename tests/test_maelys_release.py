@@ -15,16 +15,22 @@ import ast
 import atexit
 import io
 import base64
+import http.server
 import json
 import os
 import pathlib
 import re
 import shutil
+import signal
+import socket
 import subprocess
 import tempfile
 import textwrap
+import threading
+import time
 import unittest
-from contextlib import contextmanager
+from contextlib import contextmanager, redirect_stdout
+from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 CLI = ROOT / "bin" / "maelys-release"
@@ -4743,6 +4749,498 @@ class DependenciesTest(unittest.TestCase):
         """One object, whether CI made it next to the product or this made it here."""
         template = (ROOT / "share" / "templates" / "checkout-dependency.sh").read_text(encoding="utf-8")
         self.assertIn(" ".join(MODULE.CLONE_FLAGS), template)
+
+
+class RealGitHost(FakeHost):
+    """Real git in a fixture's environment, with every command written down before it runs.
+
+    What a run asked of a repository is read from what it ran, and never
+    from what it happened to say. The socle hands a call the environment of
+    its own process and what it adds to it: the fixture's environment takes
+    the place of the first, and the second is kept and written down.
+
+    `as_written` answers `git remote get-url` without the fixture's
+    `insteadOf`: git expands it there, the socle compares the answer with
+    the pin's URL, and a third party served from a directory would
+    otherwise read as cloned from somewhere else on its second run.
+    """
+
+    REACHING = {"clone", "fetch", "ls-remote", "pull", "push"}
+
+    def __init__(self, env: dict, as_written: bool = False) -> None:
+        super().__init__()
+        self.env, self.as_written = env, as_written
+        self.fed: list[dict] = []
+
+    def environment(self, command: list, env: "dict | None") -> tuple[dict, dict]:
+        added = {key: value for key, value in (env or {}).items() if os.environ.get(key) != value}
+        base = self.env
+        if self.as_written and command[1:3] == ["remote", "get-url"]:
+            base = {key: value for key, value in base.items()
+                    if key not in ("GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0")}
+        return {**base, **added}, added
+
+    def run(self, command, cwd=None, env=None):
+        self.commands.append(command)
+        return MODULE.Host.run(self, command, cwd=cwd, env=self.environment(command, env)[0])
+
+    def feed(self, command, data, cwd=None, env=None, timeout=None):
+        self.commands.append(command)
+        environment, added = self.environment(command, env)
+        done = MODULE.Host.feed(self, command, data, cwd=cwd, env=environment, timeout=timeout)
+        self.fed.append({"command": command, "added": added, "timeout": timeout, "said": done.stderr})
+        return done
+
+    def reaching(self) -> list[list[str]]:
+        return [command for command in self.commands if self.REACHING & set(command)]
+
+    def dependencies(self, product: "Product", *arguments: str) -> tuple[int, dict]:
+        """One run of `dependencies` in this process, through this host: (exit code, data)."""
+        out = io.StringIO()
+        located = {key: product.env[key] for key in ("MAELYS_GIT_BASE", "XDG_CACHE_HOME")}
+        with mock.patch.dict(os.environ, located), using_host(self), redirect_stdout(out):
+            code = MODULE.APP.main(["dependencies", str(product.dir), *arguments, "--format", "json"])
+        return code, json.loads(out.getvalue())["data"]
+
+
+class TagMadeSinceTheCloneTest(unittest.TestCase):
+    """A commit its repository has tagged is not said to carry no tag.
+
+    A checkout holds the tags of the day it was cloned. A refresh fetches
+    the commit by its hash, which follows no tag, so a pin moved to a
+    release cut since the clone was told, at every run and for good, that
+    its commit "carries no tag" -- and before the refresh too, where git
+    answers nothing for a commit the checkout does not hold. A plan reads
+    the checkout, asks nothing, and says so; `--apply` asks the repository,
+    by the clock and with nobody to prompt, and what it answers is what is
+    said.
+    """
+
+    def setUp(self) -> None:
+        self.product = Product()
+        self.addCleanup(self.product.close)
+        self.dir = str(self.product.dir)
+        self.home = (self.product.work / "cache" / "maelys-release" / "dependencies" / "maelys-fixture").resolve()
+        self.checkout = self.home / "maelys-system"
+        self.source = self.product.work / "src" / "maelys-system"
+        self.remote = self.product.work / "remotes" / "maelys-system.git"
+        self.repository = f"{self.product.env['MAELYS_GIT_BASE']}/maelys-system.git"
+        self.none = "carries no tag. A rewritten branch takes an untagged commit with it"
+
+    def pin(self, tag: str, commit: str) -> None:
+        self.product.write("dependencies/maelys-system.pin", f"{tag}\n{commit}\n")
+
+    def commit(self, content: str) -> str:
+        """A commit the dependency makes after the clone: on its branch, under no tag."""
+        (self.source / "file").write_text(content + "\n", encoding="utf-8")
+        self.product.git(self.source, "commit", "-q", "-am", content)
+        self.product.git(self.source, "push", "-q", str(self.remote), "main")
+        return self.product.git(self.source, "rev-parse", "HEAD")
+
+    def release(self, tag: str, commit: str, annotated: bool = False, moved: bool = False) -> None:
+        """The dependency tags a commit after the clone, as a release is cut."""
+        self.product.git(self.source, "tag", *(("-f",) if moved else ()), *(("-a", "-m", tag) if annotated else ()),
+                         tag, commit)
+        self.product.git(self.source, "push", "-q", *(("--force",) if moved else ()), str(self.remote), tag)
+
+    def said(self, *arguments: str, expect: int = 0) -> tuple[str, list[str], list[str]]:
+        """(action, refusals, notes) of one run."""
+        data = self.product.json("dependencies", self.dir, *arguments, expect=expect)["data"]
+        return data["dependencies"][0]["action"], data["refused"], data["notes"]
+
+    def recorded(self, *arguments: str, expect: int = 0) -> tuple[tuple[str, list[str], list[str]], list[list[str]]]:
+        """What `said` returns, of a run in this process, and the commands of it that reach a repository."""
+        self.host = RealGitHost(self.product.env)
+        code, data = self.host.dependencies(self.product, *arguments)
+        self.assertEqual(code, expect, data)
+        self.assertTrue(self.host.commands, "the host was asked nothing: the test proves nothing")
+        return (data["dependencies"][0]["action"], data["refused"], data["notes"]), self.host.reaching()
+
+    def unasked(self, commit: str) -> str:
+        return (f"maelys-system: this checkout holds no tag on {commit[:7]}, and {self.repository} was not asked"
+                " for one: --apply asks")
+
+    def unanswered(self, commit: str) -> str:
+        return (f"maelys-system: this checkout holds no tag on {commit[:7]}, and {self.repository} could not be"
+                " asked for one: not verified")
+
+    def wrong(self, line: str, commit: str, tags: str, where: str = "") -> str:
+        return (f"maelys-system: line 1 names {line}, which this checkout does not hold, and {commit[:7]} carries"
+                f" {tags} in {where or self.repository}: line 1 is wrong")
+
+    def here(self, commit: str = "") -> str:
+        """The tags the checkout holds, on one commit or on any."""
+        return self.product.git(self.checkout, "tag", *(("--points-at", commit) if commit else ())).replace("\n", " ")
+
+    def serve(self, handler: type) -> str:
+        """The checkout's repository is now a local server that answers as `handler` does."""
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        return self.moved_to(f"http://127.0.0.1:{server.server_address[1]}")
+
+    def moved_to(self, base: str) -> str:
+        """The checkout was cloned from there, as far as anything can tell."""
+        self.product.git(self.checkout, "remote", "set-url", "origin", f"{base}/maelys-system.git")
+        self.product.env["MAELYS_GIT_BASE"] = base
+        for name in ("http_proxy", "HTTP_PROXY", "all_proxy", "ALL_PROXY"):
+            self.product.env.pop(name, None)
+        self.product.env["no_proxy"] = self.product.env["NO_PROXY"] = "127.0.0.1"
+        self.repository = f"{base}/maelys-system.git"
+        return base
+
+    def test_a_plan_asks_nothing_of_a_commit_tagged_since_the_clone_and_does_not_say_it_carries_none(self) -> None:
+        """The checkout is at the pin and was cloned before the tag existed."""
+        self.assertEqual(self.said("--apply"), ("clone", [], []))
+        self.release("v0.0.2", self.product.pinned, annotated=True)
+        self.pin("v0.0.2", self.product.pinned)
+        self.assertEqual(self.recorded(), (("same", [], [self.unasked(self.product.pinned)]), []))
+        self.assertEqual(self.here(self.product.pinned), "", "a plan writes nothing either")
+        text = self.product.run("dependencies", self.dir).stdout
+        self.assertIn(f"note     {self.unasked(self.product.pinned)}\n", text)
+        self.assertNotIn("carries no tag", text)
+        # Asked, the repository answers, and nothing is left to say.
+        self.assertEqual(self.said("--apply"), ("same", [], []))
+        self.assertEqual(self.here(self.product.pinned), "v0.0.2")
+        self.assertEqual(self.recorded(), (("same", [], []), []))
+
+    def test_a_plan_asks_nothing_of_a_commit_no_tag_carries_and_apply_says_the_note_it_had(self) -> None:
+        """The other end: the same sentence on a plan, which knows no more,
+        and the repository's answer under --apply."""
+        self.said("--apply")
+        self.pin("v0.0.2", self.product.pinned)
+        self.assertEqual(self.recorded(), (("same", [], [self.unasked(self.product.pinned)]), []))
+        for _ in range(2):
+            action, refused, notes = self.said("--apply")
+            self.assertEqual((action, refused, len(notes)), ("same", [], 1), notes)
+            self.assertIn(f"maelys-system: {self.product.pinned[:7]} {self.none}", notes[0])
+        # Nothing was brought, so the next plan knows what the first one did.
+        self.assertEqual(self.recorded(), (("same", [], [self.unasked(self.product.pinned)]), []))
+
+    def test_a_plan_before_a_refresh_asks_nothing_whatever_the_commit_carries(self) -> None:
+        """Of a commit the checkout does not hold yet git answers nothing,
+        which read "carries no tag" for a pin on a release."""
+        self.pin(PINNED_TAG, self.product.tagged)
+        self.assertEqual(self.said("--apply"), ("clone", [], []))
+        self.assertEqual(self.recorded(), (("same", [], []), []), "a tag the checkout holds is read where it is")
+        untagged = self.commit("three")
+        newer = self.commit("four")
+        self.release("v0.0.2", newer)
+        self.release("v0.0.3", self.commit("five"))
+        self.pin("v0.0.2", newer)
+        self.assertEqual(self.recorded(), (("refresh", [], [self.unasked(newer)]), []))
+        self.assertEqual(self.said("--apply"), ("refresh", [], []))
+        self.assertEqual(self.product.git(self.checkout, "rev-parse", "HEAD"), newer)
+        self.assertEqual(self.here(), f"{PINNED_TAG} v0.0.2", "the tag of that commit, and no other")
+        # The other end, before a refresh too. A release cut on another
+        # commit says nothing of this one.
+        self.pin("v0.0.3", untagged)
+        self.assertEqual(self.recorded(), (("refresh", [], [self.unasked(untagged)]), []))
+        action, refused, notes = self.said("--apply")
+        self.assertEqual((action, refused, len(notes)), ("refresh", [], 1), notes)
+        self.assertIn(f"maelys-system: {untagged[:7]} {self.none}", notes[0])
+
+    def test_what_git_describe_says_of_a_commit_the_checkout_does_not_hold_yet_stays_silent(self) -> None:
+        """The shape `migrate` writes names the commit by its hash, which a
+        checkout that does not hold the commit cannot read. A plan said
+        "carries no tag" of it and --apply then said nothing: --apply asks
+        nothing of that shape, so a plan does not say that it would."""
+        self.pin(PINNED_TAG, self.product.tagged)
+        self.said("--apply")
+        newer = self.commit("three")
+        # In either case, as git reads it back.
+        for line in (f"{PINNED_TAG}-2-g{newer[:7]}", f"{PINNED_TAG}-2-g{newer[:7].upper()}", newer[:7]):
+            with self.subTest(line=line):
+                self.pin(line, newer)
+                self.assertEqual(self.recorded(), (("refresh", [], []), []))
+        said, reaching = self.recorded("--apply")
+        self.assertEqual(said, ("refresh", [], []))
+        self.assertEqual(reaching, [["git", "fetch", "--quiet", "origin", newer]], "the refresh, and no question")
+        # Read from the two lines, as this git reads it once it holds the commit.
+        named = MODULE.dependencies.by_its_hash
+        for line in (f"{PINNED_TAG}-2-g{newer[:7]}", f"a-b-10-g{newer[:4]}", f"{PINNED_TAG}-2-g{newer.upper()}",
+                     newer[:12].upper(), newer):
+            with self.subTest(line=line):
+                self.assertTrue(named(line, newer))
+                self.assertEqual(MODULE.dependencies.named_by(line, self.checkout, fetching=False), newer)
+        for line in ("", "v0.0.2", f"{PINNED_TAG}-2-g", f"{PINNED_TAG}-2-g{newer[:3]}", f"anything-g{newer[:7]}",
+                     f"{PINNED_TAG}-2-G{newer[:7]}", f"{PINNED_TAG}-2-g{self.product.tagged[:7]}",
+                     f"{newer[:7]}-dirty"):
+            with self.subTest(line=line):
+                self.assertFalse(named(line, newer))
+
+    def test_apply_asks_once_by_the_clock_with_nobody_to_prompt_and_the_next_run_asks_nothing(self) -> None:
+        """The question and the tag it brings back are the two calls that
+        carry the bound, and a checkout that holds the tag is read where it is."""
+        self.pin(PINNED_TAG, self.product.tagged)
+        self.said("--apply")
+        self.release("v0.0.2", self.product.pinned)
+        self.pin("v0.0.2", self.product.pinned)
+        said, reaching = self.recorded("--apply")
+        self.assertEqual(said, ("refresh", [], []))
+        question = ["git", "ls-remote", "--tags", "origin"]
+        bringing = ["git", "fetch", "--quiet", "--no-tags", "origin", "refs/tags/v0.0.2:refs/tags/v0.0.2"]
+        self.assertEqual(reaching, [["git", "fetch", "--quiet", "origin", self.product.pinned], question, bringing])
+        bounded = [(call["command"], call["added"], call["timeout"]) for call in self.host.fed if call["timeout"]]
+        unattended = {"GIT_TERMINAL_PROMPT": "0"}
+        self.assertEqual(bounded, [(question, unattended, 10), (bringing, unattended, 10)])
+        # The repository is gone, and nobody notices: nothing is asked of it.
+        self.remote.rename(self.remote.with_suffix(".gone"))
+        for arguments in ((), ("--apply",)):
+            with self.subTest(arguments=arguments):
+                self.assertEqual(self.recorded(*arguments), (("same", [], []), []))
+
+    def test_a_clone_of_this_run_is_the_repository_s_answer_and_is_not_asked_again(self) -> None:
+        self.pin("v0.0.2", self.product.pinned)
+        (action, refused, notes), reaching = self.recorded("--apply")
+        self.assertEqual((action, refused, len(notes)), ("clone", [], 1))
+        self.assertIn(f"maelys-system: {self.product.pinned[:7]} {self.none}", notes[0])
+        self.assertEqual([command[1] for command in reaching], ["clone"], reaching)
+
+    def test_a_repository_that_does_not_answer_is_said_and_the_run_succeeds(self) -> None:
+        """Offline nothing is known of the commit, and nothing is claimed of it."""
+        self.said("--apply")
+        self.release("v0.0.2", self.product.pinned)
+        self.pin("v0.0.2", self.product.pinned)
+        self.remote.rename(self.remote.with_suffix(".gone"))
+        self.assertEqual(self.said(), ("same", [], [self.unasked(self.product.pinned)]))
+        self.assertEqual(self.said("--apply"), ("same", [], [self.unanswered(self.product.pinned)]))
+        text = self.product.run("dependencies", self.dir, "--apply").stdout
+        self.assertIn(f"note     {self.unanswered(self.product.pinned)}\n", text)
+        self.assertNotIn("carries no tag", text)
+
+    def test_a_line_1_the_repository_does_not_carry_on_that_commit_is_wrong_and_said_so(self) -> None:
+        self.said("--apply")
+        self.release("v0.0.2", self.product.pinned)
+        self.pin("v0.0.9", self.product.pinned)
+        self.assertEqual(self.said(), ("same", [], [self.unasked(self.product.pinned)]))
+        asked = self.wrong("v0.0.9", self.product.pinned, "v0.0.2")
+        # Asked again at each --apply, and answered the same; a plan reads
+        # the tag that was brought, in the words it had.
+        for _ in range(2):
+            (action, refused, notes), reaching = self.recorded("--apply")
+            self.assertEqual((action, refused, notes), ("same", [], [asked]))
+            self.assertIn(["git", "ls-remote", "--tags", "origin"], reaching)
+        self.assertEqual(self.recorded(), (("same", [], [
+            self.wrong("v0.0.9", self.product.pinned, "v0.0.2", "it")
+            + ", or names a tag made since this checkout last fetched its tags"]), []))
+
+    def test_a_tag_added_to_a_commit_the_checkout_holds_another_tag_on_is_asked_for(self) -> None:
+        """The same defect one shape over: the checkout holds the release
+        candidate's tag on the commit, the release was cut on it since, and
+        a pin that is right was told at every run that line 1 was wrong."""
+        self.release("v0.0.2-rc1", self.product.pinned)
+        self.pin("v0.0.2-rc1", self.product.pinned)
+        self.assertEqual(self.said("--apply"), ("clone", [], []))
+        self.pin("v0.0.2", self.product.pinned)
+        hedged = (self.wrong("v0.0.2", self.product.pinned, "v0.0.2-rc1", "it")
+                  + ", or names a tag made since this checkout last fetched its tags")
+        # The other end first: the repository does not carry it, and says so.
+        self.assertEqual(self.recorded(), (("same", [], [hedged]), []))
+        (action, refused, notes), reaching = self.recorded("--apply")
+        self.assertEqual((action, refused, notes), ("same", [], [self.wrong("v0.0.2", self.product.pinned,
+                                                                              "v0.0.2-rc1")]))
+        self.assertEqual(reaching, [["git", "ls-remote", "--tags", "origin"]], "asked, and nothing to bring")
+        # It does: a plan still reads the checkout, and one --apply settles it.
+        self.release("v0.0.2", self.product.pinned, annotated=True)
+        self.assertEqual(self.recorded(), (("same", [], [hedged]), []))
+        self.assertEqual(self.said("--apply"), ("same", [], []))
+        self.assertEqual(self.here(self.product.pinned), "v0.0.2 v0.0.2-rc1")
+        for arguments in ((), ("--apply",)):
+            with self.subTest(arguments=arguments):
+                self.assertEqual(self.recorded(*arguments), (("same", [], []), []))
+
+    def test_a_tag_only_the_checkout_holds_on_the_commit_is_said_to_be_the_checkout_s(self) -> None:
+        """Asked, the repository carries none on the commit: line 1 is wrong,
+        with no "or" left, and the tag named is the one held here."""
+        self.said("--apply")
+        self.product.git(self.checkout, "tag", "kept-here", self.product.pinned)
+        self.pin("v0.0.2", self.product.pinned)
+        (action, refused, notes), reaching = self.recorded("--apply")
+        self.assertEqual((action, refused, notes), ("same", [], [self.wrong("v0.0.2", self.product.pinned,
+                                                                              "kept-here", "it")]))
+        self.assertEqual(reaching, [["git", "ls-remote", "--tags", "origin"]])
+
+    def test_every_tag_the_repository_carries_on_the_commit_is_brought(self) -> None:
+        """Two tags made on one commit since the clone, and line 1 names one."""
+        self.said("--apply")
+        self.release("v0.0.2", self.product.pinned)
+        self.release("v0.0.2-alias", self.product.pinned, annotated=True)
+        self.release("v0.0.3", self.commit("three"))
+        self.pin("v0.0.2-alias", self.product.pinned)
+        self.assertEqual(self.said("--apply"), ("same", [], []))
+        self.assertEqual(self.here(), f"{PINNED_TAG} v0.0.2 v0.0.2-alias", "those of that commit, and no other")
+        self.assertEqual(self.recorded(), (("same", [], []), []))
+
+    def test_a_tag_the_repository_moved_is_not_moved_here(self) -> None:
+        """The checkout holds a tag on another commit and the repository has
+        since moved it onto the pinned one. A published tag never moves:
+        git declines it, the checkout keeps what it had, and what the
+        checkout holds is still what refuses a line 1 that names it."""
+        self.release("v0.0.2", self.product.tagged)
+        self.said("--apply")
+        self.release("v0.0.2", self.product.pinned, moved=True)
+        self.release("v0.0.3", self.product.pinned)
+        there = self.product.git(self.checkout, "rev-parse", "v0.0.2")
+        # Line 1 names the other tag of that commit: right, and brought alone.
+        self.pin("v0.0.3", self.product.pinned)
+        self.assertEqual(self.said("--apply"), ("same", [], []))
+        self.assertEqual(self.here(self.product.pinned), "v0.0.3")
+        self.assertEqual(self.product.git(self.checkout, "rev-parse", "v0.0.2"), there)
+        # Line 1 names the moved one: refused on what the checkout holds, and nothing is asked.
+        self.pin("v0.0.2", self.product.pinned)
+        (action, refused, notes), reaching = self.recorded("--apply", expect=2)
+        self.assertEqual((action, notes, reaching), ("same", [], []))
+        self.assertEqual(len(refused), 1, refused)
+        self.assertIn(f"line 1 names v0.0.2, which is {self.product.tagged[:7]}, and line 2 is"
+                      f" {self.product.pinned[:7]}", refused[0])
+        self.assertEqual(self.product.git(self.checkout, "rev-parse", "v0.0.2"), there)
+
+    def test_a_tag_whose_name_is_not_utf_8_ends_no_run(self) -> None:
+        """A repository holds a tag named in Latin-1 on some old commit, and
+        the listing of its tags was read as text: a traceback at every
+        --apply, for a pin that is right, until the checkout was deleted."""
+        def latin(commit: str) -> None:
+            # Written where git keeps its refs packed, sorted: no file of
+            # this machine could carry the name.
+            self.product.git(self.remote, "pack-refs", "--all")
+            packed = self.remote / "packed-refs"
+            lines = packed.read_bytes().split(b"\n")
+            lines = [line for line in lines if not line.endswith(b" refs/tags/caf\xe9")]
+            lines.insert(next(index for index, line in enumerate(lines) if b" refs/tags/" in line),
+                         commit.encode() + b" refs/tags/caf\xe9")
+            packed.write_bytes(b"\n".join(lines))
+        self.said("--apply")
+        self.release("v0.0.2", self.product.pinned)
+        latin(self.product.tagged)
+        self.pin("v0.0.2", self.product.pinned)
+        self.assertEqual(self.said(), ("same", [], [self.unasked(self.product.pinned)]))
+        self.assertEqual(self.said("--apply"), ("same", [], []))
+        self.assertEqual(self.here(), f"{PINNED_TAG} v0.0.2")
+        # On the pinned commit itself it is a tag that commit carries, which
+        # line 1 cannot name and no refspec can bring: said, and left there.
+        self.product.git(self.remote, "tag", "-d", "v0.0.2")
+        self.product.git(self.checkout, "tag", "-d", "v0.0.2")
+        latin(self.product.pinned)
+        for _ in range(2):
+            self.assertEqual(self.said("--apply"), ("same", [], [self.wrong("v0.0.2", self.product.pinned,
+                                                                              "caf\\xe9")]))
+        self.assertEqual(self.here(), PINNED_TAG)
+        # And held here from the day of the clone, it is read as it is listed.
+        shutil.rmtree(self.checkout)
+        self.assertEqual(self.said("--apply"), ("clone", [], [
+            self.wrong("v0.0.2", self.product.pinned, "caf\\xe9", "it")
+            + ", or names a tag made since this checkout last fetched its tags"]))
+        self.assertEqual(self.said()[0], "same")
+
+    def test_an_empty_listing_is_an_answer_only_from_a_repository_the_checkout_holds_no_tag_of(self) -> None:
+        """A portal or a proxy answers 200 and nothing, git reads a
+        repository with no tag at all, and "carries no tag" was said on an
+        answer that was not the repository's."""
+        class Nothing(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *arguments) -> None:
+                pass
+
+            def do_GET(self) -> None:
+                self.send_response(200)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+        self.said("--apply")
+        self.assertEqual(self.here(), PINNED_TAG)
+        self.pin("v0.0.2", self.product.pinned)
+        self.serve(Nothing)
+        (action, refused, notes), reaching = self.recorded("--apply")
+        self.assertEqual((action, refused, notes), ("same", [], [self.unanswered(self.product.pinned)]))
+        self.assertEqual(reaching, [["git", "ls-remote", "--tags", "origin"]])
+        self.assertEqual(self.host.fed[-1]["said"], b"", "git took it for an answer, and said nothing against it")
+
+    def test_a_repository_with_no_tag_at_all_still_answers_that_the_commit_carries_none(self) -> None:
+        """The other end: an empty listing that is the repository's own."""
+        self.product.git(self.remote, "tag", "-d", PINNED_TAG)
+        self.pin("v0.0.2", self.product.pinned)
+        self.said("--apply")
+        self.assertEqual(self.here(), "")
+        (action, refused, notes), reaching = self.recorded("--apply")
+        self.assertEqual((action, refused, len(notes)), ("same", [], 1), notes)
+        self.assertIn(f"maelys-system: {self.product.pinned[:7]} {self.none}", notes[0])
+        self.assertEqual(reaching, [["git", "ls-remote", "--tags", "origin"]], "asked, and answered")
+
+    def test_a_repository_that_asks_for_a_name_is_not_answered_by_anybody(self) -> None:
+        """401: git would ask for a name on the terminal of whoever runs
+        this, and wait for it. It is told not to, and says that it was."""
+        class Guarded(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *arguments) -> None:
+                pass
+
+            def do_GET(self) -> None:
+                self.send_response(401)
+                self.send_header("WWW-Authenticate", 'Basic realm="fixture"')
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+        self.said("--apply")
+        self.pin("v0.0.2", self.product.pinned)
+        self.serve(Guarded)
+        (action, refused, notes), _ = self.recorded("--apply")
+        self.assertEqual((action, refused, notes), ("same", [], [self.unanswered(self.product.pinned)]))
+        self.assertIn(b"terminal prompts disabled", self.host.fed[-1]["said"])
+
+    def test_the_refusal_is_the_checkout_s_own_and_asks_nothing(self) -> None:
+        """A line 1 that names another commit here is refused as it was."""
+        self.said("--apply")
+        self.pin(PINNED_TAG, self.product.pinned)
+        refusal = (f"maelys-system: line 1 names {PINNED_TAG}, which is {self.product.tagged[:7]}, and line 2 is"
+                   f" {self.product.pinned[:7]}. A published tag never moves, so one of the two is wrong; re-pin on"
+                   " the tag's own commit")
+        for arguments in ((), ("--apply",)):
+            with self.subTest(arguments=arguments):
+                self.assertEqual(self.recorded(*arguments, expect=2), (("same", [refusal], []), []))
+
+    def test_a_repository_that_accepts_and_says_nothing_is_given_up_on_by_the_clock(self) -> None:
+        """Over git://, which git itself never gives up on: the question is
+        cut after the ten seconds the conventions state, whatever it is
+        waiting for, the note says the repository could not be asked, and
+        the run succeeds all the same. A run that is not cut is stopped
+        here, and fails."""
+        self.said("--apply")
+        self.pin("v0.0.2", self.product.pinned)
+        listener = socket.socket()
+        self.addCleanup(listener.close)
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(8)
+        held: list[socket.socket] = []
+        self.addCleanup(lambda: [connection.close() for connection in held])
+
+        def accept() -> None:
+            while True:
+                try:
+                    held.append(listener.accept()[0])
+                except OSError:
+                    return
+        threading.Thread(target=accept, daemon=True).start()
+        self.moved_to(f"git://127.0.0.1:{listener.getsockname()[1]}")
+        started = time.monotonic()
+        child = subprocess.Popen([str(CLI), "dependencies", self.dir, "--apply", "--format", "json"],
+                                 cwd=self.product.work, env=self.product.env, text=True, stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE, start_new_session=True)
+        try:
+            out, _ = child.communicate(timeout=40)
+        except subprocess.TimeoutExpired:
+            # The session this test started, by its PID: the run and the git it is waiting on.
+            os.killpg(child.pid, signal.SIGKILL)
+            child.communicate()
+            self.fail("--apply was still waiting on a repository that says nothing after 40 seconds")
+        elapsed = time.monotonic() - started
+        data = json.loads(out)["data"]
+        self.assertEqual((child.returncode, data["refused"], data["notes"]),
+                         (0, [], [self.unanswered(self.product.pinned)]))
+        self.assertTrue(held, "the note was said of a repository nothing reached")
+        self.assertGreaterEqual(elapsed, 10, "cut by the clock, and not by a refusal that came at once")
+        # And nothing is left waiting behind the run: the other end reads
+        # what git asked and then the end of the connection, or this raises.
+        held[0].settimeout(5)
+        while held[0].recv(4096):
+            pass
 
 
 class ProtectByRulesetTest(unittest.TestCase):

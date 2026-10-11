@@ -9,6 +9,7 @@ import pathlib
 import re
 import secrets
 import shutil
+import signal
 import subprocess
 import tempfile
 
@@ -158,15 +159,50 @@ class Host:
         return subprocess.run(self._command(command, cwd, env), cwd=cwd, env=env, check=False,
                               stdout=log, stderr=subprocess.STDOUT)
 
-    def feed(self, command: list[str], data: bytes, cwd: pathlib.Path | None = None) -> subprocess.CompletedProcess:
+    def feed(self, command: list[str], data: bytes, cwd: pathlib.Path | None = None,
+             env: dict[str, str] | None = None, timeout: float | None = None) -> subprocess.CompletedProcess:
         """A process given bytes and answering bytes: `git cat-file --batch` over a history.
 
         `run` decodes what it reads, and a history holds blobs that are not
-        text. Read-only by its callers; the same guard as `run` stands in
-        front of it.
+        text, as a repository holds names that are not. The same guard as
+        `run` stands in front of it.
+
+        With `timeout`, in seconds, the process answers in that time or is
+        given up on, whatever it is waiting for. It runs in a session of its
+        own: it has no terminal to ask anything on, and it is stopped with
+        everything it started -- git talks to a repository through a helper,
+        and stopping git alone leaves the helper holding the pipes this call
+        reads. What it had said comes back with the code of a process that
+        was stopped, which is never 0.
         """
-        return subprocess.run(self._command(command, cwd, None), cwd=cwd, input=data, check=False,
-                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        command = self._command(command, cwd, env)
+        if timeout is None:
+            return subprocess.run(command, cwd=cwd, env=env, input=data, check=False,
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        child = subprocess.Popen(command, cwd=cwd, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE, start_new_session=True)
+        try:
+            said, complained = child.communicate(data, timeout=timeout)
+        except BaseException as stopped:
+            # The clock, or the operator's interrupt, which a session of its
+            # own no longer receives: the session goes either way.
+            try:
+                os.killpg(child.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            if not isinstance(stopped, subprocess.TimeoutExpired):
+                child.wait()
+                raise
+            try:
+                said, complained = child.communicate(timeout=1)
+            except subprocess.TimeoutExpired:
+                # What left the session still holds the pipes, and is not
+                # waited for: the bound is the caller's, not that process's.
+                child.stdout.close()
+                child.stderr.close()
+                child.wait()
+                said = complained = b""
+        return subprocess.CompletedProcess(command, child.returncode, said, complained)
 
     def private_terms(self) -> pathlib.Path | None:
         """Where the author keeps the terms no repository may carry: outside every repository.

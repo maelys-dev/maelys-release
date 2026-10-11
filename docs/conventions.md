@@ -705,14 +705,41 @@ established, with what was measured said apart from what was reported:
   | past a tag, as `migrate` writes it into the documentation repository | what `git describe --tags` says of the commit, `vX.Y.Z-N-gSHA` | it names the commit of line 2, which that form does by its hash alone: the tag spelled in it is not read |
   | a third party's commit no tag carries, with an `unreleased <branch>` line | the last tag before the commit | it is a tag, an ancestor of the commit, and not the commit itself |
 
-  A line 1 that names another commit is refused. One that names nothing in
-  the checkout is a note, whatever the commit carries: "carries no tag"
-  over an untagged commit, and over a tagged one what the checkout holds —
-  said as read, because a tag made since the checkout last fetched its
-  tags reads the same as a wrong one. `check` reads the product's files
-  and holds no clone of what they pin, so none of this is `check`'s to
-  say: it reads line 2 as a commit and the attribute lines as grammar, and
-  the rest belongs to the one command that has the checkout.
+  A line 1 that names another commit in the checkout is refused. One that
+  names nothing there is a note, unless `--apply` finds it in the
+  repository on that commit. The checkout does not decide alone: it holds
+  the tags of the day it was cloned, and a refresh fetches a commit by its
+  hash, which follows none.
+
+  A plan reads the checkout and asks nothing, and git is kept from asking
+  on its behalf. In the partial clone the socle makes, git fetches by
+  itself an object it is asked about and does not hold, and a line 1 that
+  is a whole hash names one: the hash of line 2 is read from the two lines
+  and never given to git, and for any other git is told not to fetch,
+  which git 2.45 and later obeys — an older git fetches that one object.
+  Over a commit the checkout holds no tag on, a plan says so, and that
+  `--apply` asks. Over one it holds another tag on, it says what the
+  checkout holds: "line 1 is wrong, or names a tag made since this
+  checkout last fetched its tags".
+
+  `--apply` asks the repository which tags it carries on that commit,
+  wherever the checkout does not settle it: no tag there on the commit, or
+  a line 1 that names nothing there. The question has ten seconds by the
+  clock, whatever it is waiting on, and nobody to prompt; so has the fetch
+  that brings back, by name, every tag the repository carries on the
+  commit, after which a later run reads them in the checkout and asks
+  nothing. A tag the checkout holds on another commit is not moved. When
+  line 1 is one of the tags the repository carries on the commit, nothing
+  is said. When it carries others there, "line 1 is wrong", with their
+  names. When it carries none, "carries no tag". When it does not answer
+  in time, or answers with an empty listing where the checkout holds a
+  tag of it — a portal's answer, not the repository's — the note says it
+  could not be asked, "not verified", and never "carries no tag".
+
+  `check` reads the product's files and holds no clone of what they pin,
+  so none of this is `check`'s to say: it reads line 2 as a commit and the
+  attribute lines as grammar, and the rest belongs to the one command that
+  has the checkout.
 - **A pin has one reading, and it is the managed script's.** The script is
   the reader that clones: it matches an attribute from the first column of
   a line to the last, takes the first `repository` line, and clones from

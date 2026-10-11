@@ -17,13 +17,14 @@ on a tag.
 from __future__ import annotations
 
 import pathlib
+import re
 import shutil
 import subprocess
 import tempfile
 import unittest
 from contextlib import contextmanager
 
-from test_maelys_release import MODULE, PINNED_TAG, ROOT, Product
+from test_maelys_release import MODULE, PINNED_TAG, ROOT, Product, RealGitHost
 
 THIRD = "https://third.example.invalid"
 
@@ -785,6 +786,121 @@ class UnreleasedCheckoutTest(unittest.TestCase):
         self.assertEqual(len(data["about"]), 1, data)
         self.assertIn(f"lib: {self.third.c3[:7]} carries no tag", data["about"][0])
         self.assertIn("'unreleased <branch>' line", data["about"][0])
+        # A plan asks nothing, and says so of a commit --apply asks about.
+        with self.third.unreachable():
+            data = self.product.json("dependencies", self.dir)["data"]
+        self.assertEqual([line for line in data["notes"] if line.startswith("lib:")],
+                         [f"lib: this checkout holds no tag on {self.third.c3[:7]}, and {THIRD}/lib.git was not asked"
+                          " for one: --apply asks"])
+
+    def test_a_third_party_commit_no_tag_carries_is_told_so_by_its_repository_on_a_checkout_already_there(self) -> None:
+        """Above, the run that says "carries no tag" is the one that cloned,
+        and the answer is the clone's. A checkout made by an earlier run is
+        the one that asks: the repository answers that the commit carries no
+        tag, and the note is the one it had."""
+        self.third.pin(self.third.c3, tag=f"v1.1.0-1-g{self.third.c3[:7]}", branch="")
+        self.apply()
+        question = ["git", "ls-remote", "--tags", "origin"]
+
+        def again(*arguments: str) -> tuple[list[str], list[list[str]]]:
+            host = RealGitHost(self.product.env, as_written=True)
+            code, data = host.dependencies(self.product, *arguments)
+            self.assertEqual((code, data["refused"]), (0, []), data)
+            self.assertEqual([entry["action"] for entry in data["dependencies"]], ["same", "same"])
+            return [line for line in data["notes"] if line.startswith("lib:")], host.reaching()
+        unasked = (f"lib: this checkout holds no tag on {self.third.c3[:7]}, and {THIRD}/lib.git was not asked for"
+                   " one: --apply asks")
+        self.assertEqual(again(), ([unasked], []))
+        about, reaching = again("--apply")
+        self.assertEqual(reaching, [question], "the repository's answer, and nothing to bring")
+        self.assertEqual(len(about), 1, about)
+        self.assertIn(f"lib: {self.third.c3[:7]} carries no tag. A rewritten branch takes an untagged commit with"
+                      " it", about[0])
+        self.assertIn("'unreleased <branch>' line", about[0])
+        # The other end: the third party tags that very commit, and line 1
+        # still names it by its hash. Nothing is said, and the tag is brought.
+        self.third.git("tag", "v1.2.0", self.third.c3)
+        self.third.publish("v1.2.0")
+        self.assertEqual(again(), ([unasked], []))
+        self.assertEqual(again("--apply"), ([], [question, ["git", "fetch", "--quiet", "--no-tags", "origin",
+                                                             "refs/tags/v1.2.0:refs/tags/v1.2.0"]]))
+        for arguments in ((), ("--apply",)):
+            with self.subTest(arguments=arguments):
+                self.assertEqual(again(*arguments), ([], []))
+
+    # What git says of itself when it reaches a repository, a fetch it
+    # starts on its own included.
+    REACHES = re.compile(r"upload-pack|git-remote|built-in: git (fetch|ls-remote|clone|pull|push)"
+                         r"|run_command: .*\b(fetch|ls-remote)\b|exec: .*\bssh\b")
+
+    def traced(self, *arguments: str) -> tuple[dict, list[str]]:
+        """One run, and what git's own trace of it shows reaching a repository.
+
+        The host cannot see this: in the partial clone the socle makes, git
+        fetches by itself an object it is asked about and does not hold,
+        and that fetch is git's own child.
+        """
+        trace = self.product.work / "trace"
+        trace.unlink(missing_ok=True)
+        host = RealGitHost({**self.product.env, "GIT_TRACE": str(trace)}, as_written=True)
+        _, data = host.dependencies(self.product, *arguments)
+        lines = trace.read_text(encoding="utf-8", errors="replace").splitlines()
+        self.assertTrue(lines, "git traced nothing: the test proves nothing")
+        return data, [line.split("trace: ", 1)[-1] for line in lines if self.REACHES.search(line)]
+
+    def test_no_plan_reaches_a_repository_and_git_does_not_do_it_for_one(self) -> None:
+        """A line 1 that is the whole hash of a commit the checkout does not
+        hold made git fetch it, from a plan: the commit was in the checkout
+        afterwards, and against a repository that says nothing the plan
+        never came back."""
+        def plan(shape: str, *arguments: str) -> dict:
+            with self.subTest(shape=shape):
+                data, reaching = self.traced(*arguments)
+                self.assertEqual(reaching, [], shape)
+            return {entry["name"]: entry["action"] for entry in data["dependencies"]}
+
+        def held(checkout: str, commit: str) -> bool:
+            return subprocess.run(["git", "-C", str(self.home / checkout), "cat-file", "-e", commit],
+                                  env={**self.product.env, "GIT_NO_LAZY_FETCH": "1"}, check=False,
+                                  stderr=subprocess.DEVNULL).returncode == 0
+        system = self.product.work / "src" / "maelys-system"
+        maelys = "dependencies/maelys-system.pin"
+        self.third.pin(self.third.c2, branch="")
+        _, reaching = self.traced("--apply")
+        self.assertTrue(reaching, "the trace does not show a clone: the test proves nothing")
+        self.assertEqual(plan("each at its pin, on a tag or past one"), {"maelys-system": "same", "lib": "same"})
+        # Commits made since, which neither checkout holds.
+        (system / "file").write_text("three\n", encoding="utf-8")
+        self.product.git(system, "commit", "-q", "-am", "three")
+        self.product.git(system, "push", "-q", str(self.product.work / "remotes" / "maelys-system.git"), "main")
+        newer = self.product.git(system, "rev-parse", "HEAD")
+        five = self.third.commit("five")
+        self.third.publish("main")
+        for shape, spelled in (("the whole hash", str), ("the whole hash in capitals", str.upper),
+                               ("what git describe says", lambda commit: f"{PINNED_TAG}-2-g{commit[:7]}"),
+                               ("a tag nobody has", lambda commit: "v0.0.2")):
+            self.product.write(maelys, f"{spelled(newer)}\n{newer}\n")
+            self.third.pin(five, tag=spelled(five), branch="")
+            self.assertEqual(plan(f"a refresh pending, line 1 {shape}"), {"maelys-system": "refresh", "lib": "refresh"})
+        self.assertFalse(held("maelys-system", newer) or held("lib", five), "a plan brought a commit")
+        # The whole hash of another commit, which only the repository holds.
+        self.product.write(maelys, f"{newer}\n{self.product.pinned}\n")
+        self.third.pin(self.third.c2, tag=five, branch="")
+        self.assertEqual(plan("at its pin, line 1 the whole hash of a commit not held"),
+                         {"maelys-system": "same", "lib": "same"})
+        self.assertFalse(held("maelys-system", newer) or held("lib", five), "a plan brought a commit")
+        # A pin that says `unreleased`: before the refresh, and at the pin.
+        self.product.write(maelys, f"{PINNED_TAG}-1-g{self.product.pinned[:7]}\n{self.product.pinned}\n")
+        self.third.pin(five, tag="v2.0.0")
+        self.assertEqual(plan("unreleased, a refresh pending")["lib"], "refresh")
+        self.third.pin(self.third.c3)
+        self.assertEqual(plan("unreleased, a refresh pending to a commit held")["lib"], "refresh")
+        self.traced("--apply")
+        self.assertEqual(plan("unreleased, at its pin")["lib"], "same")
+        # And one cloned on request only, read or not.
+        self.third.pin(five, "v2.0.0", "main", "on-request")
+        self.assertEqual(plan("on request, not asked for")["lib"], "on-request")
+        self.assertEqual(plan("on request, asked for", "--all")["lib"], "refresh")
 
     def test_a_maelys_pin_keeps_the_words_it_had(self) -> None:
         """The line is not offered to a repository that may not write it."""
