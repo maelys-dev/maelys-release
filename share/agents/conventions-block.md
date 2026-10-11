@@ -18,7 +18,12 @@ rules below hold whatever that mechanism is; the complete conventions are in
   and `CLAUDE.md` is regenerated: never edit it by hand. Everything else here
   belongs to this repository. The command follows agent-cli/v2: `--format
   json` everywhere, `describe` for the catalog, and `--field NAME` to read
-  one member of the result without a `jq` expression.
+  one member of the result without a `jq` expression. On a terminal its
+  text is paged, the account of an `--apply` included, once the write is
+  done. An account that fits the screen returns by itself; a longer one,
+  or a host that presets `PAGER` or `LESS`, can stop on `:` with the
+  command finished and looking hung: through `ssh -t`, pass `--pager
+  never`.
 - `check` reports two verdicts. The conventions apply to this repository; the
   release mechanism of the socle does not, so `check` says nothing about
   `.github/workflows/release.yml`, which this repository owns entirely.

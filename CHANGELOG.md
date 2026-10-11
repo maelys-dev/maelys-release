@@ -516,6 +516,22 @@
   would answer differently from one day to the next on the same tree —
   and a pin moved since the last tag that the entry does not name, which
   costs two more readings of git on an entry `check` cannot choose.
+- **The block says what to pass through `ssh -t`.** `protect --apply`, run
+  that way, wrote and then opened the pager on the account of its write:
+  the screen stopped on `:`, and a command that had finished looked hung.
+  The contract pages text on a terminal and makes no difference between a
+  plan and a write that is done, so nothing is changed in the vendored
+  framework; both forms of the block now say to pass `--pager never`
+  there. It can stop and does not always: with `PAGER` unset the
+  framework runs `less` with `LESS=FRX`, which returns by itself when the
+  account fits the screen, so only a longer account waits — or any one on
+  a host that presets `PAGER` or `LESS`. Reproduced without a network, on
+  a pseudo-terminal: `adopt --apply` writes, then starts the pager; with
+  the option it prints. The skill does not repeat it: the block is in
+  every repository that carries the skill.
+  What this asks of the framework and its contract — that a command which
+  has just written does not page its account — is theirs to decide, and
+  is not done here.
 - **Impact.** [asks: checkout-script] [writes: protect] A minor version:
   managed files move, one of them in what it executes. A product that
   carries `scripts/checkout-dependency.sh` **re-adopts** to receive it, as

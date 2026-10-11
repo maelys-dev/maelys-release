@@ -2021,6 +2021,21 @@ Claude skill under `.claude/skills/maelys-release/`; they carry the rules
 above in the form an agent needs. Products may add their own rules outside
 the managed block.
 
+The block also says one thing that is not a rule of the fleet but a fact of
+the command: **through `ssh -t`, pass `--pager never`**. The contract pages
+the text of a command on a terminal, and makes no difference between a plan
+and the account of a write; `protect --apply`, run that way, wrote and then
+stopped on the pager's `:`, and a command that had finished looked hung.
+It can stop, and does not always, which is what made it hard to name: with
+`PAGER` unset the framework runs `less` and gives it `LESS=FRX`, whose `F`
+returns by itself when the account fits the screen. Only a longer one
+waits — or any one on a host that presets `PAGER` or `LESS`, which the
+framework then leaves as they are. The behaviour is the framework's and is
+not changed in the module the socle vendors. `--non-interactive` has the
+same effect, and JSON is never paged. The sentence is in both forms of the
+block and not in the skill: the block is in `AGENTS.md` and `CLAUDE.md` of
+every repository that carries the skill, and is read before it.
+
 ## Compatibility of the managed files
 
 A product adopts the socle once and follows it only when it has something

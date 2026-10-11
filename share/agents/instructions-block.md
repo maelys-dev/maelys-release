@@ -24,7 +24,12 @@ when it has what they name.
   repository pins; `cut`, `adopt`, `protect` and `dependencies` run as the
   checkout at hand, and `cut` says which. The command follows agent-cli/v2:
   `--format json` everywhere, `describe` for the catalog, and `--field NAME`
-  to read one member of the result without a `jq` expression.
+  to read one member of the result without a `jq` expression. On a terminal
+  its text is paged, the account of an `--apply` included, once the write
+  is done. An account that fits the screen returns by itself; a longer
+  one, or a host that presets `PAGER` or `LESS`, can stop on `:` with the
+  command finished and looking hung: through `ssh -t`, pass `--pager
+  never`.
 - A release is a signed, annotated tag `vX.Y.Z` on `main` whose commit
   carries `VERSION` = `X.Y.Z` and a dated `CHANGELOG.md` entry. Never push a
   tag before `make check` passes on that exact commit, never move or force a
