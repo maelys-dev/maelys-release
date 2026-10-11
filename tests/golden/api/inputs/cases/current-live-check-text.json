@@ -54,7 +54,7 @@
     "check",
     "<PRODUCT>",
     "--socle-sha",
-    "18ae2683e4eb6ebe3b7e17a818b7a769a1f8b489",
+    "c46508383ca9c6ec23738f2957bfd0e8d857b267",
     "--socle-tag",
     "v0.60.0",
     "--format",
