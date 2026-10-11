@@ -532,10 +532,201 @@ true`.
   adoptions.
 - A dependency on another Maelys repository is pinned by commit in an
   `dependencies/<name>.pin` file, `name` being the repository name
-  (`maelys-system.pin`): the nearest tag on line 1 for
-  humans, the pinned commit on line 2. The build verifies the checkout
+  (`maelys-system.pin`): the pinned commit on line 2, and on line 1, for
+  humans, the tag that commit carries. The build verifies the checkout
   (`git rev-parse HEAD` equal to the pin, no local modification of the
   contract paths).
+- **Line 1 says what line 2 is, and `dependencies` holds it to that.** This
+  text long said "the nearest tag", and the socle refuses exactly that: the
+  nearest tag of a commit that carries none names another commit, and a pin
+  naming two is refused, "one of the two is wrong". What line 1 holds, in
+  every case the socle accepts:
+
+  | the pin | line 1 | what `dependencies` verifies in the checkout |
+  | --- | --- | --- |
+  | on a tag — every pin on a Maelys repository, and a third party's release | the tag | it names the commit of line 2 |
+  | past a tag, as `migrate` writes it into the documentation repository | what `git describe --tags` says of the commit, `vX.Y.Z-N-gSHA` | it names the commit of line 2, which that form does by its hash alone: the tag spelled in it is not read |
+  | a third party's commit no tag carries, with an `unreleased <branch>` line | the last tag before the commit | it is a tag, an ancestor of the commit, and not the commit itself |
+
+  A line 1 that names another commit is refused. One that names nothing in
+  the checkout is a note, whatever the commit carries: "carries no tag"
+  over an untagged commit, and over a tagged one what the checkout holds —
+  said as read, because a tag made since the checkout last fetched its
+  tags reads the same as a wrong one. `check` reads the product's files
+  and holds no clone of what they pin, so none of this is `check`'s to
+  say: it reads line 2 as a commit and the attribute lines as grammar, and
+  the rest belongs to the one command that has the checkout.
+- **A pin has one reading, and it is the managed script's.** The script is
+  the reader that clones: it matches an attribute from the first column of
+  a line to the last, takes the first `repository` line, and clones from
+  the organisation when the file has none. The socle's own reader stripped
+  each line first and took the last, and the two then disagreed in
+  silence — `repository <URL>` followed by one space was a third party for
+  `check`, and no line at all for the script, which cloned the fleet's
+  repository of that name.
+
+  **The script refuses that line itself**, and this is an executed line of
+  a managed file, not a comment. A line that starts like a repository line
+  and is not one its reader matches — a space after the URL, a space or a
+  tab before the word, a tab for the space, another case, a colon, no URL,
+  no `https://` — stops it with exit 65, on stderr, naming the pin file
+  and the line, before anything is cloned; so does a second `repository`
+  line, since only the first is read. Cloning another repository than the
+  one the file names is the worst a clone script can do, and the reader in
+  Python cannot close it alone: `check` re-executes the socle a product
+  pins, so a product on an older one is told nothing, while its jobs run
+  whatever script it carries. For a well-formed pin nothing changes — the
+  three `repository` lines of the fleet are in that shape — and the script
+  refuses nothing else: another attribute spelled wrong, or a word nobody
+  knows, it ignores as it always did, and the reader below is what refuses
+  those. It is POSIX `sh` and `awk`, tried under the shell of macOS, dash
+  with mawk, and busybox.
+
+  And the reader refuses, as a problem of the pin,
+  whatever the script would read differently or not read: a carriage
+  return anywhere in the file; a line 2 that is not forty hexadecimal
+  digits alone; a line 1 with a space in or around it, or a leading dash;
+  an attribute line with a space before or after it, a tab, two spaces,
+  another case, a colon, or its word glued to its value; an attribute
+  given twice. Measured before any of it became a refusal, on the 62 pins
+  of the 17 repositories of the organisation that carry any: none has a
+  carriage return, a tab or a space out of place, every line 2 is forty
+  digits, and the lines after it are `repository`, `submodules`,
+  `on-request` and one `sha256:` — the digest `vendor` writes under the
+  socle's own pin, which the reader knows. No green product turns red.
+
+  A line that starts with no word the socle knows is **a note of `check`,
+  not a refusal**, as a section of the declaration file is: products pin
+  the socle by commit, and an attribute a later socle reads would
+  otherwise refuse every product that writes it before adopting.
+
+  A `repository` URL takes one shape: `https://host/owner/name`, with
+  `.git` or without. No user, no port, no empty segment, no `.` or `..`,
+  no percent-encoding, no dot after the host, nothing after the path; on
+  `github.com` exactly an owner and a name, elsewhere one segment or more.
+  Each of those spellings read as "not maelys-dev" and reached it. The
+  host and the owner are then compared whatever their case. **And that is
+  all a string decides.** It does not know that a repository under another
+  owner is a fork of the fleet's, that one was renamed or transferred and
+  its old URL redirects, or that another host — the one `MAELYS_GIT_BASE`
+  names on some machine, a mirror, a proxy — serves the fleet's
+  repositories. "Third party only" is a rule on what the pin says, held
+  exactly; whether what it names is a third party is not something the
+  socle can read.
+- **A third party's commit that no tag carries says so, and says which
+  branch holds it**: `unreleased <branch>`, a fourth attribute, beside
+  `repository`.
+
+  ```
+  v2.3.0
+  0123456789abcdef0123456789abcdef01234567
+  repository https://example.org/their/library.git
+  unreleased main
+  ```
+
+  The need is a product that builds a part of a library newer than any
+  version its authors have published. The word is the reason; the branch is
+  what can be verified. A tag holds its commit for good and a branch holds
+  it until somebody rewrites it, so the pin names the one ref its commit
+  depends on, and the socle asks whether it still does.
+
+  **Third party only.** The line is refused without a `repository` line,
+  and with one that names `maelys-dev`: a Maelys repository is pinned on a
+  tag, and that rule does not move. The fleet can tag what it needs; a
+  third party cannot be asked to. The branch is a name git takes as a
+  branch, spelled as the repository spells it: `HEAD`, `FETCH_HEAD` and
+  `refs/heads/main` are refused where the pin is read, as is a name git
+  itself refuses. A name that is a tag over there, and no branch, cannot
+  be told from the file: `dependencies --apply` says the repository has no
+  such branch.
+
+  **Line 1 is the last tag before the commit**, and it is verified: exactly
+  the name of a tag of that repository — `v1.1.0^0` resolves in git and is
+  no tag — an ancestor of the commit, not the commit's own. A commit that
+  carries a tag is a pin on that tag and needs no line: when the third
+  party tags the very commit a product pinned, the line no longer says the
+  truth, `dependencies` notes it from the first run, and the pin should
+  name that tag and lose the line. Any
+  ancestor tag is accepted; one that is not the last is a note naming the
+  nearer, not a refusal. Two reasons. "An ancestor" stays true whatever
+  anybody does afterwards, where "the last" stops being true the day the
+  third party tags an older commit of its branch — which is how a release
+  is cut on a branch that has moved on — and a product must not turn red
+  for that. And "nearest" is a count git makes across merges, not a
+  property of the history: what is verified is the property, that no tag
+  lies between line 1 and the commit. `git describe --tags` output is
+  refused there, by `check`: the line already says the commit is past its
+  tag.
+
+  **What is verified, and where.** Three places, and they do not know the
+  same things:
+
+  | | reads | verifies | cannot know |
+  | --- | --- | --- | --- |
+  | `check`, `declarations` | the pin file, offline | the grammar and the string of the URL, and nothing else: that the line stands on a pin whose URL does not name `maelys-dev`; that line 1 and the branch are names git takes | whether line 1 is a tag at all, whether it is an ancestor, whether the branch exists or holds the commit: it has no clone |
+  | `dependencies DIR` | the checkout it made, offline, and only one that is at the pin | line 1 against the tags that checkout holds: exactly a tag, an ancestor, not the commit's own | the branch — the ref in hand is the branch as of the last clone, and a later refresh fetches the commit by its hash without moving it; and a tag the checkout does not hold, which is a note and not a refusal |
+  | `dependencies DIR --apply` | the repository: one `git fetch` of the one branch, and of the one tag when the checkout lacks it | that the branch exists and holds the commit; that line 1 is a tag of the repository | whether the repository still serves a commit its branch has dropped: not asked; and anything between two runs |
+
+  The middle row is why nothing is refused on the branch without asking:
+  measured, a checkout refreshed onto a newer commit of the branch answers
+  "not an ancestor" from its stale ref, for a pin that is right. `--apply`
+  asks, and every row of a plan says that it did not — the one that would
+  clone and the one that would refresh as much as the one already there. A
+  pin that is also `on-request` is neither fetched nor judged without
+  `--all`: nothing looked at what sits at its path.
+
+  "No" is kept apart from "cannot know". A repository that cannot be
+  reached is a note, "not verified". A checkout that is shallow, or was
+  cloned without its tags, cannot answer "not an ancestor" or "no such
+  tag" for what it was never given: the first is a note, the second is
+  asked of the repository by name. A refusal is an answer: the repository
+  has no such branch, the branch does not hold the commit, the repository
+  has no such tag, the tag is not an ancestor.
+
+  The refusal says what was read and no more. A branch that dropped the
+  commit is refused naming the pin, the branch and its tip; whether the
+  repository still serves the commit is said only by a run that just
+  obtained it. And the day it does not — a new machine, the commit pruned —
+  the failure to obtain it names the pin and its branch, says what the
+  clone holds of that branch, and gives the likely reading as a reading,
+  beside git's own words.
+
+  **What automation does of all this: nothing.** Stated plainly, because
+  the line could be read as a guard:
+
+  - `check` and `declarations` verify the grammar and the string of the
+    URL, and nothing about the repository.
+  - `check` re-executes the socle a product pins. A product pinned on a
+    socle older than this line gets **no refusal at all** for it — not the
+    grammar, not "third party only": that socle does not know the word.
+    The rules above reach a product at its next adoption.
+  - No workflow runs `dependencies`. `scripts/checkout-dependency.sh`
+    clones the commit as any other and reads nothing of the branch. So
+    nothing in CI or in a release checks that line 1 is an ancestor, that
+    the branch holds the commit, or that the branch was not rewritten or
+    deleted: CI learns of it the day the clone fails, unless somebody ran
+    `dependencies DIR --apply` first.
+
+  `declarations` returns these pins under `unreleased`, apart from the names
+  of `dependencies`, with the repository, the branch, the tag and the
+  commit of each: a fleet observer asks which products stand on a branch
+  without opening a pin. `cut` applies to them the rule it applies to every
+  pin: the entry of a release that moves one names the dependency.
+
+  **What no line of a pin settles.** An untagged commit can disappear at
+  the third party, and saying so in a file prevents nothing: the line makes
+  the risk declared and its realisation visible, not impossible. The parry
+  is on the product's side and is a recommendation, not a rule: pin a
+  **mirror** the product controls, where a tag of the mirror's own holds
+  the commit. The pin is then an ordinary pin on a tag — `repository` names
+  the mirror, line 1 its tag, and no `unreleased` line, since nothing there
+  depends on a branch any more. It costs one more repository to keep: to
+  create, to refresh at each re-pin, and to answer for — the mirror is what
+  the product builds from, and that it holds the third party's commit and
+  nothing else is the hash's to prove, the same commit being the same
+  content wherever it is fetched. A product that pins a library for one
+  release cycle may reasonably not pay it; one that ships from that commit
+  for a year should.
 - The checkout is managed, and there are two of it, written by
   `maelys-release adopt` from the pins. `scripts/checkout-dependency.sh NAME
   [DESTINATION]` clones `maelys-dev/NAME` at its pinned commit — next to the
@@ -1970,8 +2161,9 @@ review.
   `<product>/VERSION`, and both describe the commit that was cloned: HEAD.
   Line 2 is that commit and line 1 is what `git describe --tags` says of
   it — the tag itself when HEAD carries it, `vX.Y.Z-N-gSHA` past it, which
-  names the same commit and never the tag's. `VERSION` is read at that
-  commit too. A product with no tag is refused: its prose would describe no
+  names the same commit and never the tag's: the second of the three
+  shapes "Dependencies and packages" gives line 1. `VERSION` is read at
+  that commit too. A product with no tag is refused: its prose would describe no
   release. The pin is the fleet's one format; the socle refuses
   `adapter/<NAME>_PIN` in a product since 0.14.0, so it writes none here.
 - **`--apply` moves what is committed, and refuses a tree that differs from

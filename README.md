@@ -108,8 +108,8 @@ that does not call `check-product.yml` is a warning of `check`.
 ### Dependencies and packages
 
 A dependency on another Maelys repository is one `dependencies/<name>.pin` file:
-the nearest tag on line 1 for humans, the pinned commit on line 2, `name`
-being the repository name (`maelys-system.pin`). The managed `scripts/checkout-dependency.sh maelys-system`
+the pinned commit on line 2 and, on line 1 for humans, the tag that commit
+carries, `name` being the repository name (`maelys-system.pin`). The managed `scripts/checkout-dependency.sh maelys-system`
 clones it next to the product at that commit; the release workflow, the
 product's CI and a developer all run the same script.
 

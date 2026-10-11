@@ -2149,6 +2149,37 @@
                 },
                 "type": "array"
               },
+              "unreleased": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "branch": {
+                      "type": "string"
+                    },
+                    "commit": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "repository": {
+                      "type": "string"
+                    },
+                    "tag": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "repository",
+                    "branch",
+                    "tag",
+                    "commit"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
               "valid": {
                 "type": "boolean"
               },
@@ -2239,6 +2270,7 @@
               "runners",
               "workflows",
               "carried",
+              "unreleased",
               "checks"
             ],
             "type": "object"
@@ -3325,6 +3357,9 @@
                         "on-request"
                       ]
                     },
+                    "asked": {
+                      "type": "boolean"
+                    },
                     "commit": {
                       "type": "string"
                     },
@@ -3350,6 +3385,9 @@
                       ]
                     },
                     "tag": {
+                      "type": "string"
+                    },
+                    "unreleased": {
                       "type": "string"
                     }
                   },

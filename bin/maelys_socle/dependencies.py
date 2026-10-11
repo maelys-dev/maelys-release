@@ -259,8 +259,17 @@ def handle_dependencies(invocation: Invocation, context: Context) -> tuple[dict,
         for entry in entries:
             if entry["action"] == "on-request":
                 continue
-            materialise(pathlib.Path(entry["path"]), decl.pins[entry["name"]],
-                        entry["repository"], entry["action"])
+            pin = decl.pins[entry["name"]]
+            try:
+                materialise(pathlib.Path(entry["path"]), pin, entry["repository"], entry["action"])
+            except Failure as failure:
+                if not pin.get("unreleased"):
+                    raise
+                # The day this line exists for. git's own words for it are
+                # "Server does not allow request for unadvertised object",
+                # raised here before anything was judged: the pin and its
+                # branch were never named.
+                raise unobtainable(pin, entry, failure) from None
     notes: list[str] = []
     for entry in entries:
         if entry["action"] in ("blocked", "on-request") or (entry["action"] == "clone" and not apply):
@@ -276,26 +285,65 @@ def handle_dependencies(invocation: Invocation, context: Context) -> tuple[dict,
         if entry["name"] not in decl.foreign:
             notes.extend(neighbour_pins(decl, entry["name"], path))
     refused: list[str] = []
-    # A pin that names a tag it does not point at, and a pin on no tag at
-    # all. Read from the checkout in hand, so this stays offline: a partial
-    # clone still carries every ref. maelys-git-core pinned an untagged
-    # commit of a branch, the branch was rewritten, the commit is gone from
-    # everywhere, and the repository no longer configures -- nothing had ever
-    # told it that its pin was not a tag.
+    # What line 1 says of line 2, held to the checkout in hand. Offline: a
+    # partial clone carries every ref it was given. maelys-git-core pinned
+    # an untagged commit of a branch, the branch was rewritten, the commit
+    # is gone from everywhere, and the repository no longer configures --
+    # nothing had ever told it that its pin was not a tag.
     for entry in entries:
         pin = decl.pins.get(entry["name"])
         path = directory / entry["name"]
-        if not pin or entry["action"] == "blocked" or not (path / ".git").exists():
+        # An on-request pin this run did not bring is neither read nor asked.
+        # Nothing looked at what sits at its path -- checkout_state is not
+        # called for it -- so a working copy of another repository there
+        # would be fetched from that repository's origin, and judged by its
+        # refs under this pin's name.
+        if not pin or entry["action"] in ("blocked", "on-request") or not (path / ".git").exists():
             continue
-        named = git("rev-list", "-n", "1", pin["tag"], cwd=path, check=False)
+        if pin.get("unreleased"):
+            # Judged only where the checkout is at the pin. One a plan would
+            # still refresh may not hold the commit at all, and asking git
+            # about it there is a walk that fails, or in a partial clone a
+            # fetch nobody asked for.
+            if apply or entry["action"] == "same":
+                # A clone made by this very run already is the repository's
+                # answer; anything older is asked again, and only by --apply.
+                cloned = apply and entry["action"] == "clone"
+                caught, said, entry["asked"] = unreleased_pin(pin, entry["repository"], path,
+                                                              fetch=apply and not cloned, current=cloned)
+                refused.extend(caught)
+                notes.extend(said)
+            continue
+        named = named_by(pin["tag"], path)
+        # Only a third party can answer with the line: a Maelys repository
+        # is tagged, and its messages are the ones they were.
+        declare = (" A third party's commit that no tag carries yet says which branch holds it, on an"
+                   " 'unreleased <branch>' line, with the last tag before it on line 1"
+                   if pin["repository"] else "")
         if named and named != pin["commit"]:
             refused.append(f"{entry['name']}: line 1 names {pin['tag']}, which is {named[:7]}, and line 2"
                            f" is {pin['commit'][:7]}. A published tag never moves, so one of the two is"
-                           " wrong; re-pin on the tag's own commit")
-        elif not named and not git("tag", "--points-at", pin["commit"], cwd=path, check=False):
-            notes.append(f"{entry['name']}: {pin['commit'][:7]} carries no tag. A rewritten branch takes"
-                         " an untagged commit with it, and a pin on one stops resolving everywhere at"
-                         " once -- for the socle, for CI, and for whoever clones next")
+                           " wrong; re-pin on the tag's own commit" + ("." + declare if declare else ""))
+        elif not named or pin["repository"]:
+            carried = git("tag", "--points-at", pin["commit"], cwd=path, check=False).split()
+            if not carried:
+                # `named` and no tag is what `git describe` says of a commit
+                # past its tag: a name of the commit itself. A Maelys pin in
+                # that shape is what `migrate` writes, and stays silent; a
+                # third party's is the untagged commit of the incident,
+                # however line 1 spells it.
+                notes.append(f"{entry['name']}: {pin['commit'][:7]} carries no tag. A rewritten branch takes"
+                             " an untagged commit with it, and a pin on one stops resolving everywhere at"
+                             " once -- for the socle, for CI, and for whoever clones next"
+                             + ("." + declare if declare else ""))
+            elif not named:
+                # The commit is tagged and line 1 names something else that
+                # is nothing here: said as what was read, since a tag made
+                # after this checkout last fetched its tags reads the same.
+                spelled = f"names {pin['tag']}, which this checkout does not hold" if pin["tag"] else "is empty"
+                notes.append(f"{entry['name']}: line 1 {spelled}, and {pin['commit'][:7]} carries"
+                             f" {', '.join(carried)} in it: line 1 is wrong, or names a tag made since this"
+                             " checkout last fetched its tags")
     # And the socle itself, under the same root. Its commit is not a pin: it
     # is the one on the `uses:` line, which `pinned_socle` reads. CI has
     # cloned it at that commit into $RUNNER_TEMP since 0.41.0, so giving the
@@ -326,6 +374,210 @@ def handle_dependencies(invocation: Invocation, context: Context) -> tuple[dict,
     return data, EXIT_VIOLATIONS if blocked or caught else EXIT_OK
 
 
+def named_by(line: str, path: pathlib.Path) -> str:
+    """The commit line 1 of a pin names in this checkout, or "" when it names none.
+
+    A revision, and never an option, whatever the file spells on it: the
+    line went to `git rev-list` bare, where `--all` is an instruction and
+    answers with a commit.
+    """
+    return git("rev-list", "-n", "1", "--end-of-options", line, cwd=path, check=False)
+
+
+def unreleased_pin(pin: dict, repository: str, path: pathlib.Path,
+                   fetch: bool, current: bool) -> tuple[list[str], list[str], bool]:
+    """(refusals, notes, asked) for a pin that says `unreleased <branch>`, read in its checkout.
+
+    Two facts, and they are not known the same way.
+
+    That line 1 is a tag before the commit is read from the tags this
+    checkout holds: exactly the name of a tag, an ancestor of the commit,
+    and not the commit itself -- a commit that carries a tag is a pin on
+    that tag, and says nothing else. Any tag that is an ancestor is
+    accepted, and one that is not the last is a note naming the nearer. Not
+    a refusal, for two reasons. The fact line 1 states stays true whatever
+    anybody does afterwards, where "last" stops being true the day the
+    third party tags an older commit of its branch -- which is how a
+    release is cut on a branch that moved on -- and a product must not turn
+    red for that. And "nearest" is a count git makes across merges, not a
+    property of the graph: what is verified is the property, that no tag
+    lies between line 1 and the commit.
+
+    That the branch still holds the commit is the remote's to say, and only
+    as of the moment it is asked. A clone carries the branch's ref; a
+    checkout this command refreshed later does not move it -- the refresh
+    fetches the commit, by its hash -- so the ref in hand is the branch as
+    of the last clone, and holding a re-pinned commit against it refuses a
+    pin that is right (measured: `merge-base --is-ancestor` exits 1 on a
+    commit the branch does hold). So with `fetch` the branch is fetched,
+    deliberately, one ref, and `current` says the ref in hand is already
+    the remote's answer: a clone this run made. Without either, nothing is
+    refused on the branch at all, and `asked` comes back false -- as it does
+    when the remote did not answer.
+
+    And "no" is told from "cannot know". A checkout the socle did not make
+    may be shallow, or hold no tag, and git then answers "not an ancestor"
+    and "no such tag" for what it simply does not have. A shallow checkout
+    refuses nothing on ancestry; a tag this checkout does not hold is a
+    refusal only once the repository was asked for that very tag and
+    answered that it has none, and a note before.
+    """
+    name, commit, branch, tag = pin["name"], pin["commit"], pin["unreleased"], pin["tag"]
+    refusals: list[str] = []
+    notes: list[str] = []
+    ref, tag_ref = f"refs/remotes/origin/{branch}", f"refs/tags/{tag}"
+    cloned = current
+    shallow = git("rev-parse", "--is-shallow-repository", cwd=path, check=False) == "true"
+    unread = "it is shallow" if shallow else "git could not walk its history"
+
+    def ancestor(older: str, newer: str) -> "bool | None":
+        """True, False, or None when this checkout cannot say."""
+        code = run(["git", "merge-base", "--is-ancestor", older, newer], cwd=path).returncode
+        if code == 0:
+            return True
+        # Exit 1 is git's "no", and in a shallow checkout also its answer
+        # for a history cut short of the commit asked about.
+        return False if code == 1 and not shallow else None
+
+    def holds(full: str) -> bool:
+        # Exactly this ref, and nothing a revision suffix makes of it:
+        # `rev-parse refs/tags/v1.1.0^0` resolves, and v1.1.0^0 is no tag.
+        return run(["git", "show-ref", "--verify", "--quiet", full], cwd=path).returncode == 0
+
+    def commit_of(full: str) -> str:
+        # ^{commit}: a tag may be annotated, and the question is about the
+        # commit it names.
+        return git("rev-parse", "--verify", "--quiet", f"{full}^{{commit}}", cwd=path, check=False) \
+            if holds(full) else ""
+
+    def remote_has(full: str) -> "bool | None":
+        """Whether the repository holds this ref, asked now; None when it did not answer."""
+        code = run(["git", "ls-remote", "--exit-code", "origin", full], cwd=path).returncode
+        # Exit 2 is git's "the remote answered, and has no such ref".
+        return True if code == 0 else False if code == 2 else None
+
+    gone = (f"{name}: {repository} has no branch {branch}. The pin says {commit[:7]} is on it: the branch was"
+            " deleted or renamed, or never was, and no ref this pin names holds that commit. Hold it where"
+            " the product decides -- a mirror, under a tag of its own -- or re-pin")
+    asked = current
+    if fetch:
+        fetched = run(["git", "fetch", "--quiet", "origin", f"+refs/heads/{branch}:{ref}"], cwd=path)
+        asked = current = fetched.returncode == 0
+        if not current:
+            if remote_has(f"refs/heads/{branch}") is False:
+                asked = True
+                refusals.append(gone)
+            else:
+                reason = (fetched.stderr.strip().splitlines() or ["no answer"])[-1]
+                notes.append(f"{name}: {repository} could not be asked whether {branch} still holds"
+                             f" {commit[:7]} ({reason}): not verified")
+    tip = commit_of(ref) if current else ""
+    if current and not tip:
+        # A clone carries every branch the repository has: one it does not
+        # carry is one the repository does not have.
+        refusals.append(gone)
+    elif tip:
+        on = ancestor(commit, tip)
+        if on is None:
+            notes.append(f"{name}: whether {branch} holds {commit[:7]} cannot be read from this checkout"
+                         f" ({unread}): not verified")
+        elif not on:
+            # What was read, and no more: whether the repository still
+            # serves the commit was asked only of a run that just got it.
+            served = ("This run obtained the commit from the repository" if cloned else
+                      "This checkout holds the commit, and nothing here asked whether the repository still"
+                      " serves it")
+            refusals.append(f"{name}: {commit[:7]} is not on {branch} of {repository}, which is at {tip[:7]}:"
+                            f" the branch was rewritten, or never held it. {served}. If no other ref"
+                            " holds it there, it is fetchable only until the repository prunes it -- and"
+                            " then stops resolving for the socle, for CI, and for whoever clones next. Hold it where"
+                            " the product decides -- a mirror, under a tag of its own, which this checkout"
+                            f" can push -- or re-pin on a commit of {branch}")
+    last = "With an unreleased line, line 1 is the last tag before the commit"
+    nearest = git("describe", "--tags", "--abbrev=0", commit, cwd=path, check=False)
+    if not holds(tag_ref) and asked and not cloned:
+        # Asked for by name: a checkout cloned without its tags follows
+        # none when a branch is fetched, and "this checkout holds no such
+        # tag" is then about the checkout.
+        run(["git", "fetch", "--quiet", "origin", f"{tag_ref}:{tag_ref}"], cwd=path)
+    if not holds(tag_ref):
+        # A clone of this run carries every tag; otherwise the repository
+        # is asked, when it is answering at all.
+        there = False if cloned else remote_has(tag_ref) if asked else None
+        if there is False:
+            refusals.append(f"{name}: line 1 names {tag}, which is not a tag of {repository}. {last}"
+                            + (f": {nearest}" if nearest else ""))
+        else:
+            notes.append(f"{name}: line 1 names {tag}, which this checkout does not hold, and {repository}"
+                         + (" has it, where it could not be fetched from" if there else
+                            " did not answer for it" if asked else " was not asked for it")
+                         + ": not verified")
+        return refusals, notes, asked
+    named = commit_of(tag_ref)
+    carried = git("tag", "--points-at", commit, cwd=path, check=False).split()
+    before = ancestor(named, commit) if named and named != commit else None
+    if not named:
+        refusals.append(f"{name}: line 1 names {tag}, a tag that names no commit. {last}"
+                        + (f": {nearest}" if nearest else ""))
+    elif named == commit:
+        refusals.append(f"{name}: line 1 names {tag}, which is {commit[:7]} itself. A commit that carries a tag"
+                        " is a pin on that tag: remove the unreleased line")
+    elif before is None:
+        notes.append(f"{name}: whether {tag} is an ancestor of {commit[:7]} cannot be read from this checkout"
+                     f" ({unread}): not verified")
+    elif not before:
+        refusals.append(f"{name}: line 1 names {tag}, which is {named[:7]} and not an ancestor of {commit[:7]}."
+                        f" {last}" + (f": {nearest}" if nearest and nearest != tag else ""))
+    elif carried:
+        notes.append(f"{name}: {commit[:7]} carries {carried[0]}, so the unreleased line no longer says the"
+                     f" truth. It is a pin on a tag: write {carried[0]} on line 1 and remove the line")
+    else:
+        # Between the two: it contains line 1, the commit contains it, and
+        # it is neither. A tag on a merged side branch is not between.
+        between = [other for other in git("tag", "--merged", commit, "--contains", named,
+                                          cwd=path, check=False).split()
+                   if commit_of(f"refs/tags/{other}") not in (named, commit, "")]
+        if between:
+            nearer = nearest if nearest in between else between[-1]
+            notes.append(f"{name}: {tag} is not the last tag before {commit[:7]}: {nearer} lies between"
+                         f" them. Write {nearer} on line 1")
+    return refusals, notes, asked
+
+
+def unobtainable(pin: dict, entry: dict, failure: Failure) -> Failure:
+    """The failure to obtain an `unreleased` pin's commit, naming the pin and its branch.
+
+    Says what was read and what that most likely means, and keeps the two
+    apart: git's own last line, what the clone at that path holds of the
+    branch, and then the reading -- never the reading alone.
+    """
+    name, commit, branch, repository = pin["name"], pin["commit"], pin["unreleased"], entry["repository"]
+    path = pathlib.Path(entry["path"])
+    # Every line git gave, once: the telling one is rarely the last.
+    said = "; ".join(dict.fromkeys(line.strip() for line in failure.message.partition(" failed: ")[2].splitlines()
+                                   if line.strip())) or failure.message.strip()
+    tip = git("rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{branch}^{{commit}}", cwd=path,
+              check=False) if (path / ".git").exists() else ""
+    if tip:
+        read = (f"{path} holds {branch} at {tip[:7]} and could not be brought to that commit. The most likely"
+                " reading: the branch was rewritten and the repository has pruned the commit, which no tag"
+                " held")
+    elif (path / ".git").exists():
+        read = (f"{path} holds no branch {branch} of that repository, and could not be brought to that"
+                " commit. The most likely reading: the branch was deleted or renamed and the commit pruned"
+                " with it, since no tag held it")
+    else:
+        read = ("Nothing was cloned, so this may be the network or the URL, and says nothing yet of the"
+                " commit")
+    return Failure("PROCESS_FAILED",
+                   f"{name}: {commit[:7]} could not be obtained from {repository}; the pin says it is on"
+                   f" {branch}, under no tag. {read}. git said: {said}",
+                   "If a machine, a CI cache or a mirror still holds the commit, push it under a tag to a"
+                   f" repository the product controls and pin that; otherwise re-pin on a commit of {branch}."
+                   + (f" What is at {path} is left as it is, and blocks the next run until it is moved aside."
+                      if (path / ".git").exists() else ""))
+
+
 def dependency_entry(pin: dict, repository: str, path: pathlib.Path,
                      action: str, reason: str, head: str) -> dict:
     """One line of the plan, for a pin or for the socle, in one shape.
@@ -341,6 +593,11 @@ def dependency_entry(pin: dict, repository: str, path: pathlib.Path,
              "path": str(path), "action": action}
     if pin.get("submodules") is not None:
         entry["submodules"] = pin["submodules"]
+    if pin.get("unreleased"):
+        # `asked` is false until a run has the repository's answer: every
+        # row of a plan carries it, whatever its action.
+        entry["unreleased"] = pin["unreleased"]
+        entry["asked"] = False
     if action == "blocked":
         entry["reason"] = reason
     elif action == "refresh":
@@ -352,16 +609,27 @@ def text_dependencies(data: dict) -> str:
     lines = []
     for entry in data["dependencies"]:
         head = f"{entry['name']} {entry['tag']} ({entry['commit'][:7]})"
+        unasked = ""
+        if entry.get("unreleased"):
+            # The same place on the line, and not the same claim: the tag
+            # is behind the commit, and what holds it is a branch.
+            head = f"{entry['name']} past {entry['tag']} ({entry['commit'][:7]}) on {entry['unreleased']}"
+            # Every row that did not ask says so, whatever it would do.
+            # After --apply, a repository that did not answer is a note of
+            # its own, with git's reason.
+            how = "--all --apply" if entry["action"] == "on-request" else "--apply"
+            if entry["action"] == "on-request" or (data["mode"] == "plan" and not entry.get("asked")):
+                unasked = f", not asked: {how} asks the repository whether {entry['unreleased']} still holds it"
         if entry["action"] == "clone":
-            lines.append(f"{'clone':<8} {head} from {entry['repository']}")
+            lines.append(f"{'clone':<8} {head} from {entry['repository']}{unasked}")
         elif entry["action"] == "refresh":
-            lines.append(f"{'refresh':<8} {head}, here {entry['previous'][:7]}")
+            lines.append(f"{'refresh':<8} {head}, here {entry['previous'][:7]}{unasked}")
         elif entry["action"] == "blocked":
             lines.append(f"{'BLOCKED':<8} {entry['name']}: {entry['reason']}")
         elif entry["action"] == "on-request":
-            lines.append(f"{'request':<8} {head} is cloned on request only: pass --all to bring it here")
+            lines.append(f"{'request':<8} {head} is cloned on request only: pass --all to bring it here{unasked}")
         else:
-            lines.append(f"{'same':<8} {head}")
+            lines.append(f"{'same':<8} {head}{unasked}")
     lines.extend(f"{'REFUSED':<8} {message}" for message in data.get("refused", []))
     lines.extend(f"{'note':<8} {note}" for note in data["notes"])
     count = len(data["dependencies"])

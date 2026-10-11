@@ -48,7 +48,8 @@ from maelys_socle.constants import (
 )
 from maelys_socle.context import Context
 from maelys_socle.declarations import (
-    Declarations, parse_cli_declarations, parse_packages, parse_pin, parse_release, require_valid, version_tuple,
+    Declarations, PIN_ATTRIBUTES, parse_cli_declarations, parse_packages, parse_pin, parse_release,
+    require_valid, version_tuple,
 )
 from maelys_socle.texts import (
     LABELS, checks_text, documentation_name_lines, is_generated, managed_block, names_documentation, readme_links,
@@ -411,9 +412,11 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
                      f" {' or '.join(PUBLISHED_DOWNLOAD)}, which is what the socle looks for -- a renderer"
                      " that fetches the published bytes another way is right and unrecognised", "release")
         decl.add("ok", "scripts/render-homebrew-formula.sh renders the formula")
-    # Dependencies: one dependencies/NAME.pin per Maelys repository, nearest
-    # tag on line 1 for humans and the pinned commit on line 2. The managed
-    # scripts/checkout-dependency.sh clones each of them from the pin.
+    # Dependencies: one dependencies/NAME.pin per repository the build reads,
+    # the pinned commit on line 2 and, on line 1 for humans, the tag that
+    # commit carries -- parse_pin says what line 1 holds when it carries
+    # none. The managed scripts/checkout-dependency.sh clones each of them
+    # from the pin.
     dependencies = project / "dependencies"
     for pin_file in sorted(dependencies.glob("*.pin")) if dependencies.is_dir() else []:
         pin, problems = parse_pin(pin_file.name[: -len(".pin")], pin_file.read_text(encoding="utf-8"))
@@ -444,6 +447,15 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
             decl.foreign[pin["name"]] = pin["repository"]
         if pin["submodules"] is not None:
             decl.submodules[pin["name"]] = pin["submodules"]
+        if pin["unreleased"]:
+            decl.unreleased[pin["name"]] = pin["unreleased"]
+        for line in pin["unknown"]:
+            # Named, never fatal, and never silent: neither this socle nor
+            # the script it installed reads the line, so whatever it was
+            # meant to declare is declared to nobody here.
+            decl.add("note", f"dependencies/{pin['name']}.pin: {line!r} starts with no word this socle knows"
+                     f" ({', '.join(PIN_ATTRIBUTES[:4])}): nothing here reads it, and neither does the managed"
+                     " script", "conventions")
     if (project / "adapter").is_dir():
         decl.add("refused", "adapter/ is the pre-0.14 layout: git mv adapter/<NAME>_PIN dependencies/<name>.pin"
                  " and adapter/PACKAGES dependencies/packages, then delete adapter/ and the Makefile lines that read it")
@@ -459,6 +471,16 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
         decl.add("ok", f"dependencies/{name}.pin is cloned on request only: the jobs that clone every pin skip"
                  f" it, and 'sh scripts/checkout-dependency.sh {name} DESTINATION' brings it to the one that"
                  " reads it", "conventions")
+    for name, branch in sorted(decl.unreleased.items()):
+        pin = decl.pins[name]
+        # An `ok`, and it says where its own reading stops. `check` reads the
+        # product's files and holds no clone of what they pin: that the tag
+        # is an ancestor and that the branch still holds the commit are read
+        # from a checkout, by the one command that has one.
+        decl.add("ok", f"dependencies/{name}.pin pins {pin['commit'][:7]} on {branch} of {pin['repository']},"
+                 f" past {pin['tag']} and under no tag, on purpose. Read from the pin alone, its grammar and"
+                 f" the string of its URL: nothing here asked that repository anything, and '{PROGRAM}"
+                 f" dependencies DIR --apply' is what asks whether {branch} still holds it", "conventions")
     scripts = project / "scripts"
     managed_names = {name.split("/")[-1] for name in CHECKOUT_SCRIPTS}
     stray = sorted(path.name for path in scripts.glob("checkout-*.sh")
@@ -2006,11 +2028,20 @@ APP = SocleProgram(PROGRAM, PRODUCT, socle_version(), [
                                   "linuxPackages", "macosPackages", "formulas", "targets",
                                   "manifestPatterns", "channels", "gate", "afterVersion", "fuzz",
                                   "declared", "pinned", "managedBy", "runners", "workflows", "carried",
-                                  "checks"],
+                                  "unreleased", "checks"],
                      "properties": {"valid": {"type": "boolean"}, "product": {"type": "string"},
                                     "project": {"type": "string"}, "version": {"type": "string"},
                                     "mechanism": MECHANISM_SCHEMA,
-                                    "dependencies": STRINGS, "linuxPackages": {"type": "string"},
+                                    "dependencies": STRINGS,
+                                    "unreleased": {"type": "array", "items": {
+                                        "type": "object", "additionalProperties": False,
+                                        "required": ["name", "repository", "branch", "tag", "commit"],
+                                        "properties": {"name": {"type": "string"},
+                                                       "repository": {"type": "string"},
+                                                       "branch": {"type": "string"},
+                                                       "tag": {"type": "string"},
+                                                       "commit": {"type": "string"}}}},
+                                    "linuxPackages": {"type": "string"},
                                     "macosPackages": {"type": "string"}, "formulas": STRINGS,
                                     "targets": STRINGS, "manifestPatterns": {"type": "string"},
                                     "channels": {"type": "array", "items": {
@@ -2142,6 +2173,8 @@ APP = SocleProgram(PROGRAM, PRODUCT, socle_version(), [
                                                               "action": {"enum": ["clone", "refresh", "same",
                                                                                   "blocked", "on-request"]},
                                                               "submodules": {"enum": ["", "recursive"]},
+                                                              "unreleased": {"type": "string"},
+                                                              "asked": {"type": "boolean"},
                                                               "previous": {"type": "string"},
                                                               "reason": {"type": "string"}}}},
                                            "variable": {"type": "string"},

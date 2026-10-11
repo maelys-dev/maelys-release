@@ -301,7 +301,16 @@ def handle_declarations(invocation: Invocation, context: Context) -> tuple[dict,
             "runners": read_runners(project),
             "workflows": read_workflows(project),
             "carried": read_carried(project),
-            "dependencies": decl.dependencies, "linuxPackages": decl.linux_packages,
+            "dependencies": decl.dependencies,
+            # The pins on a third party's commit that no tag carries, apart
+            # from the names above: what holds each is a branch, which can be
+            # rewritten, and a fleet observer asks which products stand there
+            # without opening a pin. Always present, empty for nearly all.
+            "unreleased": [{"name": name, "repository": decl.pins[name]["repository"],
+                            "branch": decl.unreleased[name], "tag": decl.pins[name]["tag"],
+                            "commit": decl.pins[name]["commit"]}
+                           for name in decl.dependencies if name in decl.unreleased],
+            "linuxPackages": decl.linux_packages,
             "macosPackages": decl.macos_packages, "formulas": decl.formulas,
             "targets": [name for name, _ in decl.targets] or list(SOCLE_TARGETS),
             "manifestPatterns": (SOCLE_MANIFEST_PATTERNS + " "
@@ -417,7 +426,10 @@ def strategy_lines(workflows: list) -> list:
 
 def text_declarations(data: dict) -> str:
     return checks_text(data["checks"]) + "".join(f"{key:<13} {value}\n" for key, value in (
-        ("dependencies", " ".join(data["dependencies"])), ("linux", data["linuxPackages"]),
+        ("dependencies", " ".join(data["dependencies"])),
+        ("unreleased", " ".join(f"{pin['name']} ({pin['branch']}, past {pin['tag']})"
+                                for pin in data["unreleased"])),
+        ("linux", data["linuxPackages"]),
         ("macos", data["macosPackages"]), ("formulas", " ".join(data["formulas"])),
         ("targets", " ".join(data["targets"]) + ("" if data["declared"]["targets"] else " (default)")),
         ("manifest", data["manifestPatterns"]

@@ -67,9 +67,13 @@ the first Linux build of the product.
   command answers `--format json` with an agent-cli/v2 envelope,
   `describe --format json` returns the catalog, and `--field NAME` reads one
   member of the result without a `jq` expression.
-- `dependencies/<name>.pin`: nearest tag on line 1, pinned commit on line 2.
-  `scripts/checkout-dependency.sh NAME` clones the dependency at that
-  commit; write no other checkout script.
+- `dependencies/<name>.pin`: pinned commit on line 2, and on line 1 the tag
+  that commit carries — never the nearest tag of a commit that carries
+  none, which `maelys-release dependencies` refuses. A Maelys repository is
+  pinned on a tag. A third party's commit that no tag carries yet adds
+  `repository <https URL>` and `unreleased <branch>`, with the last tag
+  before it on line 1. `scripts/checkout-dependency.sh NAME` clones the
+  dependency at that commit; write no other checkout script.
 - `dependencies/packages`: the apt (`[linux]`) and brew (`[macos]`) packages the
   build needs, one per line. Nothing else installs packages in a release
   or in CI: `.github/workflows/ci.yml` calls the socle's

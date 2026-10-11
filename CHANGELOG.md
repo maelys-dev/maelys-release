@@ -190,20 +190,186 @@
   whose name does not say it is one is searched as bytes and counted as
   unread only where a shape was found. And the guard reads shapes: what
   the conventions list as out of scope is not found.
-- **Impact.** [asks: nothing] [writes: nothing] Nothing for a product to
-  do, and nothing turns red. `check` re-executes the socle a product pins,
-  so a product reads what `check` gains only once it has adopted this
-  version. All of it is notes, never a violation: an address git made up,
-  which `adopt` run from this version also says at that adoption, said to
-  an author and silent in CI; and one line saying what the privacy guard
-  searched and read, with a note for each family it found, naming the
-  place and never the value. `preflight` notes a public repository whose
-  secret scanning or push protection is off. Two things are each
-  repository's choice and written by nothing otherwise: the pre-push hook,
-  `maelys-release hook DIR --apply` in a clone that wants it; and the
-  refusal, `[privacy] refuse`, in a product that has adopted this version
-  — an older socle does not know the section and says so as a violation.
-  No managed file moves.
+- **A third party's commit that no tag carries is pinned on purpose, and
+  held to its branch.** Asked for a product to come, which builds a
+  third-party library at a commit of its main branch that no tag carries:
+  the part it uses is newer than any published version. A pin may now say
+  `unreleased <branch>`, a fourth attribute beside `repository`,
+  `submodules` and `on-request`: the commit of line 2 is on that branch,
+  under no tag, on purpose, and line 1 is the last tag before it. The word
+  is the reason and the branch is what can be verified — a tag holds its
+  commit for good, a branch until somebody rewrites it. Third party only:
+  the line is refused without a `repository` line, and with one that names
+  `maelys-dev`. A Maelys repository is pinned on a tag, and that rule does
+  not move.
+
+  What is verified depends on who holds what, and each place says where
+  its reading stops.
+
+  `check` and `declarations` read the pin file and hold no clone. They
+  verify **the grammar and the string of the URL, and nothing else**: a
+  Maelys pin trying the line, a branch or a line 1 that git would not take
+  as a name — `HEAD`, `refs/heads/main`, `v1.1.0^0` — `git describe`
+  output on line 1. `check` says in one `ok` line that it read the pin
+  alone.
+
+  `dependencies DIR` reads the checkout it made, offline, when that
+  checkout is at the pin: line 1 is exactly a tag, an ancestor of the
+  commit and not the commit itself. Any ancestor tag is accepted, and one
+  that is not the last is a note naming the nearer — a third party that
+  tags an older commit of its branch must not turn a product red. A tag
+  the checkout does not hold is a note, since it may have been made since.
+
+  `dependencies DIR --apply` asks the repository: one fetch of the one
+  branch, and of the one tag when the checkout lacks it. A branch that is
+  gone, a branch that no longer holds the commit, a line 1 that is no tag
+  of the repository: a refusal naming the pin. Measured before the rule
+  was written: a checkout refreshed onto a newer commit keeps the
+  branch's ref of its clone, and answers "not an ancestor" for a pin that
+  is right. So nothing is refused on the branch without asking, and every
+  row of a plan says that it did not ask. A pin that is also `on-request`
+  is neither fetched nor judged without `--all`.
+
+  "No" is kept apart from "cannot know": a repository that does not
+  answer, a shallow checkout, a checkout cloned without its tags are
+  notes, "not verified", where each read as a refusal. And a refusal says
+  what was read: a branch that dropped the commit is named with its tip,
+  and nothing claims the repository still serves the commit unless this
+  run just obtained it. The day it does not, on a new machine, the failure
+  names the pin and its branch, and gives its reading as a reading beside
+  git's own words, where git's words alone were all there was.
+
+  `declarations` returns these pins under `unreleased`, with the
+  repository, the branch, the tag and the commit of each; a pin refused
+  for any of its lines is not among them. `cut` holds them to the rule of
+  every pin, the entry names the dependency it re-pins — a rule that had
+  no test through `cut` itself, and passed the suite with its call taken
+  out; it has one.
+
+  **What this does not do, stated plainly.** No workflow runs
+  `dependencies`, and `scripts/checkout-dependency.sh` reads nothing of
+  the branch: nothing in CI or in a release checks that line 1 is an
+  ancestor, that the branch holds the commit, or that the branch was not
+  rewritten or deleted. CI learns of it the day the clone fails, unless
+  somebody ran `dependencies DIR --apply` first. And `check` re-executes
+  the socle a product pins: a product on an older socle gets no refusal at
+  all for the line, grammar included, until it adopts. An untagged commit
+  can still disappear at the third party; the conventions recommend a
+  mirror the product controls, where a tag of the mirror's own holds the
+  commit — an ordinary pin on a tag, then, with no `unreleased` line — and
+  say what it costs.
+
+  Tried on a public third-party repository before anything was claimed,
+  and again after the review: a small C library, pinned nine commits past
+  its last tag on its default branch and under no tag. The managed scripts
+  clone it; `check` answers 0 with one `ok` line and the notes it had
+  without the pin; `declarations` names it under `unreleased`; a plan says
+  on its row that nothing was asked; `dependencies --apply` asks its host
+  and has nothing to say. Each rule was then broken on that pin. The line
+  without `repository`, a `maelys-dev` URL, that URL with a port, a space
+  after the URL, another case, a tab, `HEAD` for a branch, `v1.1.0^0` on
+  line 1: `check` exit 2, each named. A line 1 that is not an ancestor, a
+  line 1 that is no tag of the repository, a branch that does not hold the
+  commit, a branch that does not exist: `dependencies --apply` exit 2,
+  naming the pin — and `check` exit 0 on all four, since it has no clone
+  to read. And on maelys-http, which pins Mbed TLS twice, on tags: `check`
+  returns the 24 lines it returned, its plan gains the two managed files
+  below, the script as `mechanism` and the skill as `prose`,
+  `dependencies --apply --all` materialises its three pins and says
+  nothing, and the new script clones its pins as the old one did.
+- **A pin has one reading, and it is the managed script's.** Found by a
+  review of the line above, and wider than it. The script matches an
+  attribute from the first column of a line to the last, takes the first
+  `repository` line, and falls back to the organisation when it matches
+  none; the socle's reader stripped each line first and took the last.
+  Measured on the script: `repository <URL>` followed by one space is a
+  third party for `check` and no line at all for the script, which clones
+  the fleet's repository of that name. The reader now refuses what the
+  script would read differently or not read: a carriage return, a line 2
+  that is not the commit alone, a space or a leading dash on line 1, an
+  attribute line with a space around it, a tab, two spaces, another case,
+  a colon, an attribute given twice. A line that starts with no word the
+  socle knows is a note and not a refusal, as a section of the declaration
+  file is: a product pins the socle by commit, and the next attribute must
+  not refuse it before it adopts.
+
+  **And the script refuses that line itself: `scripts/checkout-dependency.sh`
+  changes behaviour, for a malformed `repository` line and for nothing
+  else.** The reader in Python does not close this alone — `check`
+  re-executes the socle a product pins, so a product on an older one is
+  told nothing while its jobs run the script it carries — and cloning
+  another repository than the one the file names is the worst outcome a
+  clone script has. A line that starts like a repository line and is not
+  one its reader matches — a space after the URL, a space or a tab before
+  the word, a tab for the space, another case, a colon, no URL — stops the
+  script with exit 65, naming the pin file and the line, before anything
+  is cloned; a second `repository` line does too. A well-formed pin is
+  cloned as it was: a third party's, a plain pin of the fleet, and one
+  carrying `submodules`, `on-request` and `unreleased` together are held
+  by tests that run the script against served repositories, under `sh` and
+  `dash`, and the refusals were tried under dash with mawk and under
+  busybox as well. The script refuses nothing else: what it does not read,
+  it ignores, as before.
+
+  A `repository` URL takes one shape, `https://host/owner/name` with
+  `.git` or without: no user, no port, no empty or dot segment, no
+  percent-encoding, no dot after the host. Each of those read as "not
+  maelys-dev" and reached it. What a string cannot decide is said in the
+  conventions and not implied away: a fork under another owner, a
+  repository renamed or transferred, a host that serves the fleet's
+  repositories under another name.
+
+  Measured before any of it became a refusal, on the 62 pins of the 17
+  repositories of the organisation that carry any: no pin has a problem
+  under the strict reading, none holds an unknown line, and each reads as
+  it did. And line 1 reaches git as a revision and never as an
+  option: it went to `git rev-list` bare, where `--all` on line 1 answered
+  with a commit.
+- **Line 1 of a pin says what the socle accepts.** The script's header, the
+  skill, the README, the conventions and the reader's own comment said
+  "the nearest tag, for humans". `dependencies` refuses exactly that pin
+  whenever the commit carries no tag: its nearest tag names another commit,
+  "one of the two is wrong". And since 0.63.2 `migrate` writes a third
+  thing. The conventions now give line 1 in each case the code accepts, in
+  one table: the tag the commit carries; past a tag, what `git describe
+  --tags` says of it, as `migrate` writes; under `unreleased`, the last tag
+  before it. A third party's pin refused or noted for its line 1 is told of
+  the line; a third party's untagged commit under `git describe` output,
+  which passed without a word, gets the note the incident it comes from
+  asked for. And a line 1 that names nothing over a commit that does carry
+  a tag, which passed in silence for every pin, is a note that says what
+  the checkout holds. The other words a Maelys pin reads are the ones they
+  were.
+- **Impact.** [asks: checkout-script] [writes: nothing] A minor version: a
+  managed file moves, and in what it executes. A product that carries
+  `scripts/checkout-dependency.sh` **re-adopts** to receive it, as for the
+  script's moves of 0.61.0 and 0.63.0: moving its socle pin without
+  re-adopting reads `check` exit 2 on that file. The script stops on a
+  `repository` line its reader does not match, or on a second one, where
+  it cloned the organisation's repository, and changes nothing for a
+  well-formed pin: the three `repository` lines of the fleet are in that
+  shape, so no product's build changes. The skill moves as well, in one
+  bullet, for every product the socle releases, pins or no pins, and no
+  selector names that: such a product reads the same exit 2 on
+  `.claude/skills/maelys-release/SKILL.md` if it moves its pin by hand.
+  Nothing else asks a gesture, and nothing else turns red. `check`
+  re-executes the socle a product pins, so a product reads what `check`
+  gains only once it has adopted this version. All of it is notes, never a
+  violation: an address git made up, which `adopt` run from this version
+  also says at that adoption, said to an author and silent in CI; and one
+  line saying what the privacy guard searched and read, with a note for
+  each family it found, naming the place and never the value.
+  `declarations` answers one more key, `unreleased`, empty where no pin
+  says it. `preflight` notes a public repository whose secret scanning or
+  push protection is off. Three things are each repository's choice and
+  written by nothing otherwise: the pre-push hook, `maelys-release hook
+  DIR --apply` in a clone that wants it; the refusal, `[privacy] refuse`;
+  and a pin marked `unreleased`, which a product writes from this socle
+  with `dependencies` and which `check` reads once the product has adopted
+  — a pinned socle that predates `[privacy]` says so as a violation, and
+  one that predates `unreleased` ignores the line, grammar included. The
+  strict reading of a pin asks nothing of the fleet as measured: 62 pins,
+  none refused.
 
 ## 0.63.3 — 2026-10-10
 
