@@ -292,6 +292,45 @@ class RecordingHostTest(unittest.TestCase):
                 self.host.run(command)
         self.assertEqual(Original.calls, [], "the recording machine was asked nothing")
 
+    def test_the_search_for_the_copies_of_a_pin_is_recorded_and_no_other_git_c(self) -> None:
+        """`check` on a product with a pin runs `git -c ... grep`; the recorder knew `git grep` only.
+
+        No recorded fixture pins anything, so nothing refused it yet: the
+        first one that does would have stopped its recording on a command
+        the program runs for every such product.
+        """
+        socle = RECORDER.replay.load_source(ROOT)
+        # The recorder's spelling is the program's, setting for setting.
+        self.assertEqual(RECORDER.PIN_SEARCH,
+                         ["git", *(word for setting in socle.inspection.PIN_SEARCH_SETTINGS for word in ("-c", setting)),
+                          "grep"])
+        commit = "a" * 40
+        previous, socle.host.HOST = socle.host.HOST, self.host
+        try:
+            # The program itself, on a product with one pin: the command it builds goes through.
+            self.assertEqual(socle.inspection.pin_copies(self.project, {"dependency": {"commit": commit}}), {})
+        finally:
+            socle.host.HOST = previous
+        asked = [call[1] for call in Original.calls]
+        self.assertEqual(len(asked), 1)
+        self.assertEqual((asked[0][:len(RECORDER.PIN_SEARCH)], asked[0][-2:]), (RECORDER.PIN_SEARCH, ["-e", commit]))
+        self.assertEqual(self.host.events, [{"call": {"kind": "run", "argv": asked[0], "cwd": "<PRODUCT>"},
+                                             "result": {"returncode": 0, "stdout": "original\n", "stderr": ""}}])
+        Original.calls = []
+        settings = RECORDER.PIN_SEARCH[1:-1]
+        refused = (["git", *settings, "log", "-1"], ["git", *settings, "commit", "-m", "x"], ["git", *settings, "push"],
+                   ["git", "-c", "color.grep=false", "grep", "x"], ["git", *settings[:-2], "grep", "x"],
+                   ["git", *settings, "-c", "alias.grep=!sh", "grep", "x"],
+                   ["git", "-c", "core.pager=sh", *settings[2:], "grep", "x"],
+                   ["git", *reversed(settings), "grep", "x"], ["git", "-c", "core.hooksPath=/x", "rev-parse", "HEAD"])
+        for command in refused:
+            with self.subTest(command=command[-3:]), self.assertRaisesRegex(AssertionError, "unapproved recording"):
+                self.host.run(command, cwd=self.project)
+        # And the search itself only where every recorded git runs: in the product.
+        with self.assertRaisesRegex(AssertionError, "unapproved recording"):
+            self.host.run([*RECORDER.PIN_SEARCH, "-e", commit], cwd=pathlib.Path("/elsewhere"))
+        self.assertEqual(Original.calls, [])
+
     def test_the_git_it_runs_is_a_list_of_reads_in_the_product(self) -> None:
         reads = (["git", "config", "-z", "--get-regexp", "^user"], ["git", "config", "--get", "core.hooksPath"],
                  ["git", "symbolic-ref", "-q", "--short", "HEAD"], ["git", "rev-parse", "-q", "--verify", "main@{u}"],

@@ -85,7 +85,21 @@ def git(project, *args):
                           'GIT_AUTHOR_DATE': DATE, 'GIT_COMMITTER_DATE': DATE}).stdout.strip()
 
 
+# The search for the copies of a pin, as the program spells it: `git grep`
+# with six settings of the user's configuration set back on the command
+# itself. A `-c` before the subcommand can make git do anything -- an alias,
+# a pager, a hooks path -- so no `git -c` is allowed in general: these six
+# settings, in this order, and then `grep`. A test holds the list against
+# the program's, so that a setting added there is allowed here or the
+# recording of a product with a pin stops, naming the command.
+PIN_SEARCH = ['git', '-c', 'color.grep=false', '-c', 'grep.column=false', '-c', 'grep.fullName=false',
+              '-c', 'grep.fallbackToNoIndex=false', '-c', 'submodule.recurse=false', '-c', 'core.quotePath=true',
+              'grep']
+
+
 def safe_git(command):
+    if command[:len(PIN_SEARCH)] == PIN_SEARCH:
+        return True
     prefixes = (['git', 'remote', 'get-url', 'origin'], ['git', 'config', '--get'],
                 ['git', 'tag', '--list'], ['git', 'rev-parse'], ['git', 'grep'], ['git', 'ls-files'],
                 ['git', 'describe', '--tags', '--abbrev=0'], ['git', 'cat-file', '-t'],
