@@ -2935,6 +2935,48 @@ GitHub did not answer for the protection, the rulesets or a check-run read
 (`UNREAD`), and when the write would stop requiring a check other than an
 alias retiring for its leg (`DROP`, allowed with `--allow-narrow`).
 
+**The whole protection is put only where nothing protects the branch**: no
+classic protection and no ruleset, the state the plan announces with its
+`create` lines. It used to be put in three other states, each under a plan
+that said otherwise, and each is now a refusal of this half — `REFUSED`,
+exit 2, in the plan as under `--apply` and in the same words — or a reading
+that is not one:
+
+- **A protection that exists and requires no check**, its reviews, its
+  linear history and its rule for administrators set by the repository and
+  required status checks never turned on. The plan printed `keeps every
+  other setting as it is`, and `--apply` put the socle's shape over all of
+  them, the read-back passing because it compared with the body just sent.
+  Refused: this command changes the required checks of a protection that
+  already requires some, and creates a protection where none exists; it
+  does not turn required status checks on in a protection that exists, and
+  never replaces one. Turning that setting on is the repository's to do.
+  What GitHub answers to a change of required checks on a protection that
+  requires none was not measured, and no write is built on it. This refusal
+  does not apply where a ruleset carries a check of the socle: `--apply`
+  writes that ruleset there, and leaves the classic protection as it is.
+- **No classic protection, beside a ruleset that requires none of the
+  socle's checks.** The plan printed no `create` line and said `--apply
+  writes this ruleset, never a classic protection beside it`; `--apply`
+  created a classic protection beside it. Refused: this command does not
+  create a classic protection beside a ruleset, and does not choose which
+  ruleset should require the socle's checks. Once one requires any of them,
+  `--apply` keeps the checks of the first ruleset that requires checks: it
+  writes a ruleset of the repository and refuses one of the organisation.
+  The `ruleset` line of the plan says `--apply writes this ruleset` of a
+  ruleset that carries a check of the socle, and of no other.
+- **An answer that is no protection, and a default branch GitHub did not
+  name**, are `UNREAD`. A 200 carrying nothing was read as a protection
+  that requires no check. And when the repository could not be described,
+  the branch fell back to `main`, every reading was of that guess, and
+  `--apply` created a protection on it: the default branch is now one of
+  the readings nothing is written without. The environment half reads its
+  own endpoints by the name of the repository, none of them by the branch,
+  and is armed all the same.
+
+`--without-legs` in the first two states is told what it always was where
+no protection exists: nothing requires the legs, adopt first.
+
 **What `protect` writes of the release environment.** For a product the
 socle releases — one whose `release.yml` is the generated one — the plan
 also reads the `release` environment, through the reader `preflight`
@@ -3085,8 +3127,8 @@ gh api -X POST repos/OWNER/REPO/environments/release/deployment-branch-policies 
   show it: a ruleset that holds its checks while the branch does not is
   not passed. Equal, nothing is sent, nothing is read
   back, and `--apply` ends on `protect: nothing to change`. A member GitHub
-  did not answer is never an equal one, and the whole protection that is put
-  where no required checks were read is never equal to a reading: those are
+  did not answer is never an equal one, and the whole protection, put only
+  where nothing protects the branch, has no reading to equal: those are
   written as before.
 - **`writes` is what `--apply` with the same flags would send for the
   protection**, in the plan as under `--apply`, as the environment half

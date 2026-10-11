@@ -235,11 +235,17 @@ def handle_protect(invocation: Invocation, context: Context) -> tuple[dict, int]
                       "A branch protection is a GitHub setting; this reads and writes one.")
     if not host.HOST.which("gh"):
         raise Failure("PRECONDITION_FAILED", "gh is not installed.", "Install gh: this reads the GitHub API.")
-    branch = read_repository(repository).default_branch
+    described = read_repository(repository)
+    branch = described.default_branch
     caller, derived = socle_check_contexts(project, context)
     seen, from_tag, partial = observed_contexts(repository, branch)
     protection = read_protection(repository, branch)
     state, current = protection.classic_state, protection.classic_body
+    # An answer that is no protection -- a 200 carrying nothing, or a list --
+    # is not a reading of one. It was read as a protection that requires no
+    # check, and the whole protection was put over whatever was there.
+    if state == "ok" and not (isinstance(current, dict) and current):
+        state = "empty"
     # The environment a tag deploys into, for a product whose release is the
     # socle's: a repository that publishes its own way owns its environments
     # as it owns its release.yml, and this says nothing of them. Nor does
@@ -377,8 +383,13 @@ def handle_protect(invocation: Invocation, context: Context) -> tuple[dict, int]
     # look open, and --apply would have written four contexts over
     # seventeen. Measured on maelys-system, the day 0.57.0 asked five
     # products to run this.
-    unread = [what for what, answered in (("the branch protection", state in ("ok", "absent")),
-                                          ("the rulesets", ruled in ("ok", "absent")),
+    # Nor on a branch that was not read: when GitHub does not describe the
+    # repository its default branch falls back to `main`, every reading
+    # above is of that guess, and --apply created a protection on it.
+    unread = [what for what, answered in (("the default branch", bool(described.data.get("default_branch"))),
+                                          ("the branch protection", state in ("ok", "absent")),
+                                          ("the rulesets", ruled == "absent" or ruled == "ok"
+                                           and isinstance(rules, list)),
                                           ("the check runs of recent pull requests",
                                            not partial.get("unanswered")))
               if not answered]
@@ -391,7 +402,7 @@ def handle_protect(invocation: Invocation, context: Context) -> tuple[dict, int]
     # saying so (maelys-datalog).
     if state == "ok":
         report["keeps"] = protection_settings(holds)
-    elif state == "absent" and not by_rule:
+    elif state == "absent" and "a ruleset" not in mechanisms and "the default branch" not in unread:
         report["creates"] = protection_settings(dict(PROTECTION_SHAPE, required_status_checks={"strict": False}))
     if invocation.flag("--apply"):
         withdrawn = withdrawn_for("protect", context)
@@ -421,16 +432,55 @@ def handle_protect(invocation: Invocation, context: Context) -> tuple[dict, int]
     # way than --apply would end on a sentence its --apply contradicts.
     narrows = bool(dropping) and not narrowing and not invocation.flag("--allow-narrow")
     locks = bool(adding) and not narrowing and not invocation.flag("--allow-lock")
-    bare = bool(narrowing) and state != "ok"
+    standing = None
     if ours:
         # The plan has the rules of the branch and never reads the ruleset
         # they come from, which is what the body is made of: what the rules
         # list decides nothing here, and `held` is --apply's alone to find.
         write, listed, writable = ruleset_write(repository, rules, proposed)
-        held, refuses = False, bool(unread) or narrows or locks or not writable
+        held, bare, refuses = False, False, bool(unread) or narrows or locks or not writable
     else:
         write, held = classic_write(repository, branch, state, holds, proposed)
-        listed, refuses = False, bool(unread) or narrows or locks or bare or not proposed
+        # The whole protection is created only where nothing protects the
+        # branch. Beside a ruleset that requires none of the socle's checks
+        # it was put all the same, under a plan that printed no `create`
+        # line and said --apply wrote the ruleset.
+        beside = state == "absent" and "a ruleset" in mechanisms
+        if beside:
+            write = None
+        # Nothing to narrow where no classic protection requires a check:
+        # --without-legs is told so, in the words it always was where there
+        # is no protection at all.
+        bare = bool(narrowing) and (state != "ok" or write is None)
+        # A protection that exists and requires no check has no write here
+        # either, and both are said in the plan as under --apply. The whole
+        # protection used to be put over such a protection with the socle's
+        # shape, under a plan that printed `keeps every other setting as it
+        # is`: reviews, linear history and the rule for administrators
+        # replaced, and a read-back that passed because it compared with
+        # the body just sent. No other write is guessed in its place: what
+        # GitHub answers to a change of required checks where none are
+        # required was not measured, and a protection rebuilt from its own
+        # reading is a mapping between two shapes that nothing here verifies.
+        if write is None and beside and not unread and not narrowing:
+            standing = Failure(
+                "PRECONDITION_FAILED",
+                f"{branch} of {repository} is protected by a ruleset that requires none of the socle's checks.",
+                "This command does not create a classic protection beside a ruleset, and does not choose which"
+                " ruleset should require them. Requiring one of them in a ruleset is its owner's setting to"
+                " change; protect --apply then keeps the checks of the first ruleset that requires any: it"
+                " writes a ruleset of the repository, and refuses one of the organisation.")
+        elif write is None and not unread and not narrowing:
+            standing = Failure(
+                "PRECONDITION_FAILED",
+                f"the protection of {branch} of {repository} requires no check yet.",
+                "This command changes the required checks of a protection that already requires some, and"
+                " creates a protection where none exists; it does not turn required status checks on in a"
+                " protection that exists, and never replaces one. Turning that setting on is the repository's"
+                " own to do; then protect --apply.")
+        if standing:
+            report["refused"] = {"message": standing.message, "hint": standing.hint}
+        listed, refuses = False, bool(unread) or bool(standing) or narrows or locks or bare or not proposed
     # `writes` is what --apply with the flags of this run would send for
     # this half, in the plan and under --apply alike, as the environment
     # half says its own: nothing where the half refuses, nothing on a reading
@@ -461,6 +511,10 @@ def handle_protect(invocation: Invocation, context: Context) -> tuple[dict, int]
                           f"GitHub did not answer for {', '.join(unread)} of {repository}: nothing is written on a"
                           " reading that is not there.",
                           "Run protect again once GitHub answers, and read the plan before --apply.")
+        # What the plan refused, --apply refuses in the same words, before
+        # any refusal a flag could lift.
+        if standing:
+            raise standing
         if narrows:
             raise Failure("PRECONDITION_FAILED",
                           f"this write would stop requiring {', '.join(dropping)} on {branch} of {repository}.",
@@ -489,7 +543,9 @@ def handle_protect(invocation: Invocation, context: Context) -> tuple[dict, int]
                 report["writes"], report["nothingToChange"] = [], True
             return
         if bare:
-            raise Failure("PRECONDITION_FAILED", f"{branch} of {repository} has no protection to narrow.",
+            raise Failure("PRECONDITION_FAILED",
+                          f"{branch} of {repository} has no protection to narrow." if state != "ok" else
+                          f"the protection of {branch} of {repository} requires no check: there is nothing to narrow.",
                           "Nothing requires the legs, so the adoption will not lock anything: adopt first.")
         if not proposed:
             raise Failure("PRECONDITION_FAILED",
@@ -569,12 +625,14 @@ def unordered(items: list) -> list[str]:
 
 
 def classic_write(repository: str, branch: str, state: str, holds: dict,
-                  contexts: list[str]) -> tuple[dict, bool]:
+                  contexts: list[str]) -> tuple[dict | None, bool]:
     """The write that makes a classic protection require CONTEXTS, and whether it holds them already.
 
     Held is judged member by member of the body, on what GitHub answered and
     never on what an absence was read into: a write that would set a member
-    the reading does not carry is sent as it always was.
+    the reading does not carry is sent as it always was. No write at all
+    for a protection that exists and requires no check, nor for a reading
+    that is not there: the whole protection is put only where none exists.
     """
     # An existing protection is changed in its required checks alone,
     # through their own endpoint, and keeps every other setting as it is.
@@ -596,12 +654,14 @@ def classic_write(repository: str, branch: str, state: str, holds: dict,
         listed = existing.get("contexts")
         held = (existing.get("strict") is body["strict"] and isinstance(listed, list)
                 and unordered(listed) == unordered(contexts))
-    else:
+    elif state == "absent":
         method, endpoint = "PUT", f"repos/{repository}/branches/{branch}/protection"
         body = {**PROTECTION_SHAPE, "required_status_checks": {"strict": False, "contexts": contexts}}
-        # Never held: this is sent when no required checks were read, and
-        # it sets some, so no reading can equal it.
+        # Never held: this is sent only where no protection exists, and it
+        # creates one, so there is no reading for it to equal.
         held = False
+    else:
+        return None, False
     return {"method": method, "endpoint": endpoint, "body": body}, held
 
 
@@ -745,7 +805,7 @@ def write_ruleset(repository: str, branch: str, rules: object, contexts: list[st
 def text_protect(data: dict) -> str:
     lines = [f"branch   {data['branch']} of {data['repository']}"
              + (" is protected by " + " and ".join(data["protectedBy"]) if data.get("protectedBy")
-                else " could not be read" if "the branch protection" in (data.get("unread") or [])
+                else " could not be read" if {"the default branch", "the branch protection"} & set(data.get("unread") or [])
                 else "" if data["protected"] else " is NOT protected")]
     for what in data.get("unread") or []:
         lines.append(f"UNREAD   GitHub did not answer for {what}: this plan is not a reading, and --apply refuses")
@@ -762,8 +822,13 @@ def text_protect(data: dict) -> str:
                      " request has produced yet is never proposed: 'protect DIR --apply --allow-narrow' drops"
                      " those, then merge a pull request, then 'protect DIR --apply' requires what it produced")
     if data.get("ruleset"):
+        # Said of a ruleset that carries a check of the socle, which is the
+        # one --apply writes. Of any other it was said too, and --apply then
+        # wrote the classic protection, or created one beside the ruleset.
+        ours = [name for name in data["ruleset"] if name in data["socleContexts"] or socle_owned(name, data["caller"])]
         lines.append(f"ruleset  requires " + ", ".join(data["ruleset"])
-                     + " — --apply writes this ruleset, never a classic protection beside it")
+                     + (" — --apply writes this ruleset, never a classic protection beside it" if ours else
+                        " — none of them the socle's: --apply does not write this ruleset"))
     if data.get("narrowing"):
         lines.extend(f"{'drop':<8} {name}" for name in data.get("dropped", []))
         lines.append(f"{'narrow':<8} the legs of the socle's matrix leave the required list; everything"

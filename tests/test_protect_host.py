@@ -24,12 +24,14 @@ class ProtectionHost(FakeHost):
     function of the host for one that always differs in shape. The two are
     separate readings on GitHub, and a host that derived one from the other
     could not tell a command that reads the ruleset from one that trusts the
-    rules of the branch. `own` is the state `rulesets/7` answers with, and
-    `unreadable` the other paths GitHub does not answer for.
+    rules of the branch. `own` is the state `rulesets/7` answers with,
+    `unreadable` the other paths GitHub does not answer for, and `answers`
+    what it answers on a path instead of what this host holds.
     """
 
-    def __init__(self, *, classic=None, ruleset=None, drift=None, view=None, own="ok", unreadable=()):
+    def __init__(self, *, classic=None, ruleset=None, drift=None, view=None, own="ok", unreadable=(), answers=None):
         super().__init__()
+        self.answers = answers or {}
         self.classic = copy.deepcopy(classic)
         self.ruleset = copy.deepcopy(ruleset)
         self.drift = drift
@@ -46,6 +48,8 @@ class ProtectionHost(FakeHost):
         self.events.append(("read", path))
         if path in self.unreadable:
             return "unreadable", None
+        if path in self.answers:
+            return copy.deepcopy(self.answers[path])
         if path == "repos/o/r/branches/main/protection":
             return ("ok", copy.deepcopy(self.classic)) if self.classic else ("absent", None)
         if path == "repos/o/r/rules/branches/main":
@@ -336,22 +340,17 @@ class NothingDiffersTest(unittest.TestCase):
         self.assertEqual(host.writes, [("PATCH", CHECKS, {"strict": False, "contexts": ALL_LEGS})])
 
     def test_the_whole_protection_is_put_as_before_since_no_reading_can_equal_it(self):
-        """It is sent only when no required checks were read, and it sets
-        some: a protection that holds every other setting it carries is
-        still not one that holds what it would set."""
-        shaped = {key: ({"enabled": value} if isinstance(value, bool) else value)
-                  for key, value in MODULE.PROTECTION_SHAPE.items() if value is not None}
+        """It is sent only where nothing protects the branch, and it
+        creates a protection: there is no reading for it to equal."""
         body = {**MODULE.PROTECTION_SHAPE, "required_status_checks": {"strict": False, "contexts": ALL_LEGS}}
-        for held in (None, shaped):
-            with self.subTest(exists=bool(held)):
-                code, plan = self.protect(ProtectionHost(classic=held))
-                self.assertEqual(plan["writes"], [{"method": "PUT", "endpoint": PROTECTION, "body": body}])
-                host = ProtectionHost(classic=held)
-                code, data = self.protect(host, "--apply")
-                self.assertEqual((code, data["applied"]), (0, True), data)
-                self.assertEqual(host.writes, [("PUT", PROTECTION, body)])
-                self.assertEqual(host.events[-2:], [("write", PROTECTION), ("read", PROTECTION)])
-                self.assertEqual(data["written"], [f"PUT {PROTECTION}"])
+        code, plan = self.protect(ProtectionHost())
+        self.assertEqual(plan["writes"], [{"method": "PUT", "endpoint": PROTECTION, "body": body}])
+        host = ProtectionHost()
+        code, data = self.protect(host, "--apply")
+        self.assertEqual((code, data["applied"]), (0, True), data)
+        self.assertEqual(host.writes, [("PUT", PROTECTION, body)])
+        self.assertEqual(host.events[-2:], [("write", PROTECTION), ("read", PROTECTION)])
+        self.assertEqual(data["written"], [f"PUT {PROTECTION}"])
 
     # -- a ruleset: compared on its own reading, which only --apply takes ------------------------
 
@@ -701,6 +700,13 @@ class NothingDiffersTest(unittest.TestCase):
             "no protection": ProtectionHost,
             "no protection, beside a ruleset that is not the socle's":
                 lambda: ProtectionHost(ruleset=ruleset_of(loose(["lint"]))),
+            "no protection, beside a ruleset that requires no check":
+                lambda: ProtectionHost(ruleset=dict(every, rules=every["rules"][:1])),
+            "a protection that requires no check": lambda: ProtectionHost(classic=WholeProtectionTest.HELD),
+            "a protection that requires no check, beside a ruleset that is not the socle's":
+                lambda: ProtectionHost(classic=WholeProtectionTest.HELD, ruleset=ruleset_of(loose(["lint"]))),
+            "an answer that is no protection": lambda: ProtectionHost(answers={PROTECTION: ("ok", {})}),
+            "a default branch GitHub does not name": lambda: ProtectionHost(answers={"repos/o/r": ("unreadable", None)}),
             "a ruleset that holds the proposal": lambda: ProtectionHost(ruleset=every),
             "a ruleset that holds the proposal, and the check runs unread":
                 lambda: ProtectionHost(ruleset=every, unreadable=(RUNS,)),
@@ -724,7 +730,7 @@ class NothingDiffersTest(unittest.TestCase):
                 lambda: ProtectionHost(classic=held, ruleset=ruleset_of(loose([NOTHING])))}
 
     def test_no_state_ends_a_plan_on_what_its_apply_contradicts(self):
-        self.assertEqual(len(self.states()), 22, "a state was named twice, and the second replaced the first")
+        self.assertEqual(len(self.states()), 27, "a state was named twice, and the second replaced the first")
         for name, state in self.states().items():
             for flags in ((), ("--allow-narrow",), ("--allow-lock",), ("--allow-narrow", "--allow-lock"),
                           ("--without-legs",)):
@@ -744,3 +750,231 @@ class NothingDiffersTest(unittest.TestCase):
             self.assertIs(type(data["nothingToChange"]), bool)
             for write in data["writes"]:
                 self.assertEqual(sorted(set(write) - set(declared["writes"]["items"]["properties"])), [])
+
+
+class WholeProtectionTest(unittest.TestCase):
+    """The whole protection is put only where nothing protects the branch.
+
+    Reviews, linear history, the rule for administrators: set by the
+    repository, with required status checks never turned on. The plan
+    printed `keeps every other setting as it is`, and --apply then put the
+    whole protection with the socle's shape over it: every one of those
+    settings replaced, and a read-back that passed because it compared with
+    the body just sent. Beside a ruleset that requires none of the socle's
+    checks it created a classic protection, under a plan that printed no
+    `create` line and said --apply wrote the ruleset. And where GitHub did
+    not name the default branch, it created one on `main`.
+    """
+
+    HELD = {"required_pull_request_reviews": {"required_approving_review_count": 2, "dismiss_stale_reviews": True,
+                                              "require_code_owner_reviews": True,
+                                              "require_last_push_approval": True},
+            "required_linear_history": {"enabled": True}, "required_signatures": {"enabled": True},
+            "enforce_admins": {"enabled": False}, "required_conversation_resolution": {"enabled": False},
+            "allow_force_pushes": {"enabled": False}, "allow_deletions": {"enabled": False}}
+    UNARMED = {"message": "the protection of main of o/r requires no check yet.",
+               "hint": "This command changes the required checks of a protection that already requires some, and"
+                       " creates a protection where none exists; it does not turn required status checks on in a"
+                       " protection that exists, and never replaces one. Turning that setting on is the"
+                       " repository's own to do; then protect --apply."}
+    BESIDE = {"message": "main of o/r is protected by a ruleset that requires none of the socle's checks.",
+              "hint": "This command does not create a classic protection beside a ruleset, and does not choose"
+                      " which ruleset should require them. Requiring one of them in a ruleset is its owner's"
+                      " setting to change; protect --apply then keeps the checks of the first ruleset that"
+                      " requires any: it writes a ruleset of the repository, and refuses one of the organisation."}
+    REFUSED = "protect: refused; the protection is not written\n"
+    FLAGS = ((), ("--allow-narrow",), ("--allow-lock",), ("--allow-narrow", "--allow-lock"))
+    WRITES_IT = " — --apply writes this ruleset, never a classic protection beside it\n"
+    protect = NothingDiffersTest.protect
+
+    def refused(self, state, refusal, *flags):
+        """The plan and --apply refuse in the same words, exit 2, and nothing of the protection is written."""
+        for options in (flags, (*flags, "--apply")):
+            with self.subTest(options=options):
+                host = state()
+                before = copy.deepcopy((host.classic, host.ruleset))
+                code, data = self.protect(host, *options)
+                self.assertEqual((code, data["refused"]), (2, refusal), data)
+                self.assertEqual((data["writes"], data["written"], data["applied"], data["nothingToChange"]),
+                                 ([], [], False, False))
+                self.assertEqual((host.writes, (host.classic, host.ruleset)), ([], before))
+                self.assertNotIn("creates", data)
+                code, text = self.protect(state(), *options, text=True)
+                self.assertEqual(code, 2)
+                self.assertIn(f"REFUSED  {refusal['message']} {refusal['hint']}\n", text)
+                self.assertTrue(text.endswith(self.REFUSED), text)
+                self.assertNotIn("create   ", text)
+                # No command that changes a setting is printed.
+                for words in ("gh api", "-X ", "--method", "PUT", "PATCH"):
+                    self.assertNotIn(words, text)
+        return text
+
+    # -- a protection that exists and requires no check -------------------------------------------
+
+    def test_a_protection_that_requires_no_check_is_refused_and_never_replaced(self):
+        for why, held in (("no required checks at all", self.HELD),
+                          ("required checks answered null", dict(self.HELD, required_status_checks=None)),
+                          ("required checks answered as a list", dict(self.HELD, required_status_checks=[]))):
+            for flags in self.FLAGS:
+                with self.subTest(why=why, flags=flags):
+                    text = self.refused(lambda: ProtectionHost(classic=held), self.UNARMED, *flags)
+                    # What the plan says it keeps, this run keeps: nothing is written.
+                    self.assertIn("keeps    every other setting as it is: ", text)
+                    self.assertIn("required_linear_history=true", text)
+                    self.assertIn('"required_approving_review_count": 2', text)
+        # Whatever a ruleset beside it requires, short of a check of the socle.
+        self.refused(lambda: ProtectionHost(classic=self.HELD, ruleset=ruleset_of(loose(["lint"]))), self.UNARMED)
+
+    def test_without_legs_is_told_there_is_nothing_to_narrow(self):
+        """Nothing requires the legs there, and --without-legs is not
+        advised to turn a setting on: it is told to adopt, as where no
+        protection exists at all."""
+        adopt = "Nothing requires the legs, so the adoption will not lock anything: adopt first."
+        for why, state, message in (
+                ("a protection that requires no check", lambda: ProtectionHost(classic=self.HELD),
+                 "the protection of main of o/r requires no check: there is nothing to narrow."),
+                ("no protection", ProtectionHost, "main of o/r has no protection to narrow."),
+                ("no protection, beside a ruleset that is not the socle's",
+                 lambda: ProtectionHost(ruleset=ruleset_of(loose(["lint"]))), "main of o/r has no protection to narrow.")):
+            with self.subTest(why=why):
+                code, plan = self.protect(state(), "--without-legs")
+                self.assertEqual((plan["writes"], plan["nothingToChange"]), ([], False))
+                self.assertNotIn("refused", plan)
+                self.assertTrue(self.protect(state(), "--without-legs", text=True)[1].endswith(NothingDiffersTest.APPLY))
+                host = state()
+                code, data = self.protect(host, "--without-legs", "--apply")
+                self.assertEqual((code, host.writes, data["refused"]), (2, [], {"message": message, "hint": adopt}))
+
+    def test_a_protection_that_requires_checks_still_has_them_changed_through_their_endpoint(self):
+        for strict in (False, True):
+            with self.subTest(strict=strict):
+                classic = dict(self.HELD, required_status_checks={"strict": strict, "contexts": ALL_LEGS[:1]})
+                body = {"strict": strict, "contexts": ALL_LEGS}
+                code, plan = self.protect(ProtectionHost(classic=classic))
+                self.assertEqual((code, plan["writes"]), (0, [{"method": "PATCH", "endpoint": CHECKS, "body": body}]))
+                self.assertNotIn("refused", plan)
+                host = ProtectionHost(classic=classic)
+                code, data = self.protect(host, "--apply")
+                self.assertEqual((code, data["applied"], host.writes), (0, True, [("PATCH", CHECKS, body)]))
+                self.assertEqual(host.classic, dict(self.HELD, required_status_checks=body))
+
+    def test_a_ruleset_carrying_the_socle_s_checks_is_written_whatever_the_classic_protection_lacks(self):
+        """The classic protection is not what --apply writes there, so
+        that it requires no check refuses nothing."""
+        ruleset = fixtures.LegRenameTest.RULESET
+        code, plan = self.protect(ProtectionHost(classic=self.HELD, ruleset=ruleset))
+        self.assertNotIn("refused", plan)
+        host = ProtectionHost(classic=self.HELD, ruleset=ruleset)
+        code, data = self.protect(host, "--apply")
+        self.assertEqual((code, data["applied"], [write[:2] for write in host.writes]), (0, True, [("PUT", RULESET)]))
+        self.assertEqual(host.classic, self.HELD)
+
+    # -- no classic protection ---------------------------------------------------------------------
+
+    def test_where_nothing_protects_the_branch_it_is_still_created_whole_with_its_create_lines(self):
+        body = {**MODULE.PROTECTION_SHAPE, "required_status_checks": {"strict": False, "contexts": ALL_LEGS}}
+        code, plan = self.protect(ProtectionHost())
+        self.assertEqual((code, plan["writes"]), (0, [{"method": "PUT", "endpoint": PROTECTION, "body": body}]))
+        self.assertNotIn("refused", plan)
+        self.assertEqual(plan["creates"]["required_linear_history"], False)
+        _, text = self.protect(ProtectionHost(), text=True)
+        for key, value in plan["creates"].items():
+            self.assertIn(f"create   {key}={json.dumps(value)} (no protection exists; --apply creates it with this)\n",
+                          text)
+        self.assertTrue(text.endswith(NothingDiffersTest.APPLY), text)
+        host = ProtectionHost()
+        code, data = self.protect(host, "--apply")
+        self.assertEqual((code, data["applied"], host.writes), (0, True, [("PUT", PROTECTION, body)]))
+        self.assertEqual(host.events[-2:], [("write", PROTECTION), ("read", PROTECTION)])
+
+    def test_no_classic_protection_is_created_beside_a_ruleset(self):
+        """The plan said `--apply writes this ruleset, never a classic
+        protection beside it`, printed no `create` line, and --apply put
+        the whole protection beside the ruleset."""
+        every = ruleset_of(loose(["lint"]))
+        for why, ruleset, line in (
+                ("it requires a check that is not the socle's", every,
+                 "ruleset  requires lint — none of them the socle's: --apply does not write this ruleset\n"),
+                ("it requires no check at all", dict(every, rules=every["rules"][:1]), None)):
+            for flags in self.FLAGS:
+                with self.subTest(why=why, flags=flags):
+                    def state():
+                        host = ProtectionHost(ruleset=ruleset)
+                        host.fallback = protection_host(("absent", None), seen=[*ALL_LEGS, "lint"])
+                        return host
+                    text = self.refused(state, self.BESIDE, *flags)
+                    self.assertIn("branch   main of o/r is protected by a ruleset\n", text)
+                    self.assertNotIn(self.WRITES_IT, text)
+                    if line:
+                        self.assertIn(line, text)
+
+    def test_once_a_ruleset_requires_a_check_of_the_socle_the_first_that_requires_any_is_kept(self):
+        """What the refusal says comes next, held to the code: a ruleset
+        of the repository is written, one of the organisation refused, and
+        of several the first that requires checks is the one."""
+        one = ruleset_of(bound(ALL_LEGS[:1]))
+        host = ProtectionHost(ruleset=one)
+        _, text = self.protect(ProtectionHost(ruleset=one), text=True)
+        self.assertIn(f"ruleset  requires {ALL_LEGS[0]}" + self.WRITES_IT, text)
+        code, data = self.protect(host, "--apply")
+        self.assertEqual((code, data["applied"], [write[:2] for write in host.writes]), (0, True, [("PUT", RULESET)]))
+        self.assertIsNone(host.classic)
+        host = OrganisationHost(ruleset=one)
+        code, data = self.protect(host, "--apply")
+        self.assertEqual((code, host.writes), (2, []))
+        self.assertIn("come from a ruleset of the organisation", data["refused"]["message"])
+        # The first that requires checks, whichever of them carries the socle's.
+        other = rules_of(ruleset_of(bound(ALL_LEGS[:1])), identifier=9, source="Organization")
+        host = ProtectionHost(ruleset=ruleset_of(loose(["lint"])), view=lambda host: host.applied_rules() + other)
+        host.fallback = protection_host(("absent", None), seen=[*ALL_LEGS, "lint"])
+        self.protect(host, "--apply")
+        self.assertEqual([write[:2] for write in host.writes], [("PUT", RULESET)])
+        self.assertIsNone(host.classic)
+
+    # -- a reading that is not one -----------------------------------------------------------------
+
+    def test_an_answer_that_is_no_protection_is_not_read_as_one(self):
+        """A 200 carrying nothing was read as a protection that requires
+        no check: the whole protection was put over whatever was there."""
+        for what, path, answers in (("the branch protection", PROTECTION, (None, [], {}, "x")),
+                                    ("the rulesets", VIEW, (None, {}, "x"))):
+            for body in answers:
+                with self.subTest(unread=what, body=body):
+                    state = lambda: ProtectionHost(answers={path: ("ok", body)})
+                    code, plan = self.protect(state())
+                    self.assertEqual((plan["unread"], plan["writes"], plan["nothingToChange"]), ([what], [], False))
+                    self.assertNotIn("refused", plan)
+                    if path == PROTECTION:
+                        self.assertNotIn("creates", plan)
+                        self.assertNotIn("keeps", plan)
+                    _, text = self.protect(state(), text=True)
+                    self.assertIn(f"UNREAD   GitHub did not answer for {what}", text)
+                    host = state()
+                    code, data = self.protect(host, "--apply")
+                    self.assertEqual((code, host.writes), (2, []))
+                    self.assertIn(f"GitHub did not answer for {what} of o/r", data["refused"]["message"])
+
+    def test_a_default_branch_github_did_not_name_is_not_guessed_at(self):
+        """The repository was not described, the branch fell back to
+        `main`, every reading was of that guess, and --apply created a
+        protection on it."""
+        for why, answer in (("the repository could not be read", ("unreadable", None)),
+                            ("it was not found", ("absent", None)),
+                            ("its answer names no default branch", ("ok", {"name": "r"}))):
+            with self.subTest(why=why):
+                state = lambda: ProtectionHost(answers={"repos/o/r": answer})
+                code, plan = self.protect(state())
+                self.assertEqual((plan["unread"], plan["writes"]), (["the default branch"], []))
+                _, text = self.protect(state(), text=True)
+                self.assertIn("UNREAD   GitHub did not answer for the default branch: this plan is not a reading,"
+                              " and --apply refuses\n", text)
+                self.assertTrue(text.endswith(NothingDiffersTest.APPLY), text)
+                # Nothing is said of a branch that is a guess: neither that it is open, nor what it would be created with.
+                self.assertIn("branch   main of o/r could not be read\n", text)
+                self.assertNotIn("create   ", text)
+                self.assertNotIn("creates", plan)
+                host = state()
+                code, data = self.protect(host, "--apply")
+                self.assertEqual((code, host.writes, host.classic), (2, [], None))
+                self.assertEqual(data["refused"]["message"], "GitHub did not answer for the default branch of o/r:"
+                                 " nothing is written on a reading that is not there.")

@@ -26,7 +26,7 @@ from contextlib import contextmanager, redirect_stderr, redirect_stdout
 
 import test_maelys_release as fixtures
 from test_maelys_release import ALL_LEGS, MODULE, ROOT, FakeHost, FakeProtection, protection_host, using_host
-from test_protect_host import ProtectionHost
+from test_protect_host import ProtectionHost, WholeProtectionTest
 
 
 ENVIRONMENT = "repos/o/r/environments/release"
@@ -750,6 +750,43 @@ class ProtectEnvironmentTest(unittest.TestCase):
         self.assertEqual(host.protection_writes(), [])
         self.assertTrue(result["data"]["environment"]["applied"])
         self.assertEqual(host.policies, [{"id": 100, **TAG}])
+
+    def test_what_the_protection_half_refuses_of_itself_does_not_stop_the_environment(self) -> None:
+        """A protection that requires no check, a ruleset that is not the
+        socle's with no classic protection beside it, a default branch
+        GitHub did not name: the protection half writes nothing, in the
+        plan's words where it has some, and the environment half plans its
+        two writes and makes them. It reads its own endpoints, by the name
+        of the repository, and none of them by the branch."""
+        for why, branch, said in (
+                ("a protection that requires no check", lambda: ProtectionHost(classic=WholeProtectionTest.HELD),
+                 "requires no check yet"),
+                ("a ruleset that is not the socle's",
+                 lambda: ProtectionHost(ruleset=dict(fixtures.LegRenameTest.RULESET,
+                                                     rules=fixtures.LegRenameTest.RULESET["rules"][:1])),
+                 "is protected by a ruleset that requires none of the socle's checks"),
+                ("a default branch GitHub did not name",
+                 lambda: ProtectionHost(answers={"repos/o/r": ("unreadable", None)}),
+                 "GitHub did not answer for the default branch")):
+            with self.subTest(why=why):
+                host = EnvironmentHost(branch=branch())
+                code, result = self.run_protect(host)
+                self.assertEqual([write["method"] for write in result["data"]["environment"]["writes"]],
+                                 ["PUT", "POST"])
+                self.assertEqual((host.writes, result["data"]["writes"]), ([], []))
+                host = EnvironmentHost(branch=branch())
+                code, result = self.run_protect(host, "--apply")
+                self.assertEqual(code, 2, result)
+                self.assertIn(said, result["data"]["refused"]["message"])
+                self.assertFalse(result["data"]["applied"])
+                self.assertEqual(host.protection_writes(), [])
+                self.assertTrue(result["data"]["environment"]["applied"])
+                self.assertEqual([method for method, _, _ in host.environment_writes()], ["PUT", "POST"])
+                self.assertEqual(host.policies, [{"id": 100, **TAG}])
+                self.assertEqual([path for path in host.reads if "/environments" in path and "/branches/" in path], [])
+                _, text = self.run_protect(EnvironmentHost(branch=branch()), "--apply", text=True)
+                self.assertIn("environment: applied", text)
+                self.assertIn("protect: refused; the protection is not written", text)
 
     def test_a_protection_that_failed_says_what_the_environment_wrote(self) -> None:
         """The protection is written first and read back; when that fails,
