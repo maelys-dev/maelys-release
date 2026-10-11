@@ -22,13 +22,13 @@ import tempfile
 from maelys_cli import EXIT_OK, EXIT_VIOLATIONS, Failure, Invocation
 
 from . import host
-from .constants import CI_JOB, CI_USES, DECLARATION_FILE, LEGS_JOB, SOCLE_MECHANISM
+from .constants import CI_USES, DECLARATION_FILE, LEGS_JOB, SOCLE_MECHANISM
 from .context import Context
 from .declarations import parse_release
 from .environment import Refusal, arm, environment_plan, record, text_environment, violations
 from .github import (github_api, github_list, github_read, github_repository, observed_contexts, protection_settings, read_protection, read_repository, required_contexts, ruleset_shape, verify_protection, withdrawn_for)
 from .project import project_of
-from .workflows import yaml_scalar
+from .workflows import job_names, yaml_scalar
 
 
 def socle_check_contexts(project: pathlib.Path, context: Context) -> tuple[str, list[str]]:
@@ -45,10 +45,10 @@ def socle_check_contexts(project: pathlib.Path, context: Context) -> tuple[str, 
     if not ci.is_file():
         return "", []
     caller = ""
-    for line in ci.read_text(encoding="utf-8").splitlines():
-        named = CI_JOB.match(line)
+    lines = ci.read_text(encoding="utf-8").splitlines()
+    for line, named in zip(lines, job_names(lines)):
         if named:
-            caller = named.group(1)
+            caller = named
         elif CI_USES.search(line) and caller:
             break
     else:

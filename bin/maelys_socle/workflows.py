@@ -6,11 +6,41 @@ import json
 import re
 
 from .constants import (
-    BOTTLES, CI_JOB, CI_USES, DECLARATION_FILE, LABEL, LEGS_JOB, LEGS_USES, MATRIX_REFERENCE,
-    PROGRAM, RUNNER_INPUTS, RUNS_ON, SANITIZING, SOCLE_LINUX_PACKAGES, SOCLE_MANIFEST_PATTERNS,
+    BOTTLES, CI_JOB, CI_JOB_COMMENTED, CI_USES, DECLARATION_FILE, JOBS_KEY, LABEL, LEGS_JOB, LEGS_USES,
+    MATRIX_REFERENCE, PROGRAM, RUNNER_INPUTS, RUNS_ON, SANITIZING, SOCLE_LINUX_PACKAGES, SOCLE_MANIFEST_PATTERNS,
     SOCLE_REPOSITORY, SOCLE_RUNNER_KEYS, SOCLE_TARGETS, WORKFLOW_EVENTS,
 )
 from .declarations import Declarations
+
+
+def job_names(lines: list[str], inside: bool = False) -> list[str]:
+    """The job each line names, and "" for a line that names none.
+
+    The readers of a job line ask here, so that no two of them read a
+    different one. `  name:` alone is a job line wherever it stands, as it
+    always was. Followed by a comment it is one inside the `jobs:` block
+    only: where the nearest line above that starts at the margin, blank
+    lines and comments apart, is `jobs:`. `inside` says the lines given are
+    the body of that block. Nothing else about a job is decided here.
+    """
+    names = []
+    for line in lines:
+        if line.strip() and not line[0].isspace() and not line.startswith("#"):
+            inside = bool(JOBS_KEY.match(line))
+        named = CI_JOB.match(line) or (CI_JOB_COMMENTED.match(line) if inside else None)
+        names.append(named.group(1) if named else "")
+    return names
+
+
+def names_alone(lines: list[str], inside: bool = False) -> list[str]:
+    """The lines as a reader that scans them takes them: a job line is its name alone.
+
+    The comment that ends a job line is no line of the job. Scanned with
+    it, a comment that names a runner or holds the text of a call was read
+    as what the job runs on and what it calls. A line read as a job line is
+    read as the name alone would be, by every reader that looks at it.
+    """
+    return [f"  {name}:" if name and "#" in line else line for line, name in zip(lines, job_names(lines, inside))]
 
 
 def runner_json(labels: list[str]) -> str:
@@ -52,14 +82,17 @@ def ci_legs(text: str, decl: "Declarations", sha: str, tag: str) -> str:
     named `legs` is never touched: the declarations refuse that pairing.
     """
     lines = text.splitlines(keepends=True)
-    start = next((index for index, line in enumerate(lines) if line.rstrip() == f"  {LEGS_JOB}:"), None)
+    names = job_names(lines)
+    start = next((index for index, name in enumerate(names) if name == LEGS_JOB), None)
     end = None
     if start is not None:
         end = start + 1
-        while end < len(lines) and not CI_JOB.match(lines[end]) \
+        while end < len(lines) and not names[end] \
                 and not (lines[end].strip() and not lines[end].startswith(" ")):
             end += 1
-        if not any(LEGS_USES.search(line) for line in lines[start:end]):
+        # The call makes the job the socle's, in a line of the job and not in
+        # what a comment beside its name says.
+        if not any(LEGS_USES.search(line) for line in lines[start + 1:end]):
             return text
         # Trailing blank lines and comments belong to what follows.
         while end > start + 1 and (not lines[end - 1].strip() or lines[end - 1].lstrip().startswith("#")) \
@@ -519,8 +552,9 @@ def sanitizers_twice(text: str) -> list[int]:
                 found.append(number)
                 return
 
-    for number, line in enumerate(text.splitlines(), 1):
-        if re.match(r"^  [A-Za-z0-9_-]+:\s*$", line):
+    lines = names_alone(text.splitlines())
+    for number, (line, named) in enumerate(zip(lines, job_names(lines)), 1):
+        if named:
             close()
             job = [(number, line)]
         elif job:
@@ -542,10 +576,10 @@ def workflow_jobs(text: str) -> dict:
     body = top_block(text, "jobs")
     jobs: dict = {}
     name = ""
-    for line in body.splitlines():
-        match = re.match(r"^  ([A-Za-z0-9_-]+):\s*$", line)
-        if match:
-            name = match.group(1)
+    lines = body.splitlines()
+    for line, named in zip(lines, job_names(lines, True)):
+        if named:
+            name = named
             jobs[name] = []
         elif name:
             jobs[name].append(line)

@@ -14,7 +14,7 @@ import re
 from maelys_cli import EXIT_OK, EXIT_VIOLATIONS, Failure, Invocation
 
 from .constants import (
-    CLI_REFERENCE, JOB_ID, LEGACY_CLI_REFERENCES, PROGRAM, PROSE_SUFFIXES, SOCLE_MANIFEST_PATTERNS,
+    CLI_REFERENCE, LEGACY_CLI_REFERENCES, PROGRAM, PROSE_SUFFIXES, SOCLE_MANIFEST_PATTERNS,
     SOCLE_REPOSITORY, SOCLE_TARGETS,
 )
 from .context import Context
@@ -25,7 +25,9 @@ from .identity import socle_data
 from .declarations import Declarations, version_tuple
 from .project import project_of
 from .texts import checks_text
-from .workflows import block_list, file_runners, sub_block, top_block, workflow_events, yaml_scalar
+from .workflows import (
+    block_list, file_runners, job_names, names_alone, sub_block, top_block, workflow_events, yaml_scalar,
+)
 
 
 def pinned_socle(project: pathlib.Path) -> dict | None:
@@ -136,7 +138,10 @@ def read_carried(project: pathlib.Path) -> dict:
     workflows = project / ".github" / "workflows"
     for path in sorted(workflows.glob("*.y*ml")) if workflows.is_dir() else []:
         jobs = top_block(path.read_text(encoding="utf-8"), "jobs")
-        for job in JOB_ID.findall(jobs):
+        # sub_block finds a job by its name alone on a line.
+        lines = names_alone(jobs.split("\n"), True)
+        jobs = "\n".join(lines)
+        for job in filter(None, job_names(lines, True)):
             block = sub_block(jobs, job)
             if not CARRY_CALL.search(block):
                 continue
@@ -173,7 +178,7 @@ def read_workflows(project: pathlib.Path) -> list:
             # not the same fact as no push at all: the renderer says which.
             "branches": block_list(push, "branches"),
             "tags": block_list(push, "tags"),
-            "jobs": JOB_ID.findall(top_block(text, "jobs")),
+            "jobs": [job for job in job_names(top_block(text, "jobs").split("\n"), True) if job],
             "runners": labels,
             "unresolved": unresolved,
             "delegates": bool(re.search(rf"^\s*uses:\s*{re.escape(SOCLE_REPOSITORY)}/", text, re.M)),

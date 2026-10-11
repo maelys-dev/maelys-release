@@ -3026,8 +3026,8 @@ class WorkflowReadingTest(unittest.TestCase):
         self.assertEqual(MODULE.block_list(pushed, "branches"), [])
 
     def test_jobs_and_runners_of_one_file(self) -> None:
-        self.assertEqual(MODULE.JOB_ID.findall(MODULE.top_block(self.BLOCK, "jobs")),
-                         ["check", "package"])
+        named = MODULE.job_names(MODULE.top_block(self.BLOCK, "jobs").split("\n"), True)
+        self.assertEqual([job for job in named if job], ["check", "package"])
         self.assertEqual(MODULE.file_runners("ci.yml", self.BLOCK)[0], ["macos-15", "ubuntu-26.04"])
 
     def test_the_table_is_turned_for_the_reader(self) -> None:
