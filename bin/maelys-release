@@ -1779,9 +1779,19 @@ def handle_self_test(invocation: Invocation) -> tuple[dict, int]:
     tests = socle_root() / "tests"
     if not tests.is_dir():
         raise Failure("NOT_FOUND", f"{tests} is not part of this installation.", "Run from a maelys-release checkout.")
-    command = [sys.executable, "-W", "error", "-m", "unittest", "discover", "-s", str(tests)]
-    if invocation.flag("--verbose"):
-        command.append("-v")
+    # One class per process, several at a time: the suite builds a
+    # repository for almost every test and took nine minutes one after the
+    # other, on a machine with processors to spare.
+    jobs = str(invocation.option("--jobs", "")) or str(os.cpu_count() or 1)
+    if not jobs.isdigit() or int(jobs) < 1:
+        raise Failure("VALIDATION_FAILED", f"--jobs takes a number of processes, 1 or more, not {jobs!r}.",
+                      "Leave it out to run as many classes at a time as this machine has processors.")
+    command = [sys.executable, "-W", "error", str(tests / "side_by_side.py"), "--jobs", jobs]
+    # --verbose is also a global option, which the framework reads first:
+    # asked of the command alone, it was never passed on and no run
+    # reported its tests.
+    if invocation.flag("--verbose") or invocation.verbose:
+        command.append("--verbose")
     log = sys.stderr if invocation.format != "text" else sys.stdout
     log.flush()
     with host.HOST.self_test_environment() as environment:
@@ -2418,7 +2428,9 @@ APP = SocleProgram(PROGRAM, PRODUCT, socle_version(), [
                                            "formula": {"type": "string"}, "changed": {"type": "boolean"},
                                            "diff": {"type": "string"}, "commit": {"type": "string"}, "install": {"type": "string"}}}),
     cli.execute("self-test", "self-test", "Run the socle's own tests.", handle_self_test,
-                options=[cli.flag("--verbose", "Report every test.")],
+                options=[cli.flag("--verbose", "Report every test."),
+                         cli.option("--jobs", "Test classes run at a time; defaults to the number of processors.",
+                                    cli.argument("N"))],
                 schema={"type": "object", "additionalProperties": False, "required": ["tests", "passed"],
                         "properties": {"tests": {"type": "string"}, "passed": {"type": "boolean"}}}),
     cli.execute("vendor", "vendor", "Refresh bin/maelys_cli.py from maelys-cli at dependencies/maelys-cli.pin and record its digest.",
