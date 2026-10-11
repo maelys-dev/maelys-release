@@ -3382,8 +3382,12 @@ class WhatTheScriptRecordedTest(unittest.TestCase):
         written to prevent, in the command written to prevent it.
         """
         source = (ROOT / "bin" / "maelys_socle" / "protect.py").read_text(encoding="utf-8")
+        # The write is built in a function of its own, from the contexts it
+        # is given: what holds the rule is what the one call gives it.
         body = source.split("PROTECTION_SHAPE, \"required_status_checks\"", 1)[1].split("}", 1)[0]
-        self.assertIn("proposed", body)
+        self.assertIn('"contexts": contexts', body)
+        self.assertEqual(source.count("classic_write(repository, branch, state, holds, proposed)"), 1)
+        self.assertEqual(source.count("classic_write("), 2, "one definition and one call")
         self.assertNotIn('"contexts": seen', source)
 
 

@@ -26,7 +26,10 @@ from contextlib import contextmanager, redirect_stderr, redirect_stdout
 
 import test_maelys_release as fixtures
 from test_maelys_release import ALL_LEGS, MODULE, ROOT, FakeHost, FakeProtection, protection_host, using_host
-from test_protect_host import ProtectionHost, WholeProtectionTest
+# The module and not its test class: a class imported by name is a class of
+# this module too, and the suite ran its tests a second time from here.
+import test_protect_host
+from test_protect_host import ProtectionHost
 
 
 ENVIRONMENT = "repos/o/r/environments/release"
@@ -759,7 +762,7 @@ class ProtectEnvironmentTest(unittest.TestCase):
         two writes and makes them. It reads its own endpoints, by the name
         of the repository, and none of them by the branch."""
         for why, branch, said in (
-                ("a protection that requires no check", lambda: ProtectionHost(classic=WholeProtectionTest.HELD),
+                ("a protection that requires no check", lambda: ProtectionHost(classic=test_protect_host.WholeProtectionTest.HELD),
                  "requires no check yet"),
                 ("a ruleset that is not the socle's",
                  lambda: ProtectionHost(ruleset=dict(fixtures.LegRenameTest.RULESET,

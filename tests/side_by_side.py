@@ -29,8 +29,12 @@ SKIPPED = re.compile(r"\bskipped=(\d+)")
 
 
 def classes() -> list[tuple[str, int]]:
-    """Every test class of the suite with the number of its tests, in the order `discover` finds them."""
-    found: dict[str, int] = {}
+    """Every test class of the suite with the number of its tests, in the order `discover` finds them.
+
+    Counted by the tests' own names: a class one module imports from another
+    is found in both, and is one class.
+    """
+    found: dict[str, set] = {}
 
     def walk(suite: unittest.TestSuite) -> None:
         for test in suite:
@@ -39,13 +43,12 @@ def classes() -> list[tuple[str, int]]:
             elif type(test).__module__ == "unittest.loader":
                 # A module that does not import is a test that fails, and is
                 # run where it stands: by its own name, in a process of its own.
-                found[test.id().rpartition(".")[2]] = found.get(test.id().rpartition(".")[2], 0) + 1
+                found.setdefault(test.id().rpartition(".")[2], set()).add(test.id())
             else:
-                name = f"{type(test).__module__}.{type(test).__qualname__}"
-                found[name] = found.get(name, 0) + 1
+                found.setdefault(f"{type(test).__module__}.{type(test).__qualname__}", set()).add(test.id())
 
     walk(unittest.defaultTestLoader.discover(str(TESTS)))
-    return list(found.items())
+    return [(name, len(tests)) for name, tests in found.items()]
 
 
 def run(name: str, verbose: bool) -> tuple[int, str, float]:
