@@ -195,10 +195,27 @@ class RecordingHostTest(unittest.TestCase):
                 self.host.run(command, cwd=cwd)
         with self.assertRaises(AssertionError):
             self.host.run(RECORDER.COMPOSED, env={"PATH": ""})
-        for name in ("hostname", "brew", "docker"):
+        for name in ("brew", "docker"):
             with self.subTest(name=name), self.assertRaisesRegex(AssertionError, "unexpected tool lookup"):
                 self.host.which(name)
         self.assertEqual(Original.calls, [])
+
+    def test_the_machine_has_no_name_to_give_and_is_never_asked_for_one(self) -> None:
+        """The privacy guard looks its two tools up; the recorder answers that neither exists.
+
+        Refusing the lookup, as every lookup but `gh` and `env` is refused,
+        would refuse every recorded `check`: the guard asks on each. Running
+        either tool stays what it was, a process outside the list.
+        """
+        for name in ("hostname", "scutil"):
+            with self.subTest(name=name):
+                self.assertIsNone(self.host.which(name))
+        self.assertEqual(self.host.events, [{"call": {"kind": "which", "name": name}, "result": None}
+                                            for name in ("hostname", "scutil")])
+        for command in (["hostname"], ["hostname", "-s"], ["scutil", "--get", "ComputerName"]):
+            with self.subTest(command=command), self.assertRaises(AssertionError):
+                self.host.run(command)
+        self.assertEqual(Original.calls, [], "the recording machine was asked nothing")
 
     def test_the_git_it_runs_is_a_list_of_reads_in_the_product(self) -> None:
         reads = (["git", "config", "-z", "--get-regexp", "^user"], ["git", "config", "--get", "core.hooksPath"],
