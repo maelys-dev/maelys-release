@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.64.1 — 2026-10-11
 
 Five corrections found by reading 0.64.0 again, each reproduced before it
 was changed and read a second time by someone who had not written it. Two
