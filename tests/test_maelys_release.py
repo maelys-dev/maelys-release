@@ -5871,7 +5871,7 @@ class LegRenameTest(unittest.TestCase):
             sent["body"] = body
             return subprocess.CompletedProcess([], 0, "", "")
         with using_host(FakeHost(read=read, write=write)):
-            return MODULE.write_ruleset("o/r", "main", applied, contexts), sent
+            return MODULE.write_ruleset("o/r", "main", applied, MODULE.protect.carrying_rules(applied), contexts), sent
 
     def test_the_ruleset_is_written_whole_with_only_its_checks_changed(self) -> None:
         # One context more than it holds: a ruleset that lists them all

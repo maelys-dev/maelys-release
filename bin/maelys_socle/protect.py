@@ -26,7 +26,7 @@ from .constants import CI_USES, DECLARATION_FILE, LEGS_JOB, SOCLE_MECHANISM
 from .context import Context
 from .declarations import parse_release
 from .environment import Refusal, arm, environment_plan, record, text_environment, violations
-from .github import (github_api, github_list, github_read, github_repository, observed_contexts, protection_settings, read_protection, read_repository, required_contexts, ruleset_shape, verify_protection, withdrawn_for)
+from .github import (github_api, github_list, github_read, github_repository, observed_contexts, protection_settings, read_protection, read_repository, required_contexts, rule_contexts, ruleset_shape, verify_protection, withdrawn_for)
 from .project import project_of
 from .workflows import job_names, yaml_scalar
 
@@ -375,6 +375,27 @@ def handle_protect(invocation: Invocation, context: Context) -> tuple[dict, int]
     # contexts after the next rename. Reported by agent-cli-spec, who
     # worked it out from the output before running it.
     ours = [name for name in by_rule if name in derived or socle_owned(name, caller)]
+    # And of several rulesets, the one --apply writes is the one that
+    # already carries a check of the socle, wherever GitHub lists it. The
+    # first rule that required any check named it instead: with `lint` in
+    # one ruleset and the three legs in the next, --apply gave the legs to
+    # the first and failed its read-back on every run. `ruleset` is what
+    # the plan says --apply writes, so it lists what those rulesets
+    # require, and what every ruleset requires where none carries a check
+    # of the socle; `before` keeps them all.
+    requiring = rulesets_requiring(rules)
+    carrying = [held for held in requiring if set(rule_contexts(held)) & set(ours)]
+    if carrying:
+        report["ruleset"] = sorted(rule_contexts([rule for held in carrying for rule in held]))
+    # Where several rulesets require checks, one mechanism is written at
+    # most, beside others this run does not write: the ruleset that alone
+    # carries the socle's checks, or the classic protection where none
+    # does. What that one requires, and what the others do.
+    several = len(requiring) > 1
+    alone = several and len(carrying) == 1
+    own = (rule_contexts(carrying[0]) if alone else [] if carrying else protection.classic_contexts) if several else []
+    elsewhere = ([name for held in requiring if not (alone and held is carrying[0]) for name in rule_contexts(held)]
+                 + (protection.classic_contexts if carrying else [])) if several else []
     # --without-legs: the first half of a rename. What the branch requires,
     # minus every leg of the socle's matrix -- the jobs named `check (…)` under
     # the calling job -- and nothing else. A required context that nothing
@@ -392,6 +413,36 @@ def handle_protect(invocation: Invocation, context: Context) -> tuple[dict, int]
         report["dropped"] = [name for name in required if legs.match(name)]
         report["requiredButNeverRun"], report["missingFromRuns"] = [], []
         absent, stale = [], []
+    # What the mechanism written is given: the proposal, for one mechanism.
+    # A ruleset written beside others is given what is its own business and
+    # no more -- the checks it holds that the proposal keeps, and the
+    # socle's. Given the whole proposal, it received `lint` from the ruleset
+    # that requires it, bound to the app of its own checks, and then waited
+    # on every pull request for a `lint` that app never reports. A check
+    # another mechanism requires is neither added to it nor its to drop;
+    # and one that pull requests produce and nothing requires is added to
+    # no ruleset, which of them should require it not being read anywhere.
+    written, beyond = proposed, []
+    if alone and narrowing:
+        # The legs leave the ruleset written, and nothing joins it.
+        written = [name for name in own if not legs.match(name)]
+        report["dropped"] = [name for name in own if legs.match(name)]
+    elif several and not narrowing:
+        # A check nothing produces, required where this run writes nothing,
+        # is still required when it ends: no write of it settles that, and
+        # no flag.
+        beyond = [name for name in stale if name in elsewhere]
+    if alone and not narrowing:
+        unclaimed = [name for name in proposed if name not in required and name not in derived]
+        report["proposed"] = proposed = [name for name in proposed if name not in unclaimed]
+        written = [name for name in proposed if name in own or name in derived]
+        if unclaimed:
+            one = len(unclaimed) == 1
+            aside = (f"{', '.join(unclaimed)} {'is' if one else 'are'} left out: pull requests produce"
+                     f" {'it' if one else 'them'} and nothing requires {'it' if one else 'them'}, and of several"
+                     " rulesets this command gives the one it writes the socle's checks and no other. Which"
+                     f" ruleset should require {'it' if one else 'them'} is its owner's to settle.")
+            report["note"] = f"{report['note']} {aside}" if report.get("note") else aside
     # Widening before the adoption is merged requires names that only the
     # adoption's own pull request produces, and every other open pull request
     # -- built on the previous ci.yml -- would wait for them forever. The
@@ -440,7 +491,10 @@ def handle_protect(invocation: Invocation, context: Context) -> tuple[dict, int]
     # replacement, and a job the call turned off is kept; anything else the
     # branch requires and the proposal leaves out is named, and written only
     # when asked.
-    dropping = [name for name in required if name not in proposed and name not in retiring]
+    # Judged on the checks of what is written: a check another mechanism
+    # requires is not one this write stops requiring, and was said to be,
+    # refused as a narrowing, and offered --allow-narrow to drop.
+    dropping = [name for name in (own if several else required) if name not in written and name not in retiring]
     report["dropping"] = dropping
     # A name the branch already requires blocks nothing new by being written
     # again: the refusal is for names this write would add. agent-cli-spec
@@ -459,8 +513,24 @@ def handle_protect(invocation: Invocation, context: Context) -> tuple[dict, int]
         # The plan has the rules of the branch and never reads the ruleset
         # they come from, which is what the body is made of: what the rules
         # list decides nothing here, and `held` is --apply's alone to find.
-        write, listed, writable = ruleset_write(repository, rules, proposed)
-        held, bare, refuses = False, False, bool(unread) or narrows or locks or not writable
+        write, listed, writable = ruleset_write(repository, carrying[0], written)
+        # Nor does this command choose between rulesets that each carry
+        # some of the socle's checks: it would have to move a check from
+        # one to the other, or leave it required twice, and which ruleset
+        # holds them is not a fact it can read. Whatever the flags, as a
+        # narrowing has the same choice to make; and whatever else was not
+        # read, since the rules of the branch were -- of the branch GitHub
+        # named, a guess at its name being a reading of nothing.
+        if len(carrying) > 1 and "the default branch" not in unread:
+            named = [str(own[0].get("ruleset_id")) for own in carrying]
+            standing = Failure(
+                "PRECONDITION_FAILED",
+                f"{SEVERAL} {branch} of {repository}: rulesets {', '.join(named[:-1])} and {named[-1]}.",
+                "This command writes the one ruleset that carries the socle's checks, and does not choose"
+                " between rulesets that each require some of them: nothing is written. Which of them should"
+                " carry those checks is the repository's to settle, or the organisation's for a ruleset of"
+                " its own; protect --apply then writes that one.")
+        held, bare, refuses = False, False, bool(unread) or bool(standing) or narrows or locks or not writable
     else:
         write, held = classic_write(repository, branch, state, holds, proposed)
         # The whole protection is created only where nothing protects the
@@ -490,8 +560,9 @@ def handle_protect(invocation: Invocation, context: Context) -> tuple[dict, int]
                 f"{branch} of {repository} is protected by a ruleset that requires none of the socle's checks.",
                 "This command does not create a classic protection beside a ruleset, and does not choose which"
                 " ruleset should require them. Requiring one of them in a ruleset is its owner's setting to"
-                " change; protect --apply then keeps the checks of the first ruleset that requires any: it"
-                " writes a ruleset of the repository, and refuses one of the organisation.")
+                " change; protect --apply then writes the checks of that ruleset and of no other: it writes"
+                " a ruleset of the repository, refuses one of the organisation, and refuses where more than"
+                " one ruleset requires some of them.")
         elif write is None and not unread and not narrowing:
             standing = Failure(
                 "PRECONDITION_FAILED",
@@ -500,9 +571,9 @@ def handle_protect(invocation: Invocation, context: Context) -> tuple[dict, int]
                 " creates a protection where none exists; it does not turn required status checks on in a"
                 " protection that exists, and never replaces one. Turning that setting on is the repository's"
                 " own to do; then protect --apply.")
-        if standing:
-            report["refused"] = {"message": standing.message, "hint": standing.hint}
         listed, refuses = False, bool(unread) or bool(standing) or narrows or locks or bare or not proposed
+    if standing:
+        report["refused"] = {"message": standing.message, "hint": standing.hint}
     # `writes` is what --apply with the flags of this run would send for
     # this half, in the plan and under --apply alike, as the environment
     # half says its own: nothing where the half refuses, nothing on a reading
@@ -523,6 +594,13 @@ def handle_protect(invocation: Invocation, context: Context) -> tuple[dict, int]
 
     def protection() -> None:
         """The protection half of --apply: its refusals, its write, its read-back."""
+        # What the plan refused, --apply refuses in the same words, before
+        # any refusal a flag could lift. And before a reading that is not
+        # there, which the plan named beside its refusal: only rulesets it
+        # does not choose between are refused with another reading missing,
+        # the other two refusals standing on every one of them.
+        if standing:
+            raise standing
         # Nothing is written on what could not be read. `unreadable` is not
         # `absent`: a timeout on the protection endpoint made a protected
         # branch look open, and --apply would have written four contexts
@@ -533,10 +611,6 @@ def handle_protect(invocation: Invocation, context: Context) -> tuple[dict, int]
                           f"GitHub did not answer for {', '.join(unread)} of {repository}: nothing is written on a"
                           " reading that is not there.",
                           "Run protect again once GitHub answers, and read the plan before --apply.")
-        # What the plan refused, --apply refuses in the same words, before
-        # any refusal a flag could lift.
-        if standing:
-            raise standing
         if narrows:
             raise Failure("PRECONDITION_FAILED",
                           f"this write would stop requiring {', '.join(dropping)} on {branch} of {repository}.",
@@ -557,7 +631,7 @@ def handle_protect(invocation: Invocation, context: Context) -> tuple[dict, int]
             # two mechanisms to keep true. Until 0.54.0 this refused, and a
             # repository protected by a ruleset alone had every step of a rename
             # to do by hand.
-            report["applied"] = write_ruleset(repository, branch, rules, proposed, sent)
+            report["applied"] = write_ruleset(repository, branch, rules, carrying[0], written, sent)
             # The ruleset as it was just read lists them already, as the
             # rules of the branch do: nothing was sent, and the result says
             # so instead of the write planned.
@@ -636,8 +710,10 @@ def handle_protect(invocation: Invocation, context: Context) -> tuple[dict, int]
     # writes --apply would make included. A ruleset just written answers for
     # its own contexts, as it always did -- and so does one --apply found
     # holding them already: the exit of a second run is that of the first.
+    # -- for the contexts it holds, that is: a check nothing produces that
+    # another mechanism requires stands after any write of this one.
     settled = report["applied"] or report["nothingToChange"]
-    left = (absent or stale) and not (settled and ours)
+    left = (absent or stale) and not (settled and ours) or beyond
     return report, (EXIT_VIOLATIONS if left or report.get("refused") or violations(environment) else EXIT_OK)
 
 
@@ -693,6 +769,27 @@ def carrying_rules(rules: object) -> list[dict]:
             if isinstance(rule, dict) and rule.get("type") == "required_status_checks"]
 
 
+SEVERAL = "more than one ruleset requires checks of the socle on"
+
+
+def rulesets_requiring(rules: object) -> list[list[dict]]:
+    """The rules that require checks, ruleset by ruleset, in the order GitHub lists them.
+
+    One of them that carries a check of the socle is the one --apply
+    writes, wherever it comes in that order; a ruleset that carries none
+    is never written, and of several that carry some this command writes
+    none.
+    """
+    found: list[tuple[object, list[dict]]] = []
+    for rule in carrying_rules(rules):
+        own = next((held for identifier, held in found if identifier == rule.get("ruleset_id")), None)
+        if own is None:
+            own = []
+            found.append((rule.get("ruleset_id"), own))
+        own.append(rule)
+    return [own for _, own in found]
+
+
 def ruleset_checks(rules: list, contexts: list[str]) -> list[dict]:
     """The required checks a write gives a ruleset: each context with the integration allowed to report it.
 
@@ -727,54 +824,57 @@ def checks_held(rules: list, checks: list[dict]) -> bool:
     return bool(listed) and all(isinstance(held, list) and unordered(held) == unordered(checks) for held in listed)
 
 
-def ruleset_write(repository: str, rules: object, contexts: list[str]) -> tuple[dict, bool, bool]:
+def ruleset_write(repository: str, own: list[dict], contexts: list[str]) -> tuple[dict, bool, bool]:
     """The write `write_ruleset` would send, whether the rules of the branch list its checks, and whether it may.
 
-    For the plan, which reads the rules of a branch and never the ruleset
-    they come from: the write is named without its body, which is that
-    ruleset as it reads at the moment of writing. What the rules list is
-    worth a note in a plan and is half of what --apply needs to send
-    nothing, since the two readings can differ; and a ruleset of the
-    organisation is one --apply refuses, whatever it lists.
+    OWN is the rules of the branch that require checks and come from the
+    ruleset to write. For the plan, which reads the rules of a branch and
+    never the ruleset they come from: the write is named without its body,
+    which is that ruleset as it reads at the moment of writing. What the
+    rules list is worth a note in a plan and is half of what --apply needs
+    to send nothing, since the two readings can differ; and a ruleset of
+    the organisation is one --apply refuses, whatever it lists.
 
     The rules list the checks when those of this ruleset hold what a write
-    would give them, and when every rule of the branch that requires
-    checks, whichever ruleset it comes from, names these contexts and no
-    other: what the read-back after a write requires of the same reading.
+    would give them, and name these contexts and no other: what the
+    read-back after a write requires of the same reading. What another
+    ruleset requires of its own is neither written nor read back here.
     """
-    carrying = carrying_rules(rules)
-    identifier = carrying[0].get("ruleset_id") if carrying else None
-    own = [rule for rule in carrying if rule.get("ruleset_id") == identifier]
+    identifier = own[0].get("ruleset_id") if own else None
     named = [check.get("context") if isinstance(check, dict) else None
-             for rule in carrying for check in (rule.get("parameters") or {}).get("required_status_checks") or []]
+             for rule in own for check in (rule.get("parameters") or {}).get("required_status_checks") or []]
     return ({"method": "PUT", "endpoint": f"repos/{repository}/rulesets/{identifier}"},
             bool(own) and checks_held(own, ruleset_checks(own, contexts))
             and all(isinstance(name, str) for name in named) and sorted(named) == sorted(contexts),
             bool(own) and own[0].get("ruleset_source_type") in (None, "Repository"))
 
 
-def write_ruleset(repository: str, branch: str, rules: object, contexts: list[str],
+def write_ruleset(repository: str, branch: str, rules: object, own: list[dict], contexts: list[str],
                   sent: list[str] | None = None) -> bool:
-    """Set the required checks of the ruleset that protects this branch, and say whether it was written.
+    """Set the required checks of the ruleset OWN comes from, and say whether it was written.
 
-    Only a ruleset of this repository: one inherited from the organisation
-    cannot be written with a repository's permissions, and saying so is
-    better than a 403 halfway through a rename. Every other rule of the
-    ruleset is sent back as it was read, and each kept context keeps the
-    integration that was allowed to report it. Nothing is sent when the
-    ruleset, as it is read here, and the rules of the branch both list
-    these checks already.
+    OWN is the rules of this branch that require checks and come from one
+    ruleset, the one that carries the socle's checks: of several rulesets
+    it is the only one written. Only a ruleset of this repository: one
+    inherited from the organisation cannot be written with a repository's
+    permissions, and saying so is better than a 403 halfway through a
+    rename. Every other rule of the ruleset is sent back as it was read,
+    and each kept context keeps the integration that was allowed to report
+    it. Nothing is sent when the ruleset, as it is read here, and its
+    rules of the branch both list these checks already.
     """
-    carrying = carrying_rules(rules)
-    if not carrying:
+    if not own:
         raise Failure("PRECONDITION_FAILED", f"no ruleset of {repository} requires checks on {branch}.",
                       "Nothing to write.")
-    if carrying[0].get("ruleset_source_type") not in (None, "Repository"):
+    if own[0].get("ruleset_source_type") not in (None, "Repository"):
+        # Said of the socle's checks where another ruleset requires checks
+        # of its own: those do not come from the organisation.
+        what = "the checks" if len(own) == len(carrying_rules(rules)) else "the socle's checks"
         raise Failure("PRECONDITION_FAILED",
-                      f"the checks {branch} of {repository} requires come from a ruleset of the"
+                      f"{what} {branch} of {repository} requires come from a ruleset of the"
                       " organisation, which a repository cannot write.",
                       "Change it in the organisation's settings, with the list 'protect' prints.")
-    identifier = carrying[0].get("ruleset_id")
+    identifier = own[0].get("ruleset_id")
     state, ruleset = github_read(f"repos/{repository}/rulesets/{identifier}")
     if state != "ok" or not isinstance(ruleset, dict):
         raise Failure("PROCESS_FAILED", f"ruleset {identifier} of {repository} could not be read.",
@@ -788,7 +888,7 @@ def write_ruleset(repository: str, branch: str, rules: object, contexts: list[st
     # the branch with them: the write is sent and read back as it always
     # was, and fails as it always did when the rules do not follow. Not
     # sending on the ruleset's reading alone passed that state green.
-    if ruleset_write(repository, rules, contexts)[1] and checks_held(ruleset.get("rules") or [], checks):
+    if ruleset_write(repository, own, contexts)[1] and checks_held(ruleset.get("rules") or [], checks):
         return False
     for rule in ruleset.get("rules") or []:
         if rule.get("type") != "required_status_checks":
@@ -806,7 +906,11 @@ def write_ruleset(repository: str, branch: str, rules: object, contexts: list[st
     if sent is not None:
         sent.append(f"PUT repos/{repository}/rulesets/{identifier}")
     # Re-read, as for a classic protection: every rule but the required
-    # contexts must read back as it was, and the contexts as written.
+    # contexts must read back as it was, and the contexts as written. The
+    # contexts of this ruleset: read from every rule of the branch, a
+    # second ruleset requiring a check of its own made a correct write fail
+    # on every run. Every rule of every ruleset is still compared for the
+    # rest.
     reread = read_protection(repository, branch, classic=False)
     state, after = reread.ruled_state, reread.rules
     if state != "ok" or not isinstance(after, list):
@@ -814,7 +918,7 @@ def write_ruleset(repository: str, branch: str, rules: object, contexts: list[st
                       f"ruleset {identifier} of {repository} was written, and GitHub did not answer its re-read.",
                       f"Read it: gh api repos/{repository}/rules/branches/{branch}")
     written = sorted(check.get("context") for rule in after if isinstance(rule, dict)
-                     and rule.get("type") == "required_status_checks"
+                     and rule.get("type") == "required_status_checks" and rule.get("ruleset_id") == identifier
                      for check in (rule.get("parameters") or {}).get("required_status_checks") or [])
     if ruleset_shape(after) != ruleset_shape(rules) or written != sorted(contexts):
         raise Failure("PROCESS_FAILED",
@@ -852,8 +956,13 @@ def text_protect(data: dict) -> str:
         # one --apply writes. Of any other it was said too, and --apply then
         # wrote the classic protection, or created one beside the ruleset.
         ours = [name for name in data["ruleset"] if name in data["socleContexts"] or socle_owned(name, data["caller"])]
+        # Nor of several rulesets that each carry some: the refusal says
+        # which, and this line says of them what --apply does.
+        several = (data.get("refused") or {}).get("message", "").startswith(SEVERAL)
         lines.append(f"ruleset  requires " + ", ".join(data["ruleset"])
-                     + (" — --apply writes this ruleset, never a classic protection beside it" if ours else
+                     + (" — in more than one ruleset: --apply does not choose between them, and writes none"
+                        if several else
+                        " — --apply writes this ruleset, never a classic protection beside it" if ours else
                         " — none of them the socle's: --apply does not write this ruleset"))
     if data.get("narrowing"):
         lines.extend(f"{'drop':<8} {name}" for name in data.get("dropped", []))
@@ -880,8 +989,14 @@ def text_protect(data: dict) -> str:
         lines.append(f"{'replace':<8} {pair['required']} -> {pair['by']}: the alias leaves in the same write"
                      " that requires the leg it mirrored, so main never requires less")
     for name in data["requiredButNeverRun"]:
-        lines.append(f"STALE    {name} is required and no run on {data['branch']} produces it:"
-                     " a pull request would wait for it forever")
+        # Outside a narrowing, a required check nothing produces is one
+        # this plan drops, unless a mechanism --apply does not write is what
+        # requires it: said so, and not as a check --allow-narrow drops.
+        other = "" if name in (data.get("dropping") or []) else (
+            " by a ruleset this command does not write" if name in (data.get("before") or {}).get("rulesets", [])
+            else " by the classic protection, which this command does not write here")
+        lines.append(f"STALE    {name} is required{other}{',' if other else ''} and no run on {data['branch']}"
+                     " produces it: a pull request would wait for it forever")
     for name in data["missingFromRuns"]:
         lines.append(f"NOT YET  {name} is what this socle's check job produces and no recent pull request"
                      " carries it: adopt this socle first, or its next pull request will be the first to"
