@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.64.0 — 2026-10-11
 
 This version is what a product's first release cycle showed, in four
 families; the bullets follow the ten changes as they were made, and the
