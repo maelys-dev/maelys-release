@@ -15,7 +15,7 @@ from typing import Callable
 
 from maelys_cli import EXIT_OK, EXIT_VIOLATIONS, Failure, Invocation
 from . import host
-from .constants import DECLARATION_FILE, PROGRAM
+from .constants import DECLARATION_FILE, PROGRAM, UNPUBLISHED
 from .context import Context
 from .declarations import Declarations, version_tuple
 from .github import (check_runs, cut_repository, default_branch, github_api, tag_deployments)
@@ -24,7 +24,7 @@ from .identity import socle_data
 from .project import project_of
 from .release_checks import repository_checks, tag_checks
 from .writes import confirm_ref, confirm_tag
-from .texts import LABELS
+from .texts import LABELS, unfenced
 
 
 # ---- cutting a release -------------------------------------------------------
@@ -261,6 +261,182 @@ def bump_audit(project: pathlib.Path, old: str, new: str) -> tuple[list[tuple[st
                                   " carrying the version. Refusing on that would block a release"
                                   " with nothing to unblock it"))
     return found, stale
+
+
+# ---- said before the cut ------------------------------------------------------
+#
+# `cut` refuses what it must, and it is right to. It is also the last command
+# of a release, run by whoever signs, alone at a terminal: twice in two days a
+# new product was delivered with the entry of its release left undated, once
+# with VERSION already moved to the version to cut, `check` answered "ok" to
+# whoever prepared it, and the refusal arrived at the other end. So `check`
+# says, as a note and in `cut`'s own words, what `cut` is going to refuse --
+# to the reader who can still fix it.
+#
+# Never more than a note, and only what is read. Two of `cut_open`'s refusals
+# are foretold here, the entry and the version; the others are a state of the
+# moment, of GitHub or of the signer's machine, and docs/conventions.md lists
+# them so that nobody reads "check: ok" as "cut will pass".
+
+# The one title `cut` reads, and the titles that look like it to a person.
+VERSION_HEADING = re.compile(r"^## ([0-9]+\.[0-9]+\.[0-9]+)(?![0-9.])[^\n]*$")
+ENTRY_LIKE = re.compile(r"^#{2,3}[ \t]+\[?v?([0-9]+\.[0-9]+\.[0-9]+)\]?(?![0-9.])[ \t]*"
+                        r"($|[-—–:(]|[0-9]{4}-[0-9]{2}-[0-9]{2})")
+
+
+def unread_entries(decl: Declarations) -> list[str]:
+    """One note per version after VERSION whose entry `cut` would not find.
+
+    The entries above VERSION are the releases to come, and `cut` asks one
+    thing of theirs: the title `## X.Y.Z` and a date on that line. Whether
+    it finds one is asked of `cut`'s own reader, so that the note and the
+    refusal cannot disagree. What is looked for is wider than what `cut`
+    reads, on purpose: `## [1.3.0] - 2026-09-04`, `## v1.3.0`, `### 1.3.0`
+    and a second space are entries to whoever wrote them, three products of
+    the fleet title theirs with brackets, and `cut` answers "no dated entry"
+    to each. A fenced block is skipped: an example is not an entry.
+    """
+    project = decl.project
+    changelog = project / "CHANGELOG.md"
+    if not changelog.is_file():
+        return []
+    said, seen = [], set()
+    for line in unfenced(changelog.read_text(encoding="utf-8", errors="replace")).split("\n"):
+        exact, like = VERSION_HEADING.match(line), ENTRY_LIKE.match(line)
+        if not exact and not like:
+            continue
+        version = (exact or like).group(1)
+        # A title present twice is `check`'s own refusal already: said once here.
+        if version in seen or version_tuple(version) <= version_tuple(decl.version) \
+                or changelog_entry(project, version)[0]:
+            continue
+        seen.add(version)
+        refusal = f"`cut` will refuse {version} -- CHANGELOG.md has no dated entry '{entry_heading(project, version)}'"
+        if exact:
+            # One rule, in the note as in the managed texts: an entry takes
+            # its version and its date together, the day the release is
+            # handed over. Until then it is `## Unreleased`; a later date is
+            # `cut`'s other refusal.
+            said.append(f"CHANGELOG.md carries '{line.strip()}', without a date: {refusal}. A release is handed over"
+                        " with its entry dated that day, never a later one, which `cut` refuses too; until then"
+                        " its changes sit under '## Unreleased'")
+        else:
+            said.append(f"CHANGELOG.md carries '{line.strip()}', which `cut` does not read as the entry of"
+                        f" {version}: {refusal}. Title it that way")
+    return said
+
+
+def in_a_job() -> bool:
+    """Whether this runs in a job rather than on somebody's checkout.
+
+    The note on VERSION is for whoever prepares a release, before the push.
+    The shared CI checks out the whole history and runs `check` on every
+    commit, the release commit included -- where VERSION is, by
+    construction, a version no tag carries yet, and where nobody is there
+    to do anything about a note. What a job is, the host says: the address
+    note and the privacy guard ask it the same question.
+    """
+    return host.HOST.is_runner()
+
+
+def release_in_progress(project: pathlib.Path, product: str, version: str) -> bool:
+    """Whether what a release leaves behind is here: VERSION is then where it should be.
+
+    From the first stop to the tag, VERSION is a version no tag carries --
+    on the branch, on its pull request, and on the default branch once it
+    is merged. Three things say so, measured on eight products of the fleet
+    at their last release commit, the tag deleted:
+
+    - a branch `release/vX.Y.Z` here or on origin, read where `cut` reads
+      it to resume. One product names its own `release/X.Y.Z`, forty-four
+      merges of them: both spellings.
+    - the subject `cut` gives the commit that writes VERSION, `<product>
+      X.Y.Z`. A squash keeps it and adds ` (#N)`; a merge keeps the commit.
+      Six of the eight.
+    - the subject GitHub gives the merge of that branch. Five of the eight,
+      one of them the product whose bump commit is titled by hand.
+
+    Together, seven. The eighth moved VERSION in the pull request of a
+    feature and tagged eleven commits later: nothing separates that from a
+    version moved before `cut`, because it is one, and the note says both.
+
+    The two subjects are one search, anchored on the first line: a body
+    that mentions the branch, or quotes a subject, is not a release.
+    """
+    for branch in (f"release/v{version}", f"release/{version}"):
+        if any(git("rev-parse", "-q", "--verify", name, cwd=project, check=False)
+               for name in (f"refs/heads/{branch}", f"refs/remotes/origin/{branch}")):
+            return True
+    dotted = version.replace(".", "\\.")
+    # ERE, as git compiles it, with no line mode: ^ is the start of the
+    # message, which is its subject, and a newline is an ordinary character.
+    # A product's name is [a-z0-9-], every command refuses another: it is
+    # written as it is, since POSIX leaves an escaped hyphen undefined.
+    subject = (f"^({product} {dotted}( \\(#[0-9]+\\))?"
+               f"|Merge pull request #[0-9]+ from [^ \n]+/release/v?{dotted})(\n|$)")
+    return bool(git("rev-parse", "-q", "--verify", "HEAD^{/" + subject + "}", cwd=project, check=False))
+
+
+def unpublished_version(decl: Declarations) -> list[str]:
+    """The note for a VERSION no tag has published, when that is neither normal nor unknowable.
+
+    Normal: 0.0.0, which says so itself; a release in progress; a version
+    this repository publishes candidates of under its own ceremony. Not
+    knowable: a directory that is not a repository, a shallow clone, a clone
+    told to fetch no tags -- `preflight` and `cut` refuse the same shallow
+    clone for the same reason. And not said in a job at all, before any
+    call is made for it.
+    """
+    project, version = decl.project, decl.version
+    if version == UNPUBLISHED or in_a_job() or not (project / ".git").exists():
+        return []
+    if git("rev-parse", "--is-shallow-repository", cwd=project, check=False) != "false":
+        return []
+    tags = git("tag", "--list", "v*", "--sort=-v:refname", cwd=project, check=False).split()
+    if f"v{version}" in tags or any(tag.startswith(f"v{version}-") for tag in tags):
+        return []
+    if not tags and git("config", "--get", "remote.origin.tagOpt", cwd=project, check=False) == "--no-tags":
+        return []
+    if release_in_progress(project, decl.product, version):
+        return []
+    # What was published last is what this history reaches, as `cut` reads
+    # it for the pins: on a maintenance branch at 1.2.4, the highest tag of
+    # the repository is a 1.3.0 that 1.2.4 does not come after.
+    reached = git("describe", "--tags", "--abbrev=0", "--match", "v[0-9]*", cwd=project, check=False)
+    back = reached[1:] if re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", reached) \
+        else (UNPUBLISHED if not reached else "the version last published")
+    observed = (f"VERSION says {version} and this clone holds no tag v{version} ("
+                + (f"the last tag this history reaches is {reached}" if reached else "this history reaches no tag")
+                + ")")
+    refuses = (f"for `cut`, VERSION says what was published last, and `cut` will refuse {version} as not coming"
+               " after the current version")
+    # A clone learns of a tag only when it fetches it, and the usual pull
+    # does not: measured, 'git pull origin main' brings no new tag.
+    stale = (" A clone may lack the newest tags, and 'git pull origin main' fetches none: 'git fetch --tags"
+             " origin' first")
+    if not decl.releases_here:
+        # A repository that publishes by its own means moves VERSION by
+        # hand: the RELEASING.md the socle seeds there says so, and tells it
+        # to run `check` in exactly this state. Nothing to undo is named.
+        return [f"{observed}. A release prepared by hand stands there between its merge and its tag, as"
+                " RELEASING.md describes: nothing to change, the signed tag is what is left. `cut` does not"
+                f" start from there: {refuses} -- a release made with `cut` leaves VERSION at {back} and lets"
+                f" `cut` move it.{stale}"]
+    # Observed first, then the two states that read the same, and what each
+    # asks. The remedy of the second is wrong for the first, which is the
+    # ordinary one, so it never opens the sentence.
+    return [f"{observed}. Two states read that way. A release already merged and waiting for its tag: change"
+            f" nothing; '{PROGRAM} cut DIR {version} --tag' signs it when `cut` opened it, a tag signed by hand"
+            f" otherwise. Or a VERSION moved before `cut`: {refuses}; set VERSION back to {back}, commit, and"
+            f" cut {version} with its dated entry.{stale}"]
+
+
+def before_cut(decl: Declarations) -> list[str]:
+    """What `cut` will refuse in this repository as it stands, for `check` to say as notes."""
+    # A repository that publishes by nothing at all cuts nothing.
+    if not decl.version or decl.mechanism == "none":
+        return []
+    return unread_entries(decl) + unpublished_version(decl)
 
 
 def cut_gate(decl: Declarations, version: str, signers: pathlib.Path) -> list:

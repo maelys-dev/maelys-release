@@ -158,6 +158,15 @@ def replay_host(module, events, responses, project, source):
         def exec(self, *args, **kwargs):
             raise AssertionError('API golden forbids process replacement')
 
+        def feed(self, *args, **kwargs):
+            raise AssertionError('API golden forbids fed processes')
+
+        def private_terms(self):
+            return None  # the author's list is the author's machine's; a reference has none
+
+        def is_runner(self):
+            return False  # replayed on a runner as anywhere: the recorded calls are an author's machine's
+
         def finish(self):
             if self.position != len(events):
                 raise AssertionError(f'{len(events) - self.position} recorded host calls were not consumed')

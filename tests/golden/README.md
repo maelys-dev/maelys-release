@@ -75,8 +75,11 @@ Without them, the first `cut` after a recording turned every recorded fixture
 into a drift. A candidate at any version replays the same reference.
 
 
-The original reference remains unchanged: 680 observations, 142 command triplets,
-eight pinned fleet repositories, without `gh`. The additional `api/` reference
+The first reference holds 715 observations of 216 fixture tests (17 more are
+skipped), 164 distinct command triples and the eight pinned fleet
+repositories, without `gh`: counted from `baseline/manifest.json`, where the
+figures written here before had stayed at those of the first recording. Its
+inputs are the ones it was first recorded with. The additional `api/` reference
 records the approved stage 4d implementation at
 `a6a308b67c26ddd2a16dfffee25f7476f02a06d1` (PR #117), before moving any further
 command. It contains 32 scenarios, each in JSON and text (64 CLI invocations);
@@ -85,15 +88,16 @@ from the manifest here:
 
 | Command | Recorded branches |
 | --- | --- |
-| `protect` plan | Classic settings, rulesets, open branch, unreadable protection, unreadable check runs, `--without-legs` |
+| `protect` plan | Classic settings, rulesets, open branch, unreadable protection, unreadable check runs, `--without-legs`; in each but the last, the release environment and its policies, read through the reader `preflight` verifies with and found with nothing to change |
 | `preflight` | Classic protection, ruleset, private visibility, open branch, absent release environment, an unreadable one, a branch policy beside the tag rule, a repository that has never published; signing configuration and tap drift reads |
 | `check` and `preflight` on a seeded name | The prose line naming the documentation repository: refused, and `preflight` stopping before its GitHub reads |
 | `adopt` plan and `check` | Old pin with public/classic-protection selectors; `current` false, true and unknown, and the resulting `check` verdicts |
 | `adopt --apply` on throwaway files only | Classic and ruleset guards: allowed or refused due to a retired required context; unreadable protection |
 | `migrate` plan, without `--push` | A moving document and its references, generated/public/data/unlisted documents staying, foreign product and wrong destination refusals |
 
-The inputs contain 34 real GET responses read through `Host.read`, 30 of them
-on 2026-09-16; the release listings and the deployment policies of both
+The inputs contain 34 real GET responses read through `Host.read`, 26 of them
+on 2026-09-16 and the protections and branch rules of both repositories the
+day after; the release listings and the deployment policies of both
 repositories were read on 2026-09-23, when both readers started asking for a
 page at a time: `maelys-dev/maelys-system` (classic protection),
 `maelys-dev/agent-cli-spec` (ruleset), and the public `homebrew-tap` formula
@@ -109,9 +113,27 @@ alone, and every one of them has published. These are constructed
 branches, **not** claims about the repositories' actual settings. No real
 settings were changed to manufacture a failure.
 
+One member of GitHub's answers is in no stored response: `security_and_analysis`,
+which a repository document carries for a reader who administers the
+repository and which says whether secret scanning and push protection are
+on. `preflight` reads it to note a public repository that has them off, and
+a reference holding it would say that of two real repositories, by name, on
+the day they were read. The state of a real repository's security settings
+is not this reference's to publish: `record_api.py` drops the member from
+every answer, read live or taken from the cache, before the recorded program
+sees it, so every recorded `preflight` says nothing of those settings and
+`tests/test_record_api.py` holds both halves. The note itself is proven on
+constructed answers — the member present and off, on, and absent — in
+`tests/test_privacy.py`.
+
 `inputs/` freezes the product files (including executable bits), command line,
 and ordered host calls. Git reads run only when recording inputs, in temporary
 local repositories; their stdout, stderr and exit codes become inputs too.
+What git would compose on the machine is the one exception: a reading
+compares an address with it, and the recorder never asks the real machine. It
+answers with an account and a machine that do not exist, to the command it
+records as to the reference, so no input holds the login, the account's name
+or the name of the machine it was recorded on.
 The manifest hashes every input file. Current test fixture builders never run
 during replay. The local fixture commit seen by `migrate` is recorded, not
 recreated on another platform.
@@ -132,10 +154,74 @@ To inspect a single case, add `--case protect-classic-json` to `capture_api.py`.
 
 ### Recording and intentional fixes
 
-Ordinary refactoring only replays. The initial API recording used the clean
-approved source above; `record_api.py` refuses a different HEAD, dirty source,
-an existing destination or a self-test environment. It is the only new tool
-that contacts GitHub, for reads only:
+Three situations, and only the second and third touch `record_api.py`. Five
+changes in a row took the third command for the second, from this page as it
+stood: each froze the version of the day into the reference. Find yours
+first.
+
+**1. A refactor, or a fix that changes what is printed and not what is asked
+of the host.** Replay; never record. The inputs stay as they are:
+
+```sh
+python3 tests/golden/capture_api.py /absolute/new/api-baseline --source /absolute/socle
+diff -ru /absolute/socle/tests/golden/api/baseline /absolute/new/api-baseline
+```
+
+A refactor needs that diff empty. A fix explains every line of it, with the
+diff of the first reference, and copies the reviewed outputs into
+`api/baseline` in a separate commit of its PR.
+
+**2. A fix that changes the calls a recorded command makes** — one more git
+read, one more GitHub read, a lookup, another order. It shows itself: the
+replay above stops on `unrecorded host call`, and `tests/test_api_golden.py`
+is red. Such a change cannot replay the inputs it changes, so it records them
+again **under the version the reference is frozen at, and offline**:
+
+```sh
+cp /absolute/socle/tests/golden/api/inputs/responses.json /absolute/new/responses.json
+python3 tests/golden/record_api.py /absolute/new/api-inputs \
+  --source /absolute/socle --commit FULL_FIX_COMMIT \
+  --reference /absolute/socle/tests/golden/api/inputs \
+  --responses-cache /absolute/new/responses.json --offline
+python3 tests/golden/capture_api.py /absolute/new/api-baseline \
+  --source /absolute/socle --inputs /absolute/new/api-inputs
+```
+
+Both options, always, for this case:
+
+- `--reference` runs the candidate's code under the `socle/VERSION` and
+  `socle/CHANGELOG.md` of the existing inputs, as `capture.py --candidate`
+  does for the other reference; those inputs are verified digest by digest
+  before they are used, as a replay verifies the ones it reads. Without it
+  the recording freezes the VERSION and the changelog of the commit at hand:
+  every fixture pins another version, every list of versions a product is
+  behind on grows, and the diff holds the releases cut since the last
+  recording instead of the calls that moved.
+- `--offline` refuses any read the cache does not answer, so that "nothing is
+  read live" is held by the tool and not by whoever ran it. A cache copied
+  from `responses.json` answers every read already recorded; a fix that
+  needs a new one fails naming the endpoint, and that endpoint is then read
+  in a recording of its own, reviewed as a new input.
+
+Then check what was written before reviewing anything else:
+`git diff --stat` shows nothing under `api/inputs/socle/`; `manifest.json`
+says the `frozenVersion` it said before, with `sourceCommit` the fix and
+`sourceVersion` the VERSION that commit carries; and `responses.json` holds
+the answers it held, possibly in another order — the same count, read and
+derived. If the frozen version moved, the recording was made without
+`--reference`: discard it and record again. Copy `api-inputs` over
+`api/inputs` and `api-baseline` over `api/baseline`, replay once more into
+a new directory and require an empty diff, and say in the commit which calls
+each case gained or lost. The first reference is recorded in the same PR, by
+`capture.py --record --candidate` above, when `check`, `adopt`,
+`declarations` or the catalog say anything else than they did: it is
+replayed in CI on `refactor/**` branches only, and a reference left behind
+is found by whoever comes next.
+
+**3. The bootstrap, or a deliberate refresh of what GitHub answered.** The
+only recording that reads GitHub, for reads only, and the only one that
+freezes a new version. `record_api.py` refuses a different HEAD, a dirty
+source, an existing destination or a self-test environment:
 
 ```sh
 python3 tests/golden/record_api.py /absolute/new/api-inputs \
@@ -148,15 +234,14 @@ python3 tests/golden/capture_api.py /absolute/new/api-baseline \
 The explicit cache path preserves first reads across interrupted recordings.
 A new cache means a deliberate live refresh, requiring a separately reviewed
 input diff. Review the complete provenance, input and output diff before
-copying the new directories into `api/inputs` and `api/baseline`.
+copying the new directories into `api/inputs` and `api/baseline`. Not for a
+fix, and never to make a refactor pass: a changed host call sequence is
+itself a reviewable difference, and updating inputs needs an explicit
+explanation, not a fallback or an automatic recording.
 
-For an intentional behavior fix, follow the separate fix-PR procedure above,
-keep `api/inputs` unchanged, and replay those inputs with `--source` pointing
-to the clean committed fix. Explain the failing API diff as well as the
-original golden diff, then copy the reviewed outputs into `api/baseline` in a
-separate commit of that fix PR. Never rerun `record_api.py` to make a refactor
-pass. A changed host call sequence is itself a reviewable difference: updating
-inputs needs an explicit explanation, not a fallback or automatic recording.
+In every case `record_api.py` answers for the machine and withholds what the
+reference does not publish, as said above, whatever the cache holds.
+
 The replay manifest's `sourceCommit` identifies the implementation that
 recorded the **inputs**; it remains fixed while comparing candidate outputs.
 
@@ -167,6 +252,26 @@ The new reference covers plans and local adoption, not the remote writes of
 writes and their verification reads; property tests still verify preservation
 of non-check protection settings. Neither reference covers every command or
 every API branch (pagination and all channel/gate combinations, for example).
+
+Neither reference knows the machine it was recorded on. The privacy guard of
+`check` asks the host for `hostname` and `scutil`, and a reference is
+replayed on every machine and belongs to none: `record_api.py` answers that
+neither tool exists, and the initial reference gets the same answer from its
+allowlisted PATH, which holds neither. The name of the recording machine is
+therefore never asked for and never enters a recorded file, and every
+recorded `check` says the machine's name was not looked for. The author's
+private list is read under HOME, which both captures replace; and neither
+capture is a CI runner's, whatever it is replayed on: the replay answers so,
+and the initial capture builds its environment from nothing.
+
+The guard asks git which tracked files hold a shape: two `git grep` calls
+whose patterns are arguments, recorded as they are. With a local name to
+look for the patterns go to git on its standard input instead, through
+`Host.feed`, which the recorder and the replay refuse — so a reference can
+only be recorded where no local name is known, which is how it is recorded.
+`check --history` is outside both references for the same reason: it reads
+a history through `Host.feed`, and it is held by `tests/test_privacy.py` on
+repositories built by the tests.
 
 The recorded implementation allows local adoption when protection cannot be
 read: no lock was detected. This is captured explicitly, not endorsed by the

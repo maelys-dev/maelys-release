@@ -128,23 +128,6 @@
       "pulls_url": "https://api.github.com/repos/maelys-dev/maelys-system/pulls{/number}",
       "pushed_at": "2026-09-15T15:31:06Z",
       "releases_url": "https://api.github.com/repos/maelys-dev/maelys-system/releases{/id}",
-      "security_and_analysis": {
-        "dependabot_security_updates": {
-          "status": "disabled"
-        },
-        "secret_scanning": {
-          "status": "disabled"
-        },
-        "secret_scanning_non_provider_patterns": {
-          "status": "disabled"
-        },
-        "secret_scanning_push_protection": {
-          "status": "disabled"
-        },
-        "secret_scanning_validity_checks": {
-          "status": "disabled"
-        }
-      },
       "size": 293,
       "squash_merge_commit_message": "COMMIT_MESSAGES",
       "squash_merge_commit_title": "COMMIT_OR_PR_TITLE",
@@ -16408,6 +16391,56 @@
       "recordedAt": "2026-09-17T10:43:19.968450+00:00"
     }
   },
+  "repos/maelys-dev/maelys-system/environments/release": {
+    "body": {
+      "can_admins_bypass": true,
+      "created_at": "2026-09-03T15:43:59Z",
+      "deployment_branch_policy": {
+        "custom_branch_policies": true,
+        "protected_branches": false
+      },
+      "html_url": "https://github.com/maelys-dev/maelys-system/deployments/activity_log?environments_filter=release",
+      "id": 21178803997,
+      "name": "release",
+      "node_id": "EN_kwDOUNRuyc8AAAAE7lrnHQ",
+      "protection_rules": [
+        {
+          "id": 64562910,
+          "node_id": "GA_kwDOUNRuyc4D2Sbe",
+          "type": "branch_policy"
+        }
+      ],
+      "updated_at": "2026-09-03T15:43:59Z",
+      "url": "https://api.github.com/repos/maelys-dev/maelys-system/environments/release"
+    },
+    "provenance": {
+      "endpoint": "repos/maelys-dev/maelys-system/environments/release",
+      "kind": "live",
+      "method": "GET",
+      "recordedAt": "2026-09-16T10:48:29.041665+00:00"
+    },
+    "state": "ok"
+  },
+  "repos/maelys-dev/maelys-system/environments/release/deployment-branch-policies?per_page=100&page=1": {
+    "state": "ok",
+    "body": {
+      "total_count": 1,
+      "branch_policies": [
+        {
+          "id": 59051659,
+          "node_id": "MDE2OkdhdGVCcmFuY2hQb2xpY3k1OTA1MTY1OQ==",
+          "name": "v*",
+          "type": "tag"
+        }
+      ]
+    },
+    "provenance": {
+      "kind": "live",
+      "method": "GET",
+      "endpoint": "repos/maelys-dev/maelys-system/environments/release/deployment-branch-policies?per_page=100&page=1",
+      "recordedAt": "2026-09-23T02:58:48.227706+00:00"
+    }
+  },
   "repos/maelys-dev/agent-cli-spec": {
     "body": {
       "allow_auto_merge": false,
@@ -16537,23 +16570,6 @@
       "pulls_url": "https://api.github.com/repos/maelys-dev/agent-cli-spec/pulls{/number}",
       "pushed_at": "2026-09-16T10:41:25Z",
       "releases_url": "https://api.github.com/repos/maelys-dev/agent-cli-spec/releases{/id}",
-      "security_and_analysis": {
-        "dependabot_security_updates": {
-          "status": "disabled"
-        },
-        "secret_scanning": {
-          "status": "disabled"
-        },
-        "secret_scanning_non_provider_patterns": {
-          "status": "disabled"
-        },
-        "secret_scanning_push_protection": {
-          "status": "disabled"
-        },
-        "secret_scanning_validity_checks": {
-          "status": "disabled"
-        }
-      },
       "size": 161,
       "squash_merge_commit_message": "COMMIT_MESSAGES",
       "squash_merge_commit_title": "COMMIT_OR_PR_TITLE",
@@ -29645,6 +29661,56 @@
       "recordedAt": "2026-09-17T10:43:24.586046+00:00"
     }
   },
+  "repos/maelys-dev/agent-cli-spec/environments/release": {
+    "body": {
+      "can_admins_bypass": true,
+      "created_at": "2026-09-04T09:16:44Z",
+      "deployment_branch_policy": {
+        "custom_branch_policies": true,
+        "protected_branches": false
+      },
+      "html_url": "https://github.com/maelys-dev/agent-cli-spec/deployments/activity_log?environments_filter=release",
+      "id": 21231614721,
+      "name": "release",
+      "node_id": "EN_kwDOUOFDI88AAAAE8YC7AQ",
+      "protection_rules": [
+        {
+          "id": 64604634,
+          "node_id": "GA_kwDOUOFDI84D2cna",
+          "type": "branch_policy"
+        }
+      ],
+      "updated_at": "2026-09-04T09:16:44Z",
+      "url": "https://api.github.com/repos/maelys-dev/agent-cli-spec/environments/release"
+    },
+    "provenance": {
+      "endpoint": "repos/maelys-dev/agent-cli-spec/environments/release",
+      "kind": "live",
+      "method": "GET",
+      "recordedAt": "2026-09-16T10:49:32.810545+00:00"
+    },
+    "state": "ok"
+  },
+  "repos/maelys-dev/agent-cli-spec/environments/release/deployment-branch-policies?per_page=100&page=1": {
+    "state": "ok",
+    "body": {
+      "total_count": 1,
+      "branch_policies": [
+        {
+          "id": 59091249,
+          "node_id": "MDE2OkdhdGVCcmFuY2hQb2xpY3k1OTA5MTI0OQ==",
+          "name": "v*",
+          "type": "tag"
+        }
+      ]
+    },
+    "provenance": {
+      "kind": "live",
+      "method": "GET",
+      "endpoint": "repos/maelys-dev/agent-cli-spec/environments/release/deployment-branch-policies?per_page=100&page=1",
+      "recordedAt": "2026-09-23T02:58:50.168391+00:00"
+    }
+  },
   "open:repos/maelys-dev/maelys-system/branches/main/protection": {
     "state": "absent",
     "body": null,
@@ -29721,56 +29787,6 @@
       ]
     },
     "state": "unreadable"
-  },
-  "repos/maelys-dev/maelys-system/environments/release": {
-    "body": {
-      "can_admins_bypass": true,
-      "created_at": "2026-09-03T15:43:59Z",
-      "deployment_branch_policy": {
-        "custom_branch_policies": true,
-        "protected_branches": false
-      },
-      "html_url": "https://github.com/maelys-dev/maelys-system/deployments/activity_log?environments_filter=release",
-      "id": 21178803997,
-      "name": "release",
-      "node_id": "EN_kwDOUNRuyc8AAAAE7lrnHQ",
-      "protection_rules": [
-        {
-          "id": 64562910,
-          "node_id": "GA_kwDOUNRuyc4D2Sbe",
-          "type": "branch_policy"
-        }
-      ],
-      "updated_at": "2026-09-03T15:43:59Z",
-      "url": "https://api.github.com/repos/maelys-dev/maelys-system/environments/release"
-    },
-    "provenance": {
-      "endpoint": "repos/maelys-dev/maelys-system/environments/release",
-      "kind": "live",
-      "method": "GET",
-      "recordedAt": "2026-09-16T10:48:29.041665+00:00"
-    },
-    "state": "ok"
-  },
-  "repos/maelys-dev/maelys-system/environments/release/deployment-branch-policies?per_page=100&page=1": {
-    "state": "ok",
-    "body": {
-      "total_count": 1,
-      "branch_policies": [
-        {
-          "id": 59051659,
-          "node_id": "MDE2OkdhdGVCcmFuY2hQb2xpY3k1OTA1MTY1OQ==",
-          "name": "v*",
-          "type": "tag"
-        }
-      ]
-    },
-    "provenance": {
-      "kind": "live",
-      "method": "GET",
-      "endpoint": "repos/maelys-dev/maelys-system/environments/release/deployment-branch-policies?per_page=100&page=1",
-      "recordedAt": "2026-09-23T02:58:48.227706+00:00"
-    }
   },
   "repos/maelys-dev/homebrew-tap/contents/Formula": {
     "body": [
@@ -36256,56 +36272,6 @@
       "recordedAt": "2026-09-23T02:58:49.032819+00:00"
     }
   },
-  "repos/maelys-dev/agent-cli-spec/environments/release": {
-    "body": {
-      "can_admins_bypass": true,
-      "created_at": "2026-09-04T09:16:44Z",
-      "deployment_branch_policy": {
-        "custom_branch_policies": true,
-        "protected_branches": false
-      },
-      "html_url": "https://github.com/maelys-dev/agent-cli-spec/deployments/activity_log?environments_filter=release",
-      "id": 21231614721,
-      "name": "release",
-      "node_id": "EN_kwDOUOFDI88AAAAE8YC7AQ",
-      "protection_rules": [
-        {
-          "id": 64604634,
-          "node_id": "GA_kwDOUOFDI84D2cna",
-          "type": "branch_policy"
-        }
-      ],
-      "updated_at": "2026-09-04T09:16:44Z",
-      "url": "https://api.github.com/repos/maelys-dev/agent-cli-spec/environments/release"
-    },
-    "provenance": {
-      "endpoint": "repos/maelys-dev/agent-cli-spec/environments/release",
-      "kind": "live",
-      "method": "GET",
-      "recordedAt": "2026-09-16T10:49:32.810545+00:00"
-    },
-    "state": "ok"
-  },
-  "repos/maelys-dev/agent-cli-spec/environments/release/deployment-branch-policies?per_page=100&page=1": {
-    "state": "ok",
-    "body": {
-      "total_count": 1,
-      "branch_policies": [
-        {
-          "id": 59091249,
-          "node_id": "MDE2OkdhdGVCcmFuY2hQb2xpY3k1OTA5MTI0OQ==",
-          "name": "v*",
-          "type": "tag"
-        }
-      ]
-    },
-    "provenance": {
-      "kind": "live",
-      "method": "GET",
-      "endpoint": "repos/maelys-dev/agent-cli-spec/environments/release/deployment-branch-policies?per_page=100&page=1",
-      "recordedAt": "2026-09-23T02:58:50.168391+00:00"
-    }
-  },
   "repos/maelys-dev/agent-cli-spec/releases?per_page=100&page=1": {
     "state": "ok",
     "body": [
@@ -39916,23 +39882,6 @@
       "pulls_url": "https://api.github.com/repos/maelys-dev/maelys-system/pulls{/number}",
       "pushed_at": "2026-09-15T15:31:06Z",
       "releases_url": "https://api.github.com/repos/maelys-dev/maelys-system/releases{/id}",
-      "security_and_analysis": {
-        "dependabot_security_updates": {
-          "status": "disabled"
-        },
-        "secret_scanning": {
-          "status": "disabled"
-        },
-        "secret_scanning_non_provider_patterns": {
-          "status": "disabled"
-        },
-        "secret_scanning_push_protection": {
-          "status": "disabled"
-        },
-        "secret_scanning_validity_checks": {
-          "status": "disabled"
-        }
-      },
       "size": 293,
       "squash_merge_commit_message": "COMMIT_MESSAGES",
       "squash_merge_commit_title": "COMMIT_OR_PR_TITLE",
@@ -40154,23 +40103,6 @@
       "pulls_url": "https://api.github.com/repos/maelys-dev/maelys-system/pulls{/number}",
       "pushed_at": "2026-09-15T15:31:06Z",
       "releases_url": "https://api.github.com/repos/maelys-dev/maelys-system/releases{/id}",
-      "security_and_analysis": {
-        "dependabot_security_updates": {
-          "status": "disabled"
-        },
-        "secret_scanning": {
-          "status": "disabled"
-        },
-        "secret_scanning_non_provider_patterns": {
-          "status": "disabled"
-        },
-        "secret_scanning_push_protection": {
-          "status": "disabled"
-        },
-        "secret_scanning_validity_checks": {
-          "status": "disabled"
-        }
-      },
       "size": 293,
       "squash_merge_commit_message": "COMMIT_MESSAGES",
       "squash_merge_commit_title": "COMMIT_OR_PR_TITLE",
@@ -40355,23 +40287,6 @@
       "pulls_url": "https://api.github.com/repos/maelys-dev/maelys-system/pulls{/number}",
       "pushed_at": "2026-09-15T15:31:06Z",
       "releases_url": "https://api.github.com/repos/maelys-dev/maelys-system/releases{/id}",
-      "security_and_analysis": {
-        "dependabot_security_updates": {
-          "status": "disabled"
-        },
-        "secret_scanning": {
-          "status": "disabled"
-        },
-        "secret_scanning_non_provider_patterns": {
-          "status": "disabled"
-        },
-        "secret_scanning_push_protection": {
-          "status": "disabled"
-        },
-        "secret_scanning_validity_checks": {
-          "status": "disabled"
-        }
-      },
       "size": 293,
       "squash_merge_commit_message": "COMMIT_MESSAGES",
       "squash_merge_commit_title": "COMMIT_OR_PR_TITLE",

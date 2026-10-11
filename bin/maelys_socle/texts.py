@@ -45,6 +45,32 @@ def is_generated(text: str) -> bool:
     return bool(GENERATED_MARK.search(head) and GENERATED_REFUSAL.search(head))
 
 
+FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+
+
+def unfenced(text: str) -> str:
+    """TEXT with the lines of its fenced code blocks emptied, every other line where it was.
+
+    A changelog that shows how to write an entry carries a heading that is
+    not one: an example under `## Unreleased` read as the undated entry of
+    the version it invented.
+    """
+    out, fence = [], ""
+    for line in text.split("\n"):
+        mark = FENCE.match(line)
+        if fence:
+            if mark and mark.group(1)[0] == fence[0] and len(mark.group(1)) >= len(fence) \
+                    and not line.strip().strip(fence[0]):
+                fence = ""
+            out.append("")
+        elif mark:
+            fence = mark.group(1)
+            out.append("")
+        else:
+            out.append(line)
+    return "\n".join(out)
+
+
 def managed_block(existing: str | None, block: str) -> str:
     """Replace the block between the markers, or append it."""
     if existing is not None and BEGIN in existing:

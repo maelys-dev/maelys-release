@@ -44,15 +44,16 @@ from maelys_socle.constants import (
     PROGRAM, PUBLISHED_DOWNLOAD, README_LINK, RELEASE_MANAGED, RELEASE_USES, RUNNER_INPUTS,
     RUNS_ON, SANITIZING, SOCLE_CHANNEL_KINDS, SOCLE_COMMIT_VERIFICATIONS, SOCLE_GATES,
     SOCLE_LINUX_PACKAGES, SOCLE_MANIFEST_PATTERNS, SOCLE_MECHANISM, SOCLE_REPOSITORY,
-    SOCLE_RUNNER_KEYS, SOCLE_TARGETS, VERIFIED_MARK, WORKFLOW_EVENTS,
+    SOCLE_RUNNER_KEYS, SOCLE_TARGETS, UNPUBLISHED, VERIFIED_MARK, WORKFLOW_EVENTS,
 )
 from maelys_socle.context import Context
 from maelys_socle.declarations import (
-    Declarations, parse_cli_declarations, parse_packages, parse_pin, parse_release, require_valid, version_tuple,
+    Declarations, PIN_ATTRIBUTES, parse_cli_declarations, parse_packages, parse_pin, parse_release,
+    require_valid, version_tuple,
 )
 from maelys_socle.texts import (
     LABELS, checks_text, documentation_name_lines, is_generated, managed_block, names_documentation, readme_links,
-    touches, verified_by,
+    touches, unfenced, verified_by,
 )
 from maelys_socle.workflows import (
     block_list, ci_legs, ci_macos_runner, ci_workflow, file_runners, legs_job,
@@ -60,7 +61,10 @@ from maelys_socle.workflows import (
     sanitizers_twice, sub_block, top_block, uses_commit, workflow_events, yaml_scalar,
 )
 # Import the module holding the current host, never a copy of its HOST binding.
-from maelys_socle import adoption, cut, dependencies, github, host, identity, inspection, migration, protect, rehearse, signers
+from maelys_socle import (
+    adoption, authorship, cut, dependencies, github, host, identity, inspection, migration, privacy, protect,
+    rehearse, signers,
+)
 from maelys_socle.cut import (
     CHECK_PENDING, CHECK_PASSED, CHANGELOG_ENTRY,
     host_target, worktree_paths, entry_heading, changelog_entry,
@@ -102,9 +106,9 @@ from maelys_socle.github import (
     FORMULA_REPOSITORY, FORMULA_VERSIONS, TAG_WORKFLOWS, TAP_SECRETS, WITHDRAWN_FILE,
     branch_protection, channel_visibility, check_runs, classic_protection, cut_repository, default_branch,
     deployment_policies, destination_is_public, environment_gate, github_api, github_list, github_read,
-    github_repository, observed_contexts, protection_settings, publication_record, read_repository,
-    repository_visibility, required_contexts, ruleset_shape, tag_deployments, tap_drift, tap_secrets,
-    verify_protection,
+    github_repository, observed_contexts, policy_verdicts, protection_settings, publication_record,
+    read_release_environment, read_repository, repository_visibility, required_contexts, ruleset_shape,
+    tag_deployments, tap_drift, tap_secrets, verify_protection,
 )
 
 Failure = cli.Failure
@@ -298,6 +302,24 @@ def read_branch(decl: Declarations) -> None:
                          " a branch carries the prefix its change would take in a commit", "conventions")
 
 
+def read_authorship(decl: Declarations) -> None:
+    """Note an address made up on this machine, here and in what already carries one; never refuse one.
+
+    Where the branch note fires, and for its reason: on the author's own
+    checkout, before the push, which is the last moment the commits can
+    still be written again. A detached HEAD is not enough to tell a runner
+    here -- a job started by a push checks its branch out by name, with no
+    identity and nothing to push, as a clone made a minute ago -- so the
+    runner is asked, and says so through its environment. The refusal is
+    the pre-push hook's, which a repository enables or does not.
+
+    `check` re-executes the socle a product pins, so a product reads these
+    notes from the version it adopted, not from the one that runs it.
+    """
+    for message in authorship.notes(decl.project):
+        decl.add("note", message, "conventions")
+
+
 def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCLE_MECHANISM) -> Declarations:
     decl = Declarations(project, product, mechanism)
     version_file = project / "VERSION"
@@ -331,9 +353,39 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
             pattern = rf"^## {re.escape(decl.version)}\s.*[0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}}"
             if re.search(pattern, changelog.read_text(encoding="utf-8"), re.MULTILINE):
                 decl.add("ok", f"CHANGELOG.md has a dated ## {decl.version} entry", "conventions")
+            elif decl.version == UNPUBLISHED:
+                # An entry describes a release, and 0.0.0 is the absence of
+                # one: VERSION says what was published last, and nothing
+                # was. The rule above asked for it all the same, and only
+                # `new` could answer in the right place -- it writes the
+                # entry first, so every release lands above it. A repository
+                # that existed before its adoption wrote it by hand when
+                # `check` asked, above the entry of its first release, and
+                # its changelog has read upside down since.
+                decl.add("ok", f"VERSION {UNPUBLISHED} says nothing is published yet: CHANGELOG.md owes it no entry",
+                         "conventions")
             else:
                 decl.add("missing", f"CHANGELOG.md needs a dated entry: {entry_heading(project, decl.version)}",
                          "conventions")
+            # What becomes of the ones written by hand: said, never refused.
+            # Only this entry is held to a place, because it is the only one
+            # that can be: nothing was ever published before nothing. An
+            # order of versions in general is not the socle's to judge -- a
+            # maintenance release is written after a later minor.
+            # The entry is `## 0.0.0` and nothing glued to it: `0.0.0-draft`
+            # is somebody's own title. And what it stands above is another
+            # version: a second `## 0.0.0` is the duplicate refused above,
+            # not a release. Fenced examples are not headings.
+            versions = re.findall(r"^## ([0-9]+\.[0-9]+\.[0-9]+)(?![0-9.])([^\n]*)$",
+                                  unfenced(changelog.read_text(encoding="utf-8")), re.MULTILINE)
+            zero = next((index for index, (version, rest) in enumerate(versions)
+                             if version == UNPUBLISHED and rest[:1] in ("", " ", "\t")), None)
+            above = next((version for version, _ in versions[zero + 1:] if version != UNPUBLISHED), "") \
+                if zero is not None else ""
+            if above:
+                decl.add("note", f"CHANGELOG.md carries ## {UNPUBLISHED} above ## {above}: that entry"
+                                 " says nothing was published yet, so no release comes before it. Nothing"
+                                 " asks for it any more: delete it, or move it to the end", "conventions")
     # Every packaging/homebrew/NAME.rb.in becomes one tap job publishing NAME:
     # a formula is named after what it installs, not after the repository.
     homebrew = project / "packaging" / "homebrew"
@@ -390,9 +442,11 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
                      f" {' or '.join(PUBLISHED_DOWNLOAD)}, which is what the socle looks for -- a renderer"
                      " that fetches the published bytes another way is right and unrecognised", "release")
         decl.add("ok", "scripts/render-homebrew-formula.sh renders the formula")
-    # Dependencies: one dependencies/NAME.pin per Maelys repository, nearest
-    # tag on line 1 for humans and the pinned commit on line 2. The managed
-    # scripts/checkout-dependency.sh clones each of them from the pin.
+    # Dependencies: one dependencies/NAME.pin per repository the build reads,
+    # the pinned commit on line 2 and, on line 1 for humans, the tag that
+    # commit carries -- parse_pin says what line 1 holds when it carries
+    # none. The managed scripts/checkout-dependency.sh clones each of them
+    # from the pin.
     dependencies = project / "dependencies"
     for pin_file in sorted(dependencies.glob("*.pin")) if dependencies.is_dir() else []:
         pin, problems = parse_pin(pin_file.name[: -len(".pin")], pin_file.read_text(encoding="utf-8"))
@@ -423,6 +477,15 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
             decl.foreign[pin["name"]] = pin["repository"]
         if pin["submodules"] is not None:
             decl.submodules[pin["name"]] = pin["submodules"]
+        if pin["unreleased"]:
+            decl.unreleased[pin["name"]] = pin["unreleased"]
+        for line in pin["unknown"]:
+            # Named, never fatal, and never silent: neither this socle nor
+            # the script it installed reads the line, so whatever it was
+            # meant to declare is declared to nobody here.
+            decl.add("note", f"dependencies/{pin['name']}.pin: {line!r} starts with no word this socle knows"
+                     f" ({', '.join(PIN_ATTRIBUTES[:4])}): nothing here reads it, and neither does the managed"
+                     " script", "conventions")
     if (project / "adapter").is_dir():
         decl.add("refused", "adapter/ is the pre-0.14 layout: git mv adapter/<NAME>_PIN dependencies/<name>.pin"
                  " and adapter/PACKAGES dependencies/packages, then delete adapter/ and the Makefile lines that read it")
@@ -438,6 +501,16 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
         decl.add("ok", f"dependencies/{name}.pin is cloned on request only: the jobs that clone every pin skip"
                  f" it, and 'sh scripts/checkout-dependency.sh {name} DESTINATION' brings it to the one that"
                  " reads it", "conventions")
+    for name, branch in sorted(decl.unreleased.items()):
+        pin = decl.pins[name]
+        # An `ok`, and it says where its own reading stops. `check` reads the
+        # product's files and holds no clone of what they pin: that the tag
+        # is an ancestor and that the branch still holds the commit are read
+        # from a checkout, by the one command that has one.
+        decl.add("ok", f"dependencies/{name}.pin pins {pin['commit'][:7]} on {branch} of {pin['repository']},"
+                 f" past {pin['tag']} and under no tag, on purpose. Read from the pin alone, its grammar and"
+                 f" the string of its URL: nothing here asked that repository anything, and '{PROGRAM}"
+                 f" dependencies DIR --apply' is what asks whether {branch} still holds it", "conventions")
     scripts = project / "scripts"
     managed_names = {name.split("/")[-1] for name in CHECKOUT_SCRIPTS}
     stray = sorted(path.name for path in scripts.glob("checkout-*.sh")
@@ -576,7 +649,7 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
                 parse_release(release.read_text(encoding="utf-8"))
             for section in unknown:
                 decl.add("missing", f"{release.name}: section {section} is not one this socle knows"
-                                    " ([targets], [manifest], [channels], [gate], [cut]); what it declares"
+                                    " ([targets], [manifest], [channels], [gate], [cut], [privacy]); what it declares"
                                     " is not applied here", "conventions")
             if decl.after_version:
                 # The command is this repository's, and cut runs it on the
@@ -740,6 +813,7 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
         decl.add("note", f"scripts/publish-channel.sh exists but {DECLARATION_FILE} declares no"
                          " [channels]: nothing calls it, and no channel job is written")
     read_branch(decl)
+    read_authorship(decl)
     read_strategy(decl)
     read_coming(decl)
     return decl
@@ -1445,12 +1519,14 @@ def scaffold(project: pathlib.Path, product: str, dependencies: list[tuple[str, 
     files = {
         "LICENSE": license_text,
         # VERSION says what was published last, and a scaffold has published
-        # nothing: 0.0.0, with the dated entry `check` requires of it. The
-        # scaffold used to say 0.1.0, and `cut DIR 0.1.0` then refused the
-        # first release of every new product as not coming after the
-        # current version -- found on the pilot's first day.
-        "VERSION": "0.0.0\n",
-        "CHANGELOG.md": f"# Changelog\n\n## 0.0.0 — {today}\n\n- Created by maelys-release new. Nothing is published"
+        # nothing: 0.0.0. The scaffold used to say 0.1.0, and `cut DIR 0.1.0`
+        # then refused the first release of every new product as not coming
+        # after the current version -- found on the pilot's first day.
+        # Its entry is no longer one `check` asks for. It stays because this
+        # is the one command that can write it where it belongs, first, and
+        # because it tells the reader of a new repository what to do next.
+        "VERSION": UNPUBLISHED + "\n",
+        "CHANGELOG.md": f"# Changelog\n\n## {UNPUBLISHED} — {today}\n\n- Created by maelys-release new. Nothing is published"
                         f" yet: VERSION says what was published last, and the first release of {product}"
                         f" is cut as 0.1.0 once its dated entry is written above this one.\n",
         "README.md": f"# {product}\n\n*One paragraph: what this repository is, and what it is not.*\n\n"
@@ -1508,10 +1584,13 @@ def handle_new(invocation: Invocation) -> tuple[dict, int]:
                 path.chmod(path.stat().st_mode | 0o111)
         written.append(entry)
     data: dict = {"mode": "apply" if apply else "plan", "product": product, "project": str(directory),
-                  "mechanism": mechanism, "version": "0.0.0",
+                  "mechanism": mechanism, "version": UNPUBLISHED,
                   "dependencies": [{"name": name, "tag": tag, "commit": commit}
                                    for name, tag, commit in dependencies],
-                  "files": written, "adopted": []}
+                  "files": written, "adopted": [],
+                  # Before the first commit of a repository is when an identity
+                  # git made up can still be replaced for nothing.
+                  "notes": authorship.identity_notes(directory)}
     if not apply:
         return data, EXIT_OK
     # The socle's own files come from adopt, so new and adopt can never
@@ -1681,6 +1760,7 @@ def text_preflight(data: dict) -> str:
 def text_new(data: dict) -> str:
     lines = [f"create   {entry['path']}" for entry in data["files"]]
     lines.extend(f"{entry['action']:<8} {entry['path']}" for entry in data["adopted"])
+    lines.extend(f"{LABELS['note']:<8} {note}" for note in data.get("notes", []))
     for dependency in data["dependencies"]:
         lines.append(f"pin      dependencies/{dependency['name']}.pin"
                      f" {dependency['tag']} ({dependency['commit'][:7]})")
@@ -1702,6 +1782,8 @@ TEXT = {
     "check": text_check,
     "declarations": text_declarations,
     "preflight": text_preflight,
+    "outgoing": authorship.text_outgoing,
+    "hook": authorship.text_hook,
     "signers": signers.text_signers,
     "cut": text_cut,
     "protect": lambda data: text_protect(data),
@@ -1734,6 +1816,9 @@ VERDICT_SCHEMA = {"type": "object", "required": ["valid", "violations"],
 SOCLE_SCHEMA = {"type": "object", "required": ["version", "tag", "sha"],
                 "properties": {"version": {"type": "string"}, "tag": {"type": "string"}, "sha": {"type": "string"}}}
 STRINGS = {"type": "array", "items": {"type": "string"}}
+# One line of a gate or of a verdict: ok, note or fail, and what it says.
+STATUS_LINE = {"type": "object", "required": ["status", "message"],
+               "properties": {"status": {"type": "string"}, "message": {"type": "string"}}}
 SOCLE_OPTIONS = (
     cli.option("--product", "Product name; defaults to the directory name.", cli.argument("NAME")),
     cli.option("--socle-sha", "Socle commit to pin instead of this checkout's HEAD (trials and tests).",
@@ -1741,6 +1826,44 @@ SOCLE_OPTIONS = (
     cli.option("--socle-tag", "Socle tag written next to --socle-sha.", cli.argument("TAG"), hidden=True),
 )
 DIR_OPERAND = cli.operand("DIR", "Product repository.")
+# Where, never what. A finding holds no value; a key or a path that some
+# family matched is shown by its position, and `in` says when the match was
+# the key, the name of the file or the name of a ref rather than a value.
+PRIVACY_FINDINGS = {"type": "array", "items": {
+    "type": "object", "additionalProperties": False, "required": ["family", "path"],
+    "properties": {"family": {"enum": list(privacy.FAMILIES)}, "path": {"type": "string"},
+                   "in": {"enum": ["key", "name", "ref"]},
+                   "key": {"type": "string"}, "line": {"type": "integer"}, "term": {"type": "integer"},
+                   "notice": {"type": "boolean"}, "excused": {"type": "integer"},
+                   "blob": {"type": "string"}, "commit": {"type": "string"}}}}
+PRIVACY_SCHEMA = {
+    "type": "object", "additionalProperties": False,
+    "required": ["mode", "refuses", "files", "local", "findings"],
+    "properties": {
+        "mode": {"enum": ["note", "refuse"]}, "refuses": STRINGS,
+        "files": {"type": "object", "additionalProperties": False,
+                  "required": ["tracked", "searched", "read", "unread", "astext", "partial"],
+                  "properties": {"tracked": {"type": "integer"}, "searched": {"type": "integer"},
+                                 "read": {"type": "integer"},
+                                 "unread": {"type": "array", "items": {
+                                     "type": "object", "additionalProperties": False, "required": ["path", "reason"],
+                                     "properties": {"path": {"type": "string"},
+                                                    "reason": {"enum": list(privacy.UNREAD)}}}},
+                                 "astext": STRINGS, "partial": STRINGS}},
+        "local": {"type": "object", "additionalProperties": False, "required": ["machineNames", "terms", "runner"],
+                  "properties": {"machineNames": {"type": "integer"}, "terms": {"type": "integer"},
+                                 "runner": {"type": "boolean"}}},
+        "findings": PRIVACY_FINDINGS,
+        "history": {"type": "object", "additionalProperties": False,
+                    "required": ["refs", "shallow", "commits", "blobs", "addresses", "pullRequestHeads", "findings"],
+                    "properties": {"refs": {"type": "object"}, "shallow": {"type": "boolean"},
+                                   "commits": {"type": "integer"},
+                                   "blobs": {"type": "object", "additionalProperties": False,
+                                             "required": ["read", "unread"],
+                                             "properties": {"read": {"type": "integer"},
+                                                            "unread": {"type": "object"}}},
+                                   "addresses": {"type": "integer"}, "pullRequestHeads": {"type": "boolean"},
+                                   "findings": PRIVACY_FINDINGS}}}}
 CHECK_SCHEMA = {"type": "object", "additionalProperties": False,
                 "required": ["valid", "product", "project", "mechanism", "socle", "pinned", "checks", "files",
                              "violations", "conventions", "release"],
@@ -1749,7 +1872,8 @@ CHECK_SCHEMA = {"type": "object", "additionalProperties": False,
                                "socle": SOCLE_SCHEMA,
                                "pinned": {"type": ["object", "null"]}, "checks": CHECKS_SCHEMA,
                                "files": FILES_SCHEMA, "violations": STRINGS,
-                               "conventions": VERDICT_SCHEMA, "release": VERDICT_SCHEMA}}
+                               "conventions": VERDICT_SCHEMA, "release": VERDICT_SCHEMA,
+                               "privacy": PRIVACY_SCHEMA}}
 CUT_SCHEMA = {"type": "object", "additionalProperties": False,
               "required": ["mode", "stage", "product", "project", "repository", "version", "tag", "branch",
                            "base", "gate", "checks", "ready"],
@@ -1858,7 +1982,8 @@ APP = SocleProgram(PROGRAM, PRODUCT, socle_version(), [
                                                "type": "object", "required": ["name", "tag", "commit"],
                                                "properties": {"name": {"type": "string"}, "tag": {"type": "string"},
                                                               "commit": {"type": "string"}}}},
-                                           "files": FILES_SCHEMA, "adopted": FILES_SCHEMA}}),
+                                           "files": FILES_SCHEMA, "adopted": FILES_SCHEMA,
+                                           "notes": STRINGS}}),
     cli.transaction("adopt", "adopt",
                     "Write the conventions of the socle into a product, and its release files when it publishes"
                     " through the socle; plan without --apply.",
@@ -1873,6 +1998,7 @@ APP = SocleProgram(PROGRAM, PRODUCT, socle_version(), [
                                            "socle": SOCLE_SCHEMA,
                                            "changed": {"type": "boolean"}, "checks": CHECKS_SCHEMA,
                                            "moved": {"type": "string"}, "files": FILES_SCHEMA,
+                                           "hook": {"type": "string"},
                                            "impactFrom": {"type": "string"},
                                            "impact": {"type": "array", "items": {
                                                "type": "object", "required": ["version", "says", "asks", "asksThis"],
@@ -1889,7 +2015,46 @@ APP = SocleProgram(PROGRAM, PRODUCT, socle_version(), [
              "Report the conventions of a product and, when it publishes through the socle, its release mechanism;"
              " exit 2 on any violation.",
              handle_check, operands=[DIR_OPERAND],
-             options=[*SOCLE_OPTIONS, MECHANISM_OPTION, DOCS_CONTRACT_OPTION], schema=CHECK_SCHEMA),
+             options=[*SOCLE_OPTIONS, MECHANISM_OPTION, DOCS_CONTRACT_OPTION,
+                      cli.flag("--history", "Read every ref of the clone as well -- each blob once, commit messages,"
+                               " author and committer lines -- for what the tracked files are read for; says what"
+                               " it could not read.")],
+             schema=CHECK_SCHEMA),
+    cli.read("outgoing", "outgoing",
+             "Report the commits about to leave whose author or committer address git made up on this machine;"
+             " exit 2 when there is one.",
+             authorship.handle_outgoing, operands=[DIR_OPERAND],
+             options=[cli.option("--pre-push", "Judge what a push sends to REMOTE, from the refs git hands a"
+                                 " pre-push hook on stdin, instead of what HEAD has ahead of its upstream.",
+                                 cli.argument("REMOTE"))],
+             schema={"type": "object", "additionalProperties": False,
+                     "required": ["valid", "project", "source", "scope", "commits", "fabricated", "local",
+                                  "renamed", "tags", "violations", "notes", "fix"],
+                     "properties": {"valid": {"type": "boolean"}, "project": {"type": "string"},
+                                    "source": {"enum": ["head", "pre-push"]},
+                                    "scope": {"enum": ["upstream", "untracked", "push"]},
+                                    "remote": {"type": "string"},
+                                    "commits": {"type": "integer"},
+                                    "fabricated": {"type": "array", "items": {
+                                        "type": "object", "additionalProperties": False,
+                                        "required": ["commit", "rules"],
+                                        "properties": {"commit": {"type": "string"}, "rules": STRINGS}}},
+                                    "local": {"type": "array", "items": {
+                                        "type": "object", "additionalProperties": False,
+                                        "required": ["commit", "rules"],
+                                        "properties": {"commit": {"type": "string"}, "rules": STRINGS}}},
+                                    "renamed": STRINGS, "tags": STRINGS, "violations": STRINGS,
+                                    "notes": STRINGS, "fix": {"type": "string"}}}),
+    cli.transaction("hook", "hook",
+                    "Write the optional pre-push hook that refuses a push sending an address git made up on this"
+                    " machine; plan without --apply.",
+                    authorship.handle_hook, operands=[DIR_OPERAND],
+                    schema={"type": "object", "additionalProperties": False,
+                            "required": ["mode", "project", "path", "action", "wrote", "hook"],
+                            "properties": {"mode": {"enum": ["plan", "apply"]}, "project": {"type": "string"},
+                                           "path": {"type": "string"}, "wrote": {"type": "boolean"},
+                                           "action": {"enum": ["create", "same", "kept"]},
+                                           "reason": {"type": "string"}, "hook": {"type": "string"}}}),
     cli.read("declarations", "declarations",
              "Return the product contract as data: pinned dependencies, packages, formulas; exit 2 when invalid.",
              handle_declarations, operands=[DIR_OPERAND], options=[SOCLE_OPTIONS[0]],
@@ -1898,11 +2063,20 @@ APP = SocleProgram(PROGRAM, PRODUCT, socle_version(), [
                                   "linuxPackages", "macosPackages", "formulas", "targets",
                                   "manifestPatterns", "channels", "gate", "afterVersion", "fuzz",
                                   "declared", "pinned", "managedBy", "runners", "workflows", "carried",
-                                  "checks"],
+                                  "unreleased", "checks"],
                      "properties": {"valid": {"type": "boolean"}, "product": {"type": "string"},
                                     "project": {"type": "string"}, "version": {"type": "string"},
                                     "mechanism": MECHANISM_SCHEMA,
-                                    "dependencies": STRINGS, "linuxPackages": {"type": "string"},
+                                    "dependencies": STRINGS,
+                                    "unreleased": {"type": "array", "items": {
+                                        "type": "object", "additionalProperties": False,
+                                        "required": ["name", "repository", "branch", "tag", "commit"],
+                                        "properties": {"name": {"type": "string"},
+                                                       "repository": {"type": "string"},
+                                                       "branch": {"type": "string"},
+                                                       "tag": {"type": "string"},
+                                                       "commit": {"type": "string"}}}},
+                                    "linuxPackages": {"type": "string"},
                                     "macosPackages": {"type": "string"}, "formulas": STRINGS,
                                     "targets": STRINGS, "manifestPatterns": {"type": "string"},
                                     "channels": {"type": "array", "items": {
@@ -1961,7 +2135,8 @@ APP = SocleProgram(PROGRAM, PRODUCT, socle_version(), [
                                     "product": {"type": "string"}, "project": {"type": "string"},
                                     "socle": SOCLE_SCHEMA, "pinned": {"type": ["object", "null"]},
                                     "checks": CHECKS_SCHEMA, "files": FILES_SCHEMA,
-                                    "preflight": CHECKS_SCHEMA, "violations": STRINGS}}),
+                                    "preflight": CHECKS_SCHEMA, "violations": STRINGS,
+                                    "privacy": PRIVACY_SCHEMA}}),
     cli.execute("signers", "signers",
                 "List the keys that may sign a release of this fleet, or prepare one line of that file;"
                 " --apply writes it.",
@@ -2033,6 +2208,8 @@ APP = SocleProgram(PROGRAM, PRODUCT, socle_version(), [
                                                               "action": {"enum": ["clone", "refresh", "same",
                                                                                   "blocked", "on-request"]},
                                                               "submodules": {"enum": ["", "recursive"]},
+                                                              "unreleased": {"type": "string"},
+                                                              "asked": {"type": "boolean"},
                                                               "previous": {"type": "string"},
                                                               "reason": {"type": "string"}}}},
                                            "variable": {"type": "string"},
@@ -2040,14 +2217,18 @@ APP = SocleProgram(PROGRAM, PRODUCT, socle_version(), [
                                            "notes": STRINGS, "blocked": {"type": "boolean"}}}),
     cli.execute("protect", "protect",
                 "Report what the default branch should require, derived from the workflows and the runs it"
-                " carries rather than typed by hand; --apply writes it.",
+                " carries rather than typed by hand, and what the release environment of a product the"
+                " socle releases should admit; --apply writes each, and a refusal of one does not stop"
+                " the other.",
                 handle_protect,
                 operands=[DIR_OPERAND],
-                options=[cli.flag("--apply", "Write the protection instead of only reporting it."),
+                options=[cli.flag("--apply", "Write the protection and the release environment instead of"
+                                  " only reporting them; exit 2 when either is refused."),
                          cli.flag("--allow-lock", "Require names no merged pull request has produced yet."),
                          cli.flag("--allow-narrow", "Stop requiring checks the plan leaves out, beyond alias replacements."),
                          cli.flag("--without-legs", "Propose the required list minus the socle's matrix legs:"
-                                  " the narrowing that comes before an adoption renames them.")],
+                                  " the narrowing that comes before an adoption renames them. The release"
+                                  " environment is neither read nor written.")],
                 schema={"type": "object", "additionalProperties": False,
                         "required": ["repository", "branch", "proposed"],
                         "properties": {"repository": {"type": "string"}, "branch": {"type": "string"},
@@ -2080,21 +2261,50 @@ APP = SocleProgram(PROGRAM, PRODUCT, socle_version(), [
                                            "type": "object", "required": ["required", "by"],
                                            "properties": {"required": {"type": "string"},
                                                           "by": {"type": "string"}}}},
-                                       "gone": {"type": "array", "items": {"type": "string"}}}}),
+                                       "gone": {"type": "array", "items": {"type": "string"}},
+                                       "refused": {"type": "object", "required": ["message", "hint"],
+                                                   "properties": {"message": {"type": "string"},
+                                                                  "hint": {"type": "string"}}},
+                                       "environment": {
+                                           "type": "object", "additionalProperties": False,
+                                           "required": ["name", "exists", "state", "writes", "refused", "applied"],
+                                           "properties": {
+                                               "name": {"type": "string"},
+                                               "exists": {"type": ["boolean", "null"]},
+                                               "policy": {"enum": ["custom", "protected-branches", "all", None]},
+                                               "rules": {"type": "array", "items": {"type": "object"}},
+                                               "holds": {"type": ["object", "null"]},
+                                               "state": {"type": "string"}, "becomes": {"type": "string"},
+                                               "writes": {"type": "array", "items": {
+                                                   "type": "object", "required": ["method", "endpoint", "body"],
+                                                   "properties": {"method": {"enum": ["PUT", "POST"]},
+                                                                  "endpoint": {"type": "string"},
+                                                                  "body": {"type": "object"}}}},
+                                               "refused": STRINGS, "unread": STRINGS,
+                                               "gate": {"type": "array", "items": STATUS_LINE},
+                                               "note": {"type": "string"},
+                                               "applied": {"type": "boolean"}, "written": STRINGS,
+                                               "before": {"type": "object"}}}}}),
     cli.execute("rehearse", "rehearse",
-                "Replay the Linux build job of the release in a Docker container on a copy of the working"
-                " tree, make check with --check, or a channel's publish script against a published release"
-                " with --channel.",
+                "Replay one step of one Linux job in a Docker container on a copy of the working tree: the"
+                " packaging of the release, the check of a leg of the shared CI with --check, or a channel's"
+                " publish script against a published release with --channel. The result names the step it"
+                " replayed, and the steps and jobs it did not.",
                 handle_rehearse,
                 operands=[DIR_OPERAND, cli.operand("TARGET", "linux-x86_64 or linux-arm64;"
                                                    " absent with --channel.", required=False,
                                                    choices=list(PLATFORMS))],
                 options=[*SOCLE_OPTIONS,
                          cli.option("--image", "Container image.", cli.argument("IMAGE"), default=DEFAULT_IMAGE),
-                         cli.option("--package-command", "Command producing dist/; TARGET is substituted.",
+                         cli.option("--package-command", "Command producing dist/; TARGET is substituted."
+                                    " Another line than the default names no step of the release.",
                                     cli.argument("COMMAND"), default="bash scripts/package-release.sh TARGET"),
-                         cli.flag("--check", "Run the check command instead of packaging; dist/ is left alone."),
-                         cli.option("--check-command", "Command run with --check.", cli.argument("COMMAND"), default="make check"),
+                         cli.flag("--check", "Replay the check step of the shared CI's leg for TARGET instead of"
+                                  " packaging: its packages, its line, no compiler named; dist/ is left alone."
+                                  " For any product whose ci.yml calls check-product.yml, however it publishes."),
+                         cli.option("--check-command", "The line to run with --check, when the leg's own is not"
+                                    " wanted or cannot be read for certain from ci.yml; another line than the"
+                                    " leg's names no step.", cli.argument("COMMAND")),
                          cli.flag("--keep", "Keep the container for inspection."),
                          cli.option("--channel", "Run the product's publish script against a published"
                                     " release instead of a build; needs --tag.",
@@ -2108,6 +2318,8 @@ APP = SocleProgram(PROGRAM, PRODUCT, socle_version(), [
                                        "mode": {"enum": ["package", "check"]}, "artifacts": STRINGS,
                                        "channel": {"type": "string"}, "tag": {"type": "string"},
                                        "repository": {"type": "string"}, "command": {"type": "string"},
+                                       "replayed": {"type": "string"}, "notReplayedSteps": STRINGS,
+                                       "notReplayed": STRINGS, "unlikeTheRunner": STRINGS,
                                        "assets": STRINGS, "recorded": STRINGS,
                                        "differs": STRINGS, "marker": {"type": "object"},
                                        "matches": {"type": ["boolean", "null"]}}}),

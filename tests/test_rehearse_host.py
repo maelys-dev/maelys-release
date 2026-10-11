@@ -29,7 +29,11 @@ class RehearsalHost(FakeHost):
         self.commands.append(command)
         if command == ["git", "remote", "get-url", "origin"]:
             return subprocess.CompletedProcess(command, 0, "https://github.com/o/r.git\n", "")
-        if cwd == self.product.dir.resolve() and command[:2] in (["git", "grep"], ["git", "rev-parse"]):
+        # The reads of the declarations, the identity and the commits that
+        # have not left among them: real git, on the fixture.
+        if cwd == self.product.dir.resolve() and command[:2] in (["git", "grep"], ["git", "rev-parse"],
+                                                                 ["git", "config"], ["git", "symbolic-ref"],
+                                                                 ["git", "log"], ["git", "for-each-ref"]):
             return MODULE.Host.run(self, command, cwd=cwd, env=self.product.env)
         if self.mode == "channel" and command == ["gh", "release", "download", "v1.2.3", "--repo", "o/r",
                                                   "--dir", str(self.product.dir.resolve() / "dist")]:
@@ -44,7 +48,10 @@ class RehearsalHost(FakeHost):
     def stream(self, command, log, cwd=None, env=None):
         self.streams.append((command, cwd, env))
         if self.mode == "container" and command[:2] == ["docker", "run"]:
-            (self.product.dir / "dist" / "fixture-linux-arm64.tgz").write_text("fixture", encoding="utf-8")
+            # As docker: an artifact lands in dist/ only when dist/ was given
+            # to the container, which a check never does.
+            if any(word.endswith(":/dist") for word in command):
+                (self.product.dir / "dist" / "fixture-linux-arm64.tgz").write_text("fixture", encoding="utf-8")
         elif self.mode == "channel" and command == ["bash", "-c", "bash scripts/publish-channel.sh v1.2.3 npm"]:
             pathlib.Path(env["CHANNEL_RECORD"]).write_text(json.dumps({"version": self.version}), encoding="utf-8")
         else:
@@ -83,8 +90,10 @@ class RehearseHostTest(unittest.TestCase):
                 self.assertEqual(command[:3], ["docker", "run", "--rm"])
                 self.assertIn(f"{self.product.dir.resolve()}:/src:ro", command)
                 for value in ("TARGET=linux-arm64", "DEPENDENCIES=maelys-system", "DEPENDENCIES_APART=1",
-                              f"REHEARSE_MODE={mode}", "CHECK_COMMAND=make check"):
+                              f"REHEARSE_MODE={mode}"):
                     self.assertIn(value, command)
+                # The line of a check travels with a check, and with nothing else.
+                self.assertEqual("CHECK_COMMAND=make check" in command, mode == "check")
                 self.assertEqual(command[-3:], ["bash", "-c", MODULE.REHEARSAL])
                 self.assertEqual((cwd, env, host.writes, host.reads), (None, None, [], []))
 

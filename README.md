@@ -108,8 +108,8 @@ that does not call `check-product.yml` is a warning of `check`.
 ### Dependencies and packages
 
 A dependency on another Maelys repository is one `dependencies/<name>.pin` file:
-the nearest tag on line 1 for humans, the pinned commit on line 2, `name`
-being the repository name (`maelys-system.pin`). The managed `scripts/checkout-dependency.sh maelys-system`
+the pinned commit on line 2 and, on line 1 for humans, the tag that commit
+carries, `name` being the repository name (`maelys-system.pin`). The managed `scripts/checkout-dependency.sh maelys-system`
 clones it next to the product at that commit; the release workflow, the
 product's CI and a developer all run the same script.
 
@@ -151,11 +151,22 @@ run of a product.
 container: the socle's and the declared packages, the pinned checkouts
 through `scripts/checkout-dependency.sh`, then `scripts/package-release.sh
 TARGET`, on a copy of the working tree. Only `dist/` receives the
-artifacts. `--check` replays `make check` (`--check-command` overrides)
-instead of packaging, for a Linux-only failure before the push. It runs
-before a tag what the workflow would otherwise discover on the first one; the defects maelys-oci found this way (a library without
+artifacts. It runs before a tag what the workflow would otherwise discover
+on the first one; the defects maelys-oci found this way (a library without
 pkg-config files on Debian, a host-dependent contract, objects that did not
 depend on `VERSION`) would all have failed the first release.
+
+**That is one step of one job, and not a pull request that passes.** The
+packaging chooses its own compiler; the check legs of the shared CI name
+none and build with the runner's `cc`. `rehearse DIR TARGET --check` replays
+the check of that leg instead — what it installs, the `check_command` the
+product's `ci.yml` passes, no compiler named — for a Linux-only failure
+before the push, and for any product that calls the shared CI, whatever
+publishes it. Every result says which step it replayed, and which steps of
+that job and which jobs of the shared CI it did not (`replayed`,
+`notReplayedSteps`, `notReplayed`); a check also says what a container is
+not (`unlikeTheRunner`). `docs/conventions.md`, "What a rehearsal replays,
+and what it does not", has the measurements and the limits.
 
 ### Preflight
 
@@ -166,7 +177,9 @@ the next tag, on the developer machine before it exists: `tag.gpgsign` and a
 environment of the GitHub repository limiting its deployments to tags `v*`.
 GitHub creates a missing environment on first use without any rule, so
 presence alone is not checked. Exit 2 reports what the workflow would
-otherwise refuse.
+otherwise refuse. `protect DIR --apply` writes what that environment needs
+— a custom deployment policy and the one tag rule — and the checks the
+default branch requires, each read back, and neither waiting for the other.
 
 ## Consuming the release workflow
 

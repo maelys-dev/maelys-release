@@ -8,6 +8,7 @@ import re
 from maelys_cli import EXIT_OK, Failure, Invocation
 
 from .constants import DECLARATION_FILE, FORMER_DECLARATION_FILE, PROGRAM, SOCLE_MECHANISM
+from . import authorship
 from .context import Context
 from .identity import socle_data
 from .declarations import require_valid
@@ -79,6 +80,11 @@ def handle_adopt(invocation: Invocation, context: Context) -> tuple[dict, int]:
     data["impact"], data["current"] = context.impact_for(decl, (pinned or {}).get("tag", ""))
     if moved:
         data["moved"] = moved
+    # Proposed, never written: the hook is not a managed file, and a
+    # repository that does not want it is not asked twice by a violation.
+    proposal = authorship.hook_proposal(project)
+    if proposal:
+        data["hook"] = proposal
     return data, EXIT_OK
 
 
@@ -120,6 +126,9 @@ def text_adopt(data: dict) -> str:
     if data.get("moved"):
         verb = "moves" if data["mode"] == "plan" else "moved"
         lines.append(f"{verb:<8} {data['moved']} -> {DECLARATION_FILE} (git mv, its history follows)")
+    if data.get("hook"):
+        lines.append(f"{'hook':<8} optional, and not a managed file: {data['hook']}"
+                     " -- it writes a pre-push hook that refuses a push sending an address made up on this machine")
     tag = data["socle"]["tag"]
     scope = "conventions" if data["mechanism"] != SOCLE_MECHANISM else "conventions and release files"
     if data["mode"] == "apply":

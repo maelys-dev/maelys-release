@@ -208,6 +208,154 @@ author's own checkout, before the push — and the fleet-wide view belongs to
 maelys-platform, which reads the remote branches of every repository. The
 socle declares, the observer counts: the same split as the release gate.
 
+## The address a commit carries
+
+A commit carries the address of an account, never one git made up on the
+machine it was written on. A clone with neither `user.name` nor
+`user.email` commits anyway wherever git can compose an address: the login,
+an at sign, and the name the machine resolves to. It writes that into every
+commit, beside the account's name as the system holds it, and the first
+push publishes both. A clone with no identity pushed twenty commits that
+way, long before any release. `cut` reads back what GitHub says of the
+release commit, which is correct and too late: it sees one commit, at
+publication.
+
+**Two kinds of address, which do not call for the same thing.**
+
+- *Made up on this machine*: the address git composes here, or one with no
+  domain at all. It is nobody's mailbox. What git composes is asked of git
+  itself, with every configured identity taken away for the question, and
+  not of `hostname`: the kernel's name for a machine is often not the one
+  git resolves, and only git knows which it writes. The same login at the
+  same machine under another private suffix is the same address — a laptop
+  is not on one network.
+- *Under a private name*: a domain with no dot, or one that ends in `.home`,
+  `.lan`, `.local`, `.localdomain`, `.localhost`, `.internal`, `.intranet`,
+  `.corp`, `.home.arpa`, `.fritz.box`, `.mshome.net`, or git's own
+  `.(none)`. It may be a machine's name, and it may be a real mailbox at a
+  company's private zone, in a commit that is a contributor's. It is said,
+  and never refused. The names reserved for tests and documentation —
+  `.test`, `.invalid`, `.example` — are in neither kind: nothing resolves
+  them, a fixture that commits under one says so in every commit, and this
+  repository's own fixtures do.
+
+`check` notes, and never refuses:
+
+- **the identity git would write here**, role by role and in git's own
+  order: `GIT_AUTHOR_EMAIL` or `GIT_COMMITTER_EMAIL`, then `author.email`
+  or `committer.email`, then `user.email`, then `EMAIL`; the same for the
+  name, without the last. A role nothing names is said — the address git
+  would compose, the account's name it would write — and so is an address
+  that is set and is of one of the two kinds above. Of a role nothing
+  names, nothing is said where `user.useConfigOnly` is set: git refuses to
+  commit there, and says so itself;
+- **the commits the branch has ahead of its upstream** that carry an
+  address of either kind, as author or committer, with their count;
+- **the commits written under this checkout's address and another name
+  than its own** — one address under two names, which is what a history
+  rewrite leaves when it reuses the identity of another commit: a merge
+  commit made on GitHub carries the account's login, and thirteen commits
+  rewritten from one were redone. The rule is that shape and nothing
+  wider: another person's commit has another address, GitHub's merge
+  committer is not an author, and neither is said;
+- **the annotated tags whose tagger is an address made up on this
+  machine.** Nothing in a clone says whether a tag was pushed, and the note
+  says that too.
+
+**"Not pushed" is said of one range only**: what the checked-out branch
+has ahead of its upstream, as this clone last saw it. With no upstream —
+a new branch, a detached HEAD, an upstream deleted and pruned, a shallow
+single-branch clone, a clone that pushes by URL, a pull request fetched
+from a fork — what is read is what no remote-tracking ref of this clone
+reaches, and the note says in those words that it may or may not have been
+pushed. The socle does not claim what the clone does not record.
+
+**The socle never prints a history-rewriting command it cannot prove
+safe.** One line exists, `git rebase COMMIT BRANCH --exec 'git commit
+--amend --no-edit --reset-author'`, and it is printed only where every one
+of these was read, not assumed: HEAD is on a branch; the branch has an
+upstream this clone holds; the range is what it has ahead of it; no commit
+of the range is a merge; every commit of it carries the address git
+composes on this machine as author *and* as committer, so that nothing of
+anyone else's is re-attributed; the range starts from one commit; and the
+identity here is set, since the line would otherwise write the same
+address again. The line names the branch and that commit, never `HEAD`
+and never a word to replace. Beside it, the same message says everything
+it does: it checks the branch out; author and committer become the
+identity set here; **author dates become now**; signatures are dropped
+unless commit signing is configured; it stops on an empty commit or on a
+failing pre-commit hook, where `git rebase --abort` undoes it. In every
+other case the note gives the count and the reason no line is given — no
+upstream, a merge in the range, commits that are not this machine's own, a
+detached HEAD, an identity not set yet — and no command. The note about
+two names and the note about a private name never carry one: the socle
+cannot tell which name is the author's, nor whose the commit is.
+
+No message prints the address it is about. It holds the machine's name,
+and what `check` prints ends up in logs: a message names the rule that
+matched.
+
+These notes fire where the branch note does and for its reason — on the
+author's own checkout, before the push — but not by its means. A detached
+HEAD does not tell a runner here: a job started by a push checks its branch
+out by name, with no identity and nothing to push, exactly like a clone made
+a minute ago. The runner is therefore asked, and it answers in a runner's
+words: where `CI` or `GITHUB_ACTIONS` is `true` or `1`, `check` reads
+nothing of this and says nothing. `CI=false` on an author's machine is not
+a runner.
+
+`check` re-executes the socle a product pins. **A product therefore reads
+these notes from the version it adopted**, not from the socle that runs the
+command: until it adopts a version that has them, its `check` says none.
+
+**A note nobody reads prevents nothing**, and nobody runs `check` before a
+first push. It is said in two places where it is read in time:
+
+- `new` and `adopt` say the identity note, before the repository's first
+  commits — `new` in its plan as in `--apply`, in a directory that is not a
+  repository yet;
+- an **optional pre-push hook**, which `adopt` proposes and never writes.
+  It prints the line that enables it, `maelys-release hook DIR --apply`
+  with the directory quoted for a shell, and only where that line would
+  write the hook: in a repository, with no `pre-push` yet, and with no
+  `core.hooksPath`. The hook is not a managed file — `check` reports
+  nothing about it, and deleting it removes it.
+
+The hook runs `maelys-release outgoing . --pre-push=REMOTE` with what git
+hands it: the remote, and for each ref the object sent and the object the
+other side holds. Each ref is judged for itself and for that remote: the
+commits it sends that neither that object nor that remote's own
+remote-tracking refs reach. Another remote's refs take nothing off — a
+commit a backup holds is still published by a push to the origin — and a
+push by URL, which names no remote of the clone, takes off only the object
+git gives. **It refuses the push** when a commit sent, or an annotated tag
+sent, carries an address made up on this machine, naming the ref and the
+remote and giving no rewriting line: the ref pushed need not be the branch
+checked out. An address under a private name, and one address under two
+names, are said there too and never refuse. A push that sends none of this
+passes in silence. `git push --no-verify` passes the hook once.
+
+**The hook fails open**, in those words: where `maelys-release` is not
+installed it does nothing, silently; where the command does not complete —
+a broken installation, an older one that has no `outgoing`, a ref git
+cannot list — it says so on stderr in one line, `pre-push: maelys-release
+did not read this push`, and lets the push through. Only its verdict
+refuses, so a broken installation never holds a repository's pushes, and a
+check that did not run is never read as one that passed. `hook` never
+overwrites a `pre-push` this repository wrote, writes nothing where
+`core.hooksPath` is set — that directory is shared or tracked — and says
+`nothing written` in its last line whenever it wrote nothing, with the
+lines to add by hand.
+
+`outgoing DIR` alone reads `HEAD` as `check` does and exits 2 only for
+what the branch has ahead of its upstream: without one it says what it
+found and refuses nothing, since nothing says it was not pushed. A
+directory that is no repository, or a HEAD git cannot read, is a failure
+that says `nothing was read`, never a count of zero. Unlike `check`, it is
+not silent on a runner: whoever pushes publishes. Neither `outgoing` nor
+`hook` needs a product name: they run in a clone or a worktree called
+anything.
+
 ## Versions, tags, changelog
 
 - `VERSION` holds `X.Y.Z` and nothing else. A release is the tag `vX.Y.Z`
@@ -220,9 +368,16 @@ socle declares, the observer counts: the same split as the release gate.
 - `CHANGELOG.md` has one dated `## X.Y.Z — YYYY-MM-DD` entry per release;
   an `## Unreleased` section collects what the next one will carry. The
   entry for `VERSION` must exist: `maelys-release check` reports a product
-  without it, so `make check` fails before the tag does.
+  without it, so `make check` fails before the tag does. `0.0.0` is the one
+  version that owes none: it says nothing was published, and an entry
+  describes a release. `new` still writes one, first, where every release
+  lands above it; a repository adopted with a history of its own writes
+  none, and `check` notes a `## 0.0.0` standing above another entry — the
+  place the rule put it when it was asked for by hand.
 - A published tag is never moved, deleted or force-pushed. A mistake is
-  fixed by the next patch release.
+  fixed by the next patch release. What a repository **still private**
+  does when it must lose a datum before it opens is below, with its limit
+  stated first.
 - **The tag is signed by a key the fleet names.** `share/allowed-signers` of
   the socle holds them in the ssh `allowed_signers` format, and the release
   workflow verifies the tag's own signature against that file — read at the
@@ -292,6 +447,108 @@ the same command reads the result. Nothing is undone, because the commit
 may carry a changelog entry that exists nowhere else. An answer GitHub did
 not give is a note and stops nothing.
 
+**`check` says beforehand two of the things the first stop will refuse.**
+`cut` is the last command of a release and is run by whoever signs; what
+it refuses was written earlier, by someone else, to whom `check` had
+answered "ok". Twice in two days a new product was handed over with the
+entry of its release left undated, once with `VERSION` already moved to
+the version to cut. `check` notes both, in the words `cut` will use, and
+refuses neither:
+
+- **an entry of a version after `VERSION` that `cut` will not read.** `cut`
+  reads the title `## X.Y.Z` and a date on that line, and nothing else:
+  an entry without a date is noted, and so is one titled `## [X.Y.Z]`,
+  `## vX.Y.Z`, `### X.Y.Z` or with a second space, dated or not — three
+  products title theirs with brackets, and `cut` answers "no dated entry"
+  to each. Whether an entry is found is asked of `cut`'s own reader, so
+  the note and the refusal cannot disagree. A fenced block is skipped: an
+  example of a title is not an entry.
+- **a `VERSION` no tag has published**, on a checkout that is not a job's.
+  For `cut`, `VERSION` says what was published last, and a version moved by
+  hand to the one to cut does not come after itself.
+
+**One rule for the date.** A release is handed over with its entry titled
+`## X.Y.Z — YYYY-MM-DD` and dated that day, never a later one: `cut`
+refuses a date in the future as it refuses a missing one. Until then its
+changes sit under `## Unreleased`, which nothing notes. A version in a
+title with no date is neither state, and that is what the note is about.
+
+**The note on `VERSION` is for the author's checkout.** Where `CI` or
+`GITHUB_ACTIONS` is `true` or `1`, `check` says nothing of it and asks git
+nothing for it. The shared CI checks out the whole history and runs `check` on
+every commit, the release commit included — where `VERSION` is, by
+construction, a version no tag carries yet, and where nobody can act on a
+note. The first form of this rule did not know that and was read at every
+release of six products.
+
+On an author's checkout, the states that are normal are told nothing:
+`0.0.0`, which is what a repository holds before a first release; a
+version this repository tags candidates of (`vX.Y.Z-…`) under a ceremony
+of its own; and a release in progress, recognised by what a release leaves
+behind, whatever the way it was merged:
+
+- a branch `release/vX.Y.Z` or `release/X.Y.Z`, here or on `origin`;
+- the subject `cut` gives the commit that writes `VERSION`,
+  `<product> X.Y.Z`, which a merge keeps and a squash keeps with ` (#N)`;
+- the subject GitHub gives the merge of that branch.
+
+The two subjects are read on the first line of a commit of this history
+and nowhere else: a body that mentions the branch is not a release.
+Measured on eight products at their last release commit, the tag deleted:
+six carry the subject of `cut`, five the merge of a release branch — one
+of them a product that titles its bump by hand and names its branches
+without the `v` — and seven one or the other. The eighth moved `VERSION`
+in the pull request of a feature and tagged eleven commits later; nothing
+separates that from a version moved before `cut`, because it is one. So
+the note says what is observed, then the two states that read the same
+and what each asks, in that order: a release already merged and waiting
+for its tag, where nothing is to be changed; or a `VERSION` moved before
+`cut`, to set back. The version to go back to is the one this history
+reaches — the nearest tag, as `cut` reads it for the pins — and not the
+highest of the repository, which on a maintenance branch is a version
+that one does not come after. And a clone learns of a tag only when it
+fetches it: `git pull origin main` brings none, so the note says to fetch
+them first.
+
+**A repository that publishes by its own means is told the state and no
+revert.** The `RELEASING.md` the socle seeds there sets `VERSION` on
+`main` by hand, merges, runs `check`, then signs the tag: `check` is run in
+exactly this state. The note says that a release prepared by hand stands
+there, that nothing is to be changed, and what `cut` would make of it. A
+repository whose mechanism is `none` cuts nothing and is told nothing. A
+checkout that cannot know its tags is told nothing either: a directory
+that is not a repository, a shallow clone, a clone made with `--no-tags`.
+`preflight` does not carry these notes — it reads `VERSION` as the version
+about to be tagged, and says "tag vX.Y.Z is free" of the same state.
+
+**`check: ok` is not "`cut` will pass".** What the first stop refuses, and
+who says it beforehand:
+
+| the first stop refuses | read from | `check` |
+| --- | --- | --- |
+| a `release/vX.Y.Z` left behind without its pull request, or with one closed, merged, or carrying another `VERSION` | GitHub | no |
+| a `VERSION` that is not `X.Y.Z` | the tree | refuses it |
+| a version that does not come after `VERSION` | the tree, the tags | notes it, on an author's checkout |
+| changes outside `VERSION` and `CHANGELOG.md` left uncommitted | the worktree, at that moment | no |
+| no dated entry `## X.Y.Z` | the tree | notes a title `cut` will not read; a version with no title at all is one `check` is not told |
+| an entry dated in the future | the clock | no: the same tree would read differently from one day to the next |
+| a `HEAD` that is not the default branch, level with `origin` | the checkout, the network | no |
+| the gate: the signing configuration, the key among the allowed signers, a shallow clone, the previous tag, a free `vX.Y.Z`, the `release` environment | the signer's machine, GitHub | no; `preflight` reads it for a product the socle releases |
+| a pin moved since the last tag that the entry does not name | the history | no: two more readings of git, on an entry `check` cannot choose |
+| under `--apply` only: the product's verify command, `[cut] after-version` and the audit of the bump, GitHub's verdict on the release commit, the checks | a run | no, and neither does the plan |
+
+**The plan of `cut` reads the rest, and is not the signer's gate handed to
+someone else.** `cut DIR X.Y.Z` without `--apply` reads the release as
+`cut` will. It changes no file of the product and nothing on GitHub; it
+fetches, so it needs `gh`, the network and a default branch level with
+`origin`. What it says of the version, the entry and the worktree is about
+what was prepared. Its lines on `tag.gpgsign`, `user.signingkey` and the
+signing key are about the machine it runs on: whoever prepares a release
+without the key that signs it reads `cut: not ready` and exit 2 on those
+lines alone, which is expected — the managed texts say to leave them, and
+never to configure a key to turn them green. And it does not run what the
+last row of the table lists.
+
 The middle stop is GitHub's. `cut` never merges its own pull request: a
 command that did would work only where the default branch is
 unprotected, and would teach the whole fleet that the releaser approves
@@ -315,6 +572,54 @@ and then fail to verify its own tag for want of it. What a clone needs to
 cut is `user.name`, `user.email` (an address of the GitHub account that
 holds the key), `gpg.format ssh`, `user.signingkey` and `tag.gpgsign
 true`.
+
+### Rewriting a history, before a repository opens
+
+**Only while nobody else consumes the repository**: it is private, it has
+no fork, no clone and no installed copy outside the hands that rewrite it,
+and every repository that pins it can be changed by those hands in the
+same sitting. That is the whole limit, and it is not a way around the rule
+above. Once anyone else reads a tag, the tag is never moved; a datum that
+got out is out — a secret is revoked, not erased — and the mistake is
+fixed by the next patch release.
+
+A private repository had to lose a datum before it opened. What one cycle
+established, with what was measured said apart from what was reported:
+
+- **A `push --force` is not enough, and the protection refuses it.**
+  `protect` writes `allow_force_pushes: false` under `enforce_admins`. And
+  the branch is not all GitHub holds: every pull request keeps its
+  `refs/pull/N/head`. Measured on a public repository of the fleet: 27 such
+  heads on the remote and none in a plain clone, which fetches
+  `refs/heads/*` only — so a clone that looks clean proves nothing — and 7
+  of them name a commit no branch reaches; the one asked for by its hash
+  was served.
+  Reported, from GitHub's documentation: a push cannot write those refs,
+  objects no ref names stay readable by their hash, and the remedy it
+  gives is a request to its support.
+- **So the repository is deleted and recreated**, from a clone whose
+  rewritten history was read first. Reported from the cycle: what belonged
+  to the repository and not to its history is set again — the `release`
+  environment, the protection, the secrets — and the pull requests and
+  issues are gone. Measured: rewriting the second of four commits changes
+  the hash of three, and two commits of one tree give two archives. So no
+  tag survives: each version is cut and signed again, and **every consumer
+  changes the commit it pins**, in `dependencies/<name>.pin` or on a
+  `uses:` line.
+- **Deleting asks the token for a scope it does not have.** Read in `gh
+  help`: `gh repo delete` requires `delete_repo`, which is not among the
+  scopes a login asks for; `gh auth refresh -s delete_repo` adds it and
+  `--remove-scopes delete_repo` takes it back. Reported: GitHub may restore
+  a deleted repository for 90 days, so the deletion removes the datum from
+  what opens, not from GitHub.
+- **The old history lives on wherever it was cloned.** Measured: a branch
+  made before the rewrite merges into the new history without a word, the
+  two sharing their root, and the datum is back in the tree and in the
+  log. Such clones and branches are deleted, or their own commits
+  reattached with `git rebase --onto NEW OLD BRANCH`; never merged.
+- **A channel that quotes the old archive follows.** A Homebrew formula
+  carries the sha256 of an archive of the tag; the version cut again is
+  another archive, and its formula is published again.
 
 ## Dependencies and packages
 
@@ -384,10 +689,201 @@ true`.
   adoptions.
 - A dependency on another Maelys repository is pinned by commit in an
   `dependencies/<name>.pin` file, `name` being the repository name
-  (`maelys-system.pin`): the nearest tag on line 1 for
-  humans, the pinned commit on line 2. The build verifies the checkout
+  (`maelys-system.pin`): the pinned commit on line 2, and on line 1, for
+  humans, the tag that commit carries. The build verifies the checkout
   (`git rev-parse HEAD` equal to the pin, no local modification of the
   contract paths).
+- **Line 1 says what line 2 is, and `dependencies` holds it to that.** This
+  text long said "the nearest tag", and the socle refuses exactly that: the
+  nearest tag of a commit that carries none names another commit, and a pin
+  naming two is refused, "one of the two is wrong". What line 1 holds, in
+  every case the socle accepts:
+
+  | the pin | line 1 | what `dependencies` verifies in the checkout |
+  | --- | --- | --- |
+  | on a tag — every pin on a Maelys repository, and a third party's release | the tag | it names the commit of line 2 |
+  | past a tag, as `migrate` writes it into the documentation repository | what `git describe --tags` says of the commit, `vX.Y.Z-N-gSHA` | it names the commit of line 2, which that form does by its hash alone: the tag spelled in it is not read |
+  | a third party's commit no tag carries, with an `unreleased <branch>` line | the last tag before the commit | it is a tag, an ancestor of the commit, and not the commit itself |
+
+  A line 1 that names another commit is refused. One that names nothing in
+  the checkout is a note, whatever the commit carries: "carries no tag"
+  over an untagged commit, and over a tagged one what the checkout holds —
+  said as read, because a tag made since the checkout last fetched its
+  tags reads the same as a wrong one. `check` reads the product's files
+  and holds no clone of what they pin, so none of this is `check`'s to
+  say: it reads line 2 as a commit and the attribute lines as grammar, and
+  the rest belongs to the one command that has the checkout.
+- **A pin has one reading, and it is the managed script's.** The script is
+  the reader that clones: it matches an attribute from the first column of
+  a line to the last, takes the first `repository` line, and clones from
+  the organisation when the file has none. The socle's own reader stripped
+  each line first and took the last, and the two then disagreed in
+  silence — `repository <URL>` followed by one space was a third party for
+  `check`, and no line at all for the script, which cloned the fleet's
+  repository of that name.
+
+  **The script refuses that line itself**, and this is an executed line of
+  a managed file, not a comment. A line that starts like a repository line
+  and is not one its reader matches — a space after the URL, a space or a
+  tab before the word, a tab for the space, another case, a colon, no URL,
+  no `https://` — stops it with exit 65, on stderr, naming the pin file
+  and the line, before anything is cloned; so does a second `repository`
+  line, since only the first is read. Cloning another repository than the
+  one the file names is the worst a clone script can do, and the reader in
+  Python cannot close it alone: `check` re-executes the socle a product
+  pins, so a product on an older one is told nothing, while its jobs run
+  whatever script it carries. For a well-formed pin nothing changes — the
+  three `repository` lines of the fleet are in that shape — and the script
+  refuses nothing else: another attribute spelled wrong, or a word nobody
+  knows, it ignores as it always did, and the reader below is what refuses
+  those. It is POSIX `sh` and `awk`, tried under the shell of macOS, dash
+  with mawk, and busybox.
+
+  And the reader refuses, as a problem of the pin,
+  whatever the script would read differently or not read: a carriage
+  return anywhere in the file; a line 2 that is not forty hexadecimal
+  digits alone; a line 1 with a space in or around it, or a leading dash;
+  an attribute line with a space before or after it, a tab, two spaces,
+  another case, a colon, or its word glued to its value; an attribute
+  given twice. Measured before any of it became a refusal, on the 62 pins
+  of the 17 repositories of the organisation that carry any: none has a
+  carriage return, a tab or a space out of place, every line 2 is forty
+  digits, and the lines after it are `repository`, `submodules`,
+  `on-request` and one `sha256:` — the digest `vendor` writes under the
+  socle's own pin, which the reader knows. No green product turns red.
+
+  A line that starts with no word the socle knows is **a note of `check`,
+  not a refusal**, as a section of the declaration file is: products pin
+  the socle by commit, and an attribute a later socle reads would
+  otherwise refuse every product that writes it before adopting.
+
+  A `repository` URL takes one shape: `https://host/owner/name`, with
+  `.git` or without. No user, no port, no empty segment, no `.` or `..`,
+  no percent-encoding, no dot after the host, nothing after the path; on
+  `github.com` exactly an owner and a name, elsewhere one segment or more.
+  Each of those spellings read as "not maelys-dev" and reached it. The
+  host and the owner are then compared whatever their case. **And that is
+  all a string decides.** It does not know that a repository under another
+  owner is a fork of the fleet's, that one was renamed or transferred and
+  its old URL redirects, or that another host — the one `MAELYS_GIT_BASE`
+  names on some machine, a mirror, a proxy — serves the fleet's
+  repositories. "Third party only" is a rule on what the pin says, held
+  exactly; whether what it names is a third party is not something the
+  socle can read.
+- **A third party's commit that no tag carries says so, and says which
+  branch holds it**: `unreleased <branch>`, a fourth attribute, beside
+  `repository`.
+
+  ```
+  v2.3.0
+  0123456789abcdef0123456789abcdef01234567
+  repository https://example.org/their/library.git
+  unreleased main
+  ```
+
+  The need is a product that builds a part of a library newer than any
+  version its authors have published. The word is the reason; the branch is
+  what can be verified. A tag holds its commit for good and a branch holds
+  it until somebody rewrites it, so the pin names the one ref its commit
+  depends on, and the socle asks whether it still does.
+
+  **Third party only.** The line is refused without a `repository` line,
+  and with one that names `maelys-dev`: a Maelys repository is pinned on a
+  tag, and that rule does not move. The fleet can tag what it needs; a
+  third party cannot be asked to. The branch is a name git takes as a
+  branch, spelled as the repository spells it: `HEAD`, `FETCH_HEAD` and
+  `refs/heads/main` are refused where the pin is read, as is a name git
+  itself refuses. A name that is a tag over there, and no branch, cannot
+  be told from the file: `dependencies --apply` says the repository has no
+  such branch.
+
+  **Line 1 is the last tag before the commit**, and it is verified: exactly
+  the name of a tag of that repository — `v1.1.0^0` resolves in git and is
+  no tag — an ancestor of the commit, not the commit's own. A commit that
+  carries a tag is a pin on that tag and needs no line: when the third
+  party tags the very commit a product pinned, the line no longer says the
+  truth, `dependencies` notes it from the first run, and the pin should
+  name that tag and lose the line. Any
+  ancestor tag is accepted; one that is not the last is a note naming the
+  nearer, not a refusal. Two reasons. "An ancestor" stays true whatever
+  anybody does afterwards, where "the last" stops being true the day the
+  third party tags an older commit of its branch — which is how a release
+  is cut on a branch that has moved on — and a product must not turn red
+  for that. And "nearest" is a count git makes across merges, not a
+  property of the history: what is verified is the property, that no tag
+  lies between line 1 and the commit. `git describe --tags` output is
+  refused there, by `check`: the line already says the commit is past its
+  tag.
+
+  **What is verified, and where.** Three places, and they do not know the
+  same things:
+
+  | | reads | verifies | cannot know |
+  | --- | --- | --- | --- |
+  | `check`, `declarations` | the pin file, offline | the grammar and the string of the URL, and nothing else: that the line stands on a pin whose URL does not name `maelys-dev`; that line 1 and the branch are names git takes | whether line 1 is a tag at all, whether it is an ancestor, whether the branch exists or holds the commit: it has no clone |
+  | `dependencies DIR` | the checkout it made, offline, and only one that is at the pin | line 1 against the tags that checkout holds: exactly a tag, an ancestor, not the commit's own | the branch — the ref in hand is the branch as of the last clone, and a later refresh fetches the commit by its hash without moving it; and a tag the checkout does not hold, which is a note and not a refusal |
+  | `dependencies DIR --apply` | the repository: one `git fetch` of the one branch, and of the one tag when the checkout lacks it | that the branch exists and holds the commit; that line 1 is a tag of the repository | whether the repository still serves a commit its branch has dropped: not asked; and anything between two runs |
+
+  The middle row is why nothing is refused on the branch without asking:
+  measured, a checkout refreshed onto a newer commit of the branch answers
+  "not an ancestor" from its stale ref, for a pin that is right. `--apply`
+  asks, and every row of a plan says that it did not — the one that would
+  clone and the one that would refresh as much as the one already there. A
+  pin that is also `on-request` is neither fetched nor judged without
+  `--all`: nothing looked at what sits at its path.
+
+  "No" is kept apart from "cannot know". A repository that cannot be
+  reached is a note, "not verified". A checkout that is shallow, or was
+  cloned without its tags, cannot answer "not an ancestor" or "no such
+  tag" for what it was never given: the first is a note, the second is
+  asked of the repository by name. A refusal is an answer: the repository
+  has no such branch, the branch does not hold the commit, the repository
+  has no such tag, the tag is not an ancestor.
+
+  The refusal says what was read and no more. A branch that dropped the
+  commit is refused naming the pin, the branch and its tip; whether the
+  repository still serves the commit is said only by a run that just
+  obtained it. And the day it does not — a new machine, the commit pruned —
+  the failure to obtain it names the pin and its branch, says what the
+  clone holds of that branch, and gives the likely reading as a reading,
+  beside git's own words.
+
+  **What automation does of all this: nothing.** Stated plainly, because
+  the line could be read as a guard:
+
+  - `check` and `declarations` verify the grammar and the string of the
+    URL, and nothing about the repository.
+  - `check` re-executes the socle a product pins. A product pinned on a
+    socle older than this line gets **no refusal at all** for it — not the
+    grammar, not "third party only": that socle does not know the word.
+    The rules above reach a product at its next adoption.
+  - No workflow runs `dependencies`. `scripts/checkout-dependency.sh`
+    clones the commit as any other and reads nothing of the branch. So
+    nothing in CI or in a release checks that line 1 is an ancestor, that
+    the branch holds the commit, or that the branch was not rewritten or
+    deleted: CI learns of it the day the clone fails, unless somebody ran
+    `dependencies DIR --apply` first.
+
+  `declarations` returns these pins under `unreleased`, apart from the names
+  of `dependencies`, with the repository, the branch, the tag and the
+  commit of each: a fleet observer asks which products stand on a branch
+  without opening a pin. `cut` applies to them the rule it applies to every
+  pin: the entry of a release that moves one names the dependency.
+
+  **What no line of a pin settles.** An untagged commit can disappear at
+  the third party, and saying so in a file prevents nothing: the line makes
+  the risk declared and its realisation visible, not impossible. The parry
+  is on the product's side and is a recommendation, not a rule: pin a
+  **mirror** the product controls, where a tag of the mirror's own holds
+  the commit. The pin is then an ordinary pin on a tag — `repository` names
+  the mirror, line 1 its tag, and no `unreleased` line, since nothing there
+  depends on a branch any more. It costs one more repository to keep: to
+  create, to refresh at each re-pin, and to answer for — the mirror is what
+  the product builds from, and that it holds the third party's commit and
+  nothing else is the hash's to prove, the same commit being the same
+  content wherever it is fetched. A product that pins a library for one
+  release cycle may reasonably not pay it; one that ships from that commit
+  for a year should.
 - The checkout is managed, and there are two of it, written by
   `maelys-release adopt` from the pins. `scripts/checkout-dependency.sh NAME
   [DESTINATION]` clones `maelys-dev/NAME` at its pinned commit — next to the
@@ -1116,7 +1612,11 @@ does not say where either came from.
   file stays the product's.
 - Before the first tag of a product, and after any change to
   `dependencies/packages` or `package-release.sh`, `maelys-release rehearse DIR
-  TARGET` replays the Linux build job in Docker.
+  TARGET` replays the Linux build job in Docker. That is the packaging of
+  the release and no job of this section: `rehearse DIR TARGET --check`
+  replays the check of a leg, and is the one to run before pushing what a
+  Linux leg will compile. "What a rehearsal replays, and what it does not",
+  below, says which answers for what.
 - **Every job of the socle is bounded, because nobody else can bound it.**
   GitHub refuses `timeout-minutes` on a job that calls a reusable workflow,
   so a product cannot cut a job of the socle that hangs, and the default is
@@ -1210,15 +1710,363 @@ does not say where either came from.
   from a branch or a `release.yml` edited on a branch cannot publish. GitHub
   creates a missing environment without any rule, so `preflight` checks the
   rules and not the presence — all of them, since they are alternatives and
-  one branch policy beside the tag rule admits that branch. Set it once per
-  repository, and nothing else:
+  one branch policy beside the tag rule admits that branch. `maelys-release
+  protect DIR --apply` sets it, once per repository, and nothing else; what
+  it sends, and what it refuses to send, is under "What `protect` writes of
+  the release environment" below.
 
-  ```bash
-  gh api -X PUT repos/OWNER/REPO/environments/release \
-    --input - <<<'{"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}'
-  gh api -X POST repos/OWNER/REPO/environments/release/deployment-branch-policies \
-    -f name='v*' -f type=tag
-  ```
+## What the tracked files say of their author
+
+A file can carry the name of the machine it was written on, the home
+directory of whoever wrote it, an identifier of their installation or of
+their account. Nothing in the socle read a tracked file from that angle.
+`check` does, and this section says exactly what it reads, what it shows,
+and what it does not do.
+
+**Six families, each read by the shape of a value.**
+
+| family | what is found |
+| --- | --- |
+| `machine` | this machine's own name, as `hostname -s` gives it and, on macOS, `scutil --get LocalHostName` and `ComputerName` — its words in order, whatever separates them and whatever their case |
+| `host` | a home-network host, `NAME.home`, `NAME.lan`, `NAME.local`, `NAME.home.arpa`: alone, in a URL, in a share (`//NAME.lan/x`), in a list, in a sentence |
+| `path` | `/Users/NAME`, `/home/NAME`, the same under `/mnt/c`, `/Volumes/X`, `/System/Volumes/Data` or `/var`, and `C:\Users\NAME` in either case |
+| `identifier` | a UUID, a token of sixteen characters or more holding a digit, or a number of six digits or more, **under an identity key** |
+| `email` | an address the repository does not publish itself, outside the reserved domains and `noreply` |
+| `term` | a line of the author's own list, which is not in any repository |
+
+**An identity key has one definition**, read three times: by git to name the
+files worth opening, by the search that precedes a parse, and by the rule.
+One of `installation`, `device`, `machine`, `account`, `user`,
+`organization`; then at most three characters that are neither a letter nor
+a digit; then `id` or `ids`; at the end of the key and in any case:
+`installationId`, `device_id`, `User ID`, `user.id`, `accountIds`,
+`githubUserId`. And the object that carries one: `id` in an object named
+for one of the six, singular or plural, as `{"installation": {"id": …}}`
+writes it, or a YAML block, or a TOML table. Measured on the forty-four
+repositories of the fleet, that last rule adds three findings, in one file,
+all of them account numbers a recorded API response carries.
+
+**By shape of value, not by substring.** A sieve on `.home` run over a
+clean product reported three lines, all of them a field access in code. A
+check that is wrong three times out of three on a clean tree is switched off
+the day it lands.
+
+**A file is a document by its name**, and the two value families — a host,
+an identifier — are read in documents only:
+
+- `.json`, `.jsonl`, `.ndjson`, `.jsonc`, `.json5`, `.geojson`, `.har`,
+  `.ipynb`, `.webmanifest`, `.sarif`: parsed, key by key. A string that
+  holds a document — the body of a request, kept as it was sent — is
+  parsed in turn. A
+  byte-order mark, several documents one after another and one document a
+  line are all read as what they are.
+- `.yml`, `.yaml`, `.toml`, `.ini`, `.cfg`, `.conf`, `.env` and `.env.*`,
+  `.properties`: read a line at a time, as assignments. The socle carries no
+  YAML parser and vendors none.
+- `.log`, `.txt`, `.out`: a line that ends in a JSON document is read as
+  one, and a line that is an assignment as one.
+- every other text: only the shapes that cannot be code — the path, the
+  address, this machine's name, the author's terms.
+
+**A file named as JSON that does not parse is said to be.** A truncated
+file, a trailing comma, comments: it is read a line at a time, where a key
+is seen only on the line that holds its value, and `check` lists it —
+`privacy.files.astext` — instead of counting it as read.
+
+**What is out of scope, as a list**: a document inside a Markdown code
+block; XML and property lists; CSV; a constant in a source file, fixtures
+included; a document under a name that is not in the list above — a
+file of JSON saved as `.snap`, or with no suffix; anything in a binary format.
+In those, the path, the address, the machine's name and the terms are
+still found, as in any text; a host and an identifier are not.
+
+### No output shows what a family matched
+
+A privacy check that copies what it found into a CI log publishes it a
+second time, to a place nobody rewrites. So:
+
+- **A finding leaves without its value.** `--format json` carries
+  `privacy`, whose findings are a `family`, a `path`, and a `key` or a
+  `line`.
+- **A key is a value, and so is the name of a file.** Each is examined by
+  every family before it is shown: the key of a JSON object, the key of a
+  line of YAML, every component of every tracked path — alone and without
+  its last suffix, and `Users/NAME` across two. A match is a finding of its
+  own, `"in": "key"` or `"in": "name"`, and is shown by its position:
+  `tracked path 17, fixtures/(not shown)/b.json`. The list of what was not
+  read uses the same names.
+- **A key that holds sixteen hexadecimal digits in a row, or six digits, is
+  not shown**, whatever it is.
+- **The last gate.** Before anything leaves, every line and every string of
+  the data is compared with every value found, as a whole word and without
+  regard to case, and what matches is replaced. A name one reader took for
+  a word is caught by what another reader found.
+- **A line of `[privacy]` the grammar refuses is named by its number and
+  never quoted**: the line a repository got wrong may be the value it meant
+  to keep out.
+
+### What each family takes for nobody
+
+**An invented identifier is not a leak.** It says so (`test`, `example`,
+`fake`, `sample`, `synthetic`…), or public documentation prints it (the
+UUID of RFC 4122, the two an encyclopedia made the default of every
+tutorial). Otherwise, by what it is made of:
+
+- a number, when it holds two different digits at most, or when each digit
+  follows the one before, up or down: `100000`, `424242`, `123456`. Of the
+  900 000 numbers of six digits 2 538 are, one in 355, each of them tried;
+  of seven digits one in 1 900; of eight one in 8 500; of nine and more
+  fewer than one in 50 000.
+- anything else, when at least four of every five of its symbols equal,
+  follow or precede — in the order `0-9a-z` — the symbol one or two places
+  before: the nil UUID, `12345678-1234-…`, the `a1b2c3d4-e5f6-…` of every
+  generated example. Of a million random UUIDs none is. Of random tokens of
+  sixteen hexadecimal symbols one in 9 000 is, of twenty one in 150 000. A
+  random token of letters and digits is taken for an invention about once
+  in 10 000 to 40 000 whatever its length, and by the first rule: it
+  happens to spell `test`.
+
+**A name under a home directory is a finding unless it is a single letter,
+a system account, a placeholder or a declared invention.** The accounts and
+placeholders are a list — `runner`, `Shared`, `linuxbrew`, `www`,
+`appuser`, `user`, `username`, `your_username` and their like — compared
+without regard to case; a name in capitals that is not in it is a name. No
+first name is in it: a name invented for a fixture is declared by the
+repository that invents it. In code and in prose, `/home/WORD` closed by
+the quote that opened it — `'/home/dashboard'` — is a route and not a
+home. **Known noise**: a route with more than one segment below `/home/`
+is reported; none exists on the fleet.
+
+**A host whose first label is a word programs use for themselves names no
+machine**, when that label and the suffix are the whole name: `user.home`
+is a property of the Java runtime, `settings.local` a file, `args.home` a
+field. The words are a list in the module. The reserved labels (`example`,
+`test`, `invalid`, `localhost`) and Kubernetes' `cluster.local` name
+nobody's network. None of these is reported on the fleet.
+
+**The addresses a repository publishes are not leaks**: those of
+`LICENSING.md` and `SECURITY.md` — at its root, in `.github/` or in
+`docs/`, where GitHub reads them — and of any file whose name is or ends in
+`allowed-signers`, wherever else they appear. What ends an address is a
+country's two letters, or one of a list of endings; `W@x.data` is a matrix
+product and `icon@2x.png` a file. What stands before the host of a URL,
+`scheme://user:password@host`, is not a correspondent. **What this
+misses**: an address under an ending that is not in the list, and under
+the two-letter endings that end a file of code more often than an address
+(`.py`, `.rs`, `.sh`, `.md` and eleven more). The rest is one line for the
+whole family, counting the addresses and how many stand in a copyright or
+authorship notice. On the fleet: nine addresses in forty-four
+repositories, six of them one vendored library's notice in two
+repositories, one in the deprecation message of a lockfile.
+
+### A note first, and the repository raises it
+
+**The guard is born a note.** A rule no product can satisfy on the day it
+appears is a rule people switch off, and this one reads every tracked file
+of repositories that were never read this way. No product that was green
+turns red for it. A repository that is clean says so, in
+`maelys-release.conf`, and from then on a finding is a violation and
+`check` exits 2:
+
+```
+[privacy]
+refuse
+fabricated alice atelier.home
+except fixtures/legacy/*.json family host key peer kept as 1.4.0 shipped it; regenerated with 2.0.0
+except vendor/ family email third-party notices, kept as their authors wrote them
+```
+
+- `refuse` alone raises every family; `refuse host path identifier` raises
+  those and leaves the others notes.
+- `fabricated NAME…` declares names invented for fixtures: a user name, a
+  host or its first label, an address or its domain. **A name declared here
+  is published by the declaration.** Never declare a real one to quiet a
+  finding — that is what `except` is for.
+- `except PATH family FAMILY REASON`, and `except PATH family FAMILY key
+  KEY REASON`, designate what stays. The reason is on the same line and
+  required.
+
+**A line of `[privacy]` that is not one of these is a violation**, in every
+repository and whatever publishes it: `refuse hosts`, `refuse  # all` — a
+repository that asked for a refusal and mistyped it is told, never left
+with a note it did not ask for. The guard judges the section and nothing
+else does, so the answer is the same for a repository the socle releases
+and for one it does not.
+
+**An exception excuses what it names and nothing beside it.** One family;
+under one key when it names one. And one path, compared whole:
+
+- a tracked path, as it is: `data[1].json` is that file and no other;
+- a directory, when it ends with `/`: everything under it;
+- a path holding `*`, which stands for any run of characters inside one
+  component and never crosses a `/`: `fixtures/*.json` is not
+  `fixtures/deep/b.json`.
+
+Nothing else is a pattern. `**` is refused, and so is a pattern made of
+nothing but stars: an exception names a file or a directory, not every one
+of them. An exception that excuses nothing is noted — in the tracked files
+when `check` reads those, and in the history too when it was asked to read
+it, which is the only reading that can say the line can go.
+
+**An exception designates; it never says what it excuses.** A line that
+quoted the host name to say which one it tolerates would be the leak, moved
+into a file every reader opens. What is compared with every line of the
+declaration file, comments included, as a whole word and without regard to
+case: the host of an excused host or URL, the name under an excused home,
+the address, the identifier whatever brackets it, the machine's name or the
+term as it was found. What is not, and cannot be: anything derived from
+them — a part, a translation, an encoding.
+
+**And no form takes a fingerprint of the value.** It was asked for. The
+digest of a low-entropy value — a host name, a first name, an account
+number — is one dictionary pass away from the value, and it would sit in a
+public file looking like a precaution. What the grammar refuses, by shape,
+in any word of an `except` line — its path, its key, its reason: sixteen
+hexadecimal digits in a row, whatever precedes them; and twenty characters
+or more of the alphabets base64 uses that hold a digit, a capital and a
+small letter. That is all it reads. A reason made of words can still say
+anything: the rule is for the habit, not against intent.
+
+An older socle does not know `[privacy]` and says so as a violation, as for
+any section it does not know: declare it once the socle a repository pins
+is this one or later.
+
+### What only the author's machine knows
+
+**The machine's name is checkable in one place: the machine, before the
+push.** `check` says in its first privacy line whether the name was looked
+for: not where no `hostname` command exists, and not when the name is
+shorter than six letters or is one every machine of its kind carries
+(`localhost`, `MacBook-Pro`), which would name nobody.
+
+**The author's own terms live on the author's machine.** A first name, a
+private project's name, a client's: a committed list of what must not be
+published would be the publication. The list is
+`${XDG_CONFIG_HOME:-~/.config}/maelys-release/private-terms`, one term a
+line, `#` for comments; absent, nothing happens. A term is found as it was
+written: its words in order, a hyphen, a dot or a space between two of
+them optional, and anything else — the `@` of an address, a `/`, an `&` —
+required. A match is reported as *the term on line N of your private
+list*, never the term. A term of fewer than three letters and digits is
+not looked for.
+
+**Neither is looked for on a CI runner**, where `CI` or `GITHUB_ACTIONS` is
+`true` or `1` — one definition of a runner, the one the address note is
+silent by. A runner has a name and no author: looked for there, a runner
+called after a word of the tree would find it, and a repository that
+refuses the family would be refused for it. The first privacy line says
+they were skipped, and nothing local counts towards a refusal there.
+
+**Neither reaches a process list.** git is given the machine's name and the
+terms on its standard input, never as an argument.
+
+### The history, on demand
+
+`check DIR --history` reads every ref of the clone — branches, tags,
+remote-tracking refs, whatever else `refs/` holds:
+
+- the name of each ref, which is a value like another;
+- every name any tree of the history gave a file or a directory;
+- each blob once, however many commits and paths carry it, under the first
+  path it had — and each blob counted: three versions of one file are
+  three;
+- every commit message, and every author, committer and tagger line.
+
+It is the question asked before a repository becomes public, and it is not
+asked on a pull request: it reads everything.
+
+**Nothing in a history refuses**, whatever `[privacy]` says of the tree. A
+published tag is never rewritten, and a finding in a blob three versions
+old cannot be fixed by the next commit; a rule a repository cannot satisfy
+is a rule it switches off. An exception reaches the history as it reaches
+the tree.
+
+**It says what it did not read**, because a zero that did not look is not a
+zero:
+
+- GitHub keeps `refs/pull/N/head` for every pull request ever opened, and
+  an ordinary clone does not bring them. Unless they were fetched —
+  `git fetch origin "+refs/pull/*/head:refs/pull/*/head"` — the line says
+  they were not read.
+- A shallow clone is said to be one.
+- Objects that are binary, archives, images, above the size bound, or
+  under a name that is not UTF-8 are counted; so are the objects a partial
+  clone names and never fetched, which are listed without failing and
+  without fetching; and a listing git refused is said, never read as an
+  empty history.
+- A ref is read as it was last fetched, and what no ref reaches — a commit
+  a force-push left on the server, a reflog — is not read.
+
+The addresses of a history are its identities, and every history has them:
+they are counted, with the command that prints them where only the author
+reads them, and not listed.
+
+`check` hands a product to the socle that product pins, and a socle before
+this one knows neither the guard nor the option. Until the pin has moved,
+`MAELYS_RELEASE_NO_RELOCATE=1 maelys-release check DIR --history` asks the
+socle at hand, which is the one that can answer.
+
+### What the guard does not do
+
+- **Secrets and tokens.** A token has a format, and the service that sees
+  every push and knows the formats is GitHub's: secret scanning and push
+  protection. `preflight` says, as a note, when a public repository lacks
+  either — from the repository document it already reads, which carries
+  `security_and_analysis` for a reader who administers the repository, so
+  the note costs no call; for any other reader the member is absent and
+  nothing is said.
+- **Archives, images, media, documents with metadata**, by their name: not
+  opened, and counted as unread, by kind, in the line that says what was
+  read. An EXIF block, a PDF's author field, a tarball of fixtures:
+  nothing here vouches for them.
+- **Binary files.** One whose name says so — a font, an object, a
+  database — is counted as unread. Any other is searched by git for the
+  same shapes as a text, as bytes, and is counted as unread when a shape
+  was found in it; what a binary holds in another encoding than ASCII or
+  UTF-8, or compressed, is not seen, and a binary in which nothing was
+  found is not counted apart. Telling every binary from every text means
+  opening every file, which is the cost this reading exists to avoid.
+- **Files above 4 MiB** that hold a shape, counted the same way.
+- **A file that holds too much**: beyond a hundred findings of one family,
+  or twenty thousand lines to read, a file is read up to there, and listed
+  — `privacy.files.partial`.
+- **A submodule**, which is another repository's to check.
+- **Meaning.** A first name in a comment that is not on the author's list,
+  an identifier under a key the definition does not hold: the guard reads
+  shapes, and a shape it was not given is not found. A green line here
+  means these six families were looked for in the files counted, and
+  nothing more.
+
+### What it costs
+
+`check` runs on every pull request of every product. So git names the
+files that hold a shape — two calls, one for the documents and one for
+everything else, each file read once and in one process — and only those
+are opened; an opened file is searched before it is parsed; and the
+reading is linear in what it reads.
+
+Measured on 2026-10-10 on the laptop this was written on, which was busy
+with other work:
+
+- **A file of 4 MiB built to be slow** — eighty thousand paths, as many
+  addresses, a line of four million spaces, a document of nothing but
+  identity keys, thirteen shapes in all: under one second of processor
+  time each, 0.76 s for the worst. The same three that were not linear
+  took 2.3 s at forty thousand spaces and 53 s and 58 s at 2 MB.
+- **A tree of 50 000 small source files that hold nothing**: git reads each
+  once, and nothing is opened here. 2.9 s when the machine was quiet, 5.4
+  to 7.5 s when it was not, half a second of it in this command; 55 s when
+  every file was opened here. The floor is one opening of each tracked
+  file, which is what searching them means, and on that machine an opening
+  costs sixty microseconds of system time.
+- **This repository**, some 400 tracked files and 10 MB: `check` went from
+  1.8 s to 2.2 s. **The largest repository of the fleet**, 2 784 tracked
+  files of which 1 426 are not read for their name: from 0.9 s to 2.1 s.
+
+git is asked in Perl's dialect where it was built with it, which reads the
+same patterns three times faster than POSIX's, and in POSIX's where it was
+not; the patterns mean the same in both, and a test reads one tree both
+ways.
 
 ## Agents
 
@@ -1226,6 +2074,21 @@ does not say where either came from.
 Claude skill under `.claude/skills/maelys-release/`; they carry the rules
 above in the form an agent needs. Products may add their own rules outside
 the managed block.
+
+The block also says one thing that is not a rule of the fleet but a fact of
+the command: **through `ssh -t`, pass `--pager never`**. The contract pages
+the text of a command on a terminal, and makes no difference between a plan
+and the account of a write; `protect --apply`, run that way, wrote and then
+stopped on the pager's `:`, and a command that had finished looked hung.
+It can stop, and does not always, which is what made it hard to name: with
+`PAGER` unset the framework runs `less` and gives it `LESS=FRX`, whose `F`
+returns by itself when the account fits the screen. Only a longer one
+waits — or any one on a host that presets `PAGER` or `LESS`, which the
+framework then leaves as they are. The behaviour is the framework's and is
+not changed in the module the socle vendors. `--non-interactive` has the
+same effect, and JSON is never paged. The sentence is in both forms of the
+block and not in the skill: the block is in `AGENTS.md` and `CLAUDE.md` of
+every repository that carries the skill, and is read before it.
 
 ## Compatibility of the managed files
 
@@ -1469,8 +2332,9 @@ review.
   `<product>/VERSION`, and both describe the commit that was cloned: HEAD.
   Line 2 is that commit and line 1 is what `git describe --tags` says of
   it — the tag itself when HEAD carries it, `vX.Y.Z-N-gSHA` past it, which
-  names the same commit and never the tag's. `VERSION` is read at that
-  commit too. A product with no tag is refused: its prose would describe no
+  names the same commit and never the tag's: the second of the three
+  shapes "Dependencies and packages" gives line 1. `VERSION` is read at
+  that commit too. A product with no tag is refused: its prose would describe no
   release. The pin is the fleet's one format; the socle refuses
   `adapter/<NAME>_PIN` in a product since 0.14.0, so it writes none here.
 - **`--apply` moves what is committed, and refuses a tree that differs from
@@ -1534,8 +2398,9 @@ repository holds:
 
 1. `LICENSE` (the MPL-2.0 text this socle carries), `VERSION` at `0.0.0`
    — what was published last, and nothing was; the first release is `cut
-   DIR 0.1.0` once its dated entry is written — `CHANGELOG.md` with the
-   dated `## 0.0.0` entry `check` requires of VERSION, a `README.md` skeleton,
+   DIR 0.1.0` once its dated entry is written — `CHANGELOG.md` with a
+   dated `## 0.0.0` entry that says so, written first so that every
+   release lands above it (`check` asks it of nobody), a `README.md` skeleton,
    and `scripts/package-release.sh` as a stub that **fails** until the
    product says how it packages: a release must not publish nothing.
 2. One `dependencies/<name>.pin` per `--depends NAME@vX.Y.Z`, the tag on
@@ -1545,6 +2410,12 @@ repository holds:
 The directory must be empty or absent; a `.git` is allowed. Plan by
 default, `--apply` to write. `--mechanism` picks what the repository
 publishes with, as for `adopt`.
+
+`new` also says, in its plan as in `--apply`, when git has no name or no
+address of an account to commit with here: before a repository's first
+commit is the one moment an identity made up on the machine costs nothing
+to replace. The rule and the optional hook are under *The address a commit
+carries*.
 
 ## Adopting and upgrading
 
@@ -1750,6 +2621,49 @@ same root removes an asymmetry rather than creating one. The clone is
 attempted and never required: a machine that cannot reach the socle still
 builds, and says so on stderr.
 
+**The script's checkout carries the tag its line names.** The line is
+`…@<commit> # vX.Y.Z`, and a fetch by commit brings no tag: the checkout
+did not know which version it was, so `cut` run from it said "socle
+untagged" at every release and `adopt` refused it without
+`--allow-untagged`, for a commit the same line calls a release. The script
+brings that tag by name, as a label and nothing more:
+
+- The commit on the line decides what is checked out, alone and first.
+- A comment that is not `vX.Y.Z` and nothing else — `# untagged`, which a
+  candidate under trial writes, or a `git describe` past a tag — asks the
+  remote nothing, and is never handed to git.
+- The remote is asked what `refs/tags/vX.Y.Z` names before anything of it
+  is fetched, by the whole name of the ref: a branch named like the tag is
+  not the tag. A tag that names another commit, or a tree, is not fetched
+  at all, and stderr says both.
+- The tag is created only when **what was fetched** resolves, peeled, to
+  that commit and, for a tag object, **calls itself by the name asked
+  for**. `git describe` answers with the name inside the object and not
+  with the name of the ref: a remote serving `refs/tags/v1.2.3` as an
+  object named `v9.0.0`, on the right commit, made the checkout describe
+  itself as `v9.0.0`, which `adopt` would then have written as the label.
+- Whatever is declined is said on stderr in the script's own sentence, and
+  fails nothing.
+
+The two calls that ask for the tag carry git's low-speed settings, 1000
+bytes a second over ten seconds. Measured: a server that accepts the
+connection and never answers is given up on after that time, with
+"Operation too slow", and after seventy seconds when the setting says
+seventy. They bound an http(s) transfer, which is what the
+fleet's base is, and need no `timeout` command. **The fetch by commit
+above them is not bounded that way, and neither is the clone of a pin**: a
+remote that hangs there still holds the job. That is older than the tag
+and is not changed with it.
+
+The signature of the tag is not judged there: nothing is decided by the
+label that the commit had not decided already, and the release workflow,
+which does decide, verifies a product's own tag against the allowed
+signers. And "untagged" is still what a socle says of itself where it was
+fetched by commit by something else than this script: the four steps of
+`check-product.yml` and `check-legs.yml` that fetch it, and the cache
+`check`, `preflight` and `rehearse` run the pinned socle from. `cut` or
+`adopt` run from one of those reads as before.
+
 The search below knows the name, under its own variable: a file that reads
 `$MAELYS_DEPENDENCIES_DIR` has migrated its pins and may still take the
 socle from `../maelys-release`, which is where two products stand today.
@@ -1847,6 +2761,74 @@ check says so. The command reads the pins of the checkouts it materialised
 and notes what the product does not pin, or pins elsewhere: a note, never a
 refusal, because the fleet disagrees today and is green.
 
+**A pin is the one place its commit is written, and `check` names the
+others.** In an orchestrating product the commit of one dependency lived in
+three places — its pin, a table in a bootstrap script, and a document — and
+moving it took three edits, held together by whoever remembered the other
+two. `check` searches the tracked files for the commit of every pin, in one
+`git grep` for all of them, and notes each pin whose commit is written
+again, with the files and the lines: the three places become one known
+list.
+
+```
+note     dependencies/NAME.pin: the commit it pins (abc1234) is also written in 2 other tracked files: docs/build.md:4,5, scripts/bootstrap.sh:12. Nothing ties them to the pin: when it moves, each is edited, written again by its tool, or left as the record it is. A file that can read the pin should, and this line is the list of the rest
+```
+
+The forty characters, and nothing shorter: seven of them are a word any log
+or digest may contain. Three kinds of file are left out, because what they
+write is not a copy somebody keeps. Another `dependencies/*.pin` is a
+declaration of its own. A `CHANGELOG.md` says which commit a version
+pinned, and the next pin does not rewrite it. And under `docs/`, what is
+not prose is the data of the table at the top of this page — an audit, the
+evidence of a run, written by a machine and by it again. Prose there is
+read in every form the socle calls prose: `.md`, `.markdown`, `.txt`,
+`.rst`.
+
+**No lock file is exempt by name, and the note claims no edit by hand.**
+A file that names the commit may be a table somebody keeps, a lock a tool
+writes again, or a record that stays; `check` cannot tell which, so it
+says the files are there and what may become of each. The fleet tracks
+eleven lock files and none names a pin's commit: a list of the names
+tools give their lock files would be a list to keep, for a case nobody
+has met.
+
+Measured before deciding, and again after the rule was corrected, on a
+shallow clone of every repository of the fleet: 53 pins in the 15
+repositories `check` answers for. A changelog names a pinned commit on
+three lines, in two of them; data under `docs/` does in seven files of
+two; no lock file and no generated reference does; and the documentation
+repository, eleven pins, repeats none. What the rule notes is 10 pins in 5
+repositories, 38 repetitions in 23 files: seven are code, a workflow or a
+formula template, nine are prose, and seven — fifteen repetitions, all in
+one repository, where five pins are each written in four to seven files —
+are records of a past state by their own path, the notes of a milestone or
+the provenance of a corpus. Those cannot be told from a document that must
+follow, since both are prose naming the commit; no note names records
+alone, and a record leaves the list by itself when the pin moves, because
+it keeps the commit it recorded.
+
+**The note cannot take `check` down, and does not depend on whose git
+runs it.** Only the match is asked of `git grep`, never the line that
+holds it, and paths come quoted: what is read back is ASCII whatever a
+file contains and whatever it is called. The first form read the whole
+line as text, and three things followed, each reproduced: a line of
+Latin-1 beside the commit ended `check` on a decoding error, exit 1 and no
+envelope; a lone carriage return, a form feed or U+2028 before the commit
+cut the line in two and the copy went unseen; and under `color.ui=always`
+the line number came wrapped in escapes and the note vanished without a
+word. What a user's configuration may change — colour, a column, full
+names, the fallback outside a repository, recursion into submodules,
+unquoted paths — is set back on the command. A path that is not an
+ordinary name is quoted in the list, as JSON, so the list can be cut
+again: a space, a comma, a colon or a line feed in a name is not a
+separator.
+
+A note, never a refusal: a test that asserts the commit it was verified
+against may be exactly right. It is `check`'s and not `preflight`'s, which
+is told a pin's tag and commit and needs nothing else of it; and a product
+that pins nothing is not searched at all. A `git grep` that fails says
+nothing, as outside a repository: `--only-matching` needs git 2.19.
+
 ### Protecting a default branch without typing its checks
 
 A branch protection requires a check **by its name**, and those names are the
@@ -1925,6 +2907,143 @@ checks replaced and every other rule sent back as read. It refuses when
 GitHub did not answer for the protection, the rulesets or a check-run read
 (`UNREAD`), and when the write would stop requiring a check other than an
 alias retiring for its leg (`DROP`, allowed with `--allow-narrow`).
+
+**What `protect` writes of the release environment.** For a product the
+socle releases — one whose `release.yml` is the generated one — the plan
+also reads the `release` environment, through the reader `preflight`
+verifies it with, and `--apply` arms it. The name is the default of the
+`release_environment` input, which the generated `release.yml` never passes.
+A repository that publishes its own way owns its environments as it owns its
+workflow, and `protect` neither reads nor writes them; nor does `protect
+--without-legs`, which is the narrowing half of a rename and nothing else.
+Until then this was two calls copied by hand from this document; the first
+release of a product ran the second one twice, checked by hand that the
+environment held one rule and not two, and did both again when its
+repository was created anew.
+
+**Two halves, and neither waits for the other.** The protection and the
+environment each have their reads, their refusals, their writes and their
+read-back. A half that will not write says so in the result — `REFUSED`,
+and `refused` in the JSON — and the other still does its work: a repository
+whose protection this command cannot write, because a ruleset of the
+organisation carries its checks or because a renamed check has not run yet,
+still gets its environment armed, and the reverse. A first version coupled
+them, every refusal of either before any write, and that made exactly this
+dead end. The protection is written first. When a write of either half is
+refused by GitHub or does not read back, the other half still runs, and the
+error — which replaces the report — says what each half had written and what
+each replaced.
+
+**One rule for the exit code.** 2 when something stands that `--apply` does
+not settle — a required check nothing produces, a check no pull request has
+run, a policy beside the tag rule, a reviewer declared and absent, an
+environment that cannot be sent back as read — or when `--apply` refused a
+half; 0 otherwise, a plan whose writes `--apply` would make included; 1
+when the command could not run, or a write failed or did not read back. A
+refusal of `--apply` used to be an error with exit 1: it is a result with
+exit 2, since one half refusing is no longer the end of the command. The
+plan follows the same rule in its words: what `--apply` settles is a `now`
+line and a `then` line, never a `FAIL`.
+
+What the environment half sends, and nothing else:
+
+```bash
+# an environment that does not exist: the policy alone, so nothing is set that nobody asked for
+gh api -X PUT repos/OWNER/REPO/environments/release \
+  --input - <<<'{"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}'
+# the one rule, when the list read immediately before does not hold it
+gh api -X POST repos/OWNER/REPO/environments/release/deployment-branch-policies \
+  --input - <<<'{"name":"v*","type":"tag"}'
+```
+
+- **An environment is created on two answers, not one.** Its own read must
+  say 404 and the list of the repository's environments, read whole, must
+  not name it; both are asked again at the moment of creating. One 404
+  answered in error over an environment holding reviewers would otherwise
+  be a `PUT` of the policy alone with nothing to compare afterwards. An
+  answer that is not an object is unreadable, never an absence.
+- **An environment whose policy is already custom is never `PUT`.** Its
+  missing tag rule is one `POST`, and the environment itself is not sent.
+- **An environment that exists without a custom policy is `PUT` with what
+  was read of it**: its reviewers by type and id with `prevent_self_review`,
+  its wait timer, and `can_admins_bypass` when it reads false. GitHub's
+  reference says what that endpoint sets and not what it leaves of a member
+  it omits, so nothing relies on an omission; a member that reads as its
+  default is left out, since omitting it and resetting it are then the same
+  state. What cannot be sent back as read — a reviewer without an id, a
+  reviewers rule that names nobody, a protection rule of a type this socle
+  does not know — is a refusal, with the settings page as the remedy.
+  **`can_admins_bypass` is sent on the strength of what GitHub returns, not
+  of its documentation**: the reference for "Create or update an
+  environment" does not list that member, so sending it false is unproven —
+  the pilot's reads true, which is the default and is never sent; the
+  read-back is what holds if GitHub ignores it.
+  **Custom deployment protection rules** (GitHub Apps) live on another
+  endpoint and are neither read, sent nor compared: what a `PUT` does to
+  them is equally unproven.
+- **What was sent to GitHub, and what was not.** On 2026-10-11, on the
+  `release` environment of the pilot. Limited to tags `v*` with its
+  reviewer, as it stood: nothing to change in the plan, nothing written to
+  it by `--apply`, a reading byte for byte the same before and after, and
+  the same from a second run. Then set by hand to no restriction with its
+  reviewer kept: one `PUT` carrying the policy, the reviewer as read and
+  `prevent_self_review: false`, one `POST` of the tag rule; read back with
+  a custom policy, exactly one rule `v*` of type tag, the same reviewer,
+  `prevent_self_review` false and `can_admins_bypass` true; nothing to
+  change at the second run, and `preflight`, run by the socle the pilot
+  pins, ready to tag. Not sent, since the pilot has none of them: a wait
+  timer and `can_admins_bypass` false through a `PUT`, a reviewer of type
+  Team, the creation of an absent environment, and the write that puts a
+  policy back. Those four are held by the scripted host of
+  `tests/test_environment_host.py` and by nothing else yet.
+- **A limit to protected branches is replaced, and the plan says so.** An
+  environment that admits protected branches only is not one with "no
+  deployment policy", as `preflight` used to call it: it is a limit, and
+  what it does not admit is a tag. The plan names it for what it is and
+  says that the `PUT` replaces it by tags `v*` rather than adding to it.
+- **The list is read whatever the policy.** Policies GitHub kept from an
+  earlier custom policy would become the rule the moment the policy is
+  custom again — a branch admitted and no tag. Measured on an environment
+  of the fleet that has no deployment policy: the listing answers 404
+  there, so a kept list cannot be known before the `PUT`. Measured again on
+  the pilot's, set from a custom policy back to no restriction: 404 as
+  well, and the rule it had held was gone once the policy was custom again,
+  the tag rule coming back under a new id. One measurement, of one
+  transition: the reading after the `PUT` stays. Where GitHub does
+  give it, anything but the tag rule is a refusal before any write. Where
+  it does not, the list is read right after the `PUT`; if it holds anything
+  else, the deployment policy is put back as it was read, with everything
+  the environment carried, read back, and the half is refused. That second
+  `PUT` is the only write this command makes to undo one.
+- **The reviewer is never chosen here.** `[gate] reviewer` on an environment
+  that requires nobody is the line `preflight` prints, with exit 2, before
+  and after the write: the reviewer is the repository's to name. That line
+  points at the settings page and, where everything the environment holds
+  can be carried, gives one `PUT` that carries all of it — the deployment
+  policy, the wait timer, the bypass setting — with `ID` to replace by the
+  reviewer's numeric id. It used to carry the reviewer alone, then the
+  reviewer and the policy, and on the reading where a `PUT` leaves nothing
+  of what it omits the second still erased a wait timer. It is built from
+  the reading of that moment: run as printed, not from memory.
+- **A policy beside the tag rule is refused**, in `preflight`'s words and
+  with the `DELETE` that removes it: this half adds the tag rule and removes
+  nothing. So is a reading GitHub did not give (`UNREAD`).
+- **The list is read again immediately before the rule is posted**, on
+  every path, and the rule is posted only on a list that holds nothing.
+- **Every write is read back.** After each call the environment and its
+  whole list are read again: it must read with the policy that was sent,
+  hold the tag rule and no other policy, and carry every protection it
+  carried — the reviewers compared as a set of type and id, in whatever
+  order GitHub lists them. Anything that moved stops the command with the
+  values to restore, and `before` stays in the output of a run that wrote.
+- **What remains.** A change somebody else makes between the last read and
+  a write is not prevented: this command has no way to make a write
+  conditional on what it read. It is detected by the read-back, and said,
+  with what the run had written.
+- **A second run writes nothing to the environment and says so**:
+  `environment: nothing to change`. The protection half is not silent in
+  the same way: `--apply` sends the required checks again even when nothing
+  differs, reads them back and says `protect: applied`.
 
 **Since 0.57.0 the old names are aliases, and nothing is narrowed.**
 0.54.0 to 0.56.0 printed another order — narrow, adopt, merge, widen — and
@@ -2083,8 +3202,9 @@ a reader that took one page for the answer named twenty-nine of thirty
 policies to remove — red, and an incomplete remedy, which is the same defect
 one level down. Anything beyond `tag v*` is a violation, named with the `gh
 api -X DELETE` that removes it; what the reader did not reach is said rather
-than implied. The socle writes no policy here, so the remedy is the
-operator's hand either way.
+than implied. `protect --apply` adds the tag rule and removes nothing, so a
+policy beside it stays the operator's hand: the socle did not put it there
+and does not know why it is.
 
 Measured on the ten repositories of the fleet on 2026-09-23, reading each
 `release` environment and its policies only when it has custom ones: nine
@@ -2164,6 +3284,137 @@ fixed script names. It is written here rather than fixed because the fix
 would splice a value into a `sed` expression, which is a sharper edge than
 the one it removes. A product that names a script `verify-STAGE.sh` will
 find this paragraph.
+
+### What a rehearsal replays, and what it does not
+
+A rehearsal replays **one step of one job**, and its result names it:
+`replayed`, then `notReplayedSteps` for the other steps of that job it did
+not run, and `notReplayed` for the jobs of the shared CI it did not run,
+under the names a pull request shows them by. The text says the same.
+
+| | replays | with |
+|---|---|---|
+| `rehearse DIR TARGET` | the Package step of the build job of `release.yml` for that target | the socle's packaging tools and the declared packages, without their recommended ones; the package command, **which chooses its own compiler** |
+| `rehearse DIR TARGET --check` | the Check step of a leg of `check-product.yml`: `check (linux)` for `linux-x86_64`, `check (linux-arm64)` for `linux-arm64` | what the leg installs before the declared packages, `build-essential clang`, with their recommended packages as the leg installs them, beside `git`, `ca-certificates` and the packaging tools `dpkg-dev file rpm`, which the runner image carries; the `check_command` the product's `ci.yml` passes, or the workflow's default when the call passes none; **no compiler named**, so the image's `cc` |
+
+A step and not a job, because the job does more. The build job runs
+`scripts/verify-release.sh` before it packages when a product carries one,
+attests what it built and hands it to the publish job; on a target that
+`[package]` leaves out it verifies and never packages, so a package
+rehearsed there replays no step at all, and the result says so. The check
+job of the `linux` leg ends on the socle's own drift check, which is
+`maelys-release check DIR` and is not run here. A line given by hand is no
+step of anybody's: `--package-command` and `--check-command` look at one
+thing, what they pass is not what the workflow runs, and `replayed` is then
+empty — unless the line is the workflow's own.
+
+The check mode is for any product whose `ci.yml` calls `check-product.yml`,
+whatever publishes it: the leg is not the release mechanism. The package
+mode is for the products the socle releases.
+
+**A package that builds is not a pull request that passes.** Two products
+rehearsed their packaging, on both architectures, read the green, and had
+their pull request stopped by the check legs — in the same cycle (#194).
+Their packaging exports `CC=clang`. The legs name no compiler and build with
+the runner's `cc`, which is gcc. Measured in the rehearsal image, gcc 15.2.0
+and clang 21.1.8 over glibc 2.43, on the two lines that stopped them:
+
+| | `gcc -O2` | `gcc -O0` | `gcc -O2 -U_FORTIFY_SOURCE` | `clang -O2` | `clang -O2 -D_FORTIFY_SOURCE=2` |
+|---|---|---|---|---|---|
+| `(void)read(fd, &byte, 1);` under `-Wall -Wextra -Werror` | refused, `-Werror=unused-result` | accepted | accepted | accepted | accepted |
+| `realpath(path, buffer)` imports | `__realpath_chk` | `realpath` | `realpath` | `realpath` | `__realpath_chk` |
+
+Both rows are one fact. Ubuntu's gcc defines `_FORTIFY_SOURCE=3` by itself
+as soon as it optimises, and Ubuntu's clang defines nothing. Under that
+macro glibc declares `read` `warn_unused_result` — which gcc holds through a
+cast to `void` and clang does not — and routes a `realpath` into a sized
+buffer through `__realpath_chk`. So the second is not the compiler: clang
+given the macro imports the same symbol, and a product whose symbol guard
+refuses it will meet it the day its packaging fortifies. Nor is it the libc
+of the image, which both compilers share. It is the fortification level,
+and who sets it by default.
+
+`rehearse --check` stopped the first of them before a line of it changed:
+with gcc, as the leg. What was missing was the result of the *other* mode
+saying that it answered for none of this, and a rule saying when to run
+which:
+
+- **the package mode**, before the first tag and after any change to
+  `dependencies/packages` or to the packaging — what it has always been for;
+- **the check mode**, before pushing what a Linux leg will compile or run —
+  sources, flags, tests — from a machine that is not Linux, and before the
+  first tag as well. A first release wants both, on both targets.
+
+**The line is read for certain, or nothing runs.** The socle carries no
+YAML parser and reads `ci.yml` by its lines. It reads the shapes it reads
+exactly — a plain value on its line, a quoted one, a literal block, a
+folded block of lines at one indentation, under a `with:` block of plain
+`name: value` lines in the one job that calls the workflow — and refuses
+every other before anything is written or started: a value carried over
+several lines, `with:` in flow style, a quoted key, an alias, an expression
+only GitHub evaluates, an empty value. An empty line passes `bash -e`: a
+reader that guessed was green for having run nothing. The refusal names
+the line of `ci.yml`, and `--check-command` is the way out — which names no
+step, since the operator typed it. "The default of `check-product.yml`" is
+said only when the call was read and passes none.
+
+**As the step runs it, as far as a container goes.** What could be made
+equal is:
+
+| | the leg | the check mode |
+|---|---|---|
+| shell | the line in a file, `bash --noprofile --norc -eo pipefail FILE` | the same |
+| environment | `CI=true`, `LANG=C.UTF-8`, what the checkouts export | the same, and none of the rehearsal's own variables — `TARGET` first, which make would read where a Makefile says `TARGET ?=` |
+| packages | `build-essential clang` and the declared ones, with their recommended packages | the same |
+| a mirror that does not answer | a warning, cut after two minutes; the install decides | the same |
+| bound | 30 minutes for the job | 30 minutes for the step |
+
+And what cannot, which every result of the check mode carries as
+`unlikeTheRunner`:
+
+| | the runner | the container |
+|---|---|---|
+| user | an unprivileged user | root: a test that expects a permission to be refused is not refused |
+| tools | an image that carries hundreds — `cmake`, `pkg-config`, `curl`, `sudo` among them | the image's packages and those named above: `python3` arrives with what clang recommends, those four do not |
+| tree | the merge commit of the pull request | the local HEAD and its uncommitted changes |
+| versions | the packages of the day the image was built | the archive's of today |
+| `DEBIAN_FRONTEND` | not measured: no run prints it | unset in the step |
+
+The second row is the one that turns a rehearsal red where CI is green: a
+Makefile that calls `cmake` or `pkg-config` without the product declaring
+it passes on the runner, whose image has them. When the check stops on a
+command the container does not have, the rehearsal exits on it by name and
+says where such a tool is declared — `[linux]` of `dependencies/packages`,
+which the legs and the rehearsal both install. Declaring it is harmless on
+the runner and is what makes the product's build say what it needs. An
+emulated target is slower than the runner, so the bound can cut there what
+the leg would finish. A green check says the leg's compiler accepts the
+tree. It does not say the runner will.
+
+**What nothing here replays.** The sanitizers and fuzz jobs, which run on
+x86_64 with clang handed over as `CC`, `CXX` and `MAKEFLAGS`; the macOS
+leg; a product's own legs, and the jobs its workflows add. The socle's are
+in `notReplayed`, read from the product's call as `protect` reads them; a
+product's own are not, and the text says so in words. The sanitizers were
+left out on purpose: clang is the compiler both products had already
+rehearsed with, and that job runs on one architecture, which on the
+machines the fleet develops on is the emulated one.
+
+**A check that was skipped has not passed, and the rehearsal skips what CI
+skips.** The third finding of that cycle was coverage. A conformance kit
+that drives a command's completion script in every shell it finds skips the
+checks of a shell that is not installed, and a product read two skips in its
+rehearsal where its own machine had none. The image carries neither zsh nor
+fish — and neither do the hosted Linux runners: their image lists neither
+(`ubuntu-26.04`, 20260927.149), and the legs of a product that declares
+nothing report the same two skips as its rehearsal. The rehearsal hid
+nothing there; the legs never ran those checks. A product that wants them
+run declares `zsh` and `fish` under `[linux]` of `dependencies/packages`,
+which the legs and the rehearsal both install: maelys-cli does, and its
+Linux legs skip none. The macOS leg has zsh and skips fish, in that product
+as in the others; `fish` under `[macos]` would be the other half, and no
+product declares it yet. The socle installs neither for everyone: most
+products have no completion script to drive.
 
 ### Rehearsing a channel
 

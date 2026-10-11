@@ -63,7 +63,7 @@ class ApiGoldenBoundaryTest(unittest.TestCase):
 
     def test_writers_streams_and_exec_are_always_refused(self):
         host = self.host()
-        for method in (host.write, host.stream, host.exec):
+        for method in (host.write, host.stream, host.exec, host.feed):
             with self.subTest(method=method.__name__), self.assertRaisesRegex(AssertionError, 'forbids'):
                 method('anything')
 
@@ -181,6 +181,33 @@ class ApiGoldenCoverageTest(unittest.TestCase):
         for case in manifest['cases']:
             self.assertIn(case['id'].rsplit('-', 1)[0] + '-text', {c['id'] for c in manifest['cases']})
             self.assertIn(case['id'].rsplit('-', 1)[0] + '-json', {c['id'] for c in manifest['cases']})
+
+    def test_nothing_recorded_tells_the_security_settings_of_a_real_repository(self):
+        """The recorder withholds the member; this holds what is committed, whoever recorded it.
+
+        A repository document carries `security_and_analysis` for a reader
+        who administers it, and `preflight` notes a public repository whose
+        secret scanning or push protection is off: a reference holding the
+        member said so of two real repositories, by name, in every recorded
+        `preflight`. Neither the member nor the note is in a recorded file
+        of either reference, and the note is held on constructed answers in
+        tests/test_privacy.py.
+        """
+        golden = SCRIPT.parent
+        recorded = sorted(path for path in golden.rglob('*.json') if path.is_file())
+        self.assertGreater(len(recorded), 250)
+        for path in recorded:
+            text = path.read_text(encoding='utf-8')
+            for words in ('security_and_analysis', 'secret_scanning', 'secret scanning', 'push protection'):
+                self.assertNotIn(words, text, f'{path.relative_to(golden)} holds {words!r}')
+        # The documents are still there, and still those of public repositories
+        # read by `preflight`: it is the member that is gone, not the reading.
+        responses = REPLAY.read_json(INPUTS / 'responses.json')
+        documents = [value['body'] for key, value in responses.items() if key.count('/') == 2 and value['state'] == 'ok']
+        self.assertTrue([body for body in documents if body.get('visibility') == 'public'])
+        said = [item['message'] for item in envelope('preflight-classic')['data']['preflight']]
+        self.assertTrue(said)
+        self.assertFalse([message for message in said if 'is public and' in message])
 
     def test_protect_covers_settings_rulesets_absence_and_unknown(self):
         classic = envelope('protect-classic')['data']

@@ -23,6 +23,14 @@ DEFAULT_IMAGE = "ubuntu:26.04"
 
 SOCLE_LINUX_PACKAGES = "build-essential dpkg-dev file rpm"  # the release.yml default
 
+# What a check leg of check-product.yml installs before the product's
+# packages, the minutes its job is bounded at, and the leg each Linux target
+# of a release is checked on. A test holds the three against the workflow: `rehearse --check` replays that
+# job, and a list typed here would otherwise drift from the one it runs.
+CHECK_JOB_PACKAGES = "build-essential clang"
+CHECK_JOB_MINUTES = 30
+CHECK_LEG_OF = {"linux-x86_64": "linux", "linux-arm64": "linux-arm64"}
+
 SOCLE_MANIFEST_PATTERNS = "*.tar.gz *.deb *.rpm"  # the release.yml default
 
 # What a renderer that hashes published bytes names: the tag's source archive,
@@ -173,6 +181,11 @@ FORMER_DECLARATION_FILE = "packaging/release"
 SOCLE_MECHANISM = "maelys-release"
 
 MECHANISMS = (SOCLE_MECHANISM, "custom", "none")
+
+# What VERSION holds before a first release. VERSION says what was published
+# last, and this says nothing was: `new` writes it, `cut` accepts any version
+# after it, and no tag ever carries it.
+UNPUBLISHED = "0.0.0"
 
 RELEASE_USES = re.compile(rf"{re.escape(SOCLE_REPOSITORY)}/\.github/workflows/release\.yml@[0-9a-f]{{40}}")
 

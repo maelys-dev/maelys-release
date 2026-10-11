@@ -44,6 +44,14 @@ def load_module():
 
 
 MODULE = load_module()
+# What `check` says to an author and not to a job -- the identity git would
+# use, the version `cut` will refuse -- is silent wherever these are set,
+# and a runner sets both: dropped here, once and before anything reads
+# them, so that a fixture is the same checkout on a laptop and in the
+# workflow that runs this suite. The tests that measure the silence set
+# them back for themselves.
+for _runner_variable in MODULE.host.RUNNER_VARIABLES:
+    os.environ.pop(_runner_variable, None)
 # Also guard direct unittest runs and every CLI subprocess they start. Import
 # first so an invalid inherited self-test environment fails instead of being
 # silently replaced by a fresh token. A self-test child reuses its live token.
@@ -435,7 +443,10 @@ class AdoptTest(unittest.TestCase):
             if command == ["git", "remote", "get-url", "origin"]:
                 return subprocess.CompletedProcess(command, 0, "https://github.com/o/r.git\n", "")
             self.assertEqual(cwd, self.product.dir.resolve())
-            self.assertIn(command[:2], (["git", "grep"], ["git", "rev-parse"]))
+            # With the identity git would use here and the commits that have
+            # not left, which the declarations read since the address note.
+            self.assertIn(command[:2], (["git", "grep"], ["git", "rev-parse"], ["git", "config"],
+                                        ["git", "symbolic-ref"], ["git", "log"], ["git", "for-each-ref"]))
             return MODULE.Host.run(fake, command, cwd=cwd, env=self.product.env)
         fake.runner = local_read
         invocation, _ = MODULE.APP.parse(["adopt", self.dir, *Product.SOCLE, "--apply"])
@@ -2113,7 +2124,15 @@ class GoldenTest(unittest.TestCase):
         ok       dependencies/packages: linux [pkg-config libjansson-dev] macos [jansson]
         ok       maelys-release.conf [dependencies] apart: the pins are materialised under $MAELYS_DEPENDENCIES_DIR, never beside the product
         note     no fuzzing detected by the conventions: neither tests/fuzz/ nor fuzz/ exists, and no job of .github/workflows/ci.yml runs a fuzz target
-        """) + ("note     " + COMING_NOTE + "\n" if COMING_NOTE else "")
+        note     neither a name nor an address is set here: git writes into each commit this account's name as the system holds it, and an address it composes from the login and this machine's name where it can, and a push publishes both. Set them before the next commit: 'git config --global user.name NAME' and 'git config --global user.email ADDRESS' -- on GitHub, the account's noreply address (ID+LOGIN@users.noreply.github.com) names no machine
+        """) + ("note     " + COMING_NOTE + "\n" if COMING_NOTE else "") + (
+        # The one line that depends on where the test runs: whether this
+        # machine has a name specific enough to look for is the machine's
+        # answer, asked here the way `check` asks it.
+        "ok       privacy: 18 of 18 files read, every file since this is not a git repository;"
+        f" {MODULE.privacy.read_local().says()}; nothing found\n")
+    # The fixture is a directory with no git identity anywhere, which is what
+    # the address note of CONTRACT reads: the text a human reads there, in full.
     FILES = textwrap.dedent("""\
         same     .github/workflows/release.yml
         same     scripts/checkout-dependency.sh
@@ -2232,7 +2251,13 @@ class GoldenTest(unittest.TestCase):
         product.git(product.dir, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "fixture")
         completed = product.run("preflight", self.dir, expect=2)
         self.assertEqual(completed.stderr, "")
-        self.assertEqual(completed.stdout, self.CONTRACT + self.FILES + self.VERDICTS + textwrap.dedent("""\
+        # This fixture is a repository, where the other two are directories:
+        # git names the files that hold a shape, and the line counts them.
+        contract = (self.CONTRACT[:self.CONTRACT.rindex("ok       privacy:")]
+                    + "ok       " + MODULE.privacy.check_tree(self.product.dir)[0][0][1] + "\n")
+        self.assertRegex(contract, r"privacy: 18 of 18 tracked files searched for the shapes of six families,"
+                                   r" and (the [0-9]+ that held one read|none held one); ")
+        self.assertEqual(completed.stdout, contract + self.FILES + self.VERDICTS + textwrap.dedent("""\
             check: maelys-fixture is on maelys-release v9.9.9
             FAIL     tag.gpgsign is not true: git config tag.gpgsign true
             FAIL     user.signingkey is not set (gpg.format = openpgp); the key must be registered on GitHub
@@ -4947,11 +4972,12 @@ class WidenAfterTheMergeTest(unittest.TestCase):
             return MODULE.handle_protect(invocation)[0]
 
     def test_widening_before_the_merge_is_refused_and_names_the_open_pulls(self) -> None:
-        with self.assertRaises(MODULE.Failure) as refusal:
-            self.protect(absent=True, open_pulls=(12, 15))
-        self.assertIn("no merged pull request", refusal.exception.message)
-        self.assertIn("Merge the adoption first", refusal.exception.hint)
-        self.assertIn("#12, #15", refusal.exception.hint)
+        # A refusal is a line of the result since the two halves of protect
+        # stopped waiting for each other: REFUSED, nothing written, exit 2.
+        refusal = self.protect(absent=True, open_pulls=(12, 15))["refused"]
+        self.assertIn("no merged pull request", refusal["message"])
+        self.assertIn("Merge the adoption first", refusal["hint"])
+        self.assertIn("#12, #15", refusal["hint"])
 
     def test_once_merged_it_widens(self) -> None:
         report = self.protect(absent=False, fake_writes=True)
@@ -5436,9 +5462,11 @@ class LegAliasTest(unittest.TestCase):
         # only once a merged pull request has produced it.
         self.assertIn("path     a required check nothing produces blocks every merge", text)
         self.assertIn("--allow-narrow' drops those, then merge a pull request", text)
-        with self.assertRaises(MODULE.Failure) as refused:
-            self.protect(old, seen, apply=True)
-        self.assertIn("--allow-narrow", refused.exception.hint)
+        (refused, code), written = self.protect(old, seen, apply=True)
+        self.assertIn("--allow-narrow", refused["refused"]["hint"])
+        self.assertEqual((code, written, refused["applied"]), (MODULE.EXIT_VIOLATIONS, [], False))
+        self.assertIn("REFUSED  this write would stop requiring", MODULE.text_protect(refused))
+        self.assertIn("protect: refused; the protection is not written", MODULE.text_protect(refused))
 
     def test_the_output_keeps_what_the_branch_required_before(self) -> None:
         old = ["check / check (linux)", "mine"]
@@ -5548,18 +5576,19 @@ class LegAliasTest(unittest.TestCase):
         required = ["check / check (ubuntu-26.04)", "mutation", "macos-gates"]
         seen = ["check / check (linux)", "check / check (ubuntu-26.04)", "mutation", "macos-gates"]
         for timeout in (("/protection",), ("/check-runs",), ("pulls?",)):
-            with self.assertRaises(MODULE.Failure) as refusal:
-                self.protect_with(self.answers(required, seen, timeout=timeout), required, seen)
-            self.assertIn("did not answer", refusal.exception.message, timeout)
+            report, commands = self.protect_with(self.answers(required, seen, timeout=timeout), required, seen)
+            self.assertIn("did not answer", report["refused"]["message"], timeout)
+            self.assertEqual((commands, report["applied"]), ([], False), timeout)
 
     def test_apply_does_not_narrow_by_itself(self) -> None:
         required = ["check / check (ubuntu-26.04)", "mutation", "macos-gates"]
         seen = ["check / check (linux)", "check / check (ubuntu-26.04)", "mutation"]
-        with self.assertRaises(MODULE.Failure) as refusal:
-            self.protect_with(self.answers(required, seen), required, seen)
-        self.assertIn("macos-gates", refusal.exception.message)
+        report, commands = self.protect_with(self.answers(required, seen), required, seen)
+        self.assertIn("macos-gates", report["refused"]["message"])
+        self.assertEqual((commands, report["applied"]), ([], False))
         report, commands = self.protect_with(self.answers(required, seen), required, seen, flags=("--allow-narrow",))
         self.assertTrue(report["applied"])
+        self.assertNotIn("refused", report)
 
     def test_an_existing_protection_changes_in_its_checks_alone(self) -> None:
         """maelys-oci: "require branches to be up to date" went from true to
@@ -5572,8 +5601,10 @@ class LegAliasTest(unittest.TestCase):
         self.assertEqual(body, {"strict": True, "contexts": [*ALL_LEGS, "mutation"]})
 
     def test_before_the_adoption_merges_the_swap_is_still_refused(self) -> None:
-        with self.assertRaises(MODULE.Failure):
-            self.protect(["check / check (ubuntu-26.04)"], ["check / check (ubuntu-26.04)"], apply=True)
+        (report, code), written = self.protect(["check / check (ubuntu-26.04)"], ["check / check (ubuntu-26.04)"],
+                                               apply=True)
+        self.assertTrue(report["refused"]["message"])
+        self.assertEqual((code, written), (MODULE.EXIT_VIOLATIONS, []))
 
     def test_an_adoption_refuses_a_branch_requiring_an_old_name(self) -> None:
         # Until 0.59.2 the aliases were produced and the guard let them be;
@@ -6335,7 +6366,13 @@ class UnitTest(unittest.TestCase):
         self.assertEqual([status for status, _ in missing + unlimited + protected], ["fail"] * 3)
         self.assertIn("environment release is missing in o/r", missing[0][1])
         self.assertIn("no deployment policy", unlimited[0][1])
-        self.assertIn("no deployment policy", protected[0][1])
+        # A limit to protected branches is a limit: it used to be reported as
+        # "no deployment policy: any branch can publish", which is false of
+        # it. What is wrong with it is said -- no tag can deploy.
+        self.assertNotIn("no deployment policy", protected[0][1])
+        self.assertNotIn("any branch", protected[0][1])
+        self.assertIn("limits deployments to protected branches, not to tags v*", protected[0][1])
+        self.assertIn("a tag cannot", protected[0][1])
 
     def test_a_reading_that_failed_is_never_an_answer(self) -> None:
         """Three states told apart where two were reported: an environment

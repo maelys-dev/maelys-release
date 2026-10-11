@@ -4,6 +4,13 @@
 Adoption and protection share the readers of the contexts a product would
 produce. The entry point supplies its socle root through the shared context;
 API reads, writes and verification use the current host at call time.
+
+`protect` writes what GitHub must carry before a publication: what the
+default branch requires, and -- for a product the socle releases -- the
+environment its publish job runs in, which `environment.py` plans and arms.
+The two are halves that do not wait for each other: each has its reads, its
+refusals, its writes and its read-back, a refusal of one is a line of the
+result and never stops the other, and an error says what either had written.
 """
 from __future__ import annotations
 
@@ -15,9 +22,10 @@ import tempfile
 from maelys_cli import EXIT_OK, EXIT_VIOLATIONS, Failure, Invocation
 
 from . import host
-from .constants import CI_JOB, CI_USES, DECLARATION_FILE, LEGS_JOB
+from .constants import CI_JOB, CI_USES, DECLARATION_FILE, LEGS_JOB, SOCLE_MECHANISM
 from .context import Context
 from .declarations import parse_release
+from .environment import Refusal, arm, environment_plan, record, text_environment, violations
 from .github import (github_api, github_list, github_read, github_repository, observed_contexts, protection_settings, read_protection, read_repository, required_contexts, ruleset_shape, verify_protection, withdrawn_for)
 from .project import project_of
 from .workflows import yaml_scalar
@@ -45,6 +53,23 @@ def socle_check_contexts(project: pathlib.Path, context: Context) -> tuple[str, 
             break
     else:
         return "", []
+    # And the product's own legs, which report under the legs job adopt
+    # writes. Read from the declaration and not from ci.yml: what the guard
+    # of adopt must compare a protection with is what the adoption is about
+    # to produce, and a leg removed from [check] is still in ci.yml then.
+    return caller, [f"{caller} / {name}" for name in socle_check_jobs(project, context)] \
+        + [f"{LEGS_JOB} / {name}" for name in declared_legs(project)]
+
+
+def socle_check_jobs(project: pathlib.Path, context: Context) -> list[str]:
+    """The jobs of check-product.yml a product's call turns on, as each reports.
+
+    Apart from the name of the job that calls them, so that `rehearse` lists
+    the same jobs under a caller it reads itself.
+    """
+    ci = project / ".github" / "workflows" / "ci.yml"
+    if not ci.is_file():
+        return []
     # Every job of check-product.yml that this product's call turns on, not
     # the matrix alone: fuzz and sanitizers are jobs of the socle too, and
     # leaving them out of what is computed made them look like product jobs
@@ -65,12 +90,7 @@ def socle_check_contexts(project: pathlib.Path, context: Context) -> tuple[str, 
         # never runs, when it runs and passes on every pull request they have.
         if value in ("|", "|-", ">", ">-") or value.strip("'\"") != "":
             names.append(job)
-    # And the product's own legs, which report under the legs job adopt
-    # writes. Read from the declaration and not from ci.yml: what the guard
-    # of adopt must compare a protection with is what the adoption is about
-    # to produce, and a leg removed from [check] is still in ci.yml then.
-    return caller, [f"{caller} / {name}" for name in names] + [f"{LEGS_JOB} / {name}"
-                                                               for name in declared_legs(project)]
+    return names
 
 
 def declared_legs(project: pathlib.Path) -> list[str]:
@@ -82,6 +102,22 @@ def declared_legs(project: pathlib.Path) -> list[str]:
         return [name for name, _, _ in parse_release(release.read_text(encoding="utf-8"))[-1]]
     except ValueError:
         return []
+
+
+def declared_gate(project: pathlib.Path) -> str:
+    """`[gate]` of the declaration file, through the parser `preflight` reads it with; '' when undeclared.
+
+    One reader of a declaration, as of a protection: a second scan of the
+    file would be the one a change of grammar forgets. A file that does not
+    parse declares nothing here, and `check` is what says why.
+    """
+    release = project / DECLARATION_FILE
+    if not release.is_file():
+        return ""
+    try:
+        return parse_release(release.read_text(encoding="utf-8"))[9]
+    except ValueError:
+        return ""
 
 
 def socle_owned(name: str, caller: str) -> bool:
@@ -192,7 +228,7 @@ def handle_protect(invocation: Invocation, context: Context) -> tuple[dict, int]
     the workflows and from the runs the default branch actually carries, and
     says which of them the protection is missing or naming wrongly.
     """
-    project, _product, _mechanism = project_of(invocation)
+    project, _product, mechanism = project_of(invocation)
     repository = github_repository(project)
     if not repository:
         raise Failure("PRECONDITION_FAILED", f"{project} has no GitHub origin.",
@@ -204,6 +240,15 @@ def handle_protect(invocation: Invocation, context: Context) -> tuple[dict, int]
     seen, from_tag, partial = observed_contexts(repository, branch)
     protection = read_protection(repository, branch)
     state, current = protection.classic_state, protection.classic_body
+    # The environment a tag deploys into, for a product whose release is the
+    # socle's: a repository that publishes its own way owns its environments
+    # as it owns its release.yml, and this says nothing of them. Nor does
+    # --without-legs, which is the narrowing half of a rename and nothing
+    # else: it used to create and arm an environment on its way.
+    gate = declared_gate(project)
+    reading, environment = (environment_plan(repository, gate)
+                            if mechanism == SOCLE_MECHANISM and not invocation.flag("--without-legs")
+                            else (None, None))
     holds = protection.classic
     required = protection.classic_contexts
     # The other endpoint, and the third place this socle has had to learn
@@ -337,6 +382,8 @@ def handle_protect(invocation: Invocation, context: Context) -> tuple[dict, int]
                                           ("the check runs of recent pull requests",
                                            not partial.get("unanswered")))
               if not answered]
+    if environment:
+        report["environment"] = environment
     report["unread"] = unread
     # Every other setting, in the plan: what an existing protection keeps,
     # and what a new one is created with. A new protection used to receive
@@ -356,47 +403,57 @@ def handle_protect(invocation: Invocation, context: Context) -> tuple[dict, int]
             raise Failure("PRECONDITION_FAILED",
                           f"whether maelys-release {context.socle_version()} may write a protection is unknown: {withdrawn[1]}.",
                           "Nothing is written on a reading that is not there; run again once GitHub answers.")
-    if invocation.flag("--apply") and unread:
-        raise Failure("PRECONDITION_FAILED",
-                      f"GitHub did not answer for {', '.join(unread)} of {repository}: nothing is written on a"
-                      " reading that is not there.",
-                      "Run protect again once GitHub answers, and read the plan before --apply.")
     # --apply never narrows by itself. Retiring an alias for its leg is a
     # replacement, and a job the call turned off is kept; anything else the
     # branch requires and the proposal leaves out is named, and written only
     # when asked.
     dropping = [name for name in required if name not in proposed and name not in retiring]
     report["dropping"] = dropping
-    if invocation.flag("--apply") and dropping and not narrowing and not invocation.flag("--allow-narrow"):
-        raise Failure("PRECONDITION_FAILED",
-                      f"this write would stop requiring {', '.join(dropping)} on {branch} of {repository}.",
-                      "protect --apply does not narrow a protection by itself. If those checks are gone for"
-                      " good, pass --allow-narrow; otherwise let them run on a pull request first.")
     # A name the branch already requires blocks nothing new by being written
     # again: the refusal is for names this write would add. agent-cli-spec
     # was refused a rename over a context its ruleset had required for a day.
     adding = [name for name in absent if name not in required]
-    if invocation.flag("--apply") and not narrowing and adding and not invocation.flag("--allow-lock"):
-        waiting = [str(pull.get("number")) for pull in github_list(
-            f"repos/{repository}/pulls?state=open&base={branch}&per_page=50") if isinstance(pull, dict)]
-        raise Failure("PRECONDITION_FAILED",
-                      f"no merged pull request of {repository} has run " + ", ".join(adding)
-                      + ": requiring them now would block every pull request that does not produce them yet.",
-                      "Merge the adoption first, then protect --apply."
-                      + (f" Open pull requests built on the previous ci.yml (#{', #'.join(waiting)}) must"
-                         f" merge {branch} to report the new names." if waiting else ""))
-    if invocation.flag("--apply") and ours:
-        # The ruleset carries the socle's contexts, so the ruleset is what
-        # is written -- never a classic protection beside it, which would be
-        # two mechanisms to keep true. Until 0.54.0 this refused, and a
-        # repository protected by a ruleset alone had every step of a rename
-        # to do by hand.
-        report["applied"] = write_ruleset(repository, branch, rules, proposed)
-        return report, EXIT_OK
-    if invocation.flag("--apply") and narrowing and state != "ok":
-        raise Failure("PRECONDITION_FAILED", f"{branch} of {repository} has no protection to narrow.",
-                      "Nothing requires the legs, so the adoption will not lock anything: adopt first.")
-    if invocation.flag("--apply"):
+    # What this half sent, for an error that hides the report: `before` is
+    # promised to the terminal and the logs of every run that wrote.
+    sent: list[str] = []
+
+    def protection() -> None:
+        """The protection half of --apply: its refusals, its write, its read-back."""
+        # Nothing is written on what could not be read. `unreadable` is not
+        # `absent`: a timeout on the protection endpoint made a protected
+        # branch look open, and --apply would have written four contexts
+        # over seventeen. Measured on maelys-system, the day 0.57.0 asked
+        # five products to run this.
+        if unread:
+            raise Failure("PRECONDITION_FAILED",
+                          f"GitHub did not answer for {', '.join(unread)} of {repository}: nothing is written on a"
+                          " reading that is not there.",
+                          "Run protect again once GitHub answers, and read the plan before --apply.")
+        if dropping and not narrowing and not invocation.flag("--allow-narrow"):
+            raise Failure("PRECONDITION_FAILED",
+                          f"this write would stop requiring {', '.join(dropping)} on {branch} of {repository}.",
+                          "protect --apply does not narrow a protection by itself. If those checks are gone for"
+                          " good, pass --allow-narrow; otherwise let them run on a pull request first.")
+        if not narrowing and adding and not invocation.flag("--allow-lock"):
+            waiting = [str(pull.get("number")) for pull in github_list(
+                f"repos/{repository}/pulls?state=open&base={branch}&per_page=50") if isinstance(pull, dict)]
+            raise Failure("PRECONDITION_FAILED",
+                          f"no merged pull request of {repository} has run " + ", ".join(adding)
+                          + ": requiring them now would block every pull request that does not produce them yet.",
+                          "Merge the adoption first, then protect --apply."
+                          + (f" Open pull requests built on the previous ci.yml (#{', #'.join(waiting)}) must"
+                             f" merge {branch} to report the new names." if waiting else ""))
+        if ours:
+            # The ruleset carries the socle's contexts, so the ruleset is what
+            # is written -- never a classic protection beside it, which would be
+            # two mechanisms to keep true. Until 0.54.0 this refused, and a
+            # repository protected by a ruleset alone had every step of a rename
+            # to do by hand.
+            report["applied"] = write_ruleset(repository, branch, rules, proposed, sent)
+            return
+        if narrowing and state != "ok":
+            raise Failure("PRECONDITION_FAILED", f"{branch} of {repository} has no protection to narrow.",
+                          "Nothing requires the legs, so the adoption will not lock anything: adopt first.")
         if not proposed:
             raise Failure("PRECONDITION_FAILED",
                           f"no check run was seen on {branch} of {repository}.",
@@ -429,12 +486,53 @@ def handle_protect(invocation: Invocation, context: Context) -> tuple[dict, int]
         if done.returncode != 0:
             raise Failure("PROCESS_FAILED", f"the protection of {branch} was refused: {done.stderr.strip()}",
                           "A private repository needs a paid plan for branch protection; read the message above.")
+        sent.append(f"{method} {endpoint}")
         verify_protection(repository, branch, expected, proposed)
         report["applied"] = True
-    return report, EXIT_OK if not (absent or stale) else EXIT_VIOLATIONS
+
+    # Two halves, and neither waits for the other. A half that will not
+    # write says so in the result -- REFUSED, exit 2 -- and the other still
+    # does its work: coupled, a repository whose protection this command
+    # cannot write (a ruleset of the organisation, a check renamed and not
+    # yet run) could never arm its environment with it. A half whose write
+    # GitHub refused, or that did not read back, is an error; the other
+    # half still runs, and the error says what both had written and what
+    # each replaced, since an error replaces the report.
+    failed: list[Failure] = []
+    if invocation.flag("--apply"):
+        try:
+            protection()
+        except Failure as failure:
+            if failure.code == "PRECONDITION_FAILED" and not sent:
+                report["refused"] = {"message": failure.message, "hint": failure.hint}
+            else:
+                failed.append(failure)
+        if environment:
+            try:
+                arm(reading, environment, gate, project)
+            except Refusal as refusal:
+                environment["refused"].append(str(refusal))
+            except Failure as failure:
+                failed.append(failure)
+    if failed:
+        first = failed[0]
+        wrote = ((" The protection half had written: " + "; ".join(sent) + ". Before, it was "
+                  + json.dumps(report["before"], sort_keys=True) + ".") if sent else "")
+        also = "".join(f" The other half failed too: {other.message} {other.hint}" for other in failed[1:])
+        raise Failure(first.code, first.message, (first.hint + also + wrote + record(environment)).strip(),
+                      first.issues)
+    # One rule for the exit: 2 when something stands that --apply does not
+    # settle -- a required check nothing produces, a check no pull request
+    # has run, a policy beside the tag rule, a reviewer declared and not
+    # there -- or when --apply refused a half; 0 otherwise, a plan whose
+    # writes --apply would make included. A ruleset just written answers for
+    # its own contexts, as it always did.
+    left = (absent or stale) and not (report["applied"] and ours)
+    return report, (EXIT_VIOLATIONS if left or report.get("refused") or violations(environment) else EXIT_OK)
 
 
-def write_ruleset(repository: str, branch: str, rules: object, contexts: list[str]) -> bool:
+def write_ruleset(repository: str, branch: str, rules: object, contexts: list[str],
+                  sent: list[str] | None = None) -> bool:
     """Set the required checks of the ruleset that protects this branch.
 
     Only a ruleset of this repository: one inherited from the organisation
@@ -481,6 +579,8 @@ def write_ruleset(repository: str, branch: str, rules: object, contexts: list[st
     if done.returncode != 0:
         raise Failure("PROCESS_FAILED", f"ruleset {identifier} of {repository} was refused: {done.stderr.strip()}",
                       "Writing a ruleset needs administration of the repository.")
+    if sent is not None:
+        sent.append(f"PUT repos/{repository}/rulesets/{identifier}")
     # Re-read, as for a classic protection: every rule but the required
     # contexts must read back as it was, and the contexts as written.
     reread = read_protection(repository, branch, classic=False)
@@ -564,5 +664,10 @@ def text_protect(data: dict) -> str:
     if data["applied"] and data.get("before"):
         # Printed on a write only: the plan already lists what it keeps.
         lines.append(f"{'before':<8} {json.dumps(data['before'], sort_keys=True)}")
-    lines.append(f"protect: {'applied' if data['applied'] else 'nothing written; add --apply'}")
+    refused = data.get("refused")
+    if refused:
+        lines.append(f"{'REFUSED':<8} {refused['message']} {refused['hint']}")
+    lines.extend(text_environment(data.get("environment")))
+    lines.append("protect: " + ("applied" if data["applied"] else "refused; the protection is not written"
+                                if refused else "nothing written; add --apply"))
     return "\n".join(lines) + "\n"

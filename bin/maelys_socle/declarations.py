@@ -9,8 +9,84 @@ from maelys_cli import Failure
 
 from .constants import (
     CHECK_PLATFORMS, DECLARATION_FILE, PROGRAM, SOCLE_CHANNEL_KINDS, SOCLE_COMMIT_VERIFICATIONS,
-    SOCLE_GATES, SOCLE_MANIFEST_PATTERNS, SOCLE_MECHANISM, SOCLE_RUNNER_KEYS, SOCLE_TARGETS,
+    SOCLE_GATES, SOCLE_MANIFEST_PATTERNS, SOCLE_MECHANISM, SOCLE_REPOSITORY, SOCLE_RUNNER_KEYS, SOCLE_TARGETS,
 )
+
+# The one shape a `repository` line takes: https, a host name, and a path of
+# plain segments, with `.git` or without. Everything a URL offers beyond that
+# is another spelling of the same place -- a port, a user, an empty or a dot
+# segment, a percent-encoded letter, a dot after the host -- and each of them
+# read as "not maelys-dev" while reaching it. A pin does not need them.
+REPOSITORY_URL = re.compile(r"https://(?P<host>[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?"
+                            r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*)"
+                            r"(?P<path>(?:/[A-Za-z0-9._~-]+)+)")
+# Where the fleet's own repositories live. On this host a repository is
+# https://host/owner/name and nothing longer, and the owner is compared as
+# the host compares it, whatever the case it is typed in.
+FLEET_HOSTS = ("github.com", "www.github.com")
+FLEET_OWNER = SOCLE_REPOSITORY.split("/")[0]
+# The words a line of a pin may start with, after line 2. `sha256` is the
+# digest of a vendored file, which `vendor` writes and reads back.
+PIN_ATTRIBUTES = ("repository", "submodules", "on-request", "unreleased", "sha256")
+# What `git describe --tags` says of a commit past its tag.
+DESCRIBED = re.compile(r"(.+)-[0-9]+-g([0-9a-f]{4,40})")
+# What git refuses in the name of a ref, as `git check-ref-format` states it.
+REF_FORBIDDEN = re.compile(r"[\x00-\x20\x7f~^:?*\[\\]")
+
+
+def ref_name_refusal(name: str) -> str:
+    """Why git would not take `name` as a branch or a tag; "" when it would.
+
+    Read from `git check-ref-format`, and held here rather than asked of
+    git: `check` runs where the pin is, with no repository to ask, and a
+    name git refuses must be refused before the first clone -- not by a
+    fetch that fails on the second run.
+    """
+    if not name:
+        return "it is empty"
+    if REF_FORBIDDEN.search(name):
+        return "it holds a space, a control character or one of ~ ^ : ? * [ \\"
+    if name.startswith("-"):
+        return "it starts with a dash"
+    if ".." in name or "@{" in name or name == "@":
+        return "it holds '..' or '@{', or is '@'"
+    if name.startswith("/") or name.endswith("/") or "//" in name:
+        return "it starts or ends with a slash, or holds two in a row"
+    if name.endswith("."):
+        return "it ends with a dot"
+    for component in name.split("/"):
+        if component.startswith(".") or component.endswith(".lock"):
+            return f"'{component}' starts with a dot or ends with .lock"
+    return ""
+
+
+def repository_refusal(url: str) -> str:
+    """Why `url` is not the one shape a repository line takes; "" when it is."""
+    shaped = REPOSITORY_URL.fullmatch(url)
+    if not shaped:
+        return ("the repository line must be an https URL in one shape, https://host/owner/name with .git or"
+                " without: no user, no port, no empty segment, no percent-encoding, no dot after the host")
+    segments = shaped.group("path").split("/")[1:]
+    if any(segment in (".", "..") for segment in segments):
+        return "the repository line must be an https URL whose path holds no '.' or '..' segment"
+    if shaped.group("host").lower() in FLEET_HOSTS and len(segments) != 2:
+        return (f"the repository line must be an https URL of the shape https://{shaped.group('host')}/owner/name"
+                " on that host")
+    return ""
+
+
+def fleet_repository(url: str) -> bool:
+    """Whether a `repository` URL, already in its one shape, names a repository of the fleet.
+
+    A string comparison, and it decides what a string can: the host and the
+    owner. It cannot know that another owner's repository is a fork of the
+    fleet's, that a repository was renamed or transferred, or that another
+    host -- the one MAELYS_GIT_BASE names on some machine -- serves the same
+    repositories. The conventions say so.
+    """
+    shaped = REPOSITORY_URL.fullmatch(url)
+    return bool(shaped) and shaped.group("host").lower() in FLEET_HOSTS \
+        and shaped.group("path").split("/")[1].lower() == FLEET_OWNER.lower()
 
 
 class Declarations:
@@ -88,6 +164,9 @@ class Declarations:
         self.foreign: dict[str, str] = {}
         # name -> "" or "recursive", for a dependency whose build needs them
         self.submodules: dict[str, str] = {}
+        # name -> the branch of its third party that holds a commit no tag
+        # carries, pinned there on purpose
+        self.unreleased: dict[str, str] = {}
         # Files of docs/ that are neither generated, engaged by LICENSING.md
         # nor data: they belong in maelys-docs/<product>/.
         self.prose: list[str] = []
@@ -154,8 +233,20 @@ def parse_packages(text: str) -> tuple[str, str]:
 def parse_pin(name: str, text: str) -> tuple[dict, list[str]]:
     """One dependencies/NAME.pin as data: (pin, problems); an empty pin when unusable.
 
-    Line 1 is the nearest tag, for humans; line 2 the commit, for everything
-    else. A dependency outside maelys-dev says where it lives, once, on a
+    Line 2 is the commit, for everything that clones. Line 1 is for humans,
+    and it is held to line 2 by `dependencies`, which has the checkout to
+    read it against -- so it says one of three things, and never "the
+    nearest tag" of a commit that carries none, which is what this text
+    said while the code refused it:
+
+    - the tag the commit carries, which is every pin on a release;
+    - past a tag, what `git describe --tags` says of the commit,
+      `vX.Y.Z-N-gSHA`: a name of the commit itself, and what `migrate`
+      writes into the documentation repository;
+    - under an `unreleased` line, the last tag before the commit -- an
+      ancestor of it, and not the commit's own.
+
+    A dependency outside maelys-dev says where it lives, once, on a
     `repository <https URL>` line: maelys-http builds Mbed TLS from a pinned
     commit because the distribution's version is under its security floor.
     A dependency whose build needs its submodules says so on a `submodules`
@@ -171,37 +262,171 @@ def parse_pin(name: str, text: str) -> tuple[dict, list[str]]:
     on a private repository the macOS seconds are billed tenfold. The pin is
     still a pin: `check` and `cut` judge its tag and its commit as any other.
 
+    A third party's commit that no tag carries says `unreleased <branch>`:
+    it is on that branch, past the tag of line 1, on purpose -- the part a
+    product builds is newer than any version the third party has published.
+    The word is the reason, and the branch is what can be verified: a tag
+    holds its commit for good, a branch holds it until somebody rewrites it,
+    so the pin names the one ref its commit depends on and `dependencies`
+    asks the repository whether it still does. Third party only: the line
+    is refused without a `repository` line, and with one that names
+    maelys-dev. A Maelys repository is pinned on a tag, and that rule does
+    not move -- the fleet can tag what it needs, a third party cannot be
+    asked to.
+
+    One reading. The managed script is the reader that clones, and whatever
+    it would read differently, or not read at all, is a problem here: a
+    line with a space before or after it, a tab, another case, a colon, an
+    attribute given twice, a URL in any shape but one. A word neither
+    reader knows is returned under `unknown`, for a note.
+
     Read here rather than in read_declarations alone, because the command
     that materialises the pins needs the same reading and a second one would
     drift from it.
     """
     if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", name):
         return {}, [f"dependencies/{name}.pin: the file is named after the repository, [a-z0-9-]"]
-    lines = text.splitlines()
-    if len(lines) < 2 or not re.fullmatch(r"[0-9a-f]{40}", lines[1].strip()):
-        return {}, [f"dependencies/{name}.pin: line 2 must be the pinned commit (line 1 its tag)"]
-    pin: dict = {"name": name, "tag": lines[0].strip(), "commit": lines[1].strip(),
-                 "repository": "", "submodules": None, "on_request": False}
+    where = f"dependencies/{name}.pin"
+    # Read as the managed script reads it, which is the reading that clones:
+    # lines end in LF, line 2 is forty hexadecimal digits and nothing else,
+    # and an attribute is matched from the first column to the last. This
+    # reader used to strip every line first, and the two then disagreed in
+    # silence: `repository <URL>` followed by a space was a third party
+    # here, and no line at all for the script, which cloned the fleet's
+    # repository of that name.
+    if "\r" in text:
+        return {}, [f"{where}: the file holds carriage returns; a pin is read line by line, each ending in LF"]
+    lines = text.split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()
+    if len(lines) < 2 or not re.fullmatch(r"[0-9a-f]{40}", lines[1]):
+        return {}, [f"{where}: line 2 must be the pinned commit (line 1 its tag)"]
+    pin: dict = {"name": name, "tag": lines[0].strip(), "commit": lines[1],
+                 "repository": "", "submodules": None, "on_request": False, "unreleased": "", "unknown": []}
     problems: list[str] = []
-    for attribute in lines[2:]:
-        if attribute.startswith("repository "):
-            repository = attribute[len("repository "):].strip()
-            if not re.fullmatch(r"https://[^\s]+", repository):
-                problems.append(f"dependencies/{name}.pin: the repository line must be an https URL")
+    if lines[0] != pin["tag"] or re.search(r"\s", pin["tag"]):
+        problems.append(f"{where}: line 1 holds a tag and nothing else, with no space in or around it:"
+                        f" {lines[0]!r}")
+    elif pin["tag"].startswith("-"):
+        # It is handed to git as a revision, and git reads a leading dash
+        # as an option.
+        problems.append(f"{where}: line 1 holds a tag, and {pin['tag']!r} starts with a dash")
+    seen: set[str] = set()
+    # Whether the file says where it lives at all, well or badly: a
+    # repository line refused for itself is one problem, and is not
+    # reported a second time as "no repository line".
+    located = False
+    for number, line in enumerate(lines[2:], 3):
+        if line == "":
+            continue
+        located = located or line.strip().lower().startswith("repository")
+        word, _, value = line.partition(" ")
+        if line != line.strip() or "\t" in line:
+            problems.append(f"{where}: line {number} is {line!r}; an attribute is its word at the start of the"
+                            " line, one space and its value, and nothing before or after -- the managed script"
+                            " matches it that way, and reads nothing else")
+            continue
+        if re.fullmatch(r"sha256:[0-9a-f]{64}", line):
+            word = "sha256"
+        elif word not in PIN_ATTRIBUTES[:4]:
+            attempted = [known for known in PIN_ATTRIBUTES if line.lower().startswith(known)]
+            if attempted:
+                # Another case, a colon, a word glued to its value: a line
+                # that means an attribute and is one for neither reader.
+                problems.append(f"{where}: line {number} is {line!r}, which is not the {attempted[0]} line it"
+                                f" starts like: {attempted[0]!r} in lower case, one space, its value"
+                                + (" -- or sha256:<64 hexadecimal digits>" if attempted[0] == "sha256" else ""))
             else:
-                pin["repository"] = repository
-        elif attribute.split(" ")[0] == "submodules":
-            mode = attribute[len("submodules"):].strip()
-            if mode not in ("", "recursive"):
-                problems.append(f"dependencies/{name}.pin: the submodules line takes nothing, or recursive")
+                # A word this socle does not know is named, never fatal, as
+                # a section of the declaration file is: products pin the
+                # socle by commit, and an attribute a newer socle reads
+                # would otherwise refuse every product that writes it
+                # before adopting.
+                pin["unknown"].append(line)
+            continue
+        if word in seen:
+            problems.append(f"{where}: the {word} line is given twice, and the managed script reads the first"
+                            " where this reader read the last: one line")
+            continue
+        seen.add(word)
+        if word == "repository":
+            refusal = repository_refusal(value)
+            if refusal:
+                problems.append(f"{where}: {refusal}")
             else:
-                pin["submodules"] = mode
-        elif attribute.split(" ")[0] == "on-request":
-            if attribute.strip() != "on-request":
-                problems.append(f"dependencies/{name}.pin: the on-request line takes nothing")
+                pin["repository"] = value
+        elif word == "submodules":
+            if value not in ("", "recursive") or line not in ("submodules", "submodules recursive"):
+                problems.append(f"{where}: the submodules line takes nothing, or recursive")
+            else:
+                pin["submodules"] = value
+        elif word == "on-request":
+            if line != "on-request":
+                problems.append(f"{where}: the on-request line takes nothing")
             else:
                 pin["on_request"] = True
+        elif word == "unreleased":
+            refusal = branch_refusal(value)
+            if refusal:
+                problems.append(f"{where}: the unreleased line names the branch that holds the commit, and"
+                                f" nothing else: unreleased <branch>. {value!r} is not one: {refusal}")
+            else:
+                pin["unreleased"] = value
+    if pin["unreleased"]:
+        refusal = unreleased_refusal(pin, located)
+        if refusal:
+            problems.append(f"{where}: {refusal}")
+    if problems:
+        # A refused pin is one of them for nothing downstream: not listed
+        # by `declarations`, not said to be "on purpose" by `check`.
+        pin["unreleased"] = ""
     return pin, problems
+
+
+def branch_refusal(branch: str) -> str:
+    """Why `branch` cannot be what an `unreleased` line names; "" when it can.
+
+    A name git takes as a branch, and a branch of the repository -- not one
+    of the names a clone answers to whatever the repository holds. `HEAD`
+    resolved on the first clone, as origin/HEAD, and was refused on every
+    run after it.
+    """
+    refusal = ref_name_refusal(branch)
+    if refusal:
+        return refusal
+    if branch.startswith("refs/"):
+        return "a branch is named as the repository names it, main and not refs/heads/main"
+    if re.fullmatch(r"[A-Z_]*HEAD", branch):
+        return "it is a name git keeps for itself, not a branch of the repository"
+    return ""
+
+
+def unreleased_refusal(pin: dict, located: bool) -> str:
+    """Why this pin may not say `unreleased`, from its own lines; "" when it may.
+
+    What can be read without a checkout, which is all `check` has: the
+    grammar, and the string of the URL. That line 1 is a tag of the
+    repository and an ancestor of the commit, and that the branch holds the
+    commit, are questions for a clone: `dependencies` answers them.
+    """
+    if not located:
+        return ("the unreleased line is for a third party, which says where it lives on a"
+                " 'repository <https URL>' line. A Maelys repository is pinned on a tag: tag it, and pin the tag")
+    if pin["repository"] and fleet_repository(pin["repository"]):
+        return (f"the unreleased line is for a third party, and {pin['repository']} is a Maelys repository."
+                " A Maelys repository is pinned on a tag: tag it, and pin the tag")
+    if not pin["tag"]:
+        return ("with an unreleased line, line 1 is the last tag before the commit, and it is empty")
+    described = DESCRIBED.fullmatch(pin["tag"])
+    if described and pin["commit"].startswith(described.group(2)):
+        return (f"with an unreleased line, line 1 is the last tag before the commit -- {described.group(1)}"
+                f" -- and not what git describe says of it ({pin['tag']}): the line already says the commit"
+                " is past its tag, and the socle verifies the tag is an ancestor")
+    refusal = ref_name_refusal(pin["tag"])
+    if refusal:
+        return (f"with an unreleased line, line 1 is the last tag before the commit, and {pin['tag']!r} is not"
+                f" the name of a tag: {refusal}")
+    return ""
 
 
 def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[tuple[str, str]], str, str, str]:
@@ -240,6 +465,7 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
     checks: list[tuple[str, str, str]] = []
     own_ci = False
     docs_unnamed = False
+    privacy_declared = False
     unknown: list[str] = []
     section = ""
     for number, raw in enumerate(text.splitlines(), 1):
@@ -248,7 +474,8 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
             continue
         if line.startswith("["):
             if line in ("[targets]", "[manifest]", "[sbom]", "[runners]", "[dependencies]",
-                        "[commit]", "[channels]", "[gate]", "[cut]", "[package]", "[check]", "[ci]", "[docs]"):
+                        "[commit]", "[channels]", "[gate]", "[cut]", "[package]", "[check]", "[ci]", "[docs]",
+                        "[privacy]"):
                 section = line[1:-1]
                 continue
             # A section this socle does not know is named and skipped, never
@@ -274,6 +501,16 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
             if not command.strip():
                 raise ValueError(f"[cut] after-version names no command at line {number}")
             after_version = command.strip()
+            continue
+        if section == "privacy":
+            # Named here and judged in one place only, privacy.declared(),
+            # when `check` runs the guard. A line the grammar refuses is a
+            # violation of the conventions, said by the guard to every
+            # repository whatever publishes it: said here it would be a
+            # release-scope refusal, which a repository the socle does not
+            # release never hears -- and a mistyped `refuse` would be a
+            # silence.
+            privacy_declared = True
             continue
         if section == "docs":
             # Read by declared_value(), which rendering the managed block needs.
@@ -438,7 +675,8 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
         targets.append((name, runner))
     if section and not unknown and not targets and not manifest and not channels \
             and not gate and not after_version and not sbom and not runners and not apart \
-            and not commit_verification and not package and not checks and not own_ci and not docs_unnamed:
+            and not commit_verification and not package and not checks and not own_ci and not docs_unnamed \
+            and not privacy_declared:
         raise ValueError(f"{DECLARATION_FILE} declares no target, archive kind, channel, gate or cut command")
     if own_ci and checks:
         raise ValueError("[check] legs run from the ci.yml job that calls the shared CI, and [ci] own says"

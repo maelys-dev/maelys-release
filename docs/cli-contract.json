@@ -731,6 +731,12 @@
                   "apply"
                 ]
               },
+              "notes": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
               "product": {
                 "type": "string"
               },
@@ -970,6 +976,9 @@
                 },
                 "type": "array"
               },
+              "hook": {
+                "type": "string"
+              },
               "impact": {
                 "items": {
                   "properties": {
@@ -1165,10 +1174,18 @@
                 "required": false,
                 "requires": [],
                 "summary": "Refuse prose in docs/ and a CLI reference outside docs/cli.md, instead of noting them."
+              },
+              {
+                "conflictsWith": [],
+                "long": "--history",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "Read every ref of the clone as well -- each blob once, commit messages, author and committer lines -- for what the tracked files are read for; says what it could not read."
               }
             ],
             "passthrough": false,
-            "synopsis": "check DIR [--product NAME] [--mechanism MECHANISM] [--docs-contract]"
+            "synopsis": "check DIR [--product NAME] [--mechanism MECHANISM] [--docs-contract] [--history]"
           },
           "outputMode": "json-envelope",
           "outputSchema": {
@@ -1278,6 +1295,267 @@
                   "null"
                 ]
               },
+              "privacy": {
+                "additionalProperties": false,
+                "properties": {
+                  "files": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "astext": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "partial": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "read": {
+                        "type": "integer"
+                      },
+                      "searched": {
+                        "type": "integer"
+                      },
+                      "tracked": {
+                        "type": "integer"
+                      },
+                      "unread": {
+                        "items": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "path": {
+                              "type": "string"
+                            },
+                            "reason": {
+                              "enum": [
+                                "archive",
+                                "image",
+                                "binary",
+                                "size",
+                                "submodule",
+                                "absent",
+                                "undecodable"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "path",
+                            "reason"
+                          ],
+                          "type": "object"
+                        },
+                        "type": "array"
+                      }
+                    },
+                    "required": [
+                      "tracked",
+                      "searched",
+                      "read",
+                      "unread",
+                      "astext",
+                      "partial"
+                    ],
+                    "type": "object"
+                  },
+                  "findings": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "blob": {
+                          "type": "string"
+                        },
+                        "commit": {
+                          "type": "string"
+                        },
+                        "excused": {
+                          "type": "integer"
+                        },
+                        "family": {
+                          "enum": [
+                            "machine",
+                            "host",
+                            "path",
+                            "identifier",
+                            "email",
+                            "term"
+                          ]
+                        },
+                        "in": {
+                          "enum": [
+                            "key",
+                            "name",
+                            "ref"
+                          ]
+                        },
+                        "key": {
+                          "type": "string"
+                        },
+                        "line": {
+                          "type": "integer"
+                        },
+                        "notice": {
+                          "type": "boolean"
+                        },
+                        "path": {
+                          "type": "string"
+                        },
+                        "term": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "family",
+                        "path"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "history": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "addresses": {
+                        "type": "integer"
+                      },
+                      "blobs": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "read": {
+                            "type": "integer"
+                          },
+                          "unread": {
+                            "type": "object"
+                          }
+                        },
+                        "required": [
+                          "read",
+                          "unread"
+                        ],
+                        "type": "object"
+                      },
+                      "commits": {
+                        "type": "integer"
+                      },
+                      "findings": {
+                        "items": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "blob": {
+                              "type": "string"
+                            },
+                            "commit": {
+                              "type": "string"
+                            },
+                            "excused": {
+                              "type": "integer"
+                            },
+                            "family": {
+                              "enum": [
+                                "machine",
+                                "host",
+                                "path",
+                                "identifier",
+                                "email",
+                                "term"
+                              ]
+                            },
+                            "in": {
+                              "enum": [
+                                "key",
+                                "name",
+                                "ref"
+                              ]
+                            },
+                            "key": {
+                              "type": "string"
+                            },
+                            "line": {
+                              "type": "integer"
+                            },
+                            "notice": {
+                              "type": "boolean"
+                            },
+                            "path": {
+                              "type": "string"
+                            },
+                            "term": {
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "family",
+                            "path"
+                          ],
+                          "type": "object"
+                        },
+                        "type": "array"
+                      },
+                      "pullRequestHeads": {
+                        "type": "boolean"
+                      },
+                      "refs": {
+                        "type": "object"
+                      },
+                      "shallow": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "refs",
+                      "shallow",
+                      "commits",
+                      "blobs",
+                      "addresses",
+                      "pullRequestHeads",
+                      "findings"
+                    ],
+                    "type": "object"
+                  },
+                  "local": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "machineNames": {
+                        "type": "integer"
+                      },
+                      "runner": {
+                        "type": "boolean"
+                      },
+                      "terms": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "machineNames",
+                      "terms",
+                      "runner"
+                    ],
+                    "type": "object"
+                  },
+                  "mode": {
+                    "enum": [
+                      "note",
+                      "refuse"
+                    ]
+                  },
+                  "refuses": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "mode",
+                  "refuses",
+                  "files",
+                  "local",
+                  "findings"
+                ],
+                "type": "object"
+              },
               "product": {
                 "type": "string"
               },
@@ -1353,7 +1631,254 @@
             "check"
           ],
           "purpose": "Report the conventions of a product and, when it publishes through the socle, its release mechanism; exit 2 on any violation.",
-          "usage": "check DIR [--product NAME] [--mechanism MECHANISM] [--docs-contract]"
+          "usage": "check DIR [--product NAME] [--mechanism MECHANISM] [--docs-contract] [--history]"
+        },
+        {
+          "available": true,
+          "effect": "read",
+          "exitCodes": {
+            "0": "command completed",
+            "1": "execution failed",
+            "2": "valid report with violations"
+          },
+          "external": false,
+          "hidden": false,
+          "id": "outgoing",
+          "input": {
+            "constraints": [],
+            "operands": [
+              {
+                "name": "DIR",
+                "required": true,
+                "summary": "Product repository.",
+                "variadic": false
+              }
+            ],
+            "options": [
+              {
+                "argument": {
+                  "name": "REMOTE",
+                  "type": "string"
+                },
+                "conflictsWith": [],
+                "long": "--pre-push",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "Judge what a push sends to REMOTE, from the refs git hands a pre-push hook on stdin, instead of what HEAD has ahead of its upstream."
+              }
+            ],
+            "passthrough": false,
+            "synopsis": "outgoing DIR [--pre-push REMOTE]"
+          },
+          "outputMode": "json-envelope",
+          "outputSchema": {
+            "additionalProperties": false,
+            "properties": {
+              "commits": {
+                "type": "integer"
+              },
+              "fabricated": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "commit": {
+                      "type": "string"
+                    },
+                    "rules": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "commit",
+                    "rules"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "fix": {
+                "type": "string"
+              },
+              "local": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "commit": {
+                      "type": "string"
+                    },
+                    "rules": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "commit",
+                    "rules"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "notes": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "project": {
+                "type": "string"
+              },
+              "remote": {
+                "type": "string"
+              },
+              "renamed": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "scope": {
+                "enum": [
+                  "upstream",
+                  "untracked",
+                  "push"
+                ]
+              },
+              "source": {
+                "enum": [
+                  "head",
+                  "pre-push"
+                ]
+              },
+              "tags": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "valid": {
+                "type": "boolean"
+              },
+              "violations": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "valid",
+              "project",
+              "source",
+              "scope",
+              "commits",
+              "fabricated",
+              "local",
+              "renamed",
+              "tags",
+              "violations",
+              "notes",
+              "fix"
+            ],
+            "type": "object"
+          },
+          "pattern": [
+            "outgoing"
+          ],
+          "purpose": "Report the commits about to leave whose author or committer address git made up on this machine; exit 2 when there is one.",
+          "usage": "outgoing DIR [--pre-push REMOTE]"
+        },
+        {
+          "available": true,
+          "effect": {
+            "apply": "apply",
+            "plan": "preview"
+          },
+          "exitCodes": {
+            "0": "command completed",
+            "1": "execution failed",
+            "2": "valid report with violations"
+          },
+          "external": false,
+          "hidden": false,
+          "id": "hook",
+          "input": {
+            "constraints": [],
+            "operands": [
+              {
+                "name": "DIR",
+                "required": true,
+                "summary": "Product repository.",
+                "variadic": false
+              }
+            ],
+            "options": [
+              {
+                "conflictsWith": [],
+                "long": "--apply",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "Apply the reviewed plan instead of only planning it."
+              }
+            ],
+            "passthrough": false,
+            "synopsis": "hook DIR [--apply]"
+          },
+          "outputMode": "json-envelope",
+          "outputSchema": {
+            "additionalProperties": false,
+            "properties": {
+              "action": {
+                "enum": [
+                  "create",
+                  "same",
+                  "kept"
+                ]
+              },
+              "hook": {
+                "type": "string"
+              },
+              "mode": {
+                "enum": [
+                  "plan",
+                  "apply"
+                ]
+              },
+              "path": {
+                "type": "string"
+              },
+              "project": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "wrote": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "mode",
+              "project",
+              "path",
+              "action",
+              "wrote",
+              "hook"
+            ],
+            "type": "object"
+          },
+          "pattern": [
+            "hook"
+          ],
+          "purpose": "Write the optional pre-push hook that refuses a push sending an address git made up on this machine; plan without --apply.",
+          "usage": "hook DIR [--apply]"
         },
         {
           "available": true,
@@ -1624,6 +2149,37 @@
                 },
                 "type": "array"
               },
+              "unreleased": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "branch": {
+                      "type": "string"
+                    },
+                    "commit": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "repository": {
+                      "type": "string"
+                    },
+                    "tag": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "repository",
+                    "branch",
+                    "tag",
+                    "commit"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
               "valid": {
                 "type": "boolean"
               },
@@ -1714,6 +2270,7 @@
               "runners",
               "workflows",
               "carried",
+              "unreleased",
               "checks"
             ],
             "type": "object"
@@ -1901,6 +2458,267 @@
                   "type": "object"
                 },
                 "type": "array"
+              },
+              "privacy": {
+                "additionalProperties": false,
+                "properties": {
+                  "files": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "astext": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "partial": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "read": {
+                        "type": "integer"
+                      },
+                      "searched": {
+                        "type": "integer"
+                      },
+                      "tracked": {
+                        "type": "integer"
+                      },
+                      "unread": {
+                        "items": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "path": {
+                              "type": "string"
+                            },
+                            "reason": {
+                              "enum": [
+                                "archive",
+                                "image",
+                                "binary",
+                                "size",
+                                "submodule",
+                                "absent",
+                                "undecodable"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "path",
+                            "reason"
+                          ],
+                          "type": "object"
+                        },
+                        "type": "array"
+                      }
+                    },
+                    "required": [
+                      "tracked",
+                      "searched",
+                      "read",
+                      "unread",
+                      "astext",
+                      "partial"
+                    ],
+                    "type": "object"
+                  },
+                  "findings": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "blob": {
+                          "type": "string"
+                        },
+                        "commit": {
+                          "type": "string"
+                        },
+                        "excused": {
+                          "type": "integer"
+                        },
+                        "family": {
+                          "enum": [
+                            "machine",
+                            "host",
+                            "path",
+                            "identifier",
+                            "email",
+                            "term"
+                          ]
+                        },
+                        "in": {
+                          "enum": [
+                            "key",
+                            "name",
+                            "ref"
+                          ]
+                        },
+                        "key": {
+                          "type": "string"
+                        },
+                        "line": {
+                          "type": "integer"
+                        },
+                        "notice": {
+                          "type": "boolean"
+                        },
+                        "path": {
+                          "type": "string"
+                        },
+                        "term": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "family",
+                        "path"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "history": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "addresses": {
+                        "type": "integer"
+                      },
+                      "blobs": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "read": {
+                            "type": "integer"
+                          },
+                          "unread": {
+                            "type": "object"
+                          }
+                        },
+                        "required": [
+                          "read",
+                          "unread"
+                        ],
+                        "type": "object"
+                      },
+                      "commits": {
+                        "type": "integer"
+                      },
+                      "findings": {
+                        "items": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "blob": {
+                              "type": "string"
+                            },
+                            "commit": {
+                              "type": "string"
+                            },
+                            "excused": {
+                              "type": "integer"
+                            },
+                            "family": {
+                              "enum": [
+                                "machine",
+                                "host",
+                                "path",
+                                "identifier",
+                                "email",
+                                "term"
+                              ]
+                            },
+                            "in": {
+                              "enum": [
+                                "key",
+                                "name",
+                                "ref"
+                              ]
+                            },
+                            "key": {
+                              "type": "string"
+                            },
+                            "line": {
+                              "type": "integer"
+                            },
+                            "notice": {
+                              "type": "boolean"
+                            },
+                            "path": {
+                              "type": "string"
+                            },
+                            "term": {
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "family",
+                            "path"
+                          ],
+                          "type": "object"
+                        },
+                        "type": "array"
+                      },
+                      "pullRequestHeads": {
+                        "type": "boolean"
+                      },
+                      "refs": {
+                        "type": "object"
+                      },
+                      "shallow": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "refs",
+                      "shallow",
+                      "commits",
+                      "blobs",
+                      "addresses",
+                      "pullRequestHeads",
+                      "findings"
+                    ],
+                    "type": "object"
+                  },
+                  "local": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "machineNames": {
+                        "type": "integer"
+                      },
+                      "runner": {
+                        "type": "boolean"
+                      },
+                      "terms": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "machineNames",
+                      "terms",
+                      "runner"
+                    ],
+                    "type": "object"
+                  },
+                  "mode": {
+                    "enum": [
+                      "note",
+                      "refuse"
+                    ]
+                  },
+                  "refuses": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "mode",
+                  "refuses",
+                  "files",
+                  "local",
+                  "findings"
+                ],
+                "type": "object"
               },
               "product": {
                 "type": "string"
@@ -2539,6 +3357,9 @@
                         "on-request"
                       ]
                     },
+                    "asked": {
+                      "type": "boolean"
+                    },
                     "commit": {
                       "type": "string"
                     },
@@ -2564,6 +3385,9 @@
                       ]
                     },
                     "tag": {
+                      "type": "string"
+                    },
+                    "unreleased": {
                       "type": "string"
                     }
                   },
@@ -2651,7 +3475,7 @@
                 "repeatable": false,
                 "required": false,
                 "requires": [],
-                "summary": "Write the protection instead of only reporting it."
+                "summary": "Write the protection and the release environment instead of only reporting them; exit 2 when either is refused."
               },
               {
                 "conflictsWith": [],
@@ -2675,7 +3499,7 @@
                 "repeatable": false,
                 "required": false,
                 "requires": [],
-                "summary": "Propose the required list minus the socle's matrix legs: the narrowing that comes before an adoption renames them."
+                "summary": "Propose the required list minus the socle's matrix legs: the narrowing that comes before an adoption renames them. The release environment is neither read nor written."
               }
             ],
             "passthrough": false,
@@ -2737,6 +3561,125 @@
                 },
                 "type": "array"
               },
+              "environment": {
+                "additionalProperties": false,
+                "properties": {
+                  "applied": {
+                    "type": "boolean"
+                  },
+                  "becomes": {
+                    "type": "string"
+                  },
+                  "before": {
+                    "type": "object"
+                  },
+                  "exists": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  },
+                  "gate": {
+                    "items": {
+                      "properties": {
+                        "message": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "status",
+                        "message"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "holds": {
+                    "type": [
+                      "object",
+                      "null"
+                    ]
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "note": {
+                    "type": "string"
+                  },
+                  "policy": {
+                    "enum": [
+                      "custom",
+                      "protected-branches",
+                      "all",
+                      null
+                    ]
+                  },
+                  "refused": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "rules": {
+                    "items": {
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "state": {
+                    "type": "string"
+                  },
+                  "unread": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "writes": {
+                    "items": {
+                      "properties": {
+                        "body": {
+                          "type": "object"
+                        },
+                        "endpoint": {
+                          "type": "string"
+                        },
+                        "method": {
+                          "enum": [
+                            "PUT",
+                            "POST"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "method",
+                        "endpoint",
+                        "body"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "written": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "name",
+                  "exists",
+                  "state",
+                  "writes",
+                  "refused",
+                  "applied"
+                ],
+                "type": "object"
+              },
               "fromTag": {
                 "items": {
                   "type": "string"
@@ -2793,6 +3736,21 @@
               },
               "pullRequests": {
                 "type": "integer"
+              },
+              "refused": {
+                "properties": {
+                  "hint": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "message",
+                  "hint"
+                ],
+                "type": "object"
               },
               "replaced": {
                 "items": {
@@ -2859,7 +3817,7 @@
           "pattern": [
             "protect"
           ],
-          "purpose": "Report what the default branch should require, derived from the workflows and the runs it carries rather than typed by hand; --apply writes it.",
+          "purpose": "Report what the default branch should require, derived from the workflows and the runs it carries rather than typed by hand, and what the release environment of a product the socle releases should admit; --apply writes each, and a refusal of one does not stop the other.",
           "usage": "protect DIR [--apply] [--allow-lock] [--allow-narrow] [--without-legs]"
         },
         {
@@ -2973,7 +3931,7 @@
                 "repeatable": false,
                 "required": false,
                 "requires": [],
-                "summary": "Command producing dist/; TARGET is substituted."
+                "summary": "Command producing dist/; TARGET is substituted. Another line than the default names no step of the release."
               },
               {
                 "conflictsWith": [],
@@ -2981,7 +3939,7 @@
                 "repeatable": false,
                 "required": false,
                 "requires": [],
-                "summary": "Run the check command instead of packaging; dist/ is left alone."
+                "summary": "Replay the check step of the shared CI's leg for TARGET instead of packaging: its packages, its line, no compiler named; dist/ is left alone. For any product whose ci.yml calls check-product.yml, however it publishes."
               },
               {
                 "argument": {
@@ -2989,12 +3947,11 @@
                   "type": "string"
                 },
                 "conflictsWith": [],
-                "default": "make check",
                 "long": "--check-command",
                 "repeatable": false,
                 "required": false,
                 "requires": [],
-                "summary": "Command run with --check."
+                "summary": "The line to run with --check, when the leg's own is not wanted or cannot be read for certain from ci.yml; another line than the leg's names no step."
               },
               {
                 "conflictsWith": [],
@@ -3082,6 +4039,18 @@
                   "check"
                 ]
               },
+              "notReplayed": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "notReplayedSteps": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
               "platform": {
                 "type": "string"
               },
@@ -3094,6 +4063,9 @@
                 },
                 "type": "array"
               },
+              "replayed": {
+                "type": "string"
+              },
               "repository": {
                 "type": "string"
               },
@@ -3102,6 +4074,12 @@
               },
               "target": {
                 "type": "string"
+              },
+              "unlikeTheRunner": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
               }
             },
             "required": [
@@ -3112,7 +4090,7 @@
           "pattern": [
             "rehearse"
           ],
-          "purpose": "Replay the Linux build job of the release in a Docker container on a copy of the working tree, make check with --check, or a channel's publish script against a published release with --channel.",
+          "purpose": "Replay one step of one Linux job in a Docker container on a copy of the working tree: the packaging of the release, the check of a leg of the shared CI with --check, or a channel's publish script against a published release with --channel. The result names the step it replayed, and the steps and jobs it did not.",
           "usage": "rehearse DIR [TARGET] [--product NAME] [--image IMAGE] [--package-command COMMAND] [--check] [--check-command COMMAND] [--keep] [--channel NAME] [--tag TAG]"
         },
         {
