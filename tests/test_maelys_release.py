@@ -7777,9 +7777,13 @@ class TrackedNameNotUtf8Test(unittest.TestCase):
         # The file is changed, or absent where the file system holds no such name.
         refused(lambda: MODULE.migration.describe_the_clone(product.dir, "maelys-fixture", moving))
         refused(lambda: MODULE.worktree_paths(product.dir))
-        # And an answer in which every name decodes is the answer it was.
+        # And an answer in which every name decodes is the answer it was:
+        # the name leaves the index, and the working tree where it holds it,
+        # since a file nothing tracks is listed there too.
         product.git(product.dir, "rm", "-q", "--cached", "--", os.fsdecode(b"docs/caf\xe9.md"))
         product.git(product.dir, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "renamed away")
+        if held:
+            os.remove(os.fsencode(product.dir) + b"/docs/caf\xe9.md")
         product.write("docs/y.md", "# Y\n")
         self.assertEqual(MODULE.worktree_paths(product.dir).get("docs/y.md"), "??")
 
