@@ -112,6 +112,11 @@ settings were changed to manufacture a failure.
 `inputs/` freezes the product files (including executable bits), command line,
 and ordered host calls. Git reads run only when recording inputs, in temporary
 local repositories; their stdout, stderr and exit codes become inputs too.
+What git would compose on the machine is the one exception: a reading
+compares an address with it, and the recorder never asks the real machine. It
+answers with an account and a machine that do not exist, to the command it
+records as to the reference, so no input holds the login, the account's name
+or the name of the machine it was recorded on.
 The manifest hashes every input file. Current test fixture builders never run
 during replay. The local fixture commit seen by `migrate` is recorded, not
 recreated on another platform.
@@ -157,6 +162,28 @@ original golden diff, then copy the reviewed outputs into `api/baseline` in a
 separate commit of that fix PR. Never rerun `record_api.py` to make a refactor
 pass. A changed host call sequence is itself a reviewable difference: updating
 inputs needs an explicit explanation, not a fallback or automatic recording.
+Such a fix cannot replay the inputs it changes, so it records them again, and
+on the frozen version:
+
+```sh
+python3 tests/golden/record_api.py /absolute/new/api-inputs \
+  --source /absolute/socle --commit FULL_FIX_COMMIT \
+  --reference /absolute/socle/tests/golden/api/inputs \
+  --responses-cache /absolute/copy/of/api/inputs/responses.json --offline
+```
+
+`--reference` runs the candidate's code under the `socle/VERSION` and
+`socle/CHANGELOG.md` of the existing inputs, as `capture.py --candidate` does
+for the other reference; those inputs are verified digest by digest before
+they are used, as a replay verifies the ones it reads. `--offline` refuses
+any read the cache does not answer, so that "nothing is read live" is held by
+the tool and not by whoever ran it: a cache copied from `responses.json`
+answers every read already recorded, and a fix that needs a new one fails
+naming the endpoint, which is then read in a recording of its own. The diff
+of the inputs holds the calls that moved, not the versions cut since the last
+recording. The manifest keeps the two apart: `sourceCommit` and
+`sourceVersion` are the commit recorded and the VERSION it carries,
+`frozenVersion` the VERSION it ran under.
 The replay manifest's `sourceCommit` identifies the implementation that
 recorded the **inputs**; it remains fixed while comparing candidate outputs.
 

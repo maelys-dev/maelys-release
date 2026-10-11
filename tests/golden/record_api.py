@@ -6,6 +6,19 @@ This tool alone can read GitHub. It cannot issue a GitHub write or run a
 product publication. Normal CI uses capture_api.py, which cannot call gh/git.
 The responses cache preserves every first live reading across interrupted
 recordings; refreshing live data requires a different, explicit cache path.
+
+--reference INPUTS records a behavior fix that changes the host calls: the
+candidate's code runs under the socle/VERSION and socle/CHANGELOG.md frozen
+in INPUTS, as capture.py --candidate does for the other reference, so the
+recording holds the fix and not the versions cut since the last one. INPUTS
+is verified like any inputs a replay reads, digest by digest, before a line
+of it is used. --offline refuses every read the cache does not answer:
+without it a cache miss is read live from GitHub and recorded.
+
+The manifest says both things a reader needs and cannot infer: sourceCommit
+and sourceVersion are the commit recorded and the VERSION that commit
+carries; frozenVersion is the VERSION the recording ran under, which is the
+one a replay restores.
 """
 from __future__ import annotations
 
@@ -27,6 +40,19 @@ import capture_api as replay
 
 REPOSITORIES = ('maelys-dev/maelys-system', 'maelys-dev/agent-cli-spec')
 DATE = '2026-09-16T00:00:00+0000'
+# What git would compose on the recording machine -- its account's name, its
+# login, its own name -- is never an input: it is exactly what the reading
+# that asks for it exists to keep out of a public file. The question is one
+# argv, spelled here as the program spells it; the recorder answers it
+# itself, with a machine that does not exist, and never runs it, so that what
+# is recorded is what the recorded program was told. Any other use of env(1)
+# is refused like any process outside the list below.
+COMPOSED = ['env', '-u', 'EMAIL', '-u', 'GIT_AUTHOR_NAME', '-u', 'GIT_AUTHOR_EMAIL', '-u', 'GIT_COMMITTER_NAME',
+            '-u', 'GIT_COMMITTER_EMAIL', '-u', 'GIT_DIR', '-u', 'GIT_WORK_TREE', '-u', 'GIT_CONFIG_COUNT',
+            '-u', 'GIT_CONFIG_PARAMETERS', 'GIT_CONFIG_GLOBAL=/dev/null', 'GIT_CONFIG_SYSTEM=/dev/null',
+            'GIT_CONFIG_NOSYSTEM=1', 'git', '-C', '/', 'var', 'GIT_COMMITTER_IDENT']
+MACHINE = {'env': '/usr/bin/env',
+           'stdout': 'Golden Machine <golden@golden-machine.invalid> 1757980800 +0000\n'}
 
 
 def git(project, *args):
@@ -40,7 +66,10 @@ def safe_git(command):
     prefixes = (['git', 'remote', 'get-url', 'origin'], ['git', 'config', '--get'],
                 ['git', 'tag', '--list'], ['git', 'rev-parse'], ['git', 'grep'], ['git', 'ls-files'],
                 ['git', 'describe', '--tags', '--abbrev=0'], ['git', 'cat-file', '-t'],
-                ['git', 'cat-file', '-p'], ['git', 'merge-base', '--is-ancestor'])
+                ['git', 'cat-file', '-p'], ['git', 'merge-base', '--is-ancestor'],
+                # Reads of the identity and of what a branch has ahead of its upstream.
+                ['git', 'config', '-z', '--get-regexp'], ['git', 'symbolic-ref', '-q', '--short', 'HEAD'],
+                ['git', 'log', '--boundary'], ['git', 'for-each-ref'])
     return any(command[:len(prefix)] == prefix for prefix in prefixes)
 
 
@@ -150,8 +179,8 @@ def scenarios():
 
 
 class Responses:
-    def __init__(self, original, cache):
-        self.original, self.cache = original, cache
+    def __init__(self, original, cache, offline=False):
+        self.original, self.cache, self.offline = original, cache, offline
         self.live = replay.read_json(cache) if cache.exists() else {}
         self.used = {}
 
@@ -162,6 +191,10 @@ class Responses:
         if not product_read and not tap_read:
             raise AssertionError(f'API endpoint outside the recording scope: {endpoint}')
         if endpoint not in self.live:
+            if self.offline:
+                # Said before anything is asked: a recording that promised to
+                # read nothing live must not find out afterwards that it did.
+                raise RuntimeError(f'live read refused (--offline): {endpoint} is not in the responses cache')
             state, body = self.original.read(endpoint)
             if state not in ('ok', 'absent'):
                 raise RuntimeError(f'live GET {endpoint}: {state}; do not record a transient failure as live truth')
@@ -231,6 +264,9 @@ def recording_host(module, project, source, responses, profile):
         def __init__(self):
             self.events = []
         def which(self, name):
+            if name == 'env':
+                self.events.append({'call': {'kind': 'which', 'name': name}, 'result': MACHINE['env']})
+                return MACHINE['env']
             if name != 'gh':
                 raise AssertionError(f'unexpected tool lookup: {name}')
             value = original.which(name)
@@ -243,6 +279,10 @@ def recording_host(module, project, source, responses, profile):
             self.events.append({'call': {'kind': 'read', 'path': path}, 'response': key})
             return answer['state'], copy.deepcopy(answer['body'])
         def run(self, command, cwd=None, env=None):
+            if command == COMPOSED and cwd is None and env is None:
+                self.events.append({'call': {'kind': 'run', 'argv': command, 'cwd': None},
+                                    'result': {'returncode': 0, 'stdout': MACHINE['stdout'], 'stderr': ''}})
+                return subprocess.CompletedProcess(command, 0, MACHINE['stdout'], '')
             if env is not None or cwd != project or not safe_git(command):
                 raise AssertionError(f'unapproved recording process: {command!r}, {cwd}')
             done = original.run(command, cwd=cwd)
@@ -259,12 +299,27 @@ def recording_host(module, project, source, responses, profile):
     return RecordingHost()
 
 
+def provenance(commit, own_version, frozen_version):
+    """Which commit was recorded, the VERSION it carries, and the VERSION it ran under.
+
+    One member said both until a fix was recorded under a frozen version: the
+    manifest then paired a commit at one version with the name of another,
+    and nothing told the two apart.
+    """
+    return {'schemaVersion': 1, 'sourceCommit': commit, 'sourceVersion': own_version,
+            'frozenVersion': frozen_version}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('output', type=pathlib.Path)
     parser.add_argument('--source', type=pathlib.Path, required=True)
     parser.add_argument('--commit', required=True)
     parser.add_argument('--responses-cache', type=pathlib.Path, required=True)
+    parser.add_argument('--reference', type=pathlib.Path,
+                        help='existing inputs whose frozen socle/VERSION and socle/CHANGELOG.md the recording keeps')
+    parser.add_argument('--offline', action='store_true',
+                        help='refuse a read the responses cache does not answer, instead of reading GitHub')
     args = parser.parse_args()
     source, output = args.source.resolve(), args.output.resolve()
     if not re.fullmatch('[0-9a-f]{40}', args.commit) or git(source, 'rev-parse', 'HEAD') != args.commit:
@@ -273,18 +328,34 @@ def main():
         parser.error('source must be clean and output must not exist')
     if any(name.startswith('_MAELYS_RELEASE_') for name in os.environ):
         parser.error('record outside a self-test environment')
+    if args.reference:
+        # The reference gives the version the whole recording runs under: it
+        # is held to what a replay holds its inputs to, and not to less.
+        try:
+            replay.verify_inputs(args.reference.resolve())
+        except (OSError, KeyError, ValueError, RuntimeError) as refused:
+            parser.error(f'--reference is not a verified set of inputs: {refused}')
+    if args.offline and not args.responses_cache.is_file():
+        parser.error('--offline needs the responses cache to exist: nothing else can answer a read')
     os.environ.update({'LANG': 'C', 'LC_ALL': 'C', 'TZ': 'UTC', 'GH_HOST': 'github.com',
                        'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_SYSTEM': os.devnull,
                        'GIT_CONFIG_NOSYSTEM': '1', 'GIT_TERMINAL_PROMPT': '0', 'GIT_OPTIONAL_LOCKS': '0',
                        'MAELYS_RELEASE_NO_RELOCATE': '1'})
-    module = replay.load_source(source)
-    responses = Responses(module.Host(), args.responses_cache.resolve())
     with tempfile.TemporaryDirectory(prefix='api-record-') as directory:
         work = pathlib.Path(directory).resolve()
         stage = work / 'inputs'
         stage.mkdir()
-        manifest = {'schemaVersion': 1, 'sourceCommit': args.commit, 'sourceVersion': module.socle_version(),
-                    'cases': [], 'sha256': {}}
+        # A fix is recorded under the version its reference was frozen at:
+        # the fixtures are built by the candidate's code, and their managed
+        # headers carry that version. Recording the candidate's own VERSION
+        # and CHANGELOG.md moved every fixture and every list of versions a
+        # product is behind on, for three releases nobody had asked about.
+        own_version = (source / 'VERSION').read_text(encoding='utf-8').strip()
+        commit, source = args.commit, (replay.frozen_socle(source, args.reference.resolve(), work)
+                                       if args.reference else source)
+        module = replay.load_source(source)
+        responses = Responses(module.Host(), args.responses_cache.resolve(), offline=args.offline)
+        manifest = {**provenance(commit, own_version, module.socle_version()), 'cases': [], 'sha256': {}}
         for case in scenarios():
             folder = work / case['id']
             folder.mkdir()
