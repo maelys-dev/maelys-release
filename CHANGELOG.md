@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+This version is what a product's first release cycle showed, in four
+families; the bullets follow the ten changes as they were made, and the
+last line says what a product has to do. Privacy before the push: the
+address git makes up on a machine, what the tracked files and the history
+say of the machine and the person behind them, and what a repository
+still private does when a datum must leave it before it opens. Time lost
+at a first cut: a `release` environment armed by hand, refusals of `cut`
+that `check` could have said first, a pager that holds a finished command
+through `ssh -t`, a checkout of the socle that did not know its version.
+What a rehearsal proves, said by the rehearsal itself; and a third
+party's commit that no tag carries, pinned on purpose, with every other
+file that writes a pinned commit out again.
+
 - **`check` notes an address git made up on the machine, before the
   push.** A clone with neither `user.name` nor `user.email` pushed twenty
   commits whose address carried the machine's name, long before any
