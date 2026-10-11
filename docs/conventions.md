@@ -2977,6 +2977,25 @@ that is not one:
 `--without-legs` in the first two states is told what it always was where
 no protection exists: nothing requires the legs, adopt first.
 
+**A 404 is an absence only where GitHub says so.** "Nothing protects the
+branch" is two readings, and one answer alone establishes each. For the
+classic protection, a 404 that says `Branch not protected`: GitHub answers
+404 as well to a token that may not read protections — `Not Found` — and
+for a branch that does not exist — `Branch not found` — and every 404 was
+read as the first. For the rules of the branch, `[]`: a 404 there, whatever
+it says, is not a reading of them, and was read as no ruleset. Either is
+now `UNREAD`, and nothing is written. Of such a 404 for the protection the
+plan notes what was read — the status, the words GitHub answered it in, and
+that nothing is concluded from them — and keeps the note of a refusal to
+say for a 403 or a timeout, which GitHub did not answer.
+This is the reading of `protect` alone, the one command that writes on that
+absence: `preflight` and the guard of `adopt` report on a 404 and read it
+as they did. And where the rules are unread, whatever kept them — a 502, a
+timeout, a 404, a body that is not a list — the plan says neither that the
+branch is `NOT protected`, nor what it would be created with, nor that a
+ruleset protects it: it says what was not read, and nothing more of that
+half.
+
 **What `protect` writes of the release environment.** For a product the
 socle releases — one whose `release.yml` is the generated one — the plan
 also reads the `release` environment, through the reader `preflight`

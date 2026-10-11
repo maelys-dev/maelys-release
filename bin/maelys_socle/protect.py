@@ -246,6 +246,14 @@ def handle_protect(invocation: Invocation, context: Context) -> tuple[dict, int]
     # check, and the whole protection was put over whatever was there.
     if state == "ok" and not (isinstance(current, dict) and current):
         state = "empty"
+    # Nor is every 404 an absence. GitHub says `Branch not protected` of a
+    # branch that has no protection, and answers 404 as well to a token
+    # that may not read protections and for a branch that does not exist:
+    # read as one fact, the last two had the whole protection put on them.
+    # Told apart here and nowhere else, since every other reader of a 404
+    # reports and none of them writes on it.
+    if state == "absent" and not protection.unprotected:
+        state = "unsaid"
     # The environment a tag deploys into, for a product whose release is the
     # socle's: a repository that publishes its own way owns its environments
     # as it owns its release.yml, and this says nothing of them. Nor does
@@ -266,6 +274,11 @@ def handle_protect(invocation: Invocation, context: Context) -> tuple[dict, int]
     # ruleset-protected repository it was not protected while proposing to
     # add three contexts its ruleset already required.
     ruled, rules = protection.ruled_state, protection.rules
+    # GitHub answers `[]` for a branch no rule applies to. A 404 there is
+    # not a reading of its rules, whatever it says, and neither is a body
+    # that is not a list: nothing is said of the branch from either.
+    if ruled == "absent" or ruled == "ok" and not isinstance(rules, list):
+        ruled = "unreadable"
     by_rule = protection.rule_contexts
     required += [name for name in by_rule if name not in required]
     # The socle's legs are computed, never observed: they come from the
@@ -336,6 +349,14 @@ def handle_protect(invocation: Invocation, context: Context) -> tuple[dict, int]
     if state == "unreadable":
         report["note"] = (f"GitHub refused to say what protects {branch} of {repository}, which a private"
                           " repository of a free plan does. That is not the same fact as an open branch.")
+    # A 404 that does not say the branch is unprotected is told as it was
+    # read. GitHub did answer -- `Branch not found` is an answer -- so the
+    # note of a refusal to say would be false of it.
+    elif state == "unsaid":
+        words = getattr(protection.classic_state, "message", "")
+        report["note"] = ("GitHub answered 404 with " + (f"the words '{words}'" if words else "no words")
+                          + f" for the protection of {branch} of {repository}, which is not what it says of a"
+                          " branch without protection: nothing is concluded from it.")
     # What a branch requires must be what a pull request produces. With no
     # merged pull request to read, this command proposes the socle's own
     # contexts and nothing else, and says why -- rather than reading the tip
@@ -388,8 +409,7 @@ def handle_protect(invocation: Invocation, context: Context) -> tuple[dict, int]
     # above is of that guess, and --apply created a protection on it.
     unread = [what for what, answered in (("the default branch", bool(described.data.get("default_branch"))),
                                           ("the branch protection", state in ("ok", "absent")),
-                                          ("the rulesets", ruled == "absent" or ruled == "ok"
-                                           and isinstance(rules, list)),
+                                          ("the rulesets", ruled == "ok"),
                                           ("the check runs of recent pull requests",
                                            not partial.get("unanswered")))
               if not answered]
@@ -399,10 +419,12 @@ def handle_protect(invocation: Invocation, context: Context) -> tuple[dict, int]
     # Every other setting, in the plan: what an existing protection keeps,
     # and what a new one is created with. A new protection used to receive
     # the socle's shape -- linear history off among others -- without a line
-    # saying so (maelys-datalog).
+    # saying so (maelys-datalog). Created where nothing protects the
+    # branch, which the rules must have been read to say.
     if state == "ok":
         report["keeps"] = protection_settings(holds)
-    elif state == "absent" and "a ruleset" not in mechanisms and "the default branch" not in unread:
+    elif (state == "absent" and ruled == "ok" and "a ruleset" not in mechanisms
+          and "the default branch" not in unread):
         report["creates"] = protection_settings(dict(PROTECTION_SHAPE, required_status_checks={"strict": False}))
     if invocation.flag("--apply"):
         withdrawn = withdrawn_for("protect", context)
@@ -803,9 +825,13 @@ def write_ruleset(repository: str, branch: str, rules: object, contexts: list[st
 
 
 def text_protect(data: dict) -> str:
+    # A branch is said to be open on both readings of what protects it, and
+    # on neither alone: with its rules unread, `is NOT protected` was said
+    # of a branch a ruleset may protect.
     lines = [f"branch   {data['branch']} of {data['repository']}"
              + (" is protected by " + " and ".join(data["protectedBy"]) if data.get("protectedBy")
-                else " could not be read" if {"the default branch", "the branch protection"} & set(data.get("unread") or [])
+                else " could not be read" if {"the default branch", "the branch protection", "the rulesets"}
+                & set(data.get("unread") or [])
                 else "" if data["protected"] else " is NOT protected")]
     for what in data.get("unread") or []:
         lines.append(f"UNREAD   GitHub did not answer for {what}: this plan is not a reading, and --apply refuses")

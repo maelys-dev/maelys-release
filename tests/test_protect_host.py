@@ -12,8 +12,8 @@ import unittest
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
 
 import test_maelys_release as fixtures
-from test_maelys_release import (ALL_LEGS, MODULE, FakeHost, FakeProtection,
-                                protection_host, using_host, workflow_project)
+from test_maelys_release import (ALL_LEGS, MODULE, UNPROTECTED, FakeHost, FakeProtection,
+                                answered_404, protection_host, using_host, workflow_project)
 
 
 class ProtectionHost(FakeHost):
@@ -51,7 +51,7 @@ class ProtectionHost(FakeHost):
         if path in self.answers:
             return copy.deepcopy(self.answers[path])
         if path == "repos/o/r/branches/main/protection":
-            return ("ok", copy.deepcopy(self.classic)) if self.classic else ("absent", None)
+            return ("ok", copy.deepcopy(self.classic)) if self.classic else UNPROTECTED
         if path == "repos/o/r/rules/branches/main":
             return "ok", copy.deepcopy(self.view(self) if callable(self.view) else self.applied_rules()
                                        if self.view is None else self.view)
@@ -697,7 +697,11 @@ class NothingDiffersTest(unittest.TestCase):
             "one that holds the proposal, and the check runs unread":
                 lambda: ProtectionHost(classic=held, unreadable=(RUNS,)),
             "a protection GitHub does not answer for": lambda: ProtectionHost(unreadable=(PROTECTION,)),
+            "a 404 that does not say the branch is unprotected":
+                lambda: ProtectionHost(answers={PROTECTION: answered_404("Not Found")}),
             "no protection": ProtectionHost,
+            "no protection, and a 404 for the rules of the branch":
+                lambda: ProtectionHost(answers={VIEW: answered_404("Not Found")}),
             "no protection, beside a ruleset that is not the socle's":
                 lambda: ProtectionHost(ruleset=ruleset_of(loose(["lint"]))),
             "no protection, beside a ruleset that requires no check":
@@ -730,7 +734,7 @@ class NothingDiffersTest(unittest.TestCase):
                 lambda: ProtectionHost(classic=held, ruleset=ruleset_of(loose([NOTHING])))}
 
     def test_no_state_ends_a_plan_on_what_its_apply_contradicts(self):
-        self.assertEqual(len(self.states()), 27, "a state was named twice, and the second replaced the first")
+        self.assertEqual(len(self.states()), 29, "a state was named twice, and the second replaced the first")
         for name, state in self.states().items():
             for flags in ((), ("--allow-narrow",), ("--allow-lock",), ("--allow-narrow", "--allow-lock"),
                           ("--without-legs",)):
@@ -978,3 +982,179 @@ class WholeProtectionTest(unittest.TestCase):
                 self.assertEqual((code, host.writes, host.classic), (2, [], None))
                 self.assertEqual(data["refused"]["message"], "GitHub did not answer for the default branch of o/r:"
                                  " nothing is written on a reading that is not there.")
+
+
+class AbsenceTest(unittest.TestCase):
+    """A 404 is an absence only where GitHub says so.
+
+    The whole protection is put where nothing protects the branch, and
+    that rested on two readings nothing had established. GitHub answers
+    404 `Branch not protected` for a branch without protection, 404 `Not
+    Found` to a token that may not read protections, and 404 `Branch not
+    found` for a branch that does not exist; for the rules of a branch no
+    rule applies to it answers `[]`, never a 404. Every one of those was
+    read as an absence, and --apply put the socle's protection on it.
+    """
+
+    WORDLESS = ("absent", None)
+    OTHERS = (("a token that may not read protections", answered_404("Not Found")),
+              ("a branch that does not exist", answered_404("Branch not found")),
+              ("words that are close", answered_404("Branch not protected yet")),
+              ("another case", answered_404("branch not protected")),
+              ("no word at all", answered_404("")),
+              ("a host that carries no word", WORDLESS))
+    REFUSAL = ("GitHub refused to say what protects main of o/r, which a private repository of a free plan does."
+               " That is not the same fact as an open branch.")
+    UNSAID = ("is NOT protected", "create   ", "no protection exists", "protected by a ruleset")
+    protect = NothingDiffersTest.protect
+
+    def test_a_404_that_says_branch_not_protected_and_an_empty_list_of_rules_still_create_the_protection_whole(self):
+        """The other end: what establishes that nothing protects the
+        branch is read as it was, plan and write."""
+        body = {**MODULE.PROTECTION_SHAPE, "required_status_checks": {"strict": False, "contexts": ALL_LEGS}}
+        host = ProtectionHost()
+        code, plan = self.protect(host)
+        self.assertEqual((code, plan["unread"], plan["protected"]), (0, [], False))
+        self.assertEqual(plan["writes"], [{"method": "PUT", "endpoint": PROTECTION, "body": body}])
+        self.assertEqual(host.reads[-2:], [PROTECTION, VIEW])
+        _, text = self.protect(ProtectionHost(), text=True)
+        self.assertTrue(text.startswith("branch   main of o/r is NOT protected\n"), text)
+        self.assertNotIn("UNREAD", text)
+        created = [line for line in text.splitlines() if line.startswith("create   ")]
+        self.assertEqual(created, [f"create   {key}={json.dumps(value)} (no protection exists; --apply creates it"
+                                   " with this)" for key, value in plan["creates"].items()])
+        self.assertEqual(len(created), 12)
+        self.assertTrue(text.endswith(NothingDiffersTest.APPLY), text)
+        host = ProtectionHost()
+        code, data = self.protect(host, "--apply")
+        self.assertEqual((code, data["applied"], data["written"]), (0, True, [f"PUT {PROTECTION}"]))
+        self.assertEqual(host.writes, [("PUT", PROTECTION, body)])
+        self.assertEqual([event for event in host.events if event[1] in (PROTECTION, VIEW)],
+                         [("read", PROTECTION), ("read", VIEW), ("write", PROTECTION), ("read", PROTECTION)])
+        self.assertTrue(self.protect(ProtectionHost(), "--apply", text=True)[1].endswith("protect: applied\n"))
+
+    def test_any_other_404_for_the_protection_is_unread_and_the_plan_says_what_github_answered(self):
+        """Unread as a 403 or a timeout is, and written on no more than
+        they are. The note is its own: GitHub did answer, so it is not
+        said to have refused to say, as a private repository of a free
+        plan is told -- of `Branch not found` that was false."""
+        refused = lambda: ProtectionHost(unreadable=(PROTECTION,))
+        for why, answer in self.OTHERS:
+            with self.subTest(why=why):
+                state = lambda: ProtectionHost(answers={PROTECTION: answer})
+                words = getattr(answer[0], "message", "")
+                note = ("GitHub answered 404 with " + (f"the words '{words}'" if words else "no words") + " for the"
+                        " protection of main of o/r, which is not what it says of a branch without protection:"
+                        " nothing is concluded from it.")
+                code, plan = self.protect(state())
+                self.assertEqual((plan["unread"], plan["writes"], plan["nothingToChange"], plan["protected"]),
+                                 (["the branch protection"], [], False, False))
+                self.assertEqual(plan["note"], note)
+                for member in ("creates", "keeps", "refused"):
+                    self.assertNotIn(member, plan)
+                _, text = self.protect(state(), text=True)
+                self.assertTrue(text.startswith("branch   main of o/r could not be read\n"), text)
+                self.assertIn("UNREAD   GitHub did not answer for the branch protection: this plan is not a reading,"
+                              " and --apply refuses\n", text)
+                self.assertIn(f"note     {note}\n", text)
+                for said in (*self.UNSAID, "refused to say", "free plan"):
+                    self.assertNotIn(said, text)
+                host = state()
+                code, data = self.protect(host, "--apply")
+                self.assertEqual((code, host.writes, data["writes"], data["written"], data["applied"]),
+                                 (2, [], [], [], False))
+                self.assertEqual(data["refused"]["message"], "GitHub did not answer for the branch protection of"
+                                 " o/r: nothing is written on a reading that is not there.")
+                # But for that note, nothing is said of it that is not said of a 403 or a timeout.
+                for options in ((), ("--apply",)):
+                    code, data = self.protect(state(), *options)
+                    self.assertEqual((code, dict(data, note=self.REFUSAL)), self.protect(refused(), *options))
+                    code, text = self.protect(state(), *options, text=True)
+                    self.assertEqual((code, text.replace(note, self.REFUSAL)),
+                                     self.protect(refused(), *options, text=True))
+        # And an answer GitHub did not give keeps the note it had.
+        for why, answer in (("a 403, a 502 or a timeout", ("unreadable", None)),):
+            with self.subTest(why=why):
+                code, plan = self.protect(ProtectionHost(answers={PROTECTION: answer}))
+                self.assertEqual((plan["unread"], plan["note"]), (["the branch protection"], self.REFUSAL))
+        self.assertNotIn("note", self.protect(ProtectionHost(answers={PROTECTION: ("ok", {})}))[1])
+
+    def test_a_ruleset_is_not_written_either_beside_a_protection_that_404_does_not_establish(self):
+        """The ruleset is the write, and the classic protection one of
+        the readings nothing is written without."""
+        state = lambda: ProtectionHost(ruleset=fixtures.LegRenameTest.RULESET,
+                                       answers={PROTECTION: answered_404("Not Found")})
+        code, plan = self.protect(state())
+        self.assertEqual((plan["unread"], plan["writes"], plan["protectedBy"]),
+                         (["the branch protection"], [], ["a ruleset"]))
+        host = state()
+        code, data = self.protect(host, "--apply")
+        self.assertEqual((code, host.writes), (2, []))
+        self.assertIn("did not answer for the branch protection", data["refused"]["message"])
+        # And said as GitHub says it, the same ruleset is written as it was.
+        host = ProtectionHost(ruleset=fixtures.LegRenameTest.RULESET)
+        code, data = self.protect(host, "--apply")
+        self.assertEqual((code, data["applied"], [write[:2] for write in host.writes]), (0, True, [("PUT", RULESET)]))
+
+    def test_a_404_for_the_rules_of_a_branch_is_not_a_reading_of_them(self):
+        """Whatever it says: GitHub answers `[]` where no rule applies."""
+        refused = lambda: ProtectionHost(unreadable=(VIEW,))
+        for why, answer in (("the words of a branch without protection", UNPROTECTED), *self.OTHERS):
+            with self.subTest(why=why):
+                state = lambda: ProtectionHost(answers={VIEW: answer})
+                code, plan = self.protect(state())
+                self.assertEqual((plan["unread"], plan["writes"], plan["nothingToChange"], plan["protected"]),
+                                 (["the rulesets"], [], False, False))
+                for member in ("creates", "refused"):
+                    self.assertNotIn(member, plan)
+                host = state()
+                code, data = self.protect(host, "--apply")
+                self.assertEqual((code, host.writes, data["writes"], data["written"], data["applied"]),
+                                 (2, [], [], [], False))
+                self.assertEqual(data["refused"]["message"], "GitHub did not answer for the rulesets of o/r:"
+                                 " nothing is written on a reading that is not there.")
+                for options in ((), ("--apply",)):
+                    for text in (False, True):
+                        self.assertEqual(self.protect(state(), *options, text=text),
+                                         self.protect(refused(), *options, text=text))
+
+    def test_with_its_rules_unread_a_branch_is_said_neither_open_nor_ruled_and_nothing_is_created(self):
+        """`is NOT protected` and the `create` lines were printed over a
+        timeout of the rules, and `is protected by a ruleset` from a body
+        that was not a list of them: the plan says what was not read, and
+        no more of that half."""
+        legs = rules_of(ruleset_of(bound(ALL_LEGS)))
+        unread = (("a 502, or a timeout", ("unreadable", None)), ("a 404", answered_404("Not Found")),
+                  ("null", ("ok", None)), ("an empty object", ("ok", {})), ("zero", ("ok", 0)),
+                  ("a string", ("ok", "x")), ("an error object", ("ok", {"message": "Not Found"})),
+                  ("the rules inside an object", ("ok", {"rules": legs})))
+        for why, answer in unread:
+            with self.subTest(why=why, classic="none"):
+                state = lambda: ProtectionHost(answers={VIEW: answer})
+                code, plan = self.protect(state())
+                self.assertEqual((plan["unread"], plan["protected"], plan["protectedBy"], plan["ruleset"],
+                                  plan["writes"]), (["the rulesets"], False, [], [], []))
+                self.assertNotIn("creates", plan)
+                _, text = self.protect(state(), text=True)
+                self.assertTrue(text.startswith(
+                    "branch   main of o/r could not be read\n"
+                    "UNREAD   GitHub did not answer for the rulesets: this plan is not a reading, and --apply"
+                    " refuses\n"), text)
+                for words in (*self.UNSAID, "ruleset  "):
+                    self.assertNotIn(words, text)
+                self.assertTrue(text.endswith(NothingDiffersTest.APPLY), text)
+                host = state()
+                code, data = self.protect(host, "--apply")
+                self.assertEqual((code, host.writes), (2, []))
+                self.assertIn("did not answer for the rulesets", data["refused"]["message"])
+            with self.subTest(why=why, classic="holds the proposal"):
+                # What was read is still said: the classic protection, and what it keeps.
+                state = lambda: ProtectionHost(classic=FakeProtection(ALL_LEGS).body, answers={VIEW: answer})
+                code, plan = self.protect(state())
+                self.assertEqual((plan["unread"], plan["protectedBy"], plan["writes"], plan["nothingToChange"]),
+                                 (["the rulesets"], ["branch protection"], [], False))
+                self.assertIn("keeps", plan)
+                _, text = self.protect(state(), text=True)
+                self.assertTrue(text.startswith("branch   main of o/r is protected by branch protection\n"), text)
+                for words in self.UNSAID:
+                    self.assertNotIn(words, text)
