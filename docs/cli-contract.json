@@ -3713,6 +3713,9 @@
               "note": {
                 "type": "string"
               },
+              "nothingToChange": {
+                "type": "boolean"
+              },
               "observed": {
                 "items": {
                   "type": "string"
@@ -3801,6 +3804,36 @@
                 "type": "array"
               },
               "unread": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "writes": {
+                "items": {
+                  "properties": {
+                    "body": {
+                      "type": "object"
+                    },
+                    "endpoint": {
+                      "type": "string"
+                    },
+                    "method": {
+                      "enum": [
+                        "PATCH",
+                        "PUT"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "method",
+                    "endpoint"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "written": {
                 "items": {
                   "type": "string"
                 },
@@ -4290,10 +4323,22 @@
                 "required": false,
                 "requires": [],
                 "summary": "Report every test."
+              },
+              {
+                "argument": {
+                  "name": "N",
+                  "type": "string"
+                },
+                "conflictsWith": [],
+                "long": "--jobs",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "Test classes run at a time; defaults to the number of processors."
               }
             ],
             "passthrough": false,
-            "synopsis": "self-test [--verbose]"
+            "synopsis": "self-test [--verbose] [--jobs N]"
           },
           "outputMode": "json-envelope",
           "outputSchema": {
@@ -4316,7 +4361,7 @@
             "self-test"
           ],
           "purpose": "Run the socle's own tests.",
-          "usage": "self-test [--verbose]"
+          "usage": "self-test [--verbose] [--jobs N]"
         },
         {
           "available": true,
