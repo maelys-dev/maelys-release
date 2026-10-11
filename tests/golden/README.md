@@ -75,8 +75,11 @@ Without them, the first `cut` after a recording turned every recorded fixture
 into a drift. A candidate at any version replays the same reference.
 
 
-The original reference remains unchanged: 680 observations, 142 command triplets,
-eight pinned fleet repositories, without `gh`. The additional `api/` reference
+The first reference holds 715 observations of 216 fixture tests (17 more are
+skipped), 164 distinct command triples and the eight pinned fleet
+repositories, without `gh`: counted from `baseline/manifest.json`, where the
+figures written here before had stayed at those of the first recording. Its
+inputs are the ones it was first recorded with. The additional `api/` reference
 records the approved stage 4d implementation at
 `a6a308b67c26ddd2a16dfffee25f7476f02a06d1` (PR #117), before moving any further
 command. It contains 32 scenarios, each in JSON and text (64 CLI invocations);
@@ -92,8 +95,9 @@ from the manifest here:
 | `adopt --apply` on throwaway files only | Classic and ruleset guards: allowed or refused due to a retired required context; unreadable protection |
 | `migrate` plan, without `--push` | A moving document and its references, generated/public/data/unlisted documents staying, foreign product and wrong destination refusals |
 
-The inputs contain 34 real GET responses read through `Host.read`, 30 of them
-on 2026-09-16; the release listings and the deployment policies of both
+The inputs contain 34 real GET responses read through `Host.read`, 26 of them
+on 2026-09-16 and the protections and branch rules of both repositories the
+day after; the release listings and the deployment policies of both
 repositories were read on 2026-09-23, when both readers started asking for a
 page at a time: `maelys-dev/maelys-system` (classic protection),
 `maelys-dev/agent-cli-spec` (ruleset), and the public `homebrew-tap` formula
@@ -150,10 +154,74 @@ To inspect a single case, add `--case protect-classic-json` to `capture_api.py`.
 
 ### Recording and intentional fixes
 
-Ordinary refactoring only replays. The initial API recording used the clean
-approved source above; `record_api.py` refuses a different HEAD, dirty source,
-an existing destination or a self-test environment. It is the only new tool
-that contacts GitHub, for reads only:
+Three situations, and only the second and third touch `record_api.py`. Five
+changes in a row took the third command for the second, from this page as it
+stood: each froze the version of the day into the reference. Find yours
+first.
+
+**1. A refactor, or a fix that changes what is printed and not what is asked
+of the host.** Replay; never record. The inputs stay as they are:
+
+```sh
+python3 tests/golden/capture_api.py /absolute/new/api-baseline --source /absolute/socle
+diff -ru /absolute/socle/tests/golden/api/baseline /absolute/new/api-baseline
+```
+
+A refactor needs that diff empty. A fix explains every line of it, with the
+diff of the first reference, and copies the reviewed outputs into
+`api/baseline` in a separate commit of its PR.
+
+**2. A fix that changes the calls a recorded command makes** — one more git
+read, one more GitHub read, a lookup, another order. It shows itself: the
+replay above stops on `unrecorded host call`, and `tests/test_api_golden.py`
+is red. Such a change cannot replay the inputs it changes, so it records them
+again **under the version the reference is frozen at, and offline**:
+
+```sh
+cp /absolute/socle/tests/golden/api/inputs/responses.json /absolute/new/responses.json
+python3 tests/golden/record_api.py /absolute/new/api-inputs \
+  --source /absolute/socle --commit FULL_FIX_COMMIT \
+  --reference /absolute/socle/tests/golden/api/inputs \
+  --responses-cache /absolute/new/responses.json --offline
+python3 tests/golden/capture_api.py /absolute/new/api-baseline \
+  --source /absolute/socle --inputs /absolute/new/api-inputs
+```
+
+Both options, always, for this case:
+
+- `--reference` runs the candidate's code under the `socle/VERSION` and
+  `socle/CHANGELOG.md` of the existing inputs, as `capture.py --candidate`
+  does for the other reference; those inputs are verified digest by digest
+  before they are used, as a replay verifies the ones it reads. Without it
+  the recording freezes the VERSION and the changelog of the commit at hand:
+  every fixture pins another version, every list of versions a product is
+  behind on grows, and the diff holds the releases cut since the last
+  recording instead of the calls that moved.
+- `--offline` refuses any read the cache does not answer, so that "nothing is
+  read live" is held by the tool and not by whoever ran it. A cache copied
+  from `responses.json` answers every read already recorded; a fix that
+  needs a new one fails naming the endpoint, and that endpoint is then read
+  in a recording of its own, reviewed as a new input.
+
+Then check what was written before reviewing anything else:
+`git diff --stat` shows nothing under `api/inputs/socle/`; `manifest.json`
+says the `frozenVersion` it said before, with `sourceCommit` the fix and
+`sourceVersion` the VERSION that commit carries; and `responses.json` holds
+the answers it held, possibly in another order — the same count, read and
+derived. If the frozen version moved, the recording was made without
+`--reference`: discard it and record again. Copy `api-inputs` over
+`api/inputs` and `api-baseline` over `api/baseline`, replay once more into
+a new directory and require an empty diff, and say in the commit which calls
+each case gained or lost. The first reference is recorded in the same PR, by
+`capture.py --record --candidate` above, when `check`, `adopt`,
+`declarations` or the catalog say anything else than they did: it is
+replayed in CI on `refactor/**` branches only, and a reference left behind
+is found by whoever comes next.
+
+**3. The bootstrap, or a deliberate refresh of what GitHub answered.** The
+only recording that reads GitHub, for reads only, and the only one that
+freezes a new version. `record_api.py` refuses a different HEAD, a dirty
+source, an existing destination or a self-test environment:
 
 ```sh
 python3 tests/golden/record_api.py /absolute/new/api-inputs \
@@ -166,37 +234,14 @@ python3 tests/golden/capture_api.py /absolute/new/api-baseline \
 The explicit cache path preserves first reads across interrupted recordings.
 A new cache means a deliberate live refresh, requiring a separately reviewed
 input diff. Review the complete provenance, input and output diff before
-copying the new directories into `api/inputs` and `api/baseline`.
+copying the new directories into `api/inputs` and `api/baseline`. Not for a
+fix, and never to make a refactor pass: a changed host call sequence is
+itself a reviewable difference, and updating inputs needs an explicit
+explanation, not a fallback or an automatic recording.
 
-For an intentional behavior fix, follow the separate fix-PR procedure above,
-keep `api/inputs` unchanged, and replay those inputs with `--source` pointing
-to the clean committed fix. Explain the failing API diff as well as the
-original golden diff, then copy the reviewed outputs into `api/baseline` in a
-separate commit of that fix PR. Never rerun `record_api.py` to make a refactor
-pass. A changed host call sequence is itself a reviewable difference: updating
-inputs needs an explicit explanation, not a fallback or automatic recording.
-Such a fix cannot replay the inputs it changes, so it records them again, and
-on the frozen version:
+In every case `record_api.py` answers for the machine and withholds what the
+reference does not publish, as said above, whatever the cache holds.
 
-```sh
-python3 tests/golden/record_api.py /absolute/new/api-inputs \
-  --source /absolute/socle --commit FULL_FIX_COMMIT \
-  --reference /absolute/socle/tests/golden/api/inputs \
-  --responses-cache /absolute/copy/of/api/inputs/responses.json --offline
-```
-
-`--reference` runs the candidate's code under the `socle/VERSION` and
-`socle/CHANGELOG.md` of the existing inputs, as `capture.py --candidate` does
-for the other reference; those inputs are verified digest by digest before
-they are used, as a replay verifies the ones it reads. `--offline` refuses
-any read the cache does not answer, so that "nothing is read live" is held by
-the tool and not by whoever ran it: a cache copied from `responses.json`
-answers every read already recorded, and a fix that needs a new one fails
-naming the endpoint, which is then read in a recording of its own. The diff
-of the inputs holds the calls that moved, not the versions cut since the last
-recording. The manifest keeps the two apart: `sourceCommit` and
-`sourceVersion` are the commit recorded and the VERSION it carries,
-`frozenVersion` the VERSION it ran under.
 The replay manifest's `sourceCommit` identifies the implementation that
 recorded the **inputs**; it remains fixed while comparing candidate outputs.
 
