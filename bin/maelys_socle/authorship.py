@@ -73,9 +73,14 @@ COMPOSED = ["env", "-u", "EMAIL", "-u", "GIT_AUTHOR_NAME", "-u", "GIT_AUTHOR_EMA
             "-u", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null",
             "GIT_CONFIG_NOSYSTEM=1", "git", "-C", "/", "var", "GIT_COMMITTER_IDENT"]
 
-SET_ADDRESS = ("'git config --global user.email ADDRESS' -- on GitHub, the account's noreply address"
+# The keys, and whose they are to set, never a line that sets them: the
+# notes printed 'git config --global user.name NAME' and its twin for the
+# address, which an agent can fill in with a name and an address of its
+# own making, for the whole machine.
+AUTHORS_OWN = " to set, in the author's own git configuration, before the next commit: "
+SET_ADDRESS = ("user.email -- on GitHub, the account's noreply address"
                " (ID+LOGIN@users.noreply.github.com) names no machine")
-SET_NAME = "'git config --global user.name NAME'"
+SET_NAME = "user.name"
 
 AMEND = "--exec 'git commit --amend --no-edit --reset-author'"
 
@@ -215,15 +220,15 @@ def identity_messages(read: dict, composed: Callable[[], tuple[str, str]]) -> li
     if unnamed and unaddressed:
         found.append("neither a name nor an address is set here: git writes into each commit this account's name"
                      " as the system holds it, and an address it composes from the login and this machine's"
-                     " name where it can, and a push publishes both. Set them before the next commit: "
-                     + SET_NAME + " and " + SET_ADDRESS)
+                     " name where it can, and a push publishes both. They are their author's"
+                     + AUTHORS_OWN + SET_NAME + " and " + SET_ADDRESS)
     elif unaddressed:
         found.append("no address is set here: git composes one from the login and this machine's name where it"
-                     " can, writes it into each commit, and a push publishes it. Set one before the next"
-                     " commit: " + SET_ADDRESS)
+                     " can, writes it into each commit, and a push publishes it. It is the author's"
+                     + AUTHORS_OWN + SET_ADDRESS)
     elif unnamed:
         found.append("no name is set here: git writes into each commit this account's name as the system holds"
-                     " it, and a push publishes it. Set one before the next commit: " + SET_NAME)
+                     " it, and a push publishes it. It is the author's" + AUTHORS_OWN + SET_NAME)
     kinds: dict = {}
     for role in roles:
         if role["address"]:
@@ -233,11 +238,12 @@ def identity_messages(read: dict, composed: Callable[[], tuple[str, str]]) -> li
     if "made-up" in kinds:
         found.append("the address set here is one made up on this machine, not an account's ("
                      + "; ".join(dict.fromkeys(kinds["made-up"])) + "): each commit carries it, and a push"
-                     " publishes it. Set one before the next commit: " + SET_ADDRESS)
+                     " publishes it. It is the author's" + AUTHORS_OWN + SET_ADDRESS)
     elif "local" in kinds:
         found.append("the address set here is under a name private networks and machines use ("
                      + "; ".join(dict.fromkeys(kinds["local"])) + "): a mailbox there is nothing to change; a"
-                     " machine's name is published by each push, and is replaced with " + SET_ADDRESS)
+                     " machine's name is published by each push. Where it is a machine's, their author sets"
+                     " another address in their own git configuration, before the next commit: " + SET_ADDRESS)
     return found
 
 

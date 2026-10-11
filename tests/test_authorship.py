@@ -31,6 +31,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from test_allowed_signers import lines_to_run
 from test_maelys_release import CLI, MODULE, using_host
 
 AUTHORSHIP = MODULE.authorship
@@ -372,6 +373,40 @@ class IdentityTest(unittest.TestCase):
         self.assertTrue(notes[0].startswith("the address set here is under a name private networks"), notes[0])
         self.assertIn("its domain ends in .local", notes[0])
         self.assertIn("a mailbox there is nothing to change", notes[0])
+
+    def test_no_note_gives_a_line_that_sets_an_identity(self) -> None:
+        """Each of the five names the keys and whose they are to set, word for word. They printed
+        `git config --global user.name NAME` and its twin for the address: lines an agent can fill
+        in with a name and an address of its own making, for the whole machine."""
+        def said(name: str, email: str, only: bool = False) -> list:
+            role = {"name": name, "address": email}
+            return AUTHORSHIP.identity_messages({"roles": {"author": role, "committer": role}, "configOnly": only},
+                                                lambda: ("", ""))
+
+        own = " to set, in the author's own git configuration, before the next commit: "
+        noreply = ("user.email -- on GitHub, the account's noreply address ("
+                   + address("ID+LOGIN", "users", "noreply", "github", "com") + ") names no machine")
+        notes = said("", "") + said("", ACCOUNT) + said(LOGIN, "") + said(LOGIN, BARE) + said(LOGIN, MAILBOX)
+        for note in notes:
+            with self.subTest(note=note[:32]):
+                self.assertEqual(lines_to_run(note), [], note)
+                self.assertIn("author", note)
+        self.assertEqual(notes, [
+            "neither a name nor an address is set here: git writes into each commit this account's name as the"
+            " system holds it, and an address it composes from the login and this machine's name where it can,"
+            " and a push publishes both. They are their author's" + own + "user.name and " + noreply,
+            "no name is set here: git writes into each commit this account's name as the system holds it, and a"
+            " push publishes it. It is the author's" + own + "user.name",
+            "no address is set here: git composes one from the login and this machine's name where it can, writes"
+            " it into each commit, and a push publishes it. It is the author's" + own + noreply,
+            "the address set here is one made up on this machine, not an account's (it has no domain): each"
+            " commit carries it, and a push publishes it. It is the author's" + own + noreply,
+            "the address set here is under a name private networks and machines use (its domain ends in"
+            " .local): a mailbox there is nothing to change; a machine's name is published by each push. Where"
+            " it is a machine's, their author sets another address in their own git configuration, before the"
+            " next commit: " + noreply])
+        self.assertTrue(lines_to_run("Set one before the next commit: 'git config --global user.name NAME'"))
+        self.assertEqual(said("", "", only=True), [])
 
     def test_the_environment_is_an_identity_too(self) -> None:
         """git reads it before its configuration, one variable for each role."""

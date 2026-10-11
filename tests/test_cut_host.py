@@ -11,6 +11,7 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 
 import test_maelys_release as fixtures
+from test_allowed_signers import lines_to_run
 
 MODULE = fixtures.MODULE
 
@@ -177,6 +178,11 @@ class CutHostTest(unittest.TestCase):
         self.assertEqual(code, 2, refused)
         self.assertFalse(refused["data"]["ready"])
         self.assertIn("(no_user)", refused["data"]["gate"][-1]["message"])
+        # Whose the address is to set, and no line that sets it.
+        self.assertTrue(refused["data"]["gate"][-1]["message"].endswith(
+            " (no_user): its committer address belongs to no GitHub account. user.email is the signer's own to"
+            " set, to an address of the account that holds the signing key; anyone else leaves it"), refused)
+        self.assertEqual(lines_to_run(refused["data"]["gate"][-1]["message"]), [])
         self.assertIn("--amend --reset-author -S", refused["data"]["next"])
         self.assertEqual([value for kind, value in self.host.events if kind == "read" and "check-runs" in value], [])
 
@@ -239,5 +245,7 @@ class CutHostTest(unittest.TestCase):
         self.assertEqual(code, 1, envelope)
         self.assertEqual(envelope["error"]["code"], "PROCESS_FAILED")
         self.assertIn("fixture rejects signature", envelope["error"]["message"])
+        self.assertEqual(envelope["error"]["hint"], "The signing key is the signer's own to fix before the command"
+                                                    " is run again; anyone else leaves it. Nothing was pushed.")
         self.assertIn(["git", "tag", "-d", "v1.3.0"], self.host.commands)
         self.assert_no_tag()

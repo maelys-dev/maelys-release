@@ -2124,7 +2124,7 @@ class GoldenTest(unittest.TestCase):
         ok       dependencies/packages: linux [pkg-config libjansson-dev] macos [jansson]
         ok       maelys-release.conf [dependencies] apart: the pins are materialised under $MAELYS_DEPENDENCIES_DIR, never beside the product
         note     no fuzzing detected by the conventions: neither tests/fuzz/ nor fuzz/ exists, and no job of .github/workflows/ci.yml runs a fuzz target
-        note     neither a name nor an address is set here: git writes into each commit this account's name as the system holds it, and an address it composes from the login and this machine's name where it can, and a push publishes both. Set them before the next commit: 'git config --global user.name NAME' and 'git config --global user.email ADDRESS' -- on GitHub, the account's noreply address (ID+LOGIN@users.noreply.github.com) names no machine
+        note     neither a name nor an address is set here: git writes into each commit this account's name as the system holds it, and an address it composes from the login and this machine's name where it can, and a push publishes both. They are their author's to set, in the author's own git configuration, before the next commit: user.name and user.email -- on GitHub, the account's noreply address (ID+LOGIN@users.noreply.github.com) names no machine
         """) + ("note     " + COMING_NOTE + "\n" if COMING_NOTE else "") + (
         # The one line that depends on where the test runs: whether this
         # machine has a name specific enough to look for is the machine's
@@ -2259,8 +2259,8 @@ class GoldenTest(unittest.TestCase):
                                    r" and (the [0-9]+ that held one read|none held one); ")
         self.assertEqual(completed.stdout, contract + self.FILES + self.VERDICTS + textwrap.dedent("""\
             check: maelys-fixture is on maelys-release v9.9.9
-            FAIL     tag.gpgsign is not true: git config tag.gpgsign true
-            FAIL     user.signingkey is not set (gpg.format = openpgp); the key must be registered on GitHub
+            FAIL     tag.gpgsign is not true: the signer sets it to true themselves; anyone else leaves it
+            FAIL     user.signingkey is not set (gpg.format = openpgp): a release is signed with an ssh key that allowed-signers names and that the signer's GitHub account holds as a signing key. gpg.format and user.signingkey are the signer's own to set; anyone else leaves them
             note     no v* tag yet
             ok       tag v1.2.3 is free
             ok       libmaelys-fixture renders from its template and passes brew style
