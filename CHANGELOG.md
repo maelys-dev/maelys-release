@@ -532,18 +532,67 @@
   What this asks of the framework and its contract — that a command which
   has just written does not page its account — is theirs to decide, and
   is not done here.
+- **The socle a product fetches by commit knows which version it is.**
+  `scripts/checkout-dependencies.sh` fetches the socle at the commit of the
+  `uses:` line, with `fetch --depth 1`, and no tag comes with a commit. So
+  `cut` run from that checkout noted "socle untagged" at every release, and
+  `adopt` refused it without `--allow-untagged` — for a commit the same
+  line names `# vX.Y.Z`. The script now brings that tag by name, as a
+  label and nothing more. The commit on the line decides what is checked
+  out, alone and first. A comment that is not `vX.Y.Z` and nothing else
+  asks the remote nothing and is never handed to git: `# untagged`, which
+  a candidate under trial writes, or what `git describe` says past a tag.
+  The remote is asked what `refs/tags/vX.Y.Z` names before anything of it
+  is fetched, and a tag that names another commit is not fetched at all.
+  The tag is created only when what was fetched resolves, peeled, to the
+  pinned commit and, for a tag object, calls itself by the name asked for.
+  Whatever is declined is said on stderr and fails nothing. Stdout is the
+  two assignments it was: it lands in `$GITHUB_ENV` whole.
+
+  Three things a review of the first form of this found, each reproduced
+  before it was closed. A tag object named `v99.0.0` served as
+  `refs/tags/v9.9.9` on the pinned commit passed the commit test, and the
+  checkout described itself as `v99.0.0`: `git describe` reads the name
+  inside the object. The script fetched a tag that named another commit
+  before declining it. And a tag naming a tree left git's own `error:`
+  under the script's sentence. The remote is now asked by the whole name
+  of the ref, so a branch named like the tag is not the tag.
+
+  The two calls that ask for the tag give up on a remote that accepts and
+  then says nothing, through git's low-speed settings — 1000 bytes a
+  second over ten seconds, no `timeout` command. Measured against a server
+  that accepts and never answers: cut after that time with "Operation too
+  slow". **Not bounded, as before this change:** the fetch by commit above
+  them, and the clone of every pin. A remote that hangs there holds the
+  job.
+
+  Tried on a scratch clone of the pilot product, its workflows pinning
+  v0.63.3: the fetched socle answers `v0.63.3` to `git describe --tags
+  --exact-match`, where the script of 0.63.3 leaves it without an answer.
+  One question and one fetch more per job, of one tag object. Run under
+  the `sh` of macOS and under dash; not run under busybox.
+
+  **Where "untagged" is still read after this.** Only the checkout this
+  script makes carries the tag. The socle is fetched by commit in five
+  other places, and none was touched: the four steps of
+  `check-product.yml` and `check-legs.yml` that clone it on a runner, and
+  the cache from which `check`, `preflight` and `rehearse` run the pinned
+  socle. `cut` or `adopt` run from one of those still says "untagged".
 - **Impact.** [asks: checkout-script] [writes: protect] A minor version:
-  managed files move, one of them in what it executes. A product that
-  carries `scripts/checkout-dependency.sh` **re-adopts** to receive it, as
-  for the script's moves of 0.61.0 and 0.63.0: moving its socle pin
-  without re-adopting reads `check` exit 2 on that file. The script stops
-  on a `repository` line its reader does not match, or on a second one,
-  where it cloned the organisation's repository, and changes nothing for a
+  managed files move, two of them in what they execute. A product that
+  carries `scripts/checkout-dependency.sh` and
+  `scripts/checkout-dependencies.sh` **re-adopts** to receive them, as for
+  the scripts' moves of 0.61.0 and 0.63.0: moving its socle pin without
+  re-adopting reads `check` exit 2 on those files. The first stops on a
+  `repository` line its reader does not match, or on a second one, where
+  it cloned the organisation's repository, and changes nothing for a
   well-formed pin: the three `repository` lines of the fleet are in that
-  shape, so no product's build changes. The managed texts move too, prose
-  only, and no selector names that: **re-adopt with your next release**,
-  as any adoption travels; nothing is to be changed by hand. Three files
-  drift on a product the socle releases — `AGENTS.md`, `CLAUDE.md` and
+  shape. The second also brings the socle's tag to the checkout it makes
+  of the socle, as a label and nothing more. No declaration changes, and a
+  build reads what it read. The managed texts move too, prose only, and no
+  selector names that: **re-adopt with your next release**, as any
+  adoption travels; nothing is to be changed by hand. Three files drift on
+  a product the socle releases — `AGENTS.md`, `CLAUDE.md` and
   `.claude/skills/maelys-release/SKILL.md` — and the first two on any
   other repository: a product that moves its socle pin without re-adopting
   reads `check` exit 2 on them, pins or no pins. One command writes

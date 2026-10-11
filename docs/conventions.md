@@ -2567,6 +2567,49 @@ same root removes an asymmetry rather than creating one. The clone is
 attempted and never required: a machine that cannot reach the socle still
 builds, and says so on stderr.
 
+**The script's checkout carries the tag its line names.** The line is
+`…@<commit> # vX.Y.Z`, and a fetch by commit brings no tag: the checkout
+did not know which version it was, so `cut` run from it said "socle
+untagged" at every release and `adopt` refused it without
+`--allow-untagged`, for a commit the same line calls a release. The script
+brings that tag by name, as a label and nothing more:
+
+- The commit on the line decides what is checked out, alone and first.
+- A comment that is not `vX.Y.Z` and nothing else — `# untagged`, which a
+  candidate under trial writes, or a `git describe` past a tag — asks the
+  remote nothing, and is never handed to git.
+- The remote is asked what `refs/tags/vX.Y.Z` names before anything of it
+  is fetched, by the whole name of the ref: a branch named like the tag is
+  not the tag. A tag that names another commit, or a tree, is not fetched
+  at all, and stderr says both.
+- The tag is created only when **what was fetched** resolves, peeled, to
+  that commit and, for a tag object, **calls itself by the name asked
+  for**. `git describe` answers with the name inside the object and not
+  with the name of the ref: a remote serving `refs/tags/v1.2.3` as an
+  object named `v9.0.0`, on the right commit, made the checkout describe
+  itself as `v9.0.0`, which `adopt` would then have written as the label.
+- Whatever is declined is said on stderr in the script's own sentence, and
+  fails nothing.
+
+The two calls that ask for the tag carry git's low-speed settings, 1000
+bytes a second over ten seconds. Measured: a server that accepts the
+connection and never answers is given up on after that time, with
+"Operation too slow", and after seventy seconds when the setting says
+seventy. They bound an http(s) transfer, which is what the
+fleet's base is, and need no `timeout` command. **The fetch by commit
+above them is not bounded that way, and neither is the clone of a pin**: a
+remote that hangs there still holds the job. That is older than the tag
+and is not changed with it.
+
+The signature of the tag is not judged there: nothing is decided by the
+label that the commit had not decided already, and the release workflow,
+which does decide, verifies a product's own tag against the allowed
+signers. And "untagged" is still what a socle says of itself where it was
+fetched by commit by something else than this script: the four steps of
+`check-product.yml` and `check-legs.yml` that fetch it, and the cache
+`check`, `preflight` and `rehearse` run the pinned socle from. `cut` or
+`adopt` run from one of those reads as before.
+
 The search below knows the name, under its own variable: a file that reads
 `$MAELYS_DEPENDENCIES_DIR` has migrated its pins and may still take the
 socle from `../maelys-release`, which is where two products stand today.
