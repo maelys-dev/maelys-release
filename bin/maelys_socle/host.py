@@ -17,6 +17,16 @@ from maelys_cli import Failure
 
 HTTP_STATUS = re.compile(r"\(HTTP (\d{3})\)")
 
+# A runner says that it is one, and with these words: a variable set to
+# `false` or `0` on an author's machine is not a runner. Nothing in the
+# checkout tells either: a job started by a push checks its branch out by
+# name, has no identity and has nothing to push, exactly like a clone made a
+# minute ago. One definition, read through Host.is_runner by everything that
+# is said to an author and not to a job, or looked for on an author's
+# machine and not on a runner's.
+RUNNER_VARIABLES = ("CI", "GITHUB_ACTIONS")
+RUNNER_VALUES = ("true", "1")
+
 
 class Host:
     """The current process's shell and GitHub boundary.
@@ -79,11 +89,15 @@ class Host:
     def is_runner(self) -> bool:
         """Whether this is a CI runner, by what every one of them says of itself.
 
-        `CI` or `GITHUB_ACTIONS` set to anything but nothing. A runner has a
-        name and no author: what is local by nature -- the machine's name,
-        the author's own terms -- is not looked for there.
+        `CI` or `GITHUB_ACTIONS` set to `true` or `1`, and to nothing else.
+        A runner has a name and no author: what is local by nature -- the
+        machine's name, the author's own terms -- is not looked for there,
+        and what is said to whoever is about to push is not said there.
+        The one place the environment is read for it, so that a recorded
+        reference, whose host answers for itself, is the same on a runner
+        and on a laptop.
         """
-        return bool(os.environ.get("CI") or os.environ.get("GITHUB_ACTIONS"))
+        return any(os.environ.get(name, "").strip().lower() in RUNNER_VALUES for name in RUNNER_VARIABLES)
 
     def test_signers(self) -> str | None:
         """The allowed signers a self-test names, and nothing outside one.

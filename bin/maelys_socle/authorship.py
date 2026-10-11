@@ -53,13 +53,9 @@ from .texts import LABELS
 LOCAL_SUFFIXES = (".home", ".lan", ".local", ".localdomain", ".localhost", ".internal", ".intranet", ".corp",
                   ".home.arpa", ".fritz.box", ".mshome.net", ".(none)")
 
-# A runner says that it is one, and with these words: a variable set to
-# `false` or `0` on an author's machine is not a runner. Nothing in the
-# checkout tells either: a job started by a push checks its branch out by
-# name, has no identity and has nothing to push, exactly like a clone made a
-# minute ago.
-RUNNER_VARIABLES = ("CI", "GITHUB_ACTIONS")
-RUNNER_VALUES = ("true", "1")
+# What a runner says of itself, and in which words, is the host's to know:
+# the privacy guard asks the same question for the machine's name.
+RUNNER_VARIABLES, RUNNER_VALUES = host.RUNNER_VARIABLES, host.RUNNER_VALUES
 
 SEPARATOR = "\x1f"
 COMMIT_FORMAT = "--format=" + "%x1f".join(("%m", "%h", "%p", "%an", "%ae", "%cn", "%ce"))
@@ -108,7 +104,7 @@ exit 0
 
 def on_a_runner() -> bool:
     """Whether this process runs on a CI runner, which authors and pushes nothing."""
-    return any(os.environ.get(name, "").strip().lower() in RUNNER_VALUES for name in RUNNER_VARIABLES)
+    return host.HOST.is_runner()
 
 
 def once(read: Callable[[], object]) -> Callable[[], object]:

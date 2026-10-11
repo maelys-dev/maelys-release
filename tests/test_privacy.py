@@ -1347,6 +1347,15 @@ class CommandTest(unittest.TestCase):
                 self.assertEqual(there["privacy"]["findings"], [])
                 self.assertEqual(there["privacy"]["local"], {"machineNames": 0, "terms": 0, "runner": True})
                 self.assertTrue([check for check in there["checks"] if "not looked for on a CI runner" in check["message"]])
+        # One definition of a runner, shared with the address note: a variable
+        # set to `false` or `0` on an author's machine is an author's machine.
+        for value in ("false", "0"):
+            with self.subTest(value=value):
+                self.product.env["CI"] = value
+                here = self.product.json("check", self.dir, expect=2)["data"]
+                del self.product.env["CI"]
+                self.assertFalse(here["privacy"]["local"]["runner"])
+                self.assertEqual({finding["family"] for finding in here["privacy"]["findings"]}, {"machine"})
 
 
 class SecretScanningTest(unittest.TestCase):

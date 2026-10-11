@@ -1604,10 +1604,11 @@ list*, never the term. A term of fewer than three letters and digits is
 not looked for.
 
 **Neither is looked for on a CI runner**, where `CI` or `GITHUB_ACTIONS` is
-set. A runner has a name and no author: looked for there, a runner called
-after a word of the tree would find it, and a repository that refuses the
-family would be refused for it. The first privacy line says they were
-skipped, and nothing local counts towards a refusal there.
+`true` or `1` — one definition of a runner, the one the address note is
+silent by. A runner has a name and no author: looked for there, a runner
+called after a word of the tree would find it, and a repository that
+refuses the family would be refused for it. The first privacy line says
+they were skipped, and nothing local counts towards a refusal there.
 
 **Neither reaches a process list.** git is given the machine's name and the
 terms on its standard input, never as an argument.
