@@ -2286,19 +2286,25 @@ APP = SocleProgram(PROGRAM, PRODUCT, socle_version(), [
                                                "applied": {"type": "boolean"}, "written": STRINGS,
                                                "before": {"type": "object"}}}}}),
     cli.execute("rehearse", "rehearse",
-                "Replay the Linux build job of the release in a Docker container on a copy of the working"
-                " tree, make check with --check, or a channel's publish script against a published release"
-                " with --channel.",
+                "Replay one step of one Linux job in a Docker container on a copy of the working tree: the"
+                " packaging of the release, the check of a leg of the shared CI with --check, or a channel's"
+                " publish script against a published release with --channel. The result names the step it"
+                " replayed, and the steps and jobs it did not.",
                 handle_rehearse,
                 operands=[DIR_OPERAND, cli.operand("TARGET", "linux-x86_64 or linux-arm64;"
                                                    " absent with --channel.", required=False,
                                                    choices=list(PLATFORMS))],
                 options=[*SOCLE_OPTIONS,
                          cli.option("--image", "Container image.", cli.argument("IMAGE"), default=DEFAULT_IMAGE),
-                         cli.option("--package-command", "Command producing dist/; TARGET is substituted.",
+                         cli.option("--package-command", "Command producing dist/; TARGET is substituted."
+                                    " Another line than the default names no step of the release.",
                                     cli.argument("COMMAND"), default="bash scripts/package-release.sh TARGET"),
-                         cli.flag("--check", "Run the check command instead of packaging; dist/ is left alone."),
-                         cli.option("--check-command", "Command run with --check.", cli.argument("COMMAND"), default="make check"),
+                         cli.flag("--check", "Replay the check step of the shared CI's leg for TARGET instead of"
+                                  " packaging: its packages, its line, no compiler named; dist/ is left alone."
+                                  " For any product whose ci.yml calls check-product.yml, however it publishes."),
+                         cli.option("--check-command", "The line to run with --check, when the leg's own is not"
+                                    " wanted or cannot be read for certain from ci.yml; another line than the"
+                                    " leg's names no step.", cli.argument("COMMAND")),
                          cli.flag("--keep", "Keep the container for inspection."),
                          cli.option("--channel", "Run the product's publish script against a published"
                                     " release instead of a build; needs --tag.",
@@ -2312,6 +2318,8 @@ APP = SocleProgram(PROGRAM, PRODUCT, socle_version(), [
                                        "mode": {"enum": ["package", "check"]}, "artifacts": STRINGS,
                                        "channel": {"type": "string"}, "tag": {"type": "string"},
                                        "repository": {"type": "string"}, "command": {"type": "string"},
+                                       "replayed": {"type": "string"}, "notReplayedSteps": STRINGS,
+                                       "notReplayed": STRINGS, "unlikeTheRunner": STRINGS,
                                        "assets": STRINGS, "recorded": STRINGS,
                                        "differs": STRINGS, "marker": {"type": "object"},
                                        "matches": {"type": ["boolean", "null"]}}}),

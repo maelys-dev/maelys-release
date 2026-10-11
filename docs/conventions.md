@@ -1562,7 +1562,11 @@ does not say where either came from.
   file stays the product's.
 - Before the first tag of a product, and after any change to
   `dependencies/packages` or `package-release.sh`, `maelys-release rehearse DIR
-  TARGET` replays the Linux build job in Docker.
+  TARGET` replays the Linux build job in Docker. That is the packaging of
+  the release and no job of this section: `rehearse DIR TARGET --check`
+  replays the check of a leg, and is the one to run before pushing what a
+  Linux leg will compile. "What a rehearsal replays, and what it does not",
+  below, says which answers for what.
 - **Every job of the socle is bounded, because nobody else can bound it.**
   GitHub refuses `timeout-minutes` on a job that calls a reusable workflow,
   so a product cannot cut a job of the socle that hangs, and the default is
@@ -3142,6 +3146,137 @@ fixed script names. It is written here rather than fixed because the fix
 would splice a value into a `sed` expression, which is a sharper edge than
 the one it removes. A product that names a script `verify-STAGE.sh` will
 find this paragraph.
+
+### What a rehearsal replays, and what it does not
+
+A rehearsal replays **one step of one job**, and its result names it:
+`replayed`, then `notReplayedSteps` for the other steps of that job it did
+not run, and `notReplayed` for the jobs of the shared CI it did not run,
+under the names a pull request shows them by. The text says the same.
+
+| | replays | with |
+|---|---|---|
+| `rehearse DIR TARGET` | the Package step of the build job of `release.yml` for that target | the socle's packaging tools and the declared packages, without their recommended ones; the package command, **which chooses its own compiler** |
+| `rehearse DIR TARGET --check` | the Check step of a leg of `check-product.yml`: `check (linux)` for `linux-x86_64`, `check (linux-arm64)` for `linux-arm64` | what the leg installs before the declared packages, `build-essential clang`, with their recommended packages as the leg installs them, beside `git`, `ca-certificates` and the packaging tools `dpkg-dev file rpm`, which the runner image carries; the `check_command` the product's `ci.yml` passes, or the workflow's default when the call passes none; **no compiler named**, so the image's `cc` |
+
+A step and not a job, because the job does more. The build job runs
+`scripts/verify-release.sh` before it packages when a product carries one,
+attests what it built and hands it to the publish job; on a target that
+`[package]` leaves out it verifies and never packages, so a package
+rehearsed there replays no step at all, and the result says so. The check
+job of the `linux` leg ends on the socle's own drift check, which is
+`maelys-release check DIR` and is not run here. A line given by hand is no
+step of anybody's: `--package-command` and `--check-command` look at one
+thing, what they pass is not what the workflow runs, and `replayed` is then
+empty — unless the line is the workflow's own.
+
+The check mode is for any product whose `ci.yml` calls `check-product.yml`,
+whatever publishes it: the leg is not the release mechanism. The package
+mode is for the products the socle releases.
+
+**A package that builds is not a pull request that passes.** Two products
+rehearsed their packaging, on both architectures, read the green, and had
+their pull request stopped by the check legs — in the same cycle (#194).
+Their packaging exports `CC=clang`. The legs name no compiler and build with
+the runner's `cc`, which is gcc. Measured in the rehearsal image, gcc 15.2.0
+and clang 21.1.8 over glibc 2.43, on the two lines that stopped them:
+
+| | `gcc -O2` | `gcc -O0` | `gcc -O2 -U_FORTIFY_SOURCE` | `clang -O2` | `clang -O2 -D_FORTIFY_SOURCE=2` |
+|---|---|---|---|---|---|
+| `(void)read(fd, &byte, 1);` under `-Wall -Wextra -Werror` | refused, `-Werror=unused-result` | accepted | accepted | accepted | accepted |
+| `realpath(path, buffer)` imports | `__realpath_chk` | `realpath` | `realpath` | `realpath` | `__realpath_chk` |
+
+Both rows are one fact. Ubuntu's gcc defines `_FORTIFY_SOURCE=3` by itself
+as soon as it optimises, and Ubuntu's clang defines nothing. Under that
+macro glibc declares `read` `warn_unused_result` — which gcc holds through a
+cast to `void` and clang does not — and routes a `realpath` into a sized
+buffer through `__realpath_chk`. So the second is not the compiler: clang
+given the macro imports the same symbol, and a product whose symbol guard
+refuses it will meet it the day its packaging fortifies. Nor is it the libc
+of the image, which both compilers share. It is the fortification level,
+and who sets it by default.
+
+`rehearse --check` stopped the first of them before a line of it changed:
+with gcc, as the leg. What was missing was the result of the *other* mode
+saying that it answered for none of this, and a rule saying when to run
+which:
+
+- **the package mode**, before the first tag and after any change to
+  `dependencies/packages` or to the packaging — what it has always been for;
+- **the check mode**, before pushing what a Linux leg will compile or run —
+  sources, flags, tests — from a machine that is not Linux, and before the
+  first tag as well. A first release wants both, on both targets.
+
+**The line is read for certain, or nothing runs.** The socle carries no
+YAML parser and reads `ci.yml` by its lines. It reads the shapes it reads
+exactly — a plain value on its line, a quoted one, a literal block, a
+folded block of lines at one indentation, under a `with:` block of plain
+`name: value` lines in the one job that calls the workflow — and refuses
+every other before anything is written or started: a value carried over
+several lines, `with:` in flow style, a quoted key, an alias, an expression
+only GitHub evaluates, an empty value. An empty line passes `bash -e`: a
+reader that guessed was green for having run nothing. The refusal names
+the line of `ci.yml`, and `--check-command` is the way out — which names no
+step, since the operator typed it. "The default of `check-product.yml`" is
+said only when the call was read and passes none.
+
+**As the step runs it, as far as a container goes.** What could be made
+equal is:
+
+| | the leg | the check mode |
+|---|---|---|
+| shell | the line in a file, `bash --noprofile --norc -eo pipefail FILE` | the same |
+| environment | `CI=true`, `LANG=C.UTF-8`, what the checkouts export | the same, and none of the rehearsal's own variables — `TARGET` first, which make would read where a Makefile says `TARGET ?=` |
+| packages | `build-essential clang` and the declared ones, with their recommended packages | the same |
+| a mirror that does not answer | a warning, cut after two minutes; the install decides | the same |
+| bound | 30 minutes for the job | 30 minutes for the step |
+
+And what cannot, which every result of the check mode carries as
+`unlikeTheRunner`:
+
+| | the runner | the container |
+|---|---|---|
+| user | an unprivileged user | root: a test that expects a permission to be refused is not refused |
+| tools | an image that carries hundreds — `cmake`, `pkg-config`, `curl`, `sudo` among them | the image's packages and those named above: `python3` arrives with what clang recommends, those four do not |
+| tree | the merge commit of the pull request | the local HEAD and its uncommitted changes |
+| versions | the packages of the day the image was built | the archive's of today |
+| `DEBIAN_FRONTEND` | not measured: no run prints it | unset in the step |
+
+The second row is the one that turns a rehearsal red where CI is green: a
+Makefile that calls `cmake` or `pkg-config` without the product declaring
+it passes on the runner, whose image has them. When the check stops on a
+command the container does not have, the rehearsal exits on it by name and
+says where such a tool is declared — `[linux]` of `dependencies/packages`,
+which the legs and the rehearsal both install. Declaring it is harmless on
+the runner and is what makes the product's build say what it needs. An
+emulated target is slower than the runner, so the bound can cut there what
+the leg would finish. A green check says the leg's compiler accepts the
+tree. It does not say the runner will.
+
+**What nothing here replays.** The sanitizers and fuzz jobs, which run on
+x86_64 with clang handed over as `CC`, `CXX` and `MAKEFLAGS`; the macOS
+leg; a product's own legs, and the jobs its workflows add. The socle's are
+in `notReplayed`, read from the product's call as `protect` reads them; a
+product's own are not, and the text says so in words. The sanitizers were
+left out on purpose: clang is the compiler both products had already
+rehearsed with, and that job runs on one architecture, which on the
+machines the fleet develops on is the emulated one.
+
+**A check that was skipped has not passed, and the rehearsal skips what CI
+skips.** The third finding of that cycle was coverage. A conformance kit
+that drives a command's completion script in every shell it finds skips the
+checks of a shell that is not installed, and a product read two skips in its
+rehearsal where its own machine had none. The image carries neither zsh nor
+fish — and neither do the hosted Linux runners: their image lists neither
+(`ubuntu-26.04`, 20260927.149), and the legs of a product that declares
+nothing report the same two skips as its rehearsal. The rehearsal hid
+nothing there; the legs never ran those checks. A product that wants them
+run declares `zsh` and `fish` under `[linux]` of `dependencies/packages`,
+which the legs and the rehearsal both install: maelys-cli does, and its
+Linux legs skip none. The macOS leg has zsh and skips fish, in that product
+as in the others; `fish` under `[macos]` would be the other half, and no
+product declares it yet. The socle installs neither for everyone: most
+products have no completion script to drive.
 
 ### Rehearsing a channel
 

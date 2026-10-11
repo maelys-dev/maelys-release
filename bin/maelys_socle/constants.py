@@ -23,6 +23,14 @@ DEFAULT_IMAGE = "ubuntu:26.04"
 
 SOCLE_LINUX_PACKAGES = "build-essential dpkg-dev file rpm"  # the release.yml default
 
+# What a check leg of check-product.yml installs before the product's
+# packages, the minutes its job is bounded at, and the leg each Linux target
+# of a release is checked on. A test holds the three against the workflow: `rehearse --check` replays that
+# job, and a list typed here would otherwise drift from the one it runs.
+CHECK_JOB_PACKAGES = "build-essential clang"
+CHECK_JOB_MINUTES = 30
+CHECK_LEG_OF = {"linux-x86_64": "linux", "linux-arm64": "linux-arm64"}
+
 SOCLE_MANIFEST_PATTERNS = "*.tar.gz *.deb *.rpm"  # the release.yml default
 
 # What a renderer that hashes published bytes names: the tag's source archive,

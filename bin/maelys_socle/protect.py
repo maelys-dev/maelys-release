@@ -53,6 +53,23 @@ def socle_check_contexts(project: pathlib.Path, context: Context) -> tuple[str, 
             break
     else:
         return "", []
+    # And the product's own legs, which report under the legs job adopt
+    # writes. Read from the declaration and not from ci.yml: what the guard
+    # of adopt must compare a protection with is what the adoption is about
+    # to produce, and a leg removed from [check] is still in ci.yml then.
+    return caller, [f"{caller} / {name}" for name in socle_check_jobs(project, context)] \
+        + [f"{LEGS_JOB} / {name}" for name in declared_legs(project)]
+
+
+def socle_check_jobs(project: pathlib.Path, context: Context) -> list[str]:
+    """The jobs of check-product.yml a product's call turns on, as each reports.
+
+    Apart from the name of the job that calls them, so that `rehearse` lists
+    the same jobs under a caller it reads itself.
+    """
+    ci = project / ".github" / "workflows" / "ci.yml"
+    if not ci.is_file():
+        return []
     # Every job of check-product.yml that this product's call turns on, not
     # the matrix alone: fuzz and sanitizers are jobs of the socle too, and
     # leaving them out of what is computed made them look like product jobs
@@ -73,12 +90,7 @@ def socle_check_contexts(project: pathlib.Path, context: Context) -> tuple[str, 
         # never runs, when it runs and passes on every pull request they have.
         if value in ("|", "|-", ">", ">-") or value.strip("'\"") != "":
             names.append(job)
-    # And the product's own legs, which report under the legs job adopt
-    # writes. Read from the declaration and not from ci.yml: what the guard
-    # of adopt must compare a protection with is what the adoption is about
-    # to produce, and a leg removed from [check] is still in ci.yml then.
-    return caller, [f"{caller} / {name}" for name in names] + [f"{LEGS_JOB} / {name}"
-                                                               for name in declared_legs(project)]
+    return names
 
 
 def declared_legs(project: pathlib.Path) -> list[str]:

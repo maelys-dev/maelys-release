@@ -578,6 +578,79 @@
   `check-product.yml` and `check-legs.yml` that clone it on a runner, and
   the cache from which `check`, `preflight` and `rehearse` run the pinned
   socle. `cut` or `adopt` run from one of those still says "untagged".
+- **A rehearsal says which step it replayed, and what it did not.** Two
+  products rehearsed their packaging on both Linux architectures, read the
+  green as "CI will be green", and had their pull request stopped by the
+  check legs of the shared CI, in the same cycle (#194). Measured before
+  anything changed. Their packaging exports `CC=clang`; the legs name no
+  compiler and build with the runner's `cc`, gcc. In the rehearsal image,
+  gcc 15.2.0 refuses `(void)read(...)` under `-O2 -Wall -Werror` and clang
+  21.1.8 accepts it; a `realpath` into a sized buffer imports
+  `__realpath_chk` with gcc and `realpath` with clang. Both are the
+  fortification level and not the libc: Ubuntu's gcc defines
+  `_FORTIFY_SOURCE=3` by itself when it optimises, its clang does not, and
+  clang given the macro imports the same symbol. And `rehearse --check`
+  already stopped the first, with gcc, as the leg does — so the compiler of
+  `--check` was never the defect. A package rehearsal built with the
+  compiler its script chose, said `built`, and said nothing of what it had
+  not run.
+
+  The result now carries `replayed`, `notReplayedSteps` and `notReplayed`:
+  the one **step** a rehearsal replayed, the other steps of that job, and
+  the jobs of the shared CI, under the names a pull request shows. A step
+  and not a job, because the job does more: the build job of the release
+  verifies before it packages when a product carries a verify script,
+  attests, and on a target `[package]` leaves out never packages at all —
+  a package rehearsed there replays no step, and says so; the `linux` leg
+  ends on the socle's drift check. A line given by hand names no step,
+  for `--package-command` as for `--check-command`. The text says all of
+  it, with the command that replays the leg; the log names the image's
+  `cc`.
+- **`rehearse --check` is the check step of the leg, as far as a container
+  goes, and for any product that calls the shared CI.** It ran `make check`
+  whatever the product's CI runs, and it refused a product the socle does
+  not release although the leg is not the release mechanism. Three products
+  pass a `check_command` of their own: for maelys-http and maelys-oci
+  `rehearse --check` now runs that line where it ran `make check`; the
+  third publishes by its own means and was refused, and is now rehearsed.
+  The package mode keeps its requirement.
+
+  **The line is read for certain, or nothing runs.** The socle reads
+  `ci.yml` by its lines, so it reads the shapes it reads exactly — a plain
+  or quoted value on its line, a literal block, a folded block — and
+  refuses every other, and any empty line, before anything is written or
+  started, naming the line of `ci.yml` and `--check-command` as the way
+  out. An empty line passes `bash -e`: a reader that guessed was green for
+  having run nothing. "The default of `check-product.yml`" is said only
+  when the call was read and passes none. A check is no longer given
+  `dist/`, and a package creates it after the last refusal.
+
+  **Made equal to the leg:** `clang` beside `build-essential`, installed
+  with their recommended packages; the line in a file under `bash
+  --noprofile --norc -eo pipefail`, with `CI=true`, `LANG=C.UTF-8` and none
+  of the rehearsal's variables — `TARGET` was in the environment of `make
+  check`, where a Makefile's `TARGET ?=` reads it; an `apt-get update` that
+  fails is a warning; the step is bounded at the job's 30 minutes. **Not
+  equal, and said in every result** as `unlikeTheRunner`: root, the tools
+  the runner image carries and the container does not, the merge commit, the
+  versions of the day. A check that stops on a command the container does
+  not have exits 127 on it by name and says where a product declares such a
+  tool; a product whose Makefile calls `cmake` or `pkg-config` without
+  declaring it will read that, where its CI is green.
+
+  `--check-command` no longer declares a default in the catalog, and
+  `docs/cli.md` and `docs/cli-contract.json` are regenerated.
+- **Not done, and said in the result:** the sanitizers and fuzz jobs are
+  not replayed — clang is what both products had rehearsed with, and those
+  jobs run on x86_64, the emulated architecture of the machines the fleet
+  develops on. The value of `DEBIAN_FRONTEND` on the runner is not
+  measured; the step runs without it. And the third finding was coverage,
+  not compiler: a conformance kit skipped its zsh and fish checks in the
+  rehearsal — as it does on the Linux legs, whose image carries neither
+  shell. The rehearsal hid nothing; a product that wants those checks run
+  declares both under `[linux]` of `dependencies/packages`, as maelys-cli
+  does. `docs/conventions.md`, "What a rehearsal replays, and what it does
+  not".
 - **Impact.** [asks: checkout-script] [writes: protect] A minor version:
   managed files move, two of them in what they execute. A product that
   carries `scripts/checkout-dependency.sh` and
@@ -619,15 +692,21 @@
   delete that entry. `preflight` words three answers differently — the
   remedy for a missing or unlimited environment, an environment limited to
   protected branches, the line that names a reviewer — and notes a public
-  repository whose secret scanning or push protection is off. Three things
-  are each repository's choice and written by nothing otherwise: the
-  pre-push hook, `maelys-release hook DIR --apply` in a clone that wants
-  it; the refusal, `[privacy] refuse`; and a pin marked `unreleased`,
-  which a product writes from this socle with `dependencies` and which
-  `check` reads once the product has adopted — a pinned socle that
-  predates `[privacy]` says so as a violation, and one that predates
-  `unreleased` ignores the line, grammar included. The strict reading of a
-  pin asks nothing of the fleet as measured: 62 pins, none refused.
+  repository whose secret scanning or push protection is off. `rehearse`
+  runs as the socle a product pins too, so its result changes at the next
+  adoption: a script that reads its JSON finds four more members, and a
+  fifth on a check; `rehearse --check` on a product whose `ci.yml` passes
+  its own `check_command` now runs that line, or refuses when it cannot
+  read it for certain, and one that calls a tool the container does not
+  have stops on it and says where to declare it. Three things are each
+  repository's choice and written by nothing otherwise: the pre-push hook,
+  `maelys-release hook DIR --apply` in a clone that wants it; the refusal,
+  `[privacy] refuse`; and a pin marked `unreleased`, which a product
+  writes from this socle with `dependencies` and which `check` reads once
+  the product has adopted — a pinned socle that predates `[privacy]` says
+  so as a violation, and one that predates `unreleased` ignores the line,
+  grammar included. The strict reading of a pin asks nothing of the fleet
+  as measured: 62 pins, none refused.
 
 ## 0.63.3 — 2026-10-10
 

@@ -3931,7 +3931,7 @@
                 "repeatable": false,
                 "required": false,
                 "requires": [],
-                "summary": "Command producing dist/; TARGET is substituted."
+                "summary": "Command producing dist/; TARGET is substituted. Another line than the default names no step of the release."
               },
               {
                 "conflictsWith": [],
@@ -3939,7 +3939,7 @@
                 "repeatable": false,
                 "required": false,
                 "requires": [],
-                "summary": "Run the check command instead of packaging; dist/ is left alone."
+                "summary": "Replay the check step of the shared CI's leg for TARGET instead of packaging: its packages, its line, no compiler named; dist/ is left alone. For any product whose ci.yml calls check-product.yml, however it publishes."
               },
               {
                 "argument": {
@@ -3947,12 +3947,11 @@
                   "type": "string"
                 },
                 "conflictsWith": [],
-                "default": "make check",
                 "long": "--check-command",
                 "repeatable": false,
                 "required": false,
                 "requires": [],
-                "summary": "Command run with --check."
+                "summary": "The line to run with --check, when the leg's own is not wanted or cannot be read for certain from ci.yml; another line than the leg's names no step."
               },
               {
                 "conflictsWith": [],
@@ -4040,6 +4039,18 @@
                   "check"
                 ]
               },
+              "notReplayed": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "notReplayedSteps": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
               "platform": {
                 "type": "string"
               },
@@ -4052,6 +4063,9 @@
                 },
                 "type": "array"
               },
+              "replayed": {
+                "type": "string"
+              },
               "repository": {
                 "type": "string"
               },
@@ -4060,6 +4074,12 @@
               },
               "target": {
                 "type": "string"
+              },
+              "unlikeTheRunner": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
               }
             },
             "required": [
@@ -4070,7 +4090,7 @@
           "pattern": [
             "rehearse"
           ],
-          "purpose": "Replay the Linux build job of the release in a Docker container on a copy of the working tree, make check with --check, or a channel's publish script against a published release with --channel.",
+          "purpose": "Replay one step of one Linux job in a Docker container on a copy of the working tree: the packaging of the release, the check of a leg of the shared CI with --check, or a channel's publish script against a published release with --channel. The result names the step it replayed, and the steps and jobs it did not.",
           "usage": "rehearse DIR [TARGET] [--product NAME] [--image IMAGE] [--package-command COMMAND] [--check] [--check-command COMMAND] [--keep] [--channel NAME] [--tag TAG]"
         },
         {

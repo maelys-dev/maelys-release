@@ -151,11 +151,22 @@ run of a product.
 container: the socle's and the declared packages, the pinned checkouts
 through `scripts/checkout-dependency.sh`, then `scripts/package-release.sh
 TARGET`, on a copy of the working tree. Only `dist/` receives the
-artifacts. `--check` replays `make check` (`--check-command` overrides)
-instead of packaging, for a Linux-only failure before the push. It runs
-before a tag what the workflow would otherwise discover on the first one; the defects maelys-oci found this way (a library without
+artifacts. It runs before a tag what the workflow would otherwise discover
+on the first one; the defects maelys-oci found this way (a library without
 pkg-config files on Debian, a host-dependent contract, objects that did not
 depend on `VERSION`) would all have failed the first release.
+
+**That is one step of one job, and not a pull request that passes.** The
+packaging chooses its own compiler; the check legs of the shared CI name
+none and build with the runner's `cc`. `rehearse DIR TARGET --check` replays
+the check of that leg instead — what it installs, the `check_command` the
+product's `ci.yml` passes, no compiler named — for a Linux-only failure
+before the push, and for any product that calls the shared CI, whatever
+publishes it. Every result says which step it replayed, and which steps of
+that job and which jobs of the shared CI it did not (`replayed`,
+`notReplayedSteps`, `notReplayed`); a check also says what a container is
+not (`unlikeTheRunner`). `docs/conventions.md`, "What a rehearsal replays,
+and what it does not", has the measurements and the limits.
 
 ### Preflight
 
