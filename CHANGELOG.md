@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- **The cost test of the privacy guard holds on a shared runner.** One of
+  the socle's own tests bounded a reading by a clock: two mebibytes in under
+  a second of processor time. The worst shape takes 0.57 s where the test
+  was written, so a runner 1.8 times slower fails it, and one did, at
+  1.04 s, on the merge commit of 0.64.0 -- the reading had not changed, and
+  the same commit passed when its job was run again. The bound that says
+  linear is the ratio between two sizes, and it stays as it was; the clock
+  now stops at three seconds, which the two readings that took most of a
+  minute still exceed.
+- **Impact.** [asks: nothing] [writes: nothing] Nothing for a product to
+  do: a test of this repository, and no code a product runs.
+
 ## 0.64.0 — 2026-10-11
 
 This version is what a product's first release cycle showed, in four
