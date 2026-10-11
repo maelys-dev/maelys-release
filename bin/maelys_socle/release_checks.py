@@ -13,7 +13,7 @@ from .declarations import Declarations
 from .checkouts import git_base
 from .github import (branch_protection, channel_visibility, deployment_policies, environment_gate,
                      github_read, github_repository, publication_record, read_protection,
-                     read_repository, tap_drift, tap_secrets)
+                     read_repository, secret_scanning, tap_drift, tap_secrets)
 from .host import git, run
 
 
@@ -394,6 +394,7 @@ def repository_checks(decl: Declarations) -> list[tuple[str, str]]:
         found.append(("fail", f"{repository} is public and {DECLARATION_FILE} declares [docs] named: AGENTS.md and"
                               " CLAUDE.md name the private documentation repository to anyone. Remove the"
                               " declaration and adopt"))
+    found.extend(secret_scanning(repository, repository_data))
     if repository_data.private:
         found.append(("note", f"{repository} is private: the release ships no provenance attestation (GitHub reserves"
                               " them to paid plans); the signed tag and SHA256SUMS remain"))

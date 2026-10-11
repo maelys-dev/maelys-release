@@ -94,13 +94,116 @@
   no line and no other help: rewriting it is the author's, with the count
   the note gives. Nothing says whether an annotated tag was pushed, so
   `check` notes every one that carries the address.
+- **`check` reads what the tracked files say of the machine and the person
+  behind them.** A file can carry the name of the machine it was written
+  on, a home directory, an identifier of an installation or of an account,
+  and nothing in the socle read a tracked file from that angle. Six
+  families now are, each by the shape of a value: this machine's own name,
+  a home-network host (`NAME.home`, `NAME.lan`, `NAME.local`,
+  `NAME.home.arpa`), a personal path, a UUID or a long identifier under an
+  identity key, an e-mail address the repository does not publish itself,
+  and the terms of a list the author keeps outside every repository.
+
+  By shape and not by substring: a sieve on `.home`, run over a clean
+  product, reported three lines that were all field accesses in code, and
+  none of them is reported now. A file is a document by its name: JSON and
+  JSONL are parsed, and a body held as a string is parsed in turn; YAML,
+  TOML and their like are read a line at a time; in any other text only the
+  shapes that cannot be code are looked for. A file named as JSON that
+  does not parse is read by its lines and listed as such. What is out of
+  scope is a list in the conventions: a Markdown code block, XML, CSV, a
+  constant in a source file, a document under another name.
+
+  An identity key has one definition, which git, the search before a parse
+  and the rule all read: one of `installation`, `device`, `machine`,
+  `account`, `user`, `organization`, up to three separators, `id` or `ids`
+  — `installationId`, `User ID`, `user.id`, `accountIds` — and `id` in an
+  object named for one of the six.
+- **No output shows what a family matched.** A check that copies what it
+  found into a CI log publishes it a second time. A finding leaves without
+  its value. A key and the name of a file are values too: each is examined
+  by every family, a match is a finding of its own, and it is shown by its
+  position — `tracked path 17, fixtures/(not shown)/b.json`. Before
+  anything leaves, every line and every string of the data is compared
+  with every value found. A line of `[privacy]` the grammar refuses is
+  named by its number and never quoted.
+- **What was not read is said**, in the line that says what was: archives,
+  images and documents with metadata, binary files, files above 4 MiB,
+  submodules; a file read in part because it held more than a hundred
+  findings of one family. An invented identifier is not a finding, by a
+  rule whose figures are in the conventions for every length it accepts.
+- **A note, until the repository raises it.** No product that was green
+  turns red. A repository that is clean declares `[privacy]` in
+  `maelys-release.conf`: `refuse`, alone or with the families it raises;
+  `fabricated NAME…` for the names it invents for fixtures; `except PATH
+  family FAMILY REASON`, with `key KEY` when it names one, for what stays.
+  A line of the section that is none of these is a violation in every
+  repository, whatever publishes it: a refusal that was mistyped is never
+  a silent note. An exception excuses one family under one path — a file,
+  a directory with its `/`, or a `*` that stays inside one component — and
+  nothing beside it. It designates and never says what it excuses: the
+  guard compares what it found with the declaration file and reports the
+  line that holds it. No form takes a fingerprint of the value, and the
+  conventions say what the grammar refuses by shape and what no parser can.
+- **What only the author's machine knows is read there.** The machine's
+  name comes from `hostname -s` and, on macOS, `scutil`; the author's own
+  terms from `${XDG_CONFIG_HOME:-~/.config}/maelys-release/private-terms`,
+  one a line, since a committed list of what must not be published would
+  be the publication. Neither is looked for on a CI runner, which has a
+  name and no author, and neither counts towards a refusal there. Neither
+  is ever an argument of a process: git reads them on its standard input.
+- **`check DIR --history` reads every ref**: its name, every name a tree of
+  the history gave a file, each blob once and each blob counted, every
+  commit message, every author, committer and tagger line. Nothing in a
+  history refuses — a published tag is never rewritten — and it says what
+  it did not read: the pull request heads GitHub keeps and an ordinary
+  clone does not bring, a shallow clone, the objects it left unread or a
+  partial clone never fetched, a name that is not UTF-8, a listing git
+  refused.
+- **`preflight` says when a public repository has secret scanning or push
+  protection off.** The guard reads no secret: a token has a format, and
+  the service that sees every push is GitHub's. A note, read from the
+  repository document `preflight` already had, so it costs no call; a
+  reader who does not administer the repository is not shown the setting,
+  and is told nothing.
+- **What it costs.** git names the files that hold a shape, in two calls
+  that read each file once, and only those are opened; a file is searched
+  before it is parsed; the reading is linear in what it reads.
+  Measured on a busy laptop: a file of 4 MiB built to be slow, in any of
+  thirteen shapes, under a second of processor time; a tree of 50 000
+  small files that hold nothing, 3 to 7 s according to what else the
+  machine was doing, where opening each file here took 55; this
+  repository's `check`, from 1.8 s to 2.2 s.
+- **Both references are re-recorded**, twice on this branch. `check` and
+  `preflight` ask the host whether `hostname` and `scutil` exist, and git
+  for the tracked files and for those that hold a shape. The recorder
+  answers that neither tool exists: a reference is replayed on every
+  machine and belongs to none, so the name of the machine that records it
+  is never asked for. Both references had already moved on main since
+  0.63.0 without a recording — a managed script, an option of
+  `dependencies`, a line of `protect` — and the commits that record them
+  tell what was already there from what this change adds.
+- **Not done here.** `cut` does not run the guard on the commit it
+  releases; the managed texts do not mention it; a product that pins an
+  older socle is checked by that socle, and `--history` there needs
+  `MAELYS_RELEASE_NO_RELOCATE=1` until its pin has moved. A binary file
+  whose name does not say it is one is searched as bytes and counted as
+  unread only where a shape was found. And the guard reads shapes: what
+  the conventions list as out of scope is not found.
 - **Impact.** [asks: nothing] [writes: nothing] Nothing for a product to
-  do. `check` re-executes the socle a product pins, so a product reads
-  these notes only once it has adopted this version: until then its
-  `check` says none of them, and `adopt` run from this version says them
-  at that adoption. They are notes, never a violation, and silent in CI.
-  The hook is each clone's choice: `maelys-release hook DIR --apply` in one
-  that wants it, and nothing is written otherwise.
+  do, and nothing turns red. `check` re-executes the socle a product pins,
+  so a product reads what `check` gains only once it has adopted this
+  version. All of it is notes, never a violation: an address git made up,
+  which `adopt` run from this version also says at that adoption, said to
+  an author and silent in CI; and one line saying what the privacy guard
+  searched and read, with a note for each family it found, naming the
+  place and never the value. `preflight` notes a public repository whose
+  secret scanning or push protection is off. Two things are each
+  repository's choice and written by nothing otherwise: the pre-push hook,
+  `maelys-release hook DIR --apply` in a clone that wants it; and the
+  refusal, `[privacy] refuse`, in a product that has adopted this version
+  — an older socle does not know the section and says so as a violation.
+  No managed file moves.
 
 ## 0.63.3 — 2026-10-10
 

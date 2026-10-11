@@ -240,6 +240,7 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
     checks: list[tuple[str, str, str]] = []
     own_ci = False
     docs_unnamed = False
+    privacy_declared = False
     unknown: list[str] = []
     section = ""
     for number, raw in enumerate(text.splitlines(), 1):
@@ -248,7 +249,8 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
             continue
         if line.startswith("["):
             if line in ("[targets]", "[manifest]", "[sbom]", "[runners]", "[dependencies]",
-                        "[commit]", "[channels]", "[gate]", "[cut]", "[package]", "[check]", "[ci]", "[docs]"):
+                        "[commit]", "[channels]", "[gate]", "[cut]", "[package]", "[check]", "[ci]", "[docs]",
+                        "[privacy]"):
                 section = line[1:-1]
                 continue
             # A section this socle does not know is named and skipped, never
@@ -274,6 +276,16 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
             if not command.strip():
                 raise ValueError(f"[cut] after-version names no command at line {number}")
             after_version = command.strip()
+            continue
+        if section == "privacy":
+            # Named here and judged in one place only, privacy.declared(),
+            # when `check` runs the guard. A line the grammar refuses is a
+            # violation of the conventions, said by the guard to every
+            # repository whatever publishes it: said here it would be a
+            # release-scope refusal, which a repository the socle does not
+            # release never hears -- and a mistyped `refuse` would be a
+            # silence.
+            privacy_declared = True
             continue
         if section == "docs":
             # Read by declared_value(), which rendering the managed block needs.
@@ -438,7 +450,8 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
         targets.append((name, runner))
     if section and not unknown and not targets and not manifest and not channels \
             and not gate and not after_version and not sbom and not runners and not apart \
-            and not commit_verification and not package and not checks and not own_ci and not docs_unnamed:
+            and not commit_verification and not package and not checks and not own_ci and not docs_unnamed \
+            and not privacy_declared:
         raise ValueError(f"{DECLARATION_FILE} declares no target, archive kind, channel, gate or cut command")
     if own_ci and checks:
         raise ValueError("[check] legs run from the ci.yml job that calls the shared CI, and [ci] own says"

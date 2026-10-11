@@ -195,6 +195,26 @@ writes and their verification reads; property tests still verify preservation
 of non-check protection settings. Neither reference covers every command or
 every API branch (pagination and all channel/gate combinations, for example).
 
+Neither reference knows the machine it was recorded on. The privacy guard of
+`check` asks the host for `hostname` and `scutil`, and a reference is
+replayed on every machine and belongs to none: `record_api.py` answers that
+neither tool exists, and the initial reference gets the same answer from its
+allowlisted PATH, which holds neither. The name of the recording machine is
+therefore never asked for and never enters a recorded file, and every
+recorded `check` says the machine's name was not looked for. The author's
+private list is read under HOME, which both captures replace; and neither
+capture is a CI runner's, whatever it is replayed on: the replay answers so,
+and the initial capture builds its environment from nothing.
+
+The guard asks git which tracked files hold a shape: two `git grep` calls
+whose patterns are arguments, recorded as they are. With a local name to
+look for the patterns go to git on its standard input instead, through
+`Host.feed`, which the recorder and the replay refuse — so a reference can
+only be recorded where no local name is known, which is how it is recorded.
+`check --history` is outside both references for the same reason: it reads
+a history through `Host.feed`, and it is held by `tests/test_privacy.py` on
+repositories built by the tests.
+
 The recorded implementation allows local adoption when protection cannot be
 read: no lock was detected. This is captured explicitly, not endorsed by the
 reference. Changing it requires a behavior fix and an explained golden diff.

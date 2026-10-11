@@ -62,7 +62,28 @@ class Host:
         testing = self._self_test()
         if name == "gh" and testing:
             return os.environ.get("_MAELYS_RELEASE_TEST_GH") or None
+        if name in ("hostname", "scutil") and testing:
+            # What names the machine is isolated as the author's list is: a
+            # self-test asks the tool a test wrote under the temporary
+            # directory, and never the developer's own. A suite whose verdict
+            # depends on what the machine it runs on is called is not one.
+            found = shutil.which(name)
+            return found if found and self._temporary(found) else None
         return shutil.which(name)
+
+    @staticmethod
+    def _temporary(path: str) -> bool:
+        roots = [pathlib.Path(tempfile.gettempdir()).resolve(), pathlib.Path("/tmp").resolve()]
+        return any(root in pathlib.Path(path).resolve().parents for root in roots)
+
+    def is_runner(self) -> bool:
+        """Whether this is a CI runner, by what every one of them says of itself.
+
+        `CI` or `GITHUB_ACTIONS` set to anything but nothing. A runner has a
+        name and no author: what is local by nature -- the machine's name,
+        the author's own terms -- is not looked for there.
+        """
+        return bool(os.environ.get("CI") or os.environ.get("GITHUB_ACTIONS"))
 
     def test_signers(self) -> str | None:
         """The allowed signers a self-test names, and nothing outside one.
@@ -122,6 +143,32 @@ class Host:
                env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
         return subprocess.run(self._command(command, cwd, env), cwd=cwd, env=env, check=False,
                               stdout=log, stderr=subprocess.STDOUT)
+
+    def feed(self, command: list[str], data: bytes, cwd: pathlib.Path | None = None) -> subprocess.CompletedProcess:
+        """A process given bytes and answering bytes: `git cat-file --batch` over a history.
+
+        `run` decodes what it reads, and a history holds blobs that are not
+        text. Read-only by its callers; the same guard as `run` stands in
+        front of it.
+        """
+        return subprocess.run(self._command(command, cwd, None), cwd=cwd, input=data, check=False,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    def private_terms(self) -> pathlib.Path | None:
+        """Where the author keeps the terms no repository may carry: outside every repository.
+
+        ${XDG_CONFIG_HOME:-~/.config}/maelys-release/private-terms, one term
+        a line. A committed list of what must not be published would be the
+        publication, so the list is the machine's and `check` reads it the
+        way it reads the machine's name. A self-test reads the list a test
+        wrote under the temporary directory and never the developer's own:
+        their terms are not a fixture, and a suite whose verdict depends on
+        who runs it is not one.
+        """
+        base = os.environ.get("XDG_CONFIG_HOME")
+        if self._self_test() and not (base and self._temporary(str(pathlib.Path(base) / "x"))):
+            return None
+        return pathlib.Path(base or pathlib.Path.home() / ".config") / "maelys-release" / "private-terms"
 
     def exec(self, executable: str, command: list[str], env: dict[str, str]) -> None:
         self._command([executable, *command[1:]], None, env)

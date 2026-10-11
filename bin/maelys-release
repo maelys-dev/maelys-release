@@ -60,8 +60,10 @@ from maelys_socle.workflows import (
     sanitizers_twice, sub_block, top_block, uses_commit, workflow_events, yaml_scalar,
 )
 # Import the module holding the current host, never a copy of its HOST binding.
-from maelys_socle import (adoption, authorship, cut, dependencies, github, host, identity, inspection, migration,
-                          protect, rehearse, signers)
+from maelys_socle import (
+    adoption, authorship, cut, dependencies, github, host, identity, inspection, migration, privacy, protect,
+    rehearse, signers,
+)
 from maelys_socle.cut import (
     CHECK_PENDING, CHECK_PASSED, CHANGELOG_ENTRY,
     host_target, worktree_paths, entry_heading, changelog_entry,
@@ -595,7 +597,7 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
                 parse_release(release.read_text(encoding="utf-8"))
             for section in unknown:
                 decl.add("missing", f"{release.name}: section {section} is not one this socle knows"
-                                    " ([targets], [manifest], [channels], [gate], [cut]); what it declares"
+                                    " ([targets], [manifest], [channels], [gate], [cut], [privacy]); what it declares"
                                     " is not applied here", "conventions")
             if decl.after_version:
                 # The command is this repository's, and cut runs it on the
@@ -1767,6 +1769,44 @@ SOCLE_OPTIONS = (
     cli.option("--socle-tag", "Socle tag written next to --socle-sha.", cli.argument("TAG"), hidden=True),
 )
 DIR_OPERAND = cli.operand("DIR", "Product repository.")
+# Where, never what. A finding holds no value; a key or a path that some
+# family matched is shown by its position, and `in` says when the match was
+# the key, the name of the file or the name of a ref rather than a value.
+PRIVACY_FINDINGS = {"type": "array", "items": {
+    "type": "object", "additionalProperties": False, "required": ["family", "path"],
+    "properties": {"family": {"enum": list(privacy.FAMILIES)}, "path": {"type": "string"},
+                   "in": {"enum": ["key", "name", "ref"]},
+                   "key": {"type": "string"}, "line": {"type": "integer"}, "term": {"type": "integer"},
+                   "notice": {"type": "boolean"}, "excused": {"type": "integer"},
+                   "blob": {"type": "string"}, "commit": {"type": "string"}}}}
+PRIVACY_SCHEMA = {
+    "type": "object", "additionalProperties": False,
+    "required": ["mode", "refuses", "files", "local", "findings"],
+    "properties": {
+        "mode": {"enum": ["note", "refuse"]}, "refuses": STRINGS,
+        "files": {"type": "object", "additionalProperties": False,
+                  "required": ["tracked", "searched", "read", "unread", "astext", "partial"],
+                  "properties": {"tracked": {"type": "integer"}, "searched": {"type": "integer"},
+                                 "read": {"type": "integer"},
+                                 "unread": {"type": "array", "items": {
+                                     "type": "object", "additionalProperties": False, "required": ["path", "reason"],
+                                     "properties": {"path": {"type": "string"},
+                                                    "reason": {"enum": list(privacy.UNREAD)}}}},
+                                 "astext": STRINGS, "partial": STRINGS}},
+        "local": {"type": "object", "additionalProperties": False, "required": ["machineNames", "terms", "runner"],
+                  "properties": {"machineNames": {"type": "integer"}, "terms": {"type": "integer"},
+                                 "runner": {"type": "boolean"}}},
+        "findings": PRIVACY_FINDINGS,
+        "history": {"type": "object", "additionalProperties": False,
+                    "required": ["refs", "shallow", "commits", "blobs", "addresses", "pullRequestHeads", "findings"],
+                    "properties": {"refs": {"type": "object"}, "shallow": {"type": "boolean"},
+                                   "commits": {"type": "integer"},
+                                   "blobs": {"type": "object", "additionalProperties": False,
+                                             "required": ["read", "unread"],
+                                             "properties": {"read": {"type": "integer"},
+                                                            "unread": {"type": "object"}}},
+                                   "addresses": {"type": "integer"}, "pullRequestHeads": {"type": "boolean"},
+                                   "findings": PRIVACY_FINDINGS}}}}
 CHECK_SCHEMA = {"type": "object", "additionalProperties": False,
                 "required": ["valid", "product", "project", "mechanism", "socle", "pinned", "checks", "files",
                              "violations", "conventions", "release"],
@@ -1775,7 +1815,8 @@ CHECK_SCHEMA = {"type": "object", "additionalProperties": False,
                                "socle": SOCLE_SCHEMA,
                                "pinned": {"type": ["object", "null"]}, "checks": CHECKS_SCHEMA,
                                "files": FILES_SCHEMA, "violations": STRINGS,
-                               "conventions": VERDICT_SCHEMA, "release": VERDICT_SCHEMA}}
+                               "conventions": VERDICT_SCHEMA, "release": VERDICT_SCHEMA,
+                               "privacy": PRIVACY_SCHEMA}}
 CUT_SCHEMA = {"type": "object", "additionalProperties": False,
               "required": ["mode", "stage", "product", "project", "repository", "version", "tag", "branch",
                            "base", "gate", "checks", "ready"],
@@ -1917,7 +1958,11 @@ APP = SocleProgram(PROGRAM, PRODUCT, socle_version(), [
              "Report the conventions of a product and, when it publishes through the socle, its release mechanism;"
              " exit 2 on any violation.",
              handle_check, operands=[DIR_OPERAND],
-             options=[*SOCLE_OPTIONS, MECHANISM_OPTION, DOCS_CONTRACT_OPTION], schema=CHECK_SCHEMA),
+             options=[*SOCLE_OPTIONS, MECHANISM_OPTION, DOCS_CONTRACT_OPTION,
+                      cli.flag("--history", "Read every ref of the clone as well -- each blob once, commit messages,"
+                               " author and committer lines -- for what the tracked files are read for; says what"
+                               " it could not read.")],
+             schema=CHECK_SCHEMA),
     cli.read("outgoing", "outgoing",
              "Report the commits about to leave whose author or committer address git made up on this machine;"
              " exit 2 when there is one.",
@@ -2024,7 +2069,8 @@ APP = SocleProgram(PROGRAM, PRODUCT, socle_version(), [
                                     "product": {"type": "string"}, "project": {"type": "string"},
                                     "socle": SOCLE_SCHEMA, "pinned": {"type": ["object", "null"]},
                                     "checks": CHECKS_SCHEMA, "files": FILES_SCHEMA,
-                                    "preflight": CHECKS_SCHEMA, "violations": STRINGS}}),
+                                    "preflight": CHECKS_SCHEMA, "violations": STRINGS,
+                                    "privacy": PRIVACY_SCHEMA}}),
     cli.execute("signers", "signers",
                 "List the keys that may sign a release of this fleet, or prepare one line of that file;"
                 " --apply writes it.",

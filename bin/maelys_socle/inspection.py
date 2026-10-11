@@ -18,6 +18,7 @@ from .constants import (
     SOCLE_REPOSITORY, SOCLE_TARGETS,
 )
 from .context import Context
+from . import privacy
 from .identity import socle_data
 from .declarations import Declarations, version_tuple
 from .project import project_of
@@ -250,6 +251,17 @@ def check_data(invocation: Invocation, context: Context) -> tuple[Declarations, 
                            for relative in decl.prose if relative not in decl.readme_held)
         conventions.extend(f"{name}: the generated CLI reference is {CLI_REFERENCE} for every product"
                            for name in LEGACY_CLI_REFERENCES if (project / name).is_file())
+    # What the tracked files say of the machine and the person behind them.
+    # Read last, and here alone -- by `check` and by `preflight`, which
+    # checks first: it opens every tracked file, which `declarations` on a
+    # runner and `adopt` have no use for, and a finding is not a reason to
+    # refuse an adoption. A note, until the repository itself asks for more
+    # in [privacy].
+    lines, data["privacy"] = privacy.check_tree(project, history=invocation.flag("--history"))
+    for status, message in lines:
+        decl.add(status, message, "conventions")
+        if status not in ("ok", "note"):
+            conventions.append(message)
     # The seeded notes are added while planning, so the checks are taken last.
     data["checks"] = decl.applicable()
     data["conventions"] = {"valid": not conventions, "violations": conventions}

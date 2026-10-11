@@ -267,6 +267,14 @@ def recording_host(module, project, source, responses, profile):
             if name == 'env':
                 self.events.append({'call': {'kind': 'which', 'name': name}, 'result': MACHINE['env']})
                 return MACHINE['env']
+            if name in ('hostname', 'scutil'):
+                # The reference is replayed on every machine and belongs to
+                # none of them: it records a host with no name of its own, so
+                # the name of the machine that recorded it never enters a
+                # public file. The privacy guard then looks for no machine,
+                # and says so in what it prints.
+                self.events.append({'call': {'kind': 'which', 'name': name}, 'result': None})
+                return None
             if name != 'gh':
                 raise AssertionError(f'unexpected tool lookup: {name}')
             value = original.which(name)
@@ -296,6 +304,12 @@ def recording_host(module, project, source, responses, profile):
             raise AssertionError('recording forbids streaming processes')
         def exec(self, *args, **kwargs):
             raise AssertionError('recording forbids process replacement')
+        def feed(self, *args, **kwargs):
+            raise AssertionError('recording forbids fed processes: check --history is not in the reference')
+        def private_terms(self):
+            return None  # the author's list is the author's, and a reference has no author
+        def is_runner(self):
+            return False  # nor is it any runner's: what it records is what an author's machine is asked
     return RecordingHost()
 
 

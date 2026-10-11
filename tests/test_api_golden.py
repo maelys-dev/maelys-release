@@ -63,7 +63,7 @@ class ApiGoldenBoundaryTest(unittest.TestCase):
 
     def test_writers_streams_and_exec_are_always_refused(self):
         host = self.host()
-        for method in (host.write, host.stream, host.exec):
+        for method in (host.write, host.stream, host.exec, host.feed):
             with self.subTest(method=method.__name__), self.assertRaisesRegex(AssertionError, 'forbids'):
                 method('anything')
 

@@ -131,6 +131,34 @@ class Repository:
         return str(self.data.get("default_branch") or "main")
 
 
+def secret_scanning(repository: str, data: Repository) -> list[tuple[str, str]]:
+    """Whether a public repository has secret scanning and push protection on.
+
+    The privacy guard of `check` reads no secret: a token has a format, and
+    the service that sees every push and knows the formats is GitHub's. It
+    offers both to a public repository, and on three repositories of the
+    fleet, two of them public, both were off. A note, and from the document
+    `preflight` has already read -- `repos/OWNER/NAME` carries
+    `security_and_analysis` for a reader who administers the repository, so
+    this costs no call. For any other reader GitHub leaves the member out,
+    and nothing is said: a check that cannot know does not assert.
+    """
+    analysis = data.data.get("security_and_analysis")
+    if data.visibility != "public" or not isinstance(analysis, dict):
+        return []
+    off = [label for key, label in (("secret_scanning", "secret scanning"),
+                                    ("secret_scanning_push_protection", "push protection"))
+           if (analysis.get(key) or {}).get("status") != "enabled"]
+    if not off:
+        return [("ok", f"{repository} is public, with secret scanning and push protection on")]
+    return [("note", f"{repository} is public and {' and '.join(off)} {'is' if len(off) == 1 else 'are'} off,"
+                     " though GitHub offers both to a public repository. Nothing in this command reads a secret:"
+                     " the privacy guard of check reads names, paths and identifiers, and a token is for those"
+                     f" two to stop. To turn both on: gh api -X PATCH repos/{repository}"
+                     " -f 'security_and_analysis[secret_scanning][status]=enabled'"
+                     " -f 'security_and_analysis[secret_scanning_push_protection][status]=enabled'")]
+
+
 def read_repository(repository: str) -> Repository:
     """Read `repos/{repository}` once; every reader of its answer goes through here."""
     state, body = github_read(f"repos/{repository}")

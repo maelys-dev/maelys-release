@@ -2125,9 +2125,14 @@ class GoldenTest(unittest.TestCase):
         ok       maelys-release.conf [dependencies] apart: the pins are materialised under $MAELYS_DEPENDENCIES_DIR, never beside the product
         note     no fuzzing detected by the conventions: neither tests/fuzz/ nor fuzz/ exists, and no job of .github/workflows/ci.yml runs a fuzz target
         note     neither a name nor an address is set here: git writes into each commit this account's name as the system holds it, and an address it composes from the login and this machine's name where it can, and a push publishes both. Set them before the next commit: 'git config --global user.name NAME' and 'git config --global user.email ADDRESS' -- on GitHub, the account's noreply address (ID+LOGIN@users.noreply.github.com) names no machine
-        """) + ("note     " + COMING_NOTE + "\n" if COMING_NOTE else "")
+        """) + ("note     " + COMING_NOTE + "\n" if COMING_NOTE else "") + (
+        # The one line that depends on where the test runs: whether this
+        # machine has a name specific enough to look for is the machine's
+        # answer, asked here the way `check` asks it.
+        "ok       privacy: 18 of 18 files read, every file since this is not a git repository;"
+        f" {MODULE.privacy.read_local().says()}; nothing found\n")
     # The fixture is a directory with no git identity anywhere, which is what
-    # the last note of CONTRACT reads: the text a human reads there, in full.
+    # the address note of CONTRACT reads: the text a human reads there, in full.
     FILES = textwrap.dedent("""\
         same     .github/workflows/release.yml
         same     scripts/checkout-dependency.sh
@@ -2246,7 +2251,13 @@ class GoldenTest(unittest.TestCase):
         product.git(product.dir, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "fixture")
         completed = product.run("preflight", self.dir, expect=2)
         self.assertEqual(completed.stderr, "")
-        self.assertEqual(completed.stdout, self.CONTRACT + self.FILES + self.VERDICTS + textwrap.dedent("""\
+        # This fixture is a repository, where the other two are directories:
+        # git names the files that hold a shape, and the line counts them.
+        contract = (self.CONTRACT[:self.CONTRACT.rindex("ok       privacy:")]
+                    + "ok       " + MODULE.privacy.check_tree(self.product.dir)[0][0][1] + "\n")
+        self.assertRegex(contract, r"privacy: 18 of 18 tracked files searched for the shapes of six families,"
+                                   r" and (the [0-9]+ that held one read|none held one); ")
+        self.assertEqual(completed.stdout, contract + self.FILES + self.VERDICTS + textwrap.dedent("""\
             check: maelys-fixture is on maelys-release v9.9.9
             FAIL     tag.gpgsign is not true: git config tag.gpgsign true
             FAIL     user.signingkey is not set (gpg.format = openpgp); the key must be registered on GitHub

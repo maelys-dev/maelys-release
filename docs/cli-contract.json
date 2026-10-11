@@ -1174,10 +1174,18 @@
                 "required": false,
                 "requires": [],
                 "summary": "Refuse prose in docs/ and a CLI reference outside docs/cli.md, instead of noting them."
+              },
+              {
+                "conflictsWith": [],
+                "long": "--history",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "Read every ref of the clone as well -- each blob once, commit messages, author and committer lines -- for what the tracked files are read for; says what it could not read."
               }
             ],
             "passthrough": false,
-            "synopsis": "check DIR [--product NAME] [--mechanism MECHANISM] [--docs-contract]"
+            "synopsis": "check DIR [--product NAME] [--mechanism MECHANISM] [--docs-contract] [--history]"
           },
           "outputMode": "json-envelope",
           "outputSchema": {
@@ -1287,6 +1295,267 @@
                   "null"
                 ]
               },
+              "privacy": {
+                "additionalProperties": false,
+                "properties": {
+                  "files": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "astext": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "partial": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "read": {
+                        "type": "integer"
+                      },
+                      "searched": {
+                        "type": "integer"
+                      },
+                      "tracked": {
+                        "type": "integer"
+                      },
+                      "unread": {
+                        "items": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "path": {
+                              "type": "string"
+                            },
+                            "reason": {
+                              "enum": [
+                                "archive",
+                                "image",
+                                "binary",
+                                "size",
+                                "submodule",
+                                "absent",
+                                "undecodable"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "path",
+                            "reason"
+                          ],
+                          "type": "object"
+                        },
+                        "type": "array"
+                      }
+                    },
+                    "required": [
+                      "tracked",
+                      "searched",
+                      "read",
+                      "unread",
+                      "astext",
+                      "partial"
+                    ],
+                    "type": "object"
+                  },
+                  "findings": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "blob": {
+                          "type": "string"
+                        },
+                        "commit": {
+                          "type": "string"
+                        },
+                        "excused": {
+                          "type": "integer"
+                        },
+                        "family": {
+                          "enum": [
+                            "machine",
+                            "host",
+                            "path",
+                            "identifier",
+                            "email",
+                            "term"
+                          ]
+                        },
+                        "in": {
+                          "enum": [
+                            "key",
+                            "name",
+                            "ref"
+                          ]
+                        },
+                        "key": {
+                          "type": "string"
+                        },
+                        "line": {
+                          "type": "integer"
+                        },
+                        "notice": {
+                          "type": "boolean"
+                        },
+                        "path": {
+                          "type": "string"
+                        },
+                        "term": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "family",
+                        "path"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "history": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "addresses": {
+                        "type": "integer"
+                      },
+                      "blobs": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "read": {
+                            "type": "integer"
+                          },
+                          "unread": {
+                            "type": "object"
+                          }
+                        },
+                        "required": [
+                          "read",
+                          "unread"
+                        ],
+                        "type": "object"
+                      },
+                      "commits": {
+                        "type": "integer"
+                      },
+                      "findings": {
+                        "items": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "blob": {
+                              "type": "string"
+                            },
+                            "commit": {
+                              "type": "string"
+                            },
+                            "excused": {
+                              "type": "integer"
+                            },
+                            "family": {
+                              "enum": [
+                                "machine",
+                                "host",
+                                "path",
+                                "identifier",
+                                "email",
+                                "term"
+                              ]
+                            },
+                            "in": {
+                              "enum": [
+                                "key",
+                                "name",
+                                "ref"
+                              ]
+                            },
+                            "key": {
+                              "type": "string"
+                            },
+                            "line": {
+                              "type": "integer"
+                            },
+                            "notice": {
+                              "type": "boolean"
+                            },
+                            "path": {
+                              "type": "string"
+                            },
+                            "term": {
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "family",
+                            "path"
+                          ],
+                          "type": "object"
+                        },
+                        "type": "array"
+                      },
+                      "pullRequestHeads": {
+                        "type": "boolean"
+                      },
+                      "refs": {
+                        "type": "object"
+                      },
+                      "shallow": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "refs",
+                      "shallow",
+                      "commits",
+                      "blobs",
+                      "addresses",
+                      "pullRequestHeads",
+                      "findings"
+                    ],
+                    "type": "object"
+                  },
+                  "local": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "machineNames": {
+                        "type": "integer"
+                      },
+                      "runner": {
+                        "type": "boolean"
+                      },
+                      "terms": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "machineNames",
+                      "terms",
+                      "runner"
+                    ],
+                    "type": "object"
+                  },
+                  "mode": {
+                    "enum": [
+                      "note",
+                      "refuse"
+                    ]
+                  },
+                  "refuses": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "mode",
+                  "refuses",
+                  "files",
+                  "local",
+                  "findings"
+                ],
+                "type": "object"
+              },
               "product": {
                 "type": "string"
               },
@@ -1362,7 +1631,7 @@
             "check"
           ],
           "purpose": "Report the conventions of a product and, when it publishes through the socle, its release mechanism; exit 2 on any violation.",
-          "usage": "check DIR [--product NAME] [--mechanism MECHANISM] [--docs-contract]"
+          "usage": "check DIR [--product NAME] [--mechanism MECHANISM] [--docs-contract] [--history]"
         },
         {
           "available": true,
@@ -2157,6 +2426,267 @@
                   "type": "object"
                 },
                 "type": "array"
+              },
+              "privacy": {
+                "additionalProperties": false,
+                "properties": {
+                  "files": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "astext": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "partial": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "read": {
+                        "type": "integer"
+                      },
+                      "searched": {
+                        "type": "integer"
+                      },
+                      "tracked": {
+                        "type": "integer"
+                      },
+                      "unread": {
+                        "items": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "path": {
+                              "type": "string"
+                            },
+                            "reason": {
+                              "enum": [
+                                "archive",
+                                "image",
+                                "binary",
+                                "size",
+                                "submodule",
+                                "absent",
+                                "undecodable"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "path",
+                            "reason"
+                          ],
+                          "type": "object"
+                        },
+                        "type": "array"
+                      }
+                    },
+                    "required": [
+                      "tracked",
+                      "searched",
+                      "read",
+                      "unread",
+                      "astext",
+                      "partial"
+                    ],
+                    "type": "object"
+                  },
+                  "findings": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "blob": {
+                          "type": "string"
+                        },
+                        "commit": {
+                          "type": "string"
+                        },
+                        "excused": {
+                          "type": "integer"
+                        },
+                        "family": {
+                          "enum": [
+                            "machine",
+                            "host",
+                            "path",
+                            "identifier",
+                            "email",
+                            "term"
+                          ]
+                        },
+                        "in": {
+                          "enum": [
+                            "key",
+                            "name",
+                            "ref"
+                          ]
+                        },
+                        "key": {
+                          "type": "string"
+                        },
+                        "line": {
+                          "type": "integer"
+                        },
+                        "notice": {
+                          "type": "boolean"
+                        },
+                        "path": {
+                          "type": "string"
+                        },
+                        "term": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "family",
+                        "path"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "history": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "addresses": {
+                        "type": "integer"
+                      },
+                      "blobs": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "read": {
+                            "type": "integer"
+                          },
+                          "unread": {
+                            "type": "object"
+                          }
+                        },
+                        "required": [
+                          "read",
+                          "unread"
+                        ],
+                        "type": "object"
+                      },
+                      "commits": {
+                        "type": "integer"
+                      },
+                      "findings": {
+                        "items": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "blob": {
+                              "type": "string"
+                            },
+                            "commit": {
+                              "type": "string"
+                            },
+                            "excused": {
+                              "type": "integer"
+                            },
+                            "family": {
+                              "enum": [
+                                "machine",
+                                "host",
+                                "path",
+                                "identifier",
+                                "email",
+                                "term"
+                              ]
+                            },
+                            "in": {
+                              "enum": [
+                                "key",
+                                "name",
+                                "ref"
+                              ]
+                            },
+                            "key": {
+                              "type": "string"
+                            },
+                            "line": {
+                              "type": "integer"
+                            },
+                            "notice": {
+                              "type": "boolean"
+                            },
+                            "path": {
+                              "type": "string"
+                            },
+                            "term": {
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "family",
+                            "path"
+                          ],
+                          "type": "object"
+                        },
+                        "type": "array"
+                      },
+                      "pullRequestHeads": {
+                        "type": "boolean"
+                      },
+                      "refs": {
+                        "type": "object"
+                      },
+                      "shallow": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "refs",
+                      "shallow",
+                      "commits",
+                      "blobs",
+                      "addresses",
+                      "pullRequestHeads",
+                      "findings"
+                    ],
+                    "type": "object"
+                  },
+                  "local": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "machineNames": {
+                        "type": "integer"
+                      },
+                      "runner": {
+                        "type": "boolean"
+                      },
+                      "terms": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "machineNames",
+                      "terms",
+                      "runner"
+                    ],
+                    "type": "object"
+                  },
+                  "mode": {
+                    "enum": [
+                      "note",
+                      "refuse"
+                    ]
+                  },
+                  "refuses": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "mode",
+                  "refuses",
+                  "files",
+                  "local",
+                  "findings"
+                ],
+                "type": "object"
               },
               "product": {
                 "type": "string"

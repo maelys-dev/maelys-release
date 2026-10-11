@@ -1368,6 +1368,358 @@ does not say where either came from.
     -f name='v*' -f type=tag
   ```
 
+## What the tracked files say of their author
+
+A file can carry the name of the machine it was written on, the home
+directory of whoever wrote it, an identifier of their installation or of
+their account. Nothing in the socle read a tracked file from that angle.
+`check` does, and this section says exactly what it reads, what it shows,
+and what it does not do.
+
+**Six families, each read by the shape of a value.**
+
+| family | what is found |
+| --- | --- |
+| `machine` | this machine's own name, as `hostname -s` gives it and, on macOS, `scutil --get LocalHostName` and `ComputerName` — its words in order, whatever separates them and whatever their case |
+| `host` | a home-network host, `NAME.home`, `NAME.lan`, `NAME.local`, `NAME.home.arpa`: alone, in a URL, in a share (`//NAME.lan/x`), in a list, in a sentence |
+| `path` | `/Users/NAME`, `/home/NAME`, the same under `/mnt/c`, `/Volumes/X`, `/System/Volumes/Data` or `/var`, and `C:\Users\NAME` in either case |
+| `identifier` | a UUID, a token of sixteen characters or more holding a digit, or a number of six digits or more, **under an identity key** |
+| `email` | an address the repository does not publish itself, outside the reserved domains and `noreply` |
+| `term` | a line of the author's own list, which is not in any repository |
+
+**An identity key has one definition**, read three times: by git to name the
+files worth opening, by the search that precedes a parse, and by the rule.
+One of `installation`, `device`, `machine`, `account`, `user`,
+`organization`; then at most three characters that are neither a letter nor
+a digit; then `id` or `ids`; at the end of the key and in any case:
+`installationId`, `device_id`, `User ID`, `user.id`, `accountIds`,
+`githubUserId`. And the object that carries one: `id` in an object named
+for one of the six, singular or plural, as `{"installation": {"id": …}}`
+writes it, or a YAML block, or a TOML table. Measured on the forty-four
+repositories of the fleet, that last rule adds three findings, in one file,
+all of them account numbers a recorded API response carries.
+
+**By shape of value, not by substring.** A sieve on `.home` run over a
+clean product reported three lines, all of them a field access in code. A
+check that is wrong three times out of three on a clean tree is switched off
+the day it lands.
+
+**A file is a document by its name**, and the two value families — a host,
+an identifier — are read in documents only:
+
+- `.json`, `.jsonl`, `.ndjson`, `.jsonc`, `.json5`, `.geojson`, `.har`,
+  `.ipynb`, `.webmanifest`, `.sarif`: parsed, key by key. A string that
+  holds a document — the body of a request, kept as it was sent — is
+  parsed in turn. A
+  byte-order mark, several documents one after another and one document a
+  line are all read as what they are.
+- `.yml`, `.yaml`, `.toml`, `.ini`, `.cfg`, `.conf`, `.env` and `.env.*`,
+  `.properties`: read a line at a time, as assignments. The socle carries no
+  YAML parser and vendors none.
+- `.log`, `.txt`, `.out`: a line that ends in a JSON document is read as
+  one, and a line that is an assignment as one.
+- every other text: only the shapes that cannot be code — the path, the
+  address, this machine's name, the author's terms.
+
+**A file named as JSON that does not parse is said to be.** A truncated
+file, a trailing comma, comments: it is read a line at a time, where a key
+is seen only on the line that holds its value, and `check` lists it —
+`privacy.files.astext` — instead of counting it as read.
+
+**What is out of scope, as a list**: a document inside a Markdown code
+block; XML and property lists; CSV; a constant in a source file, fixtures
+included; a document under a name that is not in the list above — a
+file of JSON saved as `.snap`, or with no suffix; anything in a binary format.
+In those, the path, the address, the machine's name and the terms are
+still found, as in any text; a host and an identifier are not.
+
+### No output shows what a family matched
+
+A privacy check that copies what it found into a CI log publishes it a
+second time, to a place nobody rewrites. So:
+
+- **A finding leaves without its value.** `--format json` carries
+  `privacy`, whose findings are a `family`, a `path`, and a `key` or a
+  `line`.
+- **A key is a value, and so is the name of a file.** Each is examined by
+  every family before it is shown: the key of a JSON object, the key of a
+  line of YAML, every component of every tracked path — alone and without
+  its last suffix, and `Users/NAME` across two. A match is a finding of its
+  own, `"in": "key"` or `"in": "name"`, and is shown by its position:
+  `tracked path 17, fixtures/(not shown)/b.json`. The list of what was not
+  read uses the same names.
+- **A key that holds sixteen hexadecimal digits in a row, or six digits, is
+  not shown**, whatever it is.
+- **The last gate.** Before anything leaves, every line and every string of
+  the data is compared with every value found, as a whole word and without
+  regard to case, and what matches is replaced. A name one reader took for
+  a word is caught by what another reader found.
+- **A line of `[privacy]` the grammar refuses is named by its number and
+  never quoted**: the line a repository got wrong may be the value it meant
+  to keep out.
+
+### What each family takes for nobody
+
+**An invented identifier is not a leak.** It says so (`test`, `example`,
+`fake`, `sample`, `synthetic`…), or public documentation prints it (the
+UUID of RFC 4122, the two an encyclopedia made the default of every
+tutorial). Otherwise, by what it is made of:
+
+- a number, when it holds two different digits at most, or when each digit
+  follows the one before, up or down: `100000`, `424242`, `123456`. Of the
+  900 000 numbers of six digits 2 538 are, one in 355, each of them tried;
+  of seven digits one in 1 900; of eight one in 8 500; of nine and more
+  fewer than one in 50 000.
+- anything else, when at least four of every five of its symbols equal,
+  follow or precede — in the order `0-9a-z` — the symbol one or two places
+  before: the nil UUID, `12345678-1234-…`, the `a1b2c3d4-e5f6-…` of every
+  generated example. Of a million random UUIDs none is. Of random tokens of
+  sixteen hexadecimal symbols one in 9 000 is, of twenty one in 150 000. A
+  random token of letters and digits is taken for an invention about once
+  in 10 000 to 40 000 whatever its length, and by the first rule: it
+  happens to spell `test`.
+
+**A name under a home directory is a finding unless it is a single letter,
+a system account, a placeholder or a declared invention.** The accounts and
+placeholders are a list — `runner`, `Shared`, `linuxbrew`, `www`,
+`appuser`, `user`, `username`, `your_username` and their like — compared
+without regard to case; a name in capitals that is not in it is a name. No
+first name is in it: a name invented for a fixture is declared by the
+repository that invents it. In code and in prose, `/home/WORD` closed by
+the quote that opened it — `'/home/dashboard'` — is a route and not a
+home. **Known noise**: a route with more than one segment below `/home/`
+is reported; none exists on the fleet.
+
+**A host whose first label is a word programs use for themselves names no
+machine**, when that label and the suffix are the whole name: `user.home`
+is a property of the Java runtime, `settings.local` a file, `args.home` a
+field. The words are a list in the module. The reserved labels (`example`,
+`test`, `invalid`, `localhost`) and Kubernetes' `cluster.local` name
+nobody's network. None of these is reported on the fleet.
+
+**The addresses a repository publishes are not leaks**: those of
+`LICENSING.md` and `SECURITY.md` — at its root, in `.github/` or in
+`docs/`, where GitHub reads them — and of any file whose name is or ends in
+`allowed-signers`, wherever else they appear. What ends an address is a
+country's two letters, or one of a list of endings; `W@x.data` is a matrix
+product and `icon@2x.png` a file. What stands before the host of a URL,
+`scheme://user:password@host`, is not a correspondent. **What this
+misses**: an address under an ending that is not in the list, and under
+the two-letter endings that end a file of code more often than an address
+(`.py`, `.rs`, `.sh`, `.md` and eleven more). The rest is one line for the
+whole family, counting the addresses and how many stand in a copyright or
+authorship notice. On the fleet: nine addresses in forty-four
+repositories, six of them one vendored library's notice in two
+repositories, one in the deprecation message of a lockfile.
+
+### A note first, and the repository raises it
+
+**The guard is born a note.** A rule no product can satisfy on the day it
+appears is a rule people switch off, and this one reads every tracked file
+of repositories that were never read this way. No product that was green
+turns red for it. A repository that is clean says so, in
+`maelys-release.conf`, and from then on a finding is a violation and
+`check` exits 2:
+
+```
+[privacy]
+refuse
+fabricated alice atelier.home
+except fixtures/legacy/*.json family host key peer kept as 1.4.0 shipped it; regenerated with 2.0.0
+except vendor/ family email third-party notices, kept as their authors wrote them
+```
+
+- `refuse` alone raises every family; `refuse host path identifier` raises
+  those and leaves the others notes.
+- `fabricated NAME…` declares names invented for fixtures: a user name, a
+  host or its first label, an address or its domain. **A name declared here
+  is published by the declaration.** Never declare a real one to quiet a
+  finding — that is what `except` is for.
+- `except PATH family FAMILY REASON`, and `except PATH family FAMILY key
+  KEY REASON`, designate what stays. The reason is on the same line and
+  required.
+
+**A line of `[privacy]` that is not one of these is a violation**, in every
+repository and whatever publishes it: `refuse hosts`, `refuse  # all` — a
+repository that asked for a refusal and mistyped it is told, never left
+with a note it did not ask for. The guard judges the section and nothing
+else does, so the answer is the same for a repository the socle releases
+and for one it does not.
+
+**An exception excuses what it names and nothing beside it.** One family;
+under one key when it names one. And one path, compared whole:
+
+- a tracked path, as it is: `data[1].json` is that file and no other;
+- a directory, when it ends with `/`: everything under it;
+- a path holding `*`, which stands for any run of characters inside one
+  component and never crosses a `/`: `fixtures/*.json` is not
+  `fixtures/deep/b.json`.
+
+Nothing else is a pattern. `**` is refused, and so is a pattern made of
+nothing but stars: an exception names a file or a directory, not every one
+of them. An exception that excuses nothing is noted — in the tracked files
+when `check` reads those, and in the history too when it was asked to read
+it, which is the only reading that can say the line can go.
+
+**An exception designates; it never says what it excuses.** A line that
+quoted the host name to say which one it tolerates would be the leak, moved
+into a file every reader opens. What is compared with every line of the
+declaration file, comments included, as a whole word and without regard to
+case: the host of an excused host or URL, the name under an excused home,
+the address, the identifier whatever brackets it, the machine's name or the
+term as it was found. What is not, and cannot be: anything derived from
+them — a part, a translation, an encoding.
+
+**And no form takes a fingerprint of the value.** It was asked for. The
+digest of a low-entropy value — a host name, a first name, an account
+number — is one dictionary pass away from the value, and it would sit in a
+public file looking like a precaution. What the grammar refuses, by shape,
+in any word of an `except` line — its path, its key, its reason: sixteen
+hexadecimal digits in a row, whatever precedes them; and twenty characters
+or more of the alphabets base64 uses that hold a digit, a capital and a
+small letter. That is all it reads. A reason made of words can still say
+anything: the rule is for the habit, not against intent.
+
+An older socle does not know `[privacy]` and says so as a violation, as for
+any section it does not know: declare it once the socle a repository pins
+is this one or later.
+
+### What only the author's machine knows
+
+**The machine's name is checkable in one place: the machine, before the
+push.** `check` says in its first privacy line whether the name was looked
+for: not where no `hostname` command exists, and not when the name is
+shorter than six letters or is one every machine of its kind carries
+(`localhost`, `MacBook-Pro`), which would name nobody.
+
+**The author's own terms live on the author's machine.** A first name, a
+private project's name, a client's: a committed list of what must not be
+published would be the publication. The list is
+`${XDG_CONFIG_HOME:-~/.config}/maelys-release/private-terms`, one term a
+line, `#` for comments; absent, nothing happens. A term is found as it was
+written: its words in order, a hyphen, a dot or a space between two of
+them optional, and anything else — the `@` of an address, a `/`, an `&` —
+required. A match is reported as *the term on line N of your private
+list*, never the term. A term of fewer than three letters and digits is
+not looked for.
+
+**Neither is looked for on a CI runner**, where `CI` or `GITHUB_ACTIONS` is
+set. A runner has a name and no author: looked for there, a runner called
+after a word of the tree would find it, and a repository that refuses the
+family would be refused for it. The first privacy line says they were
+skipped, and nothing local counts towards a refusal there.
+
+**Neither reaches a process list.** git is given the machine's name and the
+terms on its standard input, never as an argument.
+
+### The history, on demand
+
+`check DIR --history` reads every ref of the clone — branches, tags,
+remote-tracking refs, whatever else `refs/` holds:
+
+- the name of each ref, which is a value like another;
+- every name any tree of the history gave a file or a directory;
+- each blob once, however many commits and paths carry it, under the first
+  path it had — and each blob counted: three versions of one file are
+  three;
+- every commit message, and every author, committer and tagger line.
+
+It is the question asked before a repository becomes public, and it is not
+asked on a pull request: it reads everything.
+
+**Nothing in a history refuses**, whatever `[privacy]` says of the tree. A
+published tag is never rewritten, and a finding in a blob three versions
+old cannot be fixed by the next commit; a rule a repository cannot satisfy
+is a rule it switches off. An exception reaches the history as it reaches
+the tree.
+
+**It says what it did not read**, because a zero that did not look is not a
+zero:
+
+- GitHub keeps `refs/pull/N/head` for every pull request ever opened, and
+  an ordinary clone does not bring them. Unless they were fetched —
+  `git fetch origin "+refs/pull/*/head:refs/pull/*/head"` — the line says
+  they were not read.
+- A shallow clone is said to be one.
+- Objects that are binary, archives, images, above the size bound, or
+  under a name that is not UTF-8 are counted; so are the objects a partial
+  clone names and never fetched, which are listed without failing and
+  without fetching; and a listing git refused is said, never read as an
+  empty history.
+- A ref is read as it was last fetched, and what no ref reaches — a commit
+  a force-push left on the server, a reflog — is not read.
+
+The addresses of a history are its identities, and every history has them:
+they are counted, with the command that prints them where only the author
+reads them, and not listed.
+
+`check` hands a product to the socle that product pins, and a socle before
+this one knows neither the guard nor the option. Until the pin has moved,
+`MAELYS_RELEASE_NO_RELOCATE=1 maelys-release check DIR --history` asks the
+socle at hand, which is the one that can answer.
+
+### What the guard does not do
+
+- **Secrets and tokens.** A token has a format, and the service that sees
+  every push and knows the formats is GitHub's: secret scanning and push
+  protection. `preflight` says, as a note, when a public repository lacks
+  either — from the repository document it already reads, which carries
+  `security_and_analysis` for a reader who administers the repository, so
+  the note costs no call; for any other reader the member is absent and
+  nothing is said.
+- **Archives, images, media, documents with metadata**, by their name: not
+  opened, and counted as unread, by kind, in the line that says what was
+  read. An EXIF block, a PDF's author field, a tarball of fixtures:
+  nothing here vouches for them.
+- **Binary files.** One whose name says so — a font, an object, a
+  database — is counted as unread. Any other is searched by git for the
+  same shapes as a text, as bytes, and is counted as unread when a shape
+  was found in it; what a binary holds in another encoding than ASCII or
+  UTF-8, or compressed, is not seen, and a binary in which nothing was
+  found is not counted apart. Telling every binary from every text means
+  opening every file, which is the cost this reading exists to avoid.
+- **Files above 4 MiB** that hold a shape, counted the same way.
+- **A file that holds too much**: beyond a hundred findings of one family,
+  or twenty thousand lines to read, a file is read up to there, and listed
+  — `privacy.files.partial`.
+- **A submodule**, which is another repository's to check.
+- **Meaning.** A first name in a comment that is not on the author's list,
+  an identifier under a key the definition does not hold: the guard reads
+  shapes, and a shape it was not given is not found. A green line here
+  means these six families were looked for in the files counted, and
+  nothing more.
+
+### What it costs
+
+`check` runs on every pull request of every product. So git names the
+files that hold a shape — two calls, one for the documents and one for
+everything else, each file read once and in one process — and only those
+are opened; an opened file is searched before it is parsed; and the
+reading is linear in what it reads.
+
+Measured on 2026-10-10 on the laptop this was written on, which was busy
+with other work:
+
+- **A file of 4 MiB built to be slow** — eighty thousand paths, as many
+  addresses, a line of four million spaces, a document of nothing but
+  identity keys, thirteen shapes in all: under one second of processor
+  time each, 0.76 s for the worst. The same three that were not linear
+  took 2.3 s at forty thousand spaces and 53 s and 58 s at 2 MB.
+- **A tree of 50 000 small source files that hold nothing**: git reads each
+  once, and nothing is opened here. 2.9 s when the machine was quiet, 5.4
+  to 7.5 s when it was not, half a second of it in this command; 55 s when
+  every file was opened here. The floor is one opening of each tracked
+  file, which is what searching them means, and on that machine an opening
+  costs sixty microseconds of system time.
+- **This repository**, some 400 tracked files and 10 MB: `check` went from
+  1.8 s to 2.2 s. **The largest repository of the fleet**, 2 784 tracked
+  files of which 1 426 are not read for their name: from 0.9 s to 2.1 s.
+
+git is asked in Perl's dialect where it was built with it, which reads the
+same patterns three times faster than POSIX's, and in POSIX's where it was
+not; the patterns mean the same in both, and a test reads one tree both
+ways.
+
 ## Agents
 
 `adopt` installs a managed block in `AGENTS.md` and `CLAUDE.md` and a
