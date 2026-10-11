@@ -208,6 +208,154 @@ author's own checkout, before the push — and the fleet-wide view belongs to
 maelys-platform, which reads the remote branches of every repository. The
 socle declares, the observer counts: the same split as the release gate.
 
+## The address a commit carries
+
+A commit carries the address of an account, never one git made up on the
+machine it was written on. A clone with neither `user.name` nor
+`user.email` commits anyway wherever git can compose an address: the login,
+an at sign, and the name the machine resolves to. It writes that into every
+commit, beside the account's name as the system holds it, and the first
+push publishes both. A clone with no identity pushed twenty commits that
+way, long before any release. `cut` reads back what GitHub says of the
+release commit, which is correct and too late: it sees one commit, at
+publication.
+
+**Two kinds of address, which do not call for the same thing.**
+
+- *Made up on this machine*: the address git composes here, or one with no
+  domain at all. It is nobody's mailbox. What git composes is asked of git
+  itself, with every configured identity taken away for the question, and
+  not of `hostname`: the kernel's name for a machine is often not the one
+  git resolves, and only git knows which it writes. The same login at the
+  same machine under another private suffix is the same address — a laptop
+  is not on one network.
+- *Under a private name*: a domain with no dot, or one that ends in `.home`,
+  `.lan`, `.local`, `.localdomain`, `.localhost`, `.internal`, `.intranet`,
+  `.corp`, `.home.arpa`, `.fritz.box`, `.mshome.net`, or git's own
+  `.(none)`. It may be a machine's name, and it may be a real mailbox at a
+  company's private zone, in a commit that is a contributor's. It is said,
+  and never refused. The names reserved for tests and documentation —
+  `.test`, `.invalid`, `.example` — are in neither kind: nothing resolves
+  them, a fixture that commits under one says so in every commit, and this
+  repository's own fixtures do.
+
+`check` notes, and never refuses:
+
+- **the identity git would write here**, role by role and in git's own
+  order: `GIT_AUTHOR_EMAIL` or `GIT_COMMITTER_EMAIL`, then `author.email`
+  or `committer.email`, then `user.email`, then `EMAIL`; the same for the
+  name, without the last. A role nothing names is said — the address git
+  would compose, the account's name it would write — and so is an address
+  that is set and is of one of the two kinds above. Of a role nothing
+  names, nothing is said where `user.useConfigOnly` is set: git refuses to
+  commit there, and says so itself;
+- **the commits the branch has ahead of its upstream** that carry an
+  address of either kind, as author or committer, with their count;
+- **the commits written under this checkout's address and another name
+  than its own** — one address under two names, which is what a history
+  rewrite leaves when it reuses the identity of another commit: a merge
+  commit made on GitHub carries the account's login, and thirteen commits
+  rewritten from one were redone. The rule is that shape and nothing
+  wider: another person's commit has another address, GitHub's merge
+  committer is not an author, and neither is said;
+- **the annotated tags whose tagger is an address made up on this
+  machine.** Nothing in a clone says whether a tag was pushed, and the note
+  says that too.
+
+**"Not pushed" is said of one range only**: what the checked-out branch
+has ahead of its upstream, as this clone last saw it. With no upstream —
+a new branch, a detached HEAD, an upstream deleted and pruned, a shallow
+single-branch clone, a clone that pushes by URL, a pull request fetched
+from a fork — what is read is what no remote-tracking ref of this clone
+reaches, and the note says in those words that it may or may not have been
+pushed. The socle does not claim what the clone does not record.
+
+**The socle never prints a history-rewriting command it cannot prove
+safe.** One line exists, `git rebase COMMIT BRANCH --exec 'git commit
+--amend --no-edit --reset-author'`, and it is printed only where every one
+of these was read, not assumed: HEAD is on a branch; the branch has an
+upstream this clone holds; the range is what it has ahead of it; no commit
+of the range is a merge; every commit of it carries the address git
+composes on this machine as author *and* as committer, so that nothing of
+anyone else's is re-attributed; the range starts from one commit; and the
+identity here is set, since the line would otherwise write the same
+address again. The line names the branch and that commit, never `HEAD`
+and never a word to replace. Beside it, the same message says everything
+it does: it checks the branch out; author and committer become the
+identity set here; **author dates become now**; signatures are dropped
+unless commit signing is configured; it stops on an empty commit or on a
+failing pre-commit hook, where `git rebase --abort` undoes it. In every
+other case the note gives the count and the reason no line is given — no
+upstream, a merge in the range, commits that are not this machine's own, a
+detached HEAD, an identity not set yet — and no command. The note about
+two names and the note about a private name never carry one: the socle
+cannot tell which name is the author's, nor whose the commit is.
+
+No message prints the address it is about. It holds the machine's name,
+and what `check` prints ends up in logs: a message names the rule that
+matched.
+
+These notes fire where the branch note does and for its reason — on the
+author's own checkout, before the push — but not by its means. A detached
+HEAD does not tell a runner here: a job started by a push checks its branch
+out by name, with no identity and nothing to push, exactly like a clone made
+a minute ago. The runner is therefore asked, and it answers in a runner's
+words: where `CI` or `GITHUB_ACTIONS` is `true` or `1`, `check` reads
+nothing of this and says nothing. `CI=false` on an author's machine is not
+a runner.
+
+`check` re-executes the socle a product pins. **A product therefore reads
+these notes from the version it adopted**, not from the socle that runs the
+command: until it adopts a version that has them, its `check` says none.
+
+**A note nobody reads prevents nothing**, and nobody runs `check` before a
+first push. It is said in two places where it is read in time:
+
+- `new` and `adopt` say the identity note, before the repository's first
+  commits — `new` in its plan as in `--apply`, in a directory that is not a
+  repository yet;
+- an **optional pre-push hook**, which `adopt` proposes and never writes.
+  It prints the line that enables it, `maelys-release hook DIR --apply`
+  with the directory quoted for a shell, and only where that line would
+  write the hook: in a repository, with no `pre-push` yet, and with no
+  `core.hooksPath`. The hook is not a managed file — `check` reports
+  nothing about it, and deleting it removes it.
+
+The hook runs `maelys-release outgoing . --pre-push=REMOTE` with what git
+hands it: the remote, and for each ref the object sent and the object the
+other side holds. Each ref is judged for itself and for that remote: the
+commits it sends that neither that object nor that remote's own
+remote-tracking refs reach. Another remote's refs take nothing off — a
+commit a backup holds is still published by a push to the origin — and a
+push by URL, which names no remote of the clone, takes off only the object
+git gives. **It refuses the push** when a commit sent, or an annotated tag
+sent, carries an address made up on this machine, naming the ref and the
+remote and giving no rewriting line: the ref pushed need not be the branch
+checked out. An address under a private name, and one address under two
+names, are said there too and never refuse. A push that sends none of this
+passes in silence. `git push --no-verify` passes the hook once.
+
+**The hook fails open**, in those words: where `maelys-release` is not
+installed it does nothing, silently; where the command does not complete —
+a broken installation, an older one that has no `outgoing`, a ref git
+cannot list — it says so on stderr in one line, `pre-push: maelys-release
+did not read this push`, and lets the push through. Only its verdict
+refuses, so a broken installation never holds a repository's pushes, and a
+check that did not run is never read as one that passed. `hook` never
+overwrites a `pre-push` this repository wrote, writes nothing where
+`core.hooksPath` is set — that directory is shared or tracked — and says
+`nothing written` in its last line whenever it wrote nothing, with the
+lines to add by hand.
+
+`outgoing DIR` alone reads `HEAD` as `check` does and exits 2 only for
+what the branch has ahead of its upstream: without one it says what it
+found and refuses nothing, since nothing says it was not pushed. A
+directory that is no repository, or a HEAD git cannot read, is a failure
+that says `nothing was read`, never a count of zero. Unlike `check`, it is
+not silent on a runner: whoever pushes publishes. Neither `outgoing` nor
+`hook` needs a product name: they run in a clone or a worktree called
+anything.
+
 ## Versions, tags, changelog
 
 - `VERSION` holds `X.Y.Z` and nothing else. A release is the tag `vX.Y.Z`
@@ -1545,6 +1693,12 @@ repository holds:
 The directory must be empty or absent; a `.git` is allowed. Plan by
 default, `--apply` to write. `--mechanism` picks what the repository
 publishes with, as for `adopt`.
+
+`new` also says, in its plan as in `--apply`, when git has no name or no
+address of an account to commit with here: before a repository's first
+commit is the one moment an identity made up on the machine costs nothing
+to replace. The rule and the optional hook are under *The address a commit
+carries*.
 
 ## Adopting and upgrading
 

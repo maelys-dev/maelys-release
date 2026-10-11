@@ -1,5 +1,107 @@
 # Changelog
 
+## Unreleased
+
+- **`check` notes an address git made up on the machine, before the
+  push.** A clone with neither `user.name` nor `user.email` pushed twenty
+  commits whose address carried the machine's name, long before any
+  release. 0.63.3 stops `cut` on a release commit GitHub does not verify,
+  which is correct and too late: one commit, at publication. `check` now
+  notes, and refuses none of it: the identity git would write here, role by
+  role and in git's own order — the environment, `author.email` or
+  `committer.email`, `user.email`, `EMAIL` — when a role has no name or no
+  address, or has an address of one of the two kinds below; the commits
+  the branch has ahead of its upstream that carry one; the commits written
+  under this checkout's address and another name than its own, which is
+  what a history rewrite leaves when it reuses the identity of a merge
+  commit — thirteen commits were redone for it; and the annotated tags
+  whose tagger is such an address. No message prints the address it is
+  about, which holds the machine's name: it names the rule that matched.
+- **Two kinds of address.** One *made up on this machine* is the address
+  git composes here — asked of git itself, with every configured identity
+  taken away for the question, because the kernel's name for a machine is
+  often not the one git resolves — or one with no domain. One *under a
+  private name* has no dot in its domain, or ends in `.home`, `.lan`,
+  `.local`, `.localdomain`, `.localhost`, `.internal`, `.intranet`,
+  `.corp`, `.home.arpa`, `.fritz.box`, `.mshome.net` or git's `.(none)`:
+  it may be a machine's, and it may be a real mailbox in a contributor's
+  commit, so it is said and never refused. `.test`, `.invalid` and
+  `.example` are in neither: they are reserved, and fixtures use them on
+  purpose.
+- **"Not pushed" is said of one range**, what the branch has ahead of its
+  upstream. Without one — a new branch, an upstream deleted and pruned, a
+  shallow single-branch clone, a push by URL, a pull request fetched from a
+  fork — the note says what no remote-tracking ref of this clone reaches,
+  and that it may or may not have been pushed.
+- **One line that rewrites, and only where it was proved safe.** `git
+  rebase COMMIT BRANCH --exec 'git commit --amend --no-edit
+  --reset-author'` is printed only where all of this was read: HEAD is on
+  a branch that has an upstream, the range is what it has ahead of it,
+  none of it is a merge, every commit of it carries the address git
+  composes on this machine as author and as committer, it starts from one
+  commit, and the identity here is set. The message says what the line
+  does: it checks the branch out, author and committer become the identity
+  set here, author dates become now, signatures are dropped unless commit
+  signing is configured, and it stops on an empty commit or a failing
+  pre-commit hook. Everywhere else the note gives the count and the reason
+  no line is given, and no command; the note about two names and the note
+  about a private name never carry one.
+- **Silent on a runner, and by another means than the branch note.** A
+  runner has no identity and nothing to push, and a detached HEAD does not
+  tell one here: a job started by a push checks its branch out by name,
+  exactly like a clone made a minute ago. Where `CI` or `GITHUB_ACTIONS` is
+  `true` or `1`, `check` reads nothing of this and says nothing; `false`
+  and `0` are an author's machine.
+- **Said where it is read in time.** Nobody runs `check` before a first
+  push, and a note nobody reads prevents nothing. `new` and `adopt` say the
+  identity note before a repository's first commits — `new` in its plan as
+  in `--apply`, in a directory that is not a repository yet. And `adopt`
+  proposes, in one line and never by writing it, an optional pre-push hook:
+  `maelys-release hook DIR --apply`, the directory quoted, printed only
+  where that line would write the hook — a repository, no `pre-push` yet,
+  no `core.hooksPath`. It is not a managed file, and `check` reports
+  nothing about it.
+- **What the hook refuses.** It runs the new `maelys-release outgoing .
+  --pre-push=REMOTE` with what git hands it, and each ref is judged for
+  itself and for that remote: what it sends that neither the object the
+  other side holds nor that remote's own remote-tracking refs reach.
+  Another remote's refs take nothing off. A push that sends a commit, or an
+  annotated tag, carrying an address made up on this machine is refused,
+  with the ref and the remote named and no rewriting line; an address under
+  a private name is said and passes; a push that sends none passes in
+  silence, and `git push --no-verify` passes the hook once. **It fails
+  open**: it does nothing where `maelys-release` is not installed, and
+  where the command does not complete it says so on stderr in one line and
+  lets the push through, so a check that did not run is never read as one
+  that passed. `hook` never overwrites a `pre-push` the repository wrote,
+  writes nothing where `core.hooksPath` is set, and says `nothing written`
+  whenever it wrote nothing. `outgoing DIR` alone reads `HEAD` and exits 2
+  only for what a branch has ahead of its upstream; a directory that is no
+  repository is a failure, not a count of zero; and it is not silent on a
+  runner. Neither command needs a product name. `docs/cli.md` and
+  `docs/cli-contract.json` carry the two commands.
+- **What every reading now asks the host.** The identity keys of git's
+  configuration, the branch and its upstream, the commits ahead of it, the
+  tags, and what git would compose here; for `adopt`, `core.hooksPath` and
+  where git reads this repository's `pre-push`. All of it goes through the
+  host boundary and is in the API reference, which records an account and
+  a machine that do not exist: the recorder answers that one question
+  itself and never asks the real machine.
+- **Not done here:** `preflight` still does not refuse an unset
+  `user.email`, and the managed blocks say nothing of the identity: a
+  managed text is a minor version and an adoption for the fleet, which a
+  note does not ask. A range that is not provably this machine's own gets
+  no line and no other help: rewriting it is the author's, with the count
+  the note gives. Nothing says whether an annotated tag was pushed, so
+  `check` notes every one that carries the address.
+- **Impact.** [asks: nothing] [writes: nothing] Nothing for a product to
+  do. `check` re-executes the socle a product pins, so a product reads
+  these notes only once it has adopted this version: until then its
+  `check` says none of them, and `adopt` run from this version says them
+  at that adoption. They are notes, never a violation, and silent in CI.
+  The hook is each clone's choice: `maelys-release hook DIR --apply` in one
+  that wants it, and nothing is written otherwise.
+
 ## 0.63.3 — 2026-10-10
 
 - **`cut` reads back what GitHub says of the signature it pushed.**

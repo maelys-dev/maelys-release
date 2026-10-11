@@ -29,7 +29,11 @@ class RehearsalHost(FakeHost):
         self.commands.append(command)
         if command == ["git", "remote", "get-url", "origin"]:
             return subprocess.CompletedProcess(command, 0, "https://github.com/o/r.git\n", "")
-        if cwd == self.product.dir.resolve() and command[:2] in (["git", "grep"], ["git", "rev-parse"]):
+        # The reads of the declarations, the identity and the commits that
+        # have not left among them: real git, on the fixture.
+        if cwd == self.product.dir.resolve() and command[:2] in (["git", "grep"], ["git", "rev-parse"],
+                                                                 ["git", "config"], ["git", "symbolic-ref"],
+                                                                 ["git", "log"], ["git", "for-each-ref"]):
             return MODULE.Host.run(self, command, cwd=cwd, env=self.product.env)
         if self.mode == "channel" and command == ["gh", "release", "download", "v1.2.3", "--repo", "o/r",
                                                   "--dir", str(self.product.dir.resolve() / "dist")]:

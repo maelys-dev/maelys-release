@@ -53,6 +53,14 @@ if not MODULE.host.HOST._self_test():
     atexit.register(_test_environment.__exit__, None, None, None)
 
 
+# A fixture is an author's checkout wherever the suite runs: on a runner the
+# socle says nothing of the identity git would use, and the same tests would
+# read one thing on a laptop and another in CI. The runner's own case sets
+# the variable itself.
+for _runner_variable in MODULE.authorship.RUNNER_VARIABLES:
+    os.environ.pop(_runner_variable, None)
+
+
 @contextmanager
 def using_host(host):
     previous = MODULE.host.HOST
@@ -435,7 +443,10 @@ class AdoptTest(unittest.TestCase):
             if command == ["git", "remote", "get-url", "origin"]:
                 return subprocess.CompletedProcess(command, 0, "https://github.com/o/r.git\n", "")
             self.assertEqual(cwd, self.product.dir.resolve())
-            self.assertIn(command[:2], (["git", "grep"], ["git", "rev-parse"]))
+            # With the identity git would use here and the commits that have
+            # not left, which the declarations read since the address note.
+            self.assertIn(command[:2], (["git", "grep"], ["git", "rev-parse"], ["git", "config"],
+                                        ["git", "symbolic-ref"], ["git", "log"], ["git", "for-each-ref"]))
             return MODULE.Host.run(fake, command, cwd=cwd, env=self.product.env)
         fake.runner = local_read
         invocation, _ = MODULE.APP.parse(["adopt", self.dir, *Product.SOCLE, "--apply"])
@@ -2113,7 +2124,10 @@ class GoldenTest(unittest.TestCase):
         ok       dependencies/packages: linux [pkg-config libjansson-dev] macos [jansson]
         ok       maelys-release.conf [dependencies] apart: the pins are materialised under $MAELYS_DEPENDENCIES_DIR, never beside the product
         note     no fuzzing detected by the conventions: neither tests/fuzz/ nor fuzz/ exists, and no job of .github/workflows/ci.yml runs a fuzz target
+        note     neither a name nor an address is set here: git writes into each commit this account's name as the system holds it, and an address it composes from the login and this machine's name where it can, and a push publishes both. Set them before the next commit: 'git config --global user.name NAME' and 'git config --global user.email ADDRESS' -- on GitHub, the account's noreply address (ID+LOGIN@users.noreply.github.com) names no machine
         """) + ("note     " + COMING_NOTE + "\n" if COMING_NOTE else "")
+    # The fixture is a directory with no git identity anywhere, which is what
+    # the last note of CONTRACT reads: the text a human reads there, in full.
     FILES = textwrap.dedent("""\
         same     .github/workflows/release.yml
         same     scripts/checkout-dependency.sh

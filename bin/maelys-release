@@ -60,7 +60,8 @@ from maelys_socle.workflows import (
     sanitizers_twice, sub_block, top_block, uses_commit, workflow_events, yaml_scalar,
 )
 # Import the module holding the current host, never a copy of its HOST binding.
-from maelys_socle import adoption, cut, dependencies, github, host, identity, inspection, migration, protect, rehearse, signers
+from maelys_socle import (adoption, authorship, cut, dependencies, github, host, identity, inspection, migration,
+                          protect, rehearse, signers)
 from maelys_socle.cut import (
     CHECK_PENDING, CHECK_PASSED, CHANGELOG_ENTRY,
     host_target, worktree_paths, entry_heading, changelog_entry,
@@ -296,6 +297,24 @@ def read_branch(decl: Declarations) -> None:
     if separator and prefix in AGENT_BRANCHES:
         decl.add("note", f"branch {branch} is named after the tool that created it, not after its change:"
                          " a branch carries the prefix its change would take in a commit", "conventions")
+
+
+def read_authorship(decl: Declarations) -> None:
+    """Note an address made up on this machine, here and in what already carries one; never refuse one.
+
+    Where the branch note fires, and for its reason: on the author's own
+    checkout, before the push, which is the last moment the commits can
+    still be written again. A detached HEAD is not enough to tell a runner
+    here -- a job started by a push checks its branch out by name, with no
+    identity and nothing to push, as a clone made a minute ago -- so the
+    runner is asked, and says so through its environment. The refusal is
+    the pre-push hook's, which a repository enables or does not.
+
+    `check` re-executes the socle a product pins, so a product reads these
+    notes from the version it adopted, not from the one that runs it.
+    """
+    for message in authorship.notes(decl.project):
+        decl.add("note", message, "conventions")
 
 
 def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCLE_MECHANISM) -> Declarations:
@@ -740,6 +759,7 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
         decl.add("note", f"scripts/publish-channel.sh exists but {DECLARATION_FILE} declares no"
                          " [channels]: nothing calls it, and no channel job is written")
     read_branch(decl)
+    read_authorship(decl)
     read_strategy(decl)
     read_coming(decl)
     return decl
@@ -1511,7 +1531,10 @@ def handle_new(invocation: Invocation) -> tuple[dict, int]:
                   "mechanism": mechanism, "version": "0.0.0",
                   "dependencies": [{"name": name, "tag": tag, "commit": commit}
                                    for name, tag, commit in dependencies],
-                  "files": written, "adopted": []}
+                  "files": written, "adopted": [],
+                  # Before the first commit of a repository is when an identity
+                  # git made up can still be replaced for nothing.
+                  "notes": authorship.identity_notes(directory)}
     if not apply:
         return data, EXIT_OK
     # The socle's own files come from adopt, so new and adopt can never
@@ -1681,6 +1704,7 @@ def text_preflight(data: dict) -> str:
 def text_new(data: dict) -> str:
     lines = [f"create   {entry['path']}" for entry in data["files"]]
     lines.extend(f"{entry['action']:<8} {entry['path']}" for entry in data["adopted"])
+    lines.extend(f"{LABELS['note']:<8} {note}" for note in data.get("notes", []))
     for dependency in data["dependencies"]:
         lines.append(f"pin      dependencies/{dependency['name']}.pin"
                      f" {dependency['tag']} ({dependency['commit'][:7]})")
@@ -1702,6 +1726,8 @@ TEXT = {
     "check": text_check,
     "declarations": text_declarations,
     "preflight": text_preflight,
+    "outgoing": authorship.text_outgoing,
+    "hook": authorship.text_hook,
     "signers": signers.text_signers,
     "cut": text_cut,
     "protect": lambda data: text_protect(data),
@@ -1858,7 +1884,8 @@ APP = SocleProgram(PROGRAM, PRODUCT, socle_version(), [
                                                "type": "object", "required": ["name", "tag", "commit"],
                                                "properties": {"name": {"type": "string"}, "tag": {"type": "string"},
                                                               "commit": {"type": "string"}}}},
-                                           "files": FILES_SCHEMA, "adopted": FILES_SCHEMA}}),
+                                           "files": FILES_SCHEMA, "adopted": FILES_SCHEMA,
+                                           "notes": STRINGS}}),
     cli.transaction("adopt", "adopt",
                     "Write the conventions of the socle into a product, and its release files when it publishes"
                     " through the socle; plan without --apply.",
@@ -1873,6 +1900,7 @@ APP = SocleProgram(PROGRAM, PRODUCT, socle_version(), [
                                            "socle": SOCLE_SCHEMA,
                                            "changed": {"type": "boolean"}, "checks": CHECKS_SCHEMA,
                                            "moved": {"type": "string"}, "files": FILES_SCHEMA,
+                                           "hook": {"type": "string"},
                                            "impactFrom": {"type": "string"},
                                            "impact": {"type": "array", "items": {
                                                "type": "object", "required": ["version", "says", "asks", "asksThis"],
@@ -1890,6 +1918,41 @@ APP = SocleProgram(PROGRAM, PRODUCT, socle_version(), [
              " exit 2 on any violation.",
              handle_check, operands=[DIR_OPERAND],
              options=[*SOCLE_OPTIONS, MECHANISM_OPTION, DOCS_CONTRACT_OPTION], schema=CHECK_SCHEMA),
+    cli.read("outgoing", "outgoing",
+             "Report the commits about to leave whose author or committer address git made up on this machine;"
+             " exit 2 when there is one.",
+             authorship.handle_outgoing, operands=[DIR_OPERAND],
+             options=[cli.option("--pre-push", "Judge what a push sends to REMOTE, from the refs git hands a"
+                                 " pre-push hook on stdin, instead of what HEAD has ahead of its upstream.",
+                                 cli.argument("REMOTE"))],
+             schema={"type": "object", "additionalProperties": False,
+                     "required": ["valid", "project", "source", "scope", "commits", "fabricated", "local",
+                                  "renamed", "tags", "violations", "notes", "fix"],
+                     "properties": {"valid": {"type": "boolean"}, "project": {"type": "string"},
+                                    "source": {"enum": ["head", "pre-push"]},
+                                    "scope": {"enum": ["upstream", "untracked", "push"]},
+                                    "remote": {"type": "string"},
+                                    "commits": {"type": "integer"},
+                                    "fabricated": {"type": "array", "items": {
+                                        "type": "object", "additionalProperties": False,
+                                        "required": ["commit", "rules"],
+                                        "properties": {"commit": {"type": "string"}, "rules": STRINGS}}},
+                                    "local": {"type": "array", "items": {
+                                        "type": "object", "additionalProperties": False,
+                                        "required": ["commit", "rules"],
+                                        "properties": {"commit": {"type": "string"}, "rules": STRINGS}}},
+                                    "renamed": STRINGS, "tags": STRINGS, "violations": STRINGS,
+                                    "notes": STRINGS, "fix": {"type": "string"}}}),
+    cli.transaction("hook", "hook",
+                    "Write the optional pre-push hook that refuses a push sending an address git made up on this"
+                    " machine; plan without --apply.",
+                    authorship.handle_hook, operands=[DIR_OPERAND],
+                    schema={"type": "object", "additionalProperties": False,
+                            "required": ["mode", "project", "path", "action", "wrote", "hook"],
+                            "properties": {"mode": {"enum": ["plan", "apply"]}, "project": {"type": "string"},
+                                           "path": {"type": "string"}, "wrote": {"type": "boolean"},
+                                           "action": {"enum": ["create", "same", "kept"]},
+                                           "reason": {"type": "string"}, "hook": {"type": "string"}}}),
     cli.read("declarations", "declarations",
              "Return the product contract as data: pinned dependencies, packages, formulas; exit 2 when invalid.",
              handle_declarations, operands=[DIR_OPERAND], options=[SOCLE_OPTIONS[0]],

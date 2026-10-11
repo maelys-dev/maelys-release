@@ -731,6 +731,12 @@
                   "apply"
                 ]
               },
+              "notes": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
               "product": {
                 "type": "string"
               },
@@ -969,6 +975,9 @@
                   "type": "object"
                 },
                 "type": "array"
+              },
+              "hook": {
+                "type": "string"
               },
               "impact": {
                 "items": {
@@ -1354,6 +1363,253 @@
           ],
           "purpose": "Report the conventions of a product and, when it publishes through the socle, its release mechanism; exit 2 on any violation.",
           "usage": "check DIR [--product NAME] [--mechanism MECHANISM] [--docs-contract]"
+        },
+        {
+          "available": true,
+          "effect": "read",
+          "exitCodes": {
+            "0": "command completed",
+            "1": "execution failed",
+            "2": "valid report with violations"
+          },
+          "external": false,
+          "hidden": false,
+          "id": "outgoing",
+          "input": {
+            "constraints": [],
+            "operands": [
+              {
+                "name": "DIR",
+                "required": true,
+                "summary": "Product repository.",
+                "variadic": false
+              }
+            ],
+            "options": [
+              {
+                "argument": {
+                  "name": "REMOTE",
+                  "type": "string"
+                },
+                "conflictsWith": [],
+                "long": "--pre-push",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "Judge what a push sends to REMOTE, from the refs git hands a pre-push hook on stdin, instead of what HEAD has ahead of its upstream."
+              }
+            ],
+            "passthrough": false,
+            "synopsis": "outgoing DIR [--pre-push REMOTE]"
+          },
+          "outputMode": "json-envelope",
+          "outputSchema": {
+            "additionalProperties": false,
+            "properties": {
+              "commits": {
+                "type": "integer"
+              },
+              "fabricated": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "commit": {
+                      "type": "string"
+                    },
+                    "rules": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "commit",
+                    "rules"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "fix": {
+                "type": "string"
+              },
+              "local": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "commit": {
+                      "type": "string"
+                    },
+                    "rules": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "commit",
+                    "rules"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "notes": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "project": {
+                "type": "string"
+              },
+              "remote": {
+                "type": "string"
+              },
+              "renamed": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "scope": {
+                "enum": [
+                  "upstream",
+                  "untracked",
+                  "push"
+                ]
+              },
+              "source": {
+                "enum": [
+                  "head",
+                  "pre-push"
+                ]
+              },
+              "tags": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "valid": {
+                "type": "boolean"
+              },
+              "violations": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "valid",
+              "project",
+              "source",
+              "scope",
+              "commits",
+              "fabricated",
+              "local",
+              "renamed",
+              "tags",
+              "violations",
+              "notes",
+              "fix"
+            ],
+            "type": "object"
+          },
+          "pattern": [
+            "outgoing"
+          ],
+          "purpose": "Report the commits about to leave whose author or committer address git made up on this machine; exit 2 when there is one.",
+          "usage": "outgoing DIR [--pre-push REMOTE]"
+        },
+        {
+          "available": true,
+          "effect": {
+            "apply": "apply",
+            "plan": "preview"
+          },
+          "exitCodes": {
+            "0": "command completed",
+            "1": "execution failed",
+            "2": "valid report with violations"
+          },
+          "external": false,
+          "hidden": false,
+          "id": "hook",
+          "input": {
+            "constraints": [],
+            "operands": [
+              {
+                "name": "DIR",
+                "required": true,
+                "summary": "Product repository.",
+                "variadic": false
+              }
+            ],
+            "options": [
+              {
+                "conflictsWith": [],
+                "long": "--apply",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "Apply the reviewed plan instead of only planning it."
+              }
+            ],
+            "passthrough": false,
+            "synopsis": "hook DIR [--apply]"
+          },
+          "outputMode": "json-envelope",
+          "outputSchema": {
+            "additionalProperties": false,
+            "properties": {
+              "action": {
+                "enum": [
+                  "create",
+                  "same",
+                  "kept"
+                ]
+              },
+              "hook": {
+                "type": "string"
+              },
+              "mode": {
+                "enum": [
+                  "plan",
+                  "apply"
+                ]
+              },
+              "path": {
+                "type": "string"
+              },
+              "project": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "wrote": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "mode",
+              "project",
+              "path",
+              "action",
+              "wrote",
+              "hook"
+            ],
+            "type": "object"
+          },
+          "pattern": [
+            "hook"
+          ],
+          "purpose": "Write the optional pre-push hook that refuses a push sending an address git made up on this machine; plan without --apply.",
+          "usage": "hook DIR [--apply]"
         },
         {
           "available": true,
