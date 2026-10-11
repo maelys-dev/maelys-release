@@ -368,7 +368,12 @@ anything.
 - `CHANGELOG.md` has one dated `## X.Y.Z — YYYY-MM-DD` entry per release;
   an `## Unreleased` section collects what the next one will carry. The
   entry for `VERSION` must exist: `maelys-release check` reports a product
-  without it, so `make check` fails before the tag does.
+  without it, so `make check` fails before the tag does. `0.0.0` is the one
+  version that owes none: it says nothing was published, and an entry
+  describes a release. `new` still writes one, first, where every release
+  lands above it; a repository adopted with a history of its own writes
+  none, and `check` notes a `## 0.0.0` standing above another entry — the
+  place the rule put it when it was asked for by hand.
 - A published tag is never moved, deleted or force-pushed. A mistake is
   fixed by the next patch release.
 - **The tag is signed by a key the fleet names.** `share/allowed-signers` of
@@ -439,6 +444,108 @@ again and replaced on its branch, or the key is registered on GitHub, and
 the same command reads the result. Nothing is undone, because the commit
 may carry a changelog entry that exists nowhere else. An answer GitHub did
 not give is a note and stops nothing.
+
+**`check` says beforehand two of the things the first stop will refuse.**
+`cut` is the last command of a release and is run by whoever signs; what
+it refuses was written earlier, by someone else, to whom `check` had
+answered "ok". Twice in two days a new product was handed over with the
+entry of its release left undated, once with `VERSION` already moved to
+the version to cut. `check` notes both, in the words `cut` will use, and
+refuses neither:
+
+- **an entry of a version after `VERSION` that `cut` will not read.** `cut`
+  reads the title `## X.Y.Z` and a date on that line, and nothing else:
+  an entry without a date is noted, and so is one titled `## [X.Y.Z]`,
+  `## vX.Y.Z`, `### X.Y.Z` or with a second space, dated or not — three
+  products title theirs with brackets, and `cut` answers "no dated entry"
+  to each. Whether an entry is found is asked of `cut`'s own reader, so
+  the note and the refusal cannot disagree. A fenced block is skipped: an
+  example of a title is not an entry.
+- **a `VERSION` no tag has published**, on a checkout that is not a job's.
+  For `cut`, `VERSION` says what was published last, and a version moved by
+  hand to the one to cut does not come after itself.
+
+**One rule for the date.** A release is handed over with its entry titled
+`## X.Y.Z — YYYY-MM-DD` and dated that day, never a later one: `cut`
+refuses a date in the future as it refuses a missing one. Until then its
+changes sit under `## Unreleased`, which nothing notes. A version in a
+title with no date is neither state, and that is what the note is about.
+
+**The note on `VERSION` is for the author's checkout.** Where `CI` or
+`GITHUB_ACTIONS` is set, `check` says nothing of it and asks git nothing
+for it. The shared CI checks out the whole history and runs `check` on
+every commit, the release commit included — where `VERSION` is, by
+construction, a version no tag carries yet, and where nobody can act on a
+note. The first form of this rule did not know that and was read at every
+release of six products.
+
+On an author's checkout, the states that are normal are told nothing:
+`0.0.0`, which is what a repository holds before a first release; a
+version this repository tags candidates of (`vX.Y.Z-…`) under a ceremony
+of its own; and a release in progress, recognised by what a release leaves
+behind, whatever the way it was merged:
+
+- a branch `release/vX.Y.Z` or `release/X.Y.Z`, here or on `origin`;
+- the subject `cut` gives the commit that writes `VERSION`,
+  `<product> X.Y.Z`, which a merge keeps and a squash keeps with ` (#N)`;
+- the subject GitHub gives the merge of that branch.
+
+The two subjects are read on the first line of a commit of this history
+and nowhere else: a body that mentions the branch is not a release.
+Measured on eight products at their last release commit, the tag deleted:
+six carry the subject of `cut`, five the merge of a release branch — one
+of them a product that titles its bump by hand and names its branches
+without the `v` — and seven one or the other. The eighth moved `VERSION`
+in the pull request of a feature and tagged eleven commits later; nothing
+separates that from a version moved before `cut`, because it is one. So
+the note says what is observed, then the two states that read the same
+and what each asks, in that order: a release already merged and waiting
+for its tag, where nothing is to be changed; or a `VERSION` moved before
+`cut`, to set back. The version to go back to is the one this history
+reaches — the nearest tag, as `cut` reads it for the pins — and not the
+highest of the repository, which on a maintenance branch is a version
+that one does not come after. And a clone learns of a tag only when it
+fetches it: `git pull origin main` brings none, so the note says to fetch
+them first.
+
+**A repository that publishes by its own means is told the state and no
+revert.** The `RELEASING.md` the socle seeds there sets `VERSION` on
+`main` by hand, merges, runs `check`, then signs the tag: `check` is run in
+exactly this state. The note says that a release prepared by hand stands
+there, that nothing is to be changed, and what `cut` would make of it. A
+repository whose mechanism is `none` cuts nothing and is told nothing. A
+checkout that cannot know its tags is told nothing either: a directory
+that is not a repository, a shallow clone, a clone made with `--no-tags`.
+`preflight` does not carry these notes — it reads `VERSION` as the version
+about to be tagged, and says "tag vX.Y.Z is free" of the same state.
+
+**`check: ok` is not "`cut` will pass".** What the first stop refuses, and
+who says it beforehand:
+
+| the first stop refuses | read from | `check` |
+| --- | --- | --- |
+| a `release/vX.Y.Z` left behind without its pull request, or with one closed, merged, or carrying another `VERSION` | GitHub | no |
+| a `VERSION` that is not `X.Y.Z` | the tree | refuses it |
+| a version that does not come after `VERSION` | the tree, the tags | notes it, on an author's checkout |
+| changes outside `VERSION` and `CHANGELOG.md` left uncommitted | the worktree, at that moment | no |
+| no dated entry `## X.Y.Z` | the tree | notes a title `cut` will not read; a version with no title at all is one `check` is not told |
+| an entry dated in the future | the clock | no: the same tree would read differently from one day to the next |
+| a `HEAD` that is not the default branch, level with `origin` | the checkout, the network | no |
+| the gate: the signing configuration, the key among the allowed signers, a shallow clone, the previous tag, a free `vX.Y.Z`, the `release` environment | the signer's machine, GitHub | no; `preflight` reads it for a product the socle releases |
+| a pin moved since the last tag that the entry does not name | the history | no: two more readings of git, on an entry `check` cannot choose |
+| under `--apply` only: the product's verify command, `[cut] after-version` and the audit of the bump, GitHub's verdict on the release commit, the checks | a run | no, and neither does the plan |
+
+**The plan of `cut` reads the rest, and is not the signer's gate handed to
+someone else.** `cut DIR X.Y.Z` without `--apply` reads the release as
+`cut` will. It changes no file of the product and nothing on GitHub; it
+fetches, so it needs `gh`, the network and a default branch level with
+`origin`. What it says of the version, the entry and the worktree is about
+what was prepared. Its lines on `tag.gpgsign`, `user.signingkey` and the
+signing key are about the machine it runs on: whoever prepares a release
+without the key that signs it reads `cut: not ready` and exit 2 on those
+lines alone, which is expected — the managed texts say to leave them, and
+never to configure a key to turn them green. And it does not run what the
+last row of the table lists.
 
 The middle stop is GitHub's. `cut` never merges its own pull request: a
 command that did would work only where the default branch is
@@ -2222,8 +2329,9 @@ repository holds:
 
 1. `LICENSE` (the MPL-2.0 text this socle carries), `VERSION` at `0.0.0`
    — what was published last, and nothing was; the first release is `cut
-   DIR 0.1.0` once its dated entry is written — `CHANGELOG.md` with the
-   dated `## 0.0.0` entry `check` requires of VERSION, a `README.md` skeleton,
+   DIR 0.1.0` once its dated entry is written — `CHANGELOG.md` with a
+   dated `## 0.0.0` entry that says so, written first so that every
+   release lands above it (`check` asks it of nobody), a `README.md` skeleton,
    and `scripts/package-release.sh` as a stub that **fails** until the
    product says how it packages: a release must not publish nothing.
 2. One `dependencies/<name>.pin` per `--depends NAME@vX.Y.Z`, the tag on

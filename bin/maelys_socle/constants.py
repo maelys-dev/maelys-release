@@ -174,6 +174,11 @@ SOCLE_MECHANISM = "maelys-release"
 
 MECHANISMS = (SOCLE_MECHANISM, "custom", "none")
 
+# What VERSION holds before a first release. VERSION says what was published
+# last, and this says nothing was: `new` writes it, `cut` accepts any version
+# after it, and no tag ever carries it.
+UNPUBLISHED = "0.0.0"
+
 RELEASE_USES = re.compile(rf"{re.escape(SOCLE_REPOSITORY)}/\.github/workflows/release\.yml@[0-9a-f]{{40}}")
 
 CI_USES = re.compile(rf"({re.escape(SOCLE_REPOSITORY)}/\.github/workflows/check-product\.yml@)[0-9a-f]{{40}} # \S+")

@@ -438,48 +438,131 @@
   silent in the same way, and is unchanged: `--apply` sends the required
   checks again even when nothing differs, reads them back and says
   `protect: applied`.
-- **Impact.** [asks: checkout-script] [writes: protect] A minor version: a
-  managed file moves, and in what it executes. A product that carries
-  `scripts/checkout-dependency.sh` **re-adopts** to receive it, as for the
-  script's moves of 0.61.0 and 0.63.0: moving its socle pin without
-  re-adopting reads `check` exit 2 on that file. The script stops on a
-  `repository` line its reader does not match, or on a second one, where
-  it cloned the organisation's repository, and changes nothing for a
+- **`check` says beforehand two of the things `cut` will refuse.** Twice in
+  two days a new product was handed over with the entry of its release
+  left undated, once with `VERSION` already moved to the version to cut.
+  `check` had answered "conventions: ok" to whoever prepared it, and `cut`
+  refused in front of whoever signs: right, and at the wrong moment.
+  Measured before changing anything: an entry `## X.Y.Z — (undated)` above
+  a `VERSION` left alone passes `check` and is refused by `cut` as "no
+  dated entry"; a `VERSION` moved by hand with its entry dated passes
+  `check` and is refused as not coming after the current version. Only the
+  two together were already a violation. `check` now notes both, in
+  `cut`'s words, and refuses neither.
+
+  **An entry `cut` will not read.** `cut` reads the title `## X.Y.Z` and a
+  date on that line. An entry of a version after `VERSION` without a date
+  is noted, and so is one titled `## [X.Y.Z]`, `## vX.Y.Z`, `### X.Y.Z` or
+  with a second space, dated or not: three products title theirs with
+  brackets, and `cut` answers "no dated entry" to each. Whether an entry
+  is found is asked of `cut`'s own reader. A fenced block is skipped. And
+  one rule for the date, in the note as in the managed texts: a release is
+  handed over with its entry dated that day, never a later one, which
+  `cut` refuses too; until then its changes sit under `## Unreleased`.
+
+  **A `VERSION` no tag has published, on an author's checkout.** Where `CI`
+  or `GITHUB_ACTIONS` is set, `check` says nothing of it and asks git
+  nothing for it: the shared CI checks out the whole history and runs
+  `check` on the release commit itself, where `VERSION` is by construction
+  a version no tag carries yet. Elsewhere it is told to nobody it is
+  normal for — `0.0.0`, a version tagged as candidates `vX.Y.Z-…`, and a
+  release in progress, recognised by what a release leaves whatever the
+  merge: a branch `release/vX.Y.Z` or `release/X.Y.Z` here or on `origin`,
+  the subject `cut` writes (`<product> X.Y.Z`, with ` (#N)` after a
+  squash), or the subject GitHub gives the merge of that branch — nor to a
+  checkout that cannot know: not a repository, shallow, cloned with
+  `--no-tags`. Measured on eight products at their last release commit,
+  the tag deleted: seven are told nothing. The eighth moved `VERSION` in
+  the pull request of a feature and tagged eleven commits later, which
+  nothing separates from a version moved before `cut`; so the note says
+  what is observed, then the two states that read the same — a release
+  waiting for its tag, where nothing is to be changed, and a version moved
+  before `cut`, to set back — and what each asks, in that order. The
+  version to go back to is the one this history reaches, not the highest
+  tag of the repository, and the note says to fetch the tags first: `git
+  pull origin main` brings none. A repository that publishes by its own
+  means sets `VERSION` by hand, as its seeded `RELEASING.md` says, and
+  runs `check` in exactly that state: it is told the state and no revert.
+  `preflight` does not carry the notes: it reads `VERSION` as the tag to
+  come. A repository whose mechanism is `none` reads none.
+- **`0.0.0` owes no changelog entry.** `check` asked for a dated entry of
+  `VERSION` whatever it held, `adopt` refused without it, and `0.0.0` says
+  nothing was published. `new` could answer in the right place, first; a
+  repository adopted with a history of its own wrote the entry by hand
+  when asked, above its first release, and has read upside down since.
+  The entry is no longer asked of anyone; `new` still writes it, where
+  every release lands above it. A `## 0.0.0` standing above the entry of
+  another version is a note naming the two remedies — delete it, or move
+  it to the end. The order of versions in general is not judged: a
+  maintenance release is written after a later minor.
+- **The managed texts say the state a release is cut from, each for the
+  repositories that receive it.** The block of a product the socle
+  releases says `VERSION` waits for `cut`; the block of a repository with
+  its own mechanism says it moves in the pull request that prepares the
+  tag when the release is made by hand, as the `RELEASING.md` seeded
+  beside it describes, and by `cut` when it is made with `cut`. Both, and
+  the skill, give the rule for the date, and say what `cut DIR X.Y.Z`
+  without `--apply` is: a reading of the release as `cut` will read it,
+  which changes no file of the product and nothing on GitHub, and needs
+  `gh`, the network and a `main` level with `origin`. What it says of the
+  version, the entry and the worktree is about what was prepared; its
+  lines on `tag.gpgsign`, `user.signingkey` and the signing key are the
+  signer's own, exit 2 on those alone is expected of anyone else, and no
+  key is ever configured to turn them green. It does not run what only
+  `--apply` runs.
+- **What `check` does not foretell** is listed in `docs/conventions.md`,
+  with every refusal of the first stop and who reads it: `check: ok` is
+  not "`cut` will pass". Among them an entry dated in the future — `check`
+  would answer differently from one day to the next on the same tree —
+  and a pin moved since the last tag that the entry does not name, which
+  costs two more readings of git on an entry `check` cannot choose.
+- **Impact.** [asks: checkout-script] [writes: protect] A minor version:
+  managed files move, one of them in what it executes. A product that
+  carries `scripts/checkout-dependency.sh` **re-adopts** to receive it, as
+  for the script's moves of 0.61.0 and 0.63.0: moving its socle pin
+  without re-adopting reads `check` exit 2 on that file. The script stops
+  on a `repository` line its reader does not match, or on a second one,
+  where it cloned the organisation's repository, and changes nothing for a
   well-formed pin: the three `repository` lines of the fleet are in that
-  shape, so no product's build changes. The skill moves as well, in one
-  bullet, for every product the socle releases, pins or no pins, and no
-  selector names that: such a product reads the same exit 2 on
-  `.claude/skills/maelys-release/SKILL.md` if it moves its pin by hand.
-  One command writes differently on GitHub. `protect DIR --apply` now also
-  reads the `release` environment of a product the socle releases and
-  writes it when it is missing, unlimited, limited to protected branches —
-  a limit it **replaces** by tags `v*` — or without its tag rule; one that
-  already limits deployments to tags `v*` is not written. A refusal of
-  `protect --apply` is now a result with exit 2 and `refused` in its data,
-  no longer an error with exit 1: a script that reads `error.code` for it
+  shape, so no product's build changes. The managed texts move too, prose
+  only, and no selector names that: **re-adopt with your next release**,
+  as any adoption travels; nothing is to be changed by hand. Three files
+  drift on a product the socle releases — `AGENTS.md`, `CLAUDE.md` and
+  `.claude/skills/maelys-release/SKILL.md` — and the first two on any
+  other repository: a product that moves its socle pin without re-adopting
+  reads `check` exit 2 on them, pins or no pins. One command writes
+  differently on GitHub. `protect DIR --apply` now also reads the
+  `release` environment of a product the socle releases and writes it when
+  it is missing, unlimited, limited to protected branches — a limit it
+  **replaces** by tags `v*` — or without its tag rule; one that already
+  limits deployments to tags `v*` is not written. A refusal of `protect
+  --apply` is now a result with exit 2 and `refused` in its data, no
+  longer an error with exit 1: a script that reads `error.code` for it
   reads `data.refused` instead. `protect` also exits 2 for a product that
   declares `[gate] reviewer` while its environment requires nobody, and
   for a policy beside the tag rule. Nothing else asks a gesture, and
   nothing else turns red. `check` re-executes the socle a product pins, so
   a product reads what `check` gains only once it has adopted this
   version. All of it is notes, never a violation: an address git made up,
-  which `adopt` run from this version also says at that adoption, said to
-  an author and silent in CI; and one line saying what the privacy guard
+  which `adopt` run from this version also says at that adoption, and a
+  `VERSION` no tag carries, both said to an author and silent in CI; an
+  entry `cut` will not read; and one line saying what the privacy guard
   searched and read, with a note for each family it found, naming the
   place and never the value. `declarations` answers one more key,
-  `unreleased`, empty where no pin says it. `preflight` words three
-  answers differently — the remedy for a missing or unlimited environment,
-  an environment limited to protected branches, the line that names a
-  reviewer — and notes a public repository whose secret scanning or push
-  protection is off. Three things are each repository's choice and written
-  by nothing otherwise: the pre-push hook, `maelys-release hook DIR
-  --apply` in a clone that wants it; the refusal, `[privacy] refuse`; and
-  a pin marked `unreleased`, which a product writes from this socle with
-  `dependencies` and which `check` reads once the product has adopted — a
-  pinned socle that predates `[privacy]` says so as a violation, and one
-  that predates `unreleased` ignores the line, grammar included. The
-  strict reading of a pin asks nothing of the fleet as measured: 62 pins,
-  none refused.
+  `unreleased`, empty where no pin says it. A repository whose changelog
+  carries `## 0.0.0` above its first release reads one note, and may
+  delete that entry. `preflight` words three answers differently — the
+  remedy for a missing or unlimited environment, an environment limited to
+  protected branches, the line that names a reviewer — and notes a public
+  repository whose secret scanning or push protection is off. Three things
+  are each repository's choice and written by nothing otherwise: the
+  pre-push hook, `maelys-release hook DIR --apply` in a clone that wants
+  it; the refusal, `[privacy] refuse`; and a pin marked `unreleased`,
+  which a product writes from this socle with `dependencies` and which
+  `check` reads once the product has adopted — a pinned socle that
+  predates `[privacy]` says so as a violation, and one that predates
+  `unreleased` ignores the line, grammar included. The strict reading of a
+  pin asks nothing of the fleet as measured: 62 pins, none refused.
 
 ## 0.63.3 — 2026-10-10
 

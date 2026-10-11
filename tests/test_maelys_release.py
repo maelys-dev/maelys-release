@@ -44,6 +44,12 @@ def load_module():
 
 
 MODULE = load_module()
+# What `check` says to an author and not to a job is silent wherever these
+# are set, and a runner sets both: dropped here, so that a fixture is the
+# same checkout on a laptop and in the workflow that runs this suite. The
+# tests that measure the silence set them back for themselves.
+for _job in ("CI", "GITHUB_ACTIONS"):
+    os.environ.pop(_job, None)
 # Also guard direct unittest runs and every CLI subprocess they start. Import
 # first so an invalid inherited self-test environment fails instead of being
 # silently replaced by a fresh token. A self-test child reuses its live token.

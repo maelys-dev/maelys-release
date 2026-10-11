@@ -19,6 +19,7 @@ from .constants import (
 )
 from .context import Context
 from . import privacy
+from .cut import before_cut
 from .identity import socle_data
 from .declarations import Declarations, version_tuple
 from .project import project_of
@@ -324,7 +325,14 @@ def handle_declarations(invocation: Invocation, context: Context) -> tuple[dict,
 
 
 def handle_check(invocation: Invocation, context: Context) -> tuple[dict, int]:
-    _, data = check_data(invocation, context)
+    decl, data = check_data(invocation, context)
+    # Said by `check` and not by `preflight`, which shares everything above:
+    # `preflight` reads VERSION as the version about to be tagged, and says
+    # "tag vX.Y.Z is free" of the very state this reads as a version `cut`
+    # will refuse. Two readings of one file do not belong in one report.
+    for message in before_cut(decl):
+        decl.add("note", message, "conventions")
+    data["checks"] = decl.applicable()
     return data, EXIT_OK if data["valid"] else EXIT_VIOLATIONS
 
 

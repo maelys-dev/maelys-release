@@ -44,7 +44,7 @@ from maelys_socle.constants import (
     PROGRAM, PUBLISHED_DOWNLOAD, README_LINK, RELEASE_MANAGED, RELEASE_USES, RUNNER_INPUTS,
     RUNS_ON, SANITIZING, SOCLE_CHANNEL_KINDS, SOCLE_COMMIT_VERIFICATIONS, SOCLE_GATES,
     SOCLE_LINUX_PACKAGES, SOCLE_MANIFEST_PATTERNS, SOCLE_MECHANISM, SOCLE_REPOSITORY,
-    SOCLE_RUNNER_KEYS, SOCLE_TARGETS, VERIFIED_MARK, WORKFLOW_EVENTS,
+    SOCLE_RUNNER_KEYS, SOCLE_TARGETS, UNPUBLISHED, VERIFIED_MARK, WORKFLOW_EVENTS,
 )
 from maelys_socle.context import Context
 from maelys_socle.declarations import (
@@ -53,7 +53,7 @@ from maelys_socle.declarations import (
 )
 from maelys_socle.texts import (
     LABELS, checks_text, documentation_name_lines, is_generated, managed_block, names_documentation, readme_links,
-    touches, verified_by,
+    touches, unfenced, verified_by,
 )
 from maelys_socle.workflows import (
     block_list, ci_legs, ci_macos_runner, ci_workflow, file_runners, legs_job,
@@ -353,9 +353,39 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
             pattern = rf"^## {re.escape(decl.version)}\s.*[0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}}"
             if re.search(pattern, changelog.read_text(encoding="utf-8"), re.MULTILINE):
                 decl.add("ok", f"CHANGELOG.md has a dated ## {decl.version} entry", "conventions")
+            elif decl.version == UNPUBLISHED:
+                # An entry describes a release, and 0.0.0 is the absence of
+                # one: VERSION says what was published last, and nothing
+                # was. The rule above asked for it all the same, and only
+                # `new` could answer in the right place -- it writes the
+                # entry first, so every release lands above it. A repository
+                # that existed before its adoption wrote it by hand when
+                # `check` asked, above the entry of its first release, and
+                # its changelog has read upside down since.
+                decl.add("ok", f"VERSION {UNPUBLISHED} says nothing is published yet: CHANGELOG.md owes it no entry",
+                         "conventions")
             else:
                 decl.add("missing", f"CHANGELOG.md needs a dated entry: {entry_heading(project, decl.version)}",
                          "conventions")
+            # What becomes of the ones written by hand: said, never refused.
+            # Only this entry is held to a place, because it is the only one
+            # that can be: nothing was ever published before nothing. An
+            # order of versions in general is not the socle's to judge -- a
+            # maintenance release is written after a later minor.
+            # The entry is `## 0.0.0` and nothing glued to it: `0.0.0-draft`
+            # is somebody's own title. And what it stands above is another
+            # version: a second `## 0.0.0` is the duplicate refused above,
+            # not a release. Fenced examples are not headings.
+            versions = re.findall(r"^## ([0-9]+\.[0-9]+\.[0-9]+)(?![0-9.])([^\n]*)$",
+                                  unfenced(changelog.read_text(encoding="utf-8")), re.MULTILINE)
+            zero = next((index for index, (version, rest) in enumerate(versions)
+                             if version == UNPUBLISHED and rest[:1] in ("", " ", "\t")), None)
+            above = next((version for version, _ in versions[zero + 1:] if version != UNPUBLISHED), "") \
+                if zero is not None else ""
+            if above:
+                decl.add("note", f"CHANGELOG.md carries ## {UNPUBLISHED} above ## {above}: that entry"
+                                 " says nothing was published yet, so no release comes before it. Nothing"
+                                 " asks for it any more: delete it, or move it to the end", "conventions")
     # Every packaging/homebrew/NAME.rb.in becomes one tap job publishing NAME:
     # a formula is named after what it installs, not after the repository.
     homebrew = project / "packaging" / "homebrew"
@@ -1489,12 +1519,14 @@ def scaffold(project: pathlib.Path, product: str, dependencies: list[tuple[str, 
     files = {
         "LICENSE": license_text,
         # VERSION says what was published last, and a scaffold has published
-        # nothing: 0.0.0, with the dated entry `check` requires of it. The
-        # scaffold used to say 0.1.0, and `cut DIR 0.1.0` then refused the
-        # first release of every new product as not coming after the
-        # current version -- found on the pilot's first day.
-        "VERSION": "0.0.0\n",
-        "CHANGELOG.md": f"# Changelog\n\n## 0.0.0 — {today}\n\n- Created by maelys-release new. Nothing is published"
+        # nothing: 0.0.0. The scaffold used to say 0.1.0, and `cut DIR 0.1.0`
+        # then refused the first release of every new product as not coming
+        # after the current version -- found on the pilot's first day.
+        # Its entry is no longer one `check` asks for. It stays because this
+        # is the one command that can write it where it belongs, first, and
+        # because it tells the reader of a new repository what to do next.
+        "VERSION": UNPUBLISHED + "\n",
+        "CHANGELOG.md": f"# Changelog\n\n## {UNPUBLISHED} — {today}\n\n- Created by maelys-release new. Nothing is published"
                         f" yet: VERSION says what was published last, and the first release of {product}"
                         f" is cut as 0.1.0 once its dated entry is written above this one.\n",
         "README.md": f"# {product}\n\n*One paragraph: what this repository is, and what it is not.*\n\n"
@@ -1552,7 +1584,7 @@ def handle_new(invocation: Invocation) -> tuple[dict, int]:
                 path.chmod(path.stat().st_mode | 0o111)
         written.append(entry)
     data: dict = {"mode": "apply" if apply else "plan", "product": product, "project": str(directory),
-                  "mechanism": mechanism, "version": "0.0.0",
+                  "mechanism": mechanism, "version": UNPUBLISHED,
                   "dependencies": [{"name": name, "tag": tag, "commit": commit}
                                    for name, tag, commit in dependencies],
                   "files": written, "adopted": [],
