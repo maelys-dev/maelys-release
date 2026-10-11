@@ -333,9 +333,10 @@ def in_a_job() -> bool:
     The shared CI checks out the whole history and runs `check` on every
     commit, the release commit included -- where VERSION is, by
     construction, a version no tag carries yet, and where nobody is there
-    to do anything about a note.
+    to do anything about a note. What a job is, the host says: the address
+    note and the privacy guard ask it the same question.
     """
-    return bool(os.environ.get("CI") or os.environ.get("GITHUB_ACTIONS"))
+    return host.HOST.is_runner()
 
 
 def release_in_progress(project: pathlib.Path, product: str, version: str) -> bool:

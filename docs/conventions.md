@@ -472,8 +472,8 @@ changes sit under `## Unreleased`, which nothing notes. A version in a
 title with no date is neither state, and that is what the note is about.
 
 **The note on `VERSION` is for the author's checkout.** Where `CI` or
-`GITHUB_ACTIONS` is set, `check` says nothing of it and asks git nothing
-for it. The shared CI checks out the whole history and runs `check` on
+`GITHUB_ACTIONS` is `true` or `1`, `check` says nothing of it and asks git
+nothing for it. The shared CI checks out the whole history and runs `check` on
 every commit, the release commit included — where `VERSION` is, by
 construction, a version no tag carries yet, and where nobody can act on a
 note. The first form of this rule did not know that and was read at every

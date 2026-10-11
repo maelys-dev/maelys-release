@@ -336,9 +336,12 @@ class BeforeCutTest(unittest.TestCase):
             with mock.patch.dict(os.environ, {variable: "true"}), using_host(FakeHost()) as host:
                 self.assertEqual(MODULE.cut.unpublished_version(decl), [])
                 self.assertEqual(host.commands, [])
-            # An empty value is a variable nobody set.
-            with mock.patch.dict(self.product.env, {variable: ""}):
-                self.assertEqual(len(self.notes()), 1, variable)
+            # An empty value is a variable nobody set; and one definition of
+            # a job, shared with the address note and the privacy guard:
+            # `false` and `0` are an author's machine.
+            for value in ("", "false", "0"):
+                with mock.patch.dict(self.product.env, {variable: value}):
+                    self.assertEqual(len(self.notes()), 1, (variable, value))
         # The entry is a reading of one file, and stays said: it costs no
         # call, and its author reads the log of their own pull request.
         self.product.write("VERSION", "1.2.3\n")

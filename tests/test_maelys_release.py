@@ -44,12 +44,14 @@ def load_module():
 
 
 MODULE = load_module()
-# What `check` says to an author and not to a job is silent wherever these
-# are set, and a runner sets both: dropped here, so that a fixture is the
-# same checkout on a laptop and in the workflow that runs this suite. The
-# tests that measure the silence set them back for themselves.
-for _job in ("CI", "GITHUB_ACTIONS"):
-    os.environ.pop(_job, None)
+# What `check` says to an author and not to a job -- the identity git would
+# use, the version `cut` will refuse -- is silent wherever these are set,
+# and a runner sets both: dropped here, once and before anything reads
+# them, so that a fixture is the same checkout on a laptop and in the
+# workflow that runs this suite. The tests that measure the silence set
+# them back for themselves.
+for _runner_variable in MODULE.host.RUNNER_VARIABLES:
+    os.environ.pop(_runner_variable, None)
 # Also guard direct unittest runs and every CLI subprocess they start. Import
 # first so an invalid inherited self-test environment fails instead of being
 # silently replaced by a fresh token. A self-test child reuses its live token.
@@ -57,14 +59,6 @@ if not MODULE.host.HOST._self_test():
     _test_environment = MODULE.host.HOST.self_test_environment()
     os.environ.update(_test_environment.__enter__())
     atexit.register(_test_environment.__exit__, None, None, None)
-
-
-# A fixture is an author's checkout wherever the suite runs: on a runner the
-# socle says nothing of the identity git would use, and the same tests would
-# read one thing on a laptop and another in CI. The runner's own case sets
-# the variable itself.
-for _runner_variable in MODULE.authorship.RUNNER_VARIABLES:
-    os.environ.pop(_runner_variable, None)
 
 
 @contextmanager
