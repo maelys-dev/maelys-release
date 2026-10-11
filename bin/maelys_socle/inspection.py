@@ -14,12 +14,13 @@ import re
 from maelys_cli import EXIT_OK, EXIT_VIOLATIONS, Failure, Invocation
 
 from .constants import (
-    CLI_REFERENCE, JOB_ID, LEGACY_CLI_REFERENCES, PROGRAM, SOCLE_MANIFEST_PATTERNS,
+    CLI_REFERENCE, JOB_ID, LEGACY_CLI_REFERENCES, PROGRAM, PROSE_SUFFIXES, SOCLE_MANIFEST_PATTERNS,
     SOCLE_REPOSITORY, SOCLE_TARGETS,
 )
 from .context import Context
 from . import privacy
 from .cut import before_cut
+from .host import run
 from .identity import socle_data
 from .declarations import Declarations, version_tuple
 from .project import project_of
@@ -324,6 +325,127 @@ def handle_declarations(invocation: Invocation, context: Context) -> tuple[dict,
         EXIT_OK if decl.valid else EXIT_VIOLATIONS
 
 
+# What a user's git configuration may change in the output or in the reach of
+# `git grep`, each set back on the command itself. Colour puts escapes around
+# the line number, and the note vanished without a word under color.ui=always
+# -- color.grep is the setting that decides for grep, and it overrides the
+# general one. A column is one field more; full names are relative to another
+# directory; the fallback searches untracked files outside a repository;
+# recursion reads the files of another repository. And paths are quoted, so
+# that the output is ASCII whatever a file is called. As configuration and
+# not as options: a git that does not know a key ignores it, where it refuses
+# an option it does not know, and a refusal here is silence.
+PIN_SEARCH_SETTINGS = ("color.grep=false", "grep.column=false", "grep.fullName=false",
+                       "grep.fallbackToNoIndex=false", "submodule.recurse=false", "core.quotePath=true")
+_QUOTED = {"a": 7, "b": 8, "f": 12, "n": 10, "r": 13, "t": 9, "v": 11, "\\": 92, '"': 34}
+
+
+def unquoted_path(path: str) -> str:
+    """A path as git wrote it, back to its characters.
+
+    git quotes a path that holds a control character, a quote, a backslash
+    or a byte above 127: in double quotes, C escapes and three octal digits.
+    A name that is not UTF-8 comes back with its bytes spelled out rather
+    than raising: it is named in a message, never opened.
+    """
+    if len(path) < 2 or not (path.startswith('"') and path.endswith('"')):
+        return path
+    body, raw, position = path[1:-1], bytearray(), 0
+    while position < len(body):
+        following = body[position + 1:position + 2]
+        if body[position] != "\\":
+            raw += body[position].encode("utf-8", "backslashreplace")
+            position += 1
+        elif following in _QUOTED:
+            raw.append(_QUOTED[following])
+            position += 2
+        elif re.fullmatch(r"[0-3][0-7]{2}", body[position + 1:position + 4]):
+            raw.append(int(body[position + 1:position + 4], 8))
+            position += 4
+        else:
+            raw += b"\\"
+            position += 1
+    return raw.decode("utf-8", "backslashreplace")
+
+
+def pin_copies(project: pathlib.Path, pins: dict[str, dict]) -> dict[str, dict[str, list[int]]]:
+    """The tracked files that write out the commit of a pin, per pin.
+
+    In one product the commit of a dependency lived in three places: its
+    pin, a table in a bootstrap script and a document. Moving it took three
+    edits, held together by whoever remembered the other two. The pin is the
+    one place a dependency is named; this finds the others, so that they are
+    a list and not a memory.
+
+    The forty characters, and nothing shorter: seven of them are a word any
+    log, any digest and any other commit may contain, and a rule that
+    matched them would name files that have nothing to do with the pin.
+
+    Three kinds of file write the commit without being a copy to keep, and
+    they are left out. Another `dependencies/*.pin` is a declaration of its
+    own. A `CHANGELOG.md` says which commit a version pinned: that is
+    history, and the next pin does not rewrite it. And under `docs/`, what
+    is not prose is data -- the kind `check` already sorts it into, written
+    by a machine and written again by it: an audit, the evidence of a run.
+    Prose there is read in every form the socle calls prose, `.md`,
+    `.markdown`, `.txt` and `.rst`.
+
+    Nothing else is exempt, and no lock file by name: on the fleet not one
+    names a pin's commit, and a list of the names tools give their lock
+    files would be a list to keep. What is left may be a record -- the
+    notes of a milestone, a provenance file -- or a file a tool writes
+    again, and neither can be told from here from a document that must
+    follow. So the note claims no hand edit: it says the files are there.
+    A record leaves the list by itself when the pin moves, since it keeps
+    the commit it recorded.
+
+    One search for every pin, over the tracked files as they are in the
+    working tree: `check` runs on every product and in every CI run, and a
+    search per pin would be eleven of them on the repository that pins most.
+    None at all for a product that pins nothing. Outside a repository
+    `git grep` answers nothing and so does this.
+
+    Only the match is asked for, never the line that holds it, and paths
+    come quoted: what is read back is a path, a number and forty
+    hexadecimal characters, ASCII whatever the file contains and whatever
+    it is called. A line of Latin-1 beside the commit took `check` down
+    with a decoding error, exit 1 and no envelope, for a rule that is a
+    note; and a lone carriage return, a form feed or U+2028 before the
+    commit cut the line in two and the copy went unseen.
+    """
+    commits = sorted({pin["commit"] for pin in pins.values()})
+    if not commits:
+        return {}
+    found = run(["git", *(word for setting in PIN_SEARCH_SETTINGS for word in ("-c", setting)),
+                 "grep", "-n", "-I", "--only-matching", "--fixed-strings",
+                 *(argument for commit in commits for argument in ("-e", commit))], cwd=project)
+    if found.returncode != 0:
+        return {}
+    names: dict[str, list[str]] = {}
+    for name, pin in pins.items():
+        names.setdefault(pin["commit"], []).append(name)
+    copies: dict[str, dict[str, list[int]]] = {}
+    for line in found.stdout.split("\n"):
+        record = re.fullmatch(r"(.+):([0-9]+):([0-9a-f]{40})", line)
+        if not record or record.group(3) not in names:
+            continue
+        path, number = unquoted_path(record.group(1)), int(record.group(2))
+        if re.fullmatch(r"dependencies/[^/]+\.pin", path) or path.rpartition("/")[2] == "CHANGELOG.md" \
+                or path.startswith("docs/") and not path.lower().endswith(PROSE_SUFFIXES):
+            continue
+        for name in names[record.group(3)]:
+            lines = copies.setdefault(name, {}).setdefault(path, [])
+            if number not in lines:
+                lines.append(number)
+    return copies
+
+
+def named_path(path: str) -> str:
+    """A path in a list a reader can cut again: quoted when it holds
+    anything but letters, digits and the punctuation of an ordinary name."""
+    return path if re.fullmatch(r"[\w./@+~-]+", path) else json.dumps(path)
+
+
 def handle_check(invocation: Invocation, context: Context) -> tuple[dict, int]:
     decl, data = check_data(invocation, context)
     # Said by `check` and not by `preflight`, which shares everything above:
@@ -332,6 +454,19 @@ def handle_check(invocation: Invocation, context: Context) -> tuple[dict, int]:
     # will refuse. Two readings of one file do not belong in one report.
     for message in before_cut(decl):
         decl.add("note", message, "conventions")
+    # In `check` and nowhere else: `preflight` reads the same data before a
+    # tag, and what a release needs to know of a pin is its tag and its
+    # commit, which it is told. A note, and never more: a file that names
+    # the commit it was verified against may be exactly right.
+    for name, files in sorted(pin_copies(decl.project, decl.pins).items()):
+        commit = decl.pins[name]["commit"]
+        listed = ", ".join(f"{named_path(path)}:{','.join(str(number) for number in numbers)}"
+                           for path, numbers in sorted(files.items()))
+        decl.add("note", f"dependencies/{name}.pin: the commit it pins ({commit[:7]}) is also written in"
+                 f" {len(files)} other tracked file{'s' if len(files) != 1 else ''}: {listed}. Nothing ties"
+                 f" {'them' if len(files) != 1 else 'it'} to the pin: when it moves, each is edited, written"
+                 " again by its tool, or left as the record it is. A file that can read the pin should,"
+                 " and this line is the list of the rest", "conventions")
     data["checks"] = decl.applicable()
     return data, EXIT_OK if data["valid"] else EXIT_VIOLATIONS
 

@@ -651,6 +651,66 @@
   declares both under `[linux]` of `dependencies/packages`, as maelys-cli
   does. `docs/conventions.md`, "What a rehearsal replays, and what it does
   not".
+- **`check` names every file that writes a pinned commit out again.** In an
+  orchestrating product the commit of one dependency lived in three places:
+  its `dependencies/<name>.pin`, a table in a bootstrap script, and a
+  document. Moving it took three edits, verified by hand. `dependencies`
+  already notes what a product pins at another commit than its own
+  dependencies do; `check` now notes a pin whose commit is written in
+  another tracked file of the product itself, with the files and the
+  lines, so that the places are one known list: `dependencies/NAME.pin:
+  the commit it pins (abc1234) is also written in 2 other tracked files:
+  docs/build.md:4,5, scripts/bootstrap.sh:12`. A path that is not an
+  ordinary name is quoted, as JSON, so the list can be cut again.
+
+  The forty characters and nothing shorter. Three kinds of file are left
+  out: another `dependencies/*.pin`, a `CHANGELOG.md` — it says what a
+  version pinned, and is not rewritten — and, under `docs/`, what is not
+  prose, which the conventions already call data. Prose there is read in
+  every form the socle calls prose, `.md`, `.markdown`, `.txt` and `.rst`:
+  the first form of this exempted the last two as data.
+
+  **Lock files are not exempt by name; the note is worded so that it
+  claims no edit by hand.** It says the files are there and that each, when
+  the pin moves, "is edited, written again by its tool, or left as the
+  record it is". The fleet tracks eleven lock files and none names a pin's
+  commit.
+
+  **What it notes that nobody will edit.** Measured on a shallow clone of
+  every repository of the fleet, before deciding and again after the
+  corrections below, with the same counts: 53 pins in the 15 repositories
+  `check` answers for. A changelog names a pinned commit on three lines
+  and seven data files under `docs/` do, all left out; no lock file, no
+  generated reference and nothing of the documentation repository does.
+  The rule notes 10 pins in 5 repositories, 38 repetitions in 23 files:
+  seven files of code, a workflow or a formula template, nine of prose,
+  and seven that are records of a past state by their own path — fifteen
+  repetitions, all in one repository, where five pins are each written in
+  four to seven files. Those seven are named and will not follow the pin.
+  They cannot be told from a document that must; no note names records
+  alone; and they leave the list when the pin moves.
+
+  Three defects a review found in the first form, each reproduced before
+  it was closed. A tracked line that is not UTF-8, beside the commit,
+  ended `check` on a decoding error — exit 1, no envelope — for a rule
+  whose promise is to change no verdict. A lone carriage return, a form
+  feed or U+2028 before the commit cut the line in two and the copy was
+  not named. And under `color.ui=always` the note vanished without a word.
+  `check` now asks git for the match alone, never the line, with quoted
+  paths: what it reads back is ASCII whatever a file contains or is
+  called. And what a user's configuration may change in that search —
+  colour, a column, full names, the fallback outside a repository,
+  recursion into submodules, unquoted paths — is set back on the command.
+
+  One `git grep` for all the pins of a product, between 41 and 86 ms on
+  those clones under load, and none for a product that pins nothing. A note, never a
+  refusal, in `check` alone.
+
+  Not done: no field of `check --format json` carries the list as data —
+  it is in the message — and the socle's own commit on a `uses:` line is
+  not a pin and is not searched. Not proved here: a file whose *name* is
+  not UTF-8, which the file system this was written on refuses to create;
+  what git prints for one is read back in a test, the file itself is not.
 - **Impact.** [asks: checkout-script] [writes: protect] A minor version:
   managed files move, two of them in what they execute. A product that
   carries `scripts/checkout-dependency.sh` and
@@ -684,7 +744,8 @@
   version. All of it is notes, never a violation: an address git made up,
   which `adopt` run from this version also says at that adoption, and a
   `VERSION` no tag carries, both said to an author and silent in CI; an
-  entry `cut` will not read; and one line saying what the privacy guard
+  entry `cut` will not read; a pin whose commit is written out again in
+  another tracked file; and one line saying what the privacy guard
   searched and read, with a note for each family it found, naming the
   place and never the value. `declarations` answers one more key,
   `unreleased`, empty where no pin says it. A repository whose changelog

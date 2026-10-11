@@ -2711,6 +2711,74 @@ check says so. The command reads the pins of the checkouts it materialised
 and notes what the product does not pin, or pins elsewhere: a note, never a
 refusal, because the fleet disagrees today and is green.
 
+**A pin is the one place its commit is written, and `check` names the
+others.** In an orchestrating product the commit of one dependency lived in
+three places — its pin, a table in a bootstrap script, and a document — and
+moving it took three edits, held together by whoever remembered the other
+two. `check` searches the tracked files for the commit of every pin, in one
+`git grep` for all of them, and notes each pin whose commit is written
+again, with the files and the lines: the three places become one known
+list.
+
+```
+note     dependencies/NAME.pin: the commit it pins (abc1234) is also written in 2 other tracked files: docs/build.md:4,5, scripts/bootstrap.sh:12. Nothing ties them to the pin: when it moves, each is edited, written again by its tool, or left as the record it is. A file that can read the pin should, and this line is the list of the rest
+```
+
+The forty characters, and nothing shorter: seven of them are a word any log
+or digest may contain. Three kinds of file are left out, because what they
+write is not a copy somebody keeps. Another `dependencies/*.pin` is a
+declaration of its own. A `CHANGELOG.md` says which commit a version
+pinned, and the next pin does not rewrite it. And under `docs/`, what is
+not prose is the data of the table at the top of this page — an audit, the
+evidence of a run, written by a machine and by it again. Prose there is
+read in every form the socle calls prose: `.md`, `.markdown`, `.txt`,
+`.rst`.
+
+**No lock file is exempt by name, and the note claims no edit by hand.**
+A file that names the commit may be a table somebody keeps, a lock a tool
+writes again, or a record that stays; `check` cannot tell which, so it
+says the files are there and what may become of each. The fleet tracks
+eleven lock files and none names a pin's commit: a list of the names
+tools give their lock files would be a list to keep, for a case nobody
+has met.
+
+Measured before deciding, and again after the rule was corrected, on a
+shallow clone of every repository of the fleet: 53 pins in the 15
+repositories `check` answers for. A changelog names a pinned commit on
+three lines, in two of them; data under `docs/` does in seven files of
+two; no lock file and no generated reference does; and the documentation
+repository, eleven pins, repeats none. What the rule notes is 10 pins in 5
+repositories, 38 repetitions in 23 files: seven are code, a workflow or a
+formula template, nine are prose, and seven — fifteen repetitions, all in
+one repository, where five pins are each written in four to seven files —
+are records of a past state by their own path, the notes of a milestone or
+the provenance of a corpus. Those cannot be told from a document that must
+follow, since both are prose naming the commit; no note names records
+alone, and a record leaves the list by itself when the pin moves, because
+it keeps the commit it recorded.
+
+**The note cannot take `check` down, and does not depend on whose git
+runs it.** Only the match is asked of `git grep`, never the line that
+holds it, and paths come quoted: what is read back is ASCII whatever a
+file contains and whatever it is called. The first form read the whole
+line as text, and three things followed, each reproduced: a line of
+Latin-1 beside the commit ended `check` on a decoding error, exit 1 and no
+envelope; a lone carriage return, a form feed or U+2028 before the commit
+cut the line in two and the copy went unseen; and under `color.ui=always`
+the line number came wrapped in escapes and the note vanished without a
+word. What a user's configuration may change — colour, a column, full
+names, the fallback outside a repository, recursion into submodules,
+unquoted paths — is set back on the command. A path that is not an
+ordinary name is quoted in the list, as JSON, so the list can be cut
+again: a space, a comma, a colon or a line feed in a name is not a
+separator.
+
+A note, never a refusal: a test that asserts the commit it was verified
+against may be exactly right. It is `check`'s and not `preflight`'s, which
+is told a pin's tag and commit and needs nothing else of it; and a product
+that pins nothing is not searched at all. A `git grep` that fails says
+nothing, as outside a repository: `--only-matching` needs git 2.19.
+
 ### Protecting a default branch without typing its checks
 
 A branch protection requires a check **by its name**, and those names are the
