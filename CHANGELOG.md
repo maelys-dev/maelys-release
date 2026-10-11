@@ -711,6 +711,30 @@
   not a pin and is not searched. Not proved here: a file whose *name* is
   not UTF-8, which the file system this was written on refuses to create;
   what git prints for one is read back in a test, the file itself is not.
+- **What a repository still private does when it must lose a datum before
+  it opens.** The conventions say a published tag never moves; they did not
+  say what precedes publication. A private repository went through it, and
+  `docs/conventions.md` now states it, the limit first: only while nobody
+  else consumes the repository. A `push --force` is not enough — the
+  protection `protect` writes refuses it, and GitHub keeps
+  `refs/pull/N/head`, which a plain clone never shows — so the repository
+  is deleted and recreated, its environment and protection set again, its
+  versions cut again, and the pinned commit changed at every consumer.
+  Deleting asks the token for `delete_repo`, which a login does not grant.
+  Clones and branches left on the old history are deleted or reattached
+  with `rebase --onto`, never merged: measured, a plain merge brings the
+  datum back without a word. A formula quoting the old archive follows.
+
+  Measured for this page: the pull request heads of a public repository
+  against a plain clone of it (27 on the remote, none in the clone, 7
+  naming a commit no branch reaches), the merge and the rebase on a local
+  history, the hashes and the archives after a rewrite. Read, not
+  exercised: the scope, in `gh help`. Reported from GitHub's documentation
+  and from the cycle, not measured: that a push cannot write a pull
+  request's ref, that an object no ref names stays readable, that a
+  deleted repository may be restored for 90 days, and what a repository
+  loses with its deletion. Nothing was deleted, pushed or rewritten on
+  GitHub to write it.
 - **Impact.** [asks: checkout-script] [writes: protect] A minor version:
   managed files move, two of them in what they execute. A product that
   carries `scripts/checkout-dependency.sh` and

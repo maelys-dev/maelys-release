@@ -375,7 +375,9 @@ anything.
   none, and `check` notes a `## 0.0.0` standing above another entry — the
   place the rule put it when it was asked for by hand.
 - A published tag is never moved, deleted or force-pushed. A mistake is
-  fixed by the next patch release.
+  fixed by the next patch release. What a repository **still private**
+  does when it must lose a datum before it opens is below, with its limit
+  stated first.
 - **The tag is signed by a key the fleet names.** `share/allowed-signers` of
   the socle holds them in the ssh `allowed_signers` format, and the release
   workflow verifies the tag's own signature against that file — read at the
@@ -570,6 +572,54 @@ and then fail to verify its own tag for want of it. What a clone needs to
 cut is `user.name`, `user.email` (an address of the GitHub account that
 holds the key), `gpg.format ssh`, `user.signingkey` and `tag.gpgsign
 true`.
+
+### Rewriting a history, before a repository opens
+
+**Only while nobody else consumes the repository**: it is private, it has
+no fork, no clone and no installed copy outside the hands that rewrite it,
+and every repository that pins it can be changed by those hands in the
+same sitting. That is the whole limit, and it is not a way around the rule
+above. Once anyone else reads a tag, the tag is never moved; a datum that
+got out is out — a secret is revoked, not erased — and the mistake is
+fixed by the next patch release.
+
+A private repository had to lose a datum before it opened. What one cycle
+established, with what was measured said apart from what was reported:
+
+- **A `push --force` is not enough, and the protection refuses it.**
+  `protect` writes `allow_force_pushes: false` under `enforce_admins`. And
+  the branch is not all GitHub holds: every pull request keeps its
+  `refs/pull/N/head`. Measured on a public repository of the fleet: 27 such
+  heads on the remote and none in a plain clone, which fetches
+  `refs/heads/*` only — so a clone that looks clean proves nothing — and 7
+  of them name a commit no branch reaches; the one asked for by its hash
+  was served.
+  Reported, from GitHub's documentation: a push cannot write those refs,
+  objects no ref names stay readable by their hash, and the remedy it
+  gives is a request to its support.
+- **So the repository is deleted and recreated**, from a clone whose
+  rewritten history was read first. Reported from the cycle: what belonged
+  to the repository and not to its history is set again — the `release`
+  environment, the protection, the secrets — and the pull requests and
+  issues are gone. Measured: rewriting the second of four commits changes
+  the hash of three, and two commits of one tree give two archives. So no
+  tag survives: each version is cut and signed again, and **every consumer
+  changes the commit it pins**, in `dependencies/<name>.pin` or on a
+  `uses:` line.
+- **Deleting asks the token for a scope it does not have.** Read in `gh
+  help`: `gh repo delete` requires `delete_repo`, which is not among the
+  scopes a login asks for; `gh auth refresh -s delete_repo` adds it and
+  `--remove-scopes delete_repo` takes it back. Reported: GitHub may restore
+  a deleted repository for 90 days, so the deletion removes the datum from
+  what opens, not from GitHub.
+- **The old history lives on wherever it was cloned.** Measured: a branch
+  made before the rewrite merges into the new history without a word, the
+  two sharing their root, and the datum is back in the tree and in the
+  log. Such clones and branches are deleted, or their own commits
+  reattached with `git rebase --onto NEW OLD BRANCH`; never merged.
+- **A channel that quotes the old archive follows.** A Homebrew formula
+  carries the sha256 of an archive of the tag; the version cut again is
+  another archive, and its formula is published again.
 
 ## Dependencies and packages
 
