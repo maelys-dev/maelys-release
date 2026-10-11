@@ -115,3 +115,41 @@ def declared_word(project: pathlib.Path, section: str, word: str) -> bool:
         elif current == f"[{section}]" and line == word:
             return True
     return False
+
+
+def is_utf8(raw: bytes) -> bool:
+    try:
+        raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return False
+    return True
+
+
+def spelled(raw: bytes) -> str:
+    """RAW as a message can carry it: each byte that is not UTF-8 spelled out, `caf\\xe9.txt`.
+
+    From the bytes, and never through a string that holds them as lone
+    surrogates: no output encodes one, and a JSON envelope that escapes one
+    is an envelope no reader can write again.
+    """
+    return raw.decode("utf-8", "backslashreplace")
+
+
+def unread_names(names: "list[bytes]") -> Failure:
+    """The refusal of a repository that tracks NAMES, which are not UTF-8.
+
+    The readers of a tracked name read it as text, open the file by it and
+    write it back, in a note or in a generated file. One such name ended
+    `check` on a decoding error where the tracked files are listed for the
+    name of the documentation repository; read through instead, it reaches
+    the files `adopt` writes. The command ends there in words, and is told
+    which name.
+    """
+    shown = ", ".join(spelled(name) for name in names[:5]) + (f", and {len(names) - 5} more" if len(names) > 5 else "")
+    one = len(names) == 1
+    return Failure("PRECONDITION_FAILED",
+                   f"This repository tracks {'a file' if one else f'{len(names)} files'} whose name is not UTF-8:"
+                   f" {shown}. The socle reads tracked names as UTF-8, and says nothing of a repository until"
+                   " every name it tracks is one.",
+                   f"Renaming {'it' if one else 'them'} is this repository's own to do: rename, commit, and run the"
+                   " command again.")

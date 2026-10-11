@@ -15,7 +15,7 @@ from .context import Context
 from .declarations import Declarations, parse_pin
 from .host import git, run
 from .inspection import pinned_socle
-from .project import project_of
+from .project import is_utf8, project_of, spelled, unread_names
 
 
 DEPENDENCIES_VARIABLE = "MAELYS_DEPENDENCIES_DIR"
@@ -109,12 +109,28 @@ def sibling_readers(project: pathlib.Path, names: list[str]) -> list[tuple[str, 
     # have traded one false line for another.
     call = re.compile(r"checkout-dependency\.sh[\"']?\s+[\"']?"
                       r"(?:\$|(?:" + alternatives + r")(?![A-Za-z0-9._-]))")
-    found = run(["git", "grep", "-n", "-I", "-E",
-                 "-e", r"\.\./(" + alternatives + ")",
-                 "-e", r"checkout-dependency\.sh"], cwd=project)
+    search = ["git", "grep", "-n", "-I", "-E",
+              "-e", r"\.\./(" + alternatives + ")",
+              "-e", r"checkout-dependency\.sh"]
+    try:
+        found = run(search, cwd=project).stdout
+    except UnicodeDecodeError:
+        # git writes the line it matched as the file holds it, and a line
+        # need not be UTF-8: a comment in Latin-1 beside the match raised
+        # here, and the caller read the error as a refusal of the
+        # declaration file. Asked again as bytes, and only then. A name is
+        # still read strictly -- one that is not UTF-8 is the refusal of
+        # the tracked list, and no file is opened by a spelled name -- and
+        # what does not decode in a line is spelled out.
+        answer = host.HOST.feed(search, b"", cwd=project).stdout
+        strange = sorted({record.partition(b":")[0] for record in answer.split(b"\n")
+                          if not is_utf8(record.partition(b":")[0])})
+        if strange:
+            raise unread_names(strange) from None
+        found = spelled(answer)
     migrated: dict[str, bool] = {}
     readers = []
-    for line in found.stdout.splitlines():
+    for line in found.splitlines():
         path, _, rest = line.partition(":")
         number, _, text = rest.partition(":")
         if not number.isdigit() or path.endswith(".md") or path in SIBLING_EXEMPT:

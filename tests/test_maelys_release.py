@@ -191,6 +191,28 @@ def formula_template(klass: str, name: str) -> str:
             f"end\n")
 
 
+def track_raw_name(directory: pathlib.Path, name: bytes, content: bytes) -> bool:
+    """Track CONTENT under NAME, bytes that are not UTF-8; whether the working tree holds the file.
+
+    A Linux file system holds any name, and the file is written and added.
+    APFS refuses to create it: the blob is then written and named in the
+    index alone, which is what a clone of such a repository is on that
+    machine -- the file tracked, and absent.
+    """
+    git, path = [b"git", b"-C", os.fsencode(directory)], os.fsencode(directory) + b"/" + name
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as held:
+            held.write(content)
+    except OSError:
+        blob = subprocess.run([*git, b"hash-object", b"-w", b"--stdin"], input=content, check=True,
+                              capture_output=True).stdout.strip()
+        subprocess.run([*git, b"update-index", b"--add", b"--cacheinfo", b"100644," + blob + b"," + name], check=True)
+        return False
+    subprocess.run([*git, b"add", b"--", name], check=True)
+    return True
+
+
 class Product:
     """A product fixture with one pinned dependency served from a bare repository."""
 
@@ -1899,6 +1921,26 @@ class DocsContractTest(unittest.TestCase):
         self.product.run("adopt", self.dir, "--apply")
         prose = [note.split(":")[0] for note in self.notes() if "maelys-docs" in note]
         self.assertEqual(prose, ["docs/d.md"])
+
+    def test_a_document_that_is_not_utf_8_is_said_and_sorted_like_any_other(self) -> None:
+        """A decoding error here ended every command that reads the declarations.
+
+        What is asked of a document is in ASCII and in its first lines, so it
+        is still answered: the prose is prose, to the strict contract too,
+        and the generated file is not. Each is said not to be UTF-8.
+        """
+        (self.product.dir / "docs").mkdir()
+        (self.product.dir / "docs" / "latin.md").write_bytes(b"# Caf\xe9\n\nProse.\n")
+        (self.product.dir / "docs" / "made.md").write_bytes(b"<!-- GENERATED; do not edit -->\n\n# R\xe9f\xe9rence\n")
+        self.product.write("docs/plain.md", "# Café\n\nProse.\n")
+        self.product.run("adopt", self.dir, "--apply")
+        notes = self.notes()
+        self.assertEqual(sorted(note.split(":")[0] for note in notes if "is not UTF-8" in note),
+                         ["docs/latin.md is not UTF-8", "docs/made.md is not UTF-8"])
+        self.assertEqual(sorted(note.split(":")[0] for note in notes if "prose belongs in maelys-docs" in note),
+                         ["docs/latin.md", "docs/plain.md"])
+        strict = self.product.json("check", self.dir, "--docs-contract", expect=2)["data"]["conventions"]["violations"]
+        self.assertEqual(sorted(violation.split(":")[0] for violation in strict), ["docs/latin.md", "docs/plain.md"])
 
     def test_a_document_licensing_engages_stays(self) -> None:
         self.product.write("docs/open-core.md", "# Open core\n\nProse, but engaged.\n")
@@ -4476,6 +4518,40 @@ class DependenciesApartTest(unittest.TestCase):
                  if check["status"] == "note" and check["message"].startswith("Makefile line 1")]
         self.assertEqual(len(notes), 1, notes)
         self.assertIn("nobody ever sees taken", notes[0])
+
+    def test_a_line_that_is_not_utf_8_beside_the_match_is_read_and_refuses_nothing(self) -> None:
+        """git writes the matched line as the file holds it, and a line need not be UTF-8.
+
+        A comment in Latin-1 beside the line raised a decoding error, which
+        was read as a refusal of the declaration file: on any file system,
+        with git as it is installed. The search is a note, the line is
+        spelled, and a UTF-8 line beside it reads as it always did.
+        """
+        (self.product.dir / "build.sh").write_bytes(b"# \xe9t\xe9\ncd ../maelys-system # d\xe9p\xf4t\n")
+        self.product.write("other.sh", "cd ../maelys-system # dépôt\n")
+        # Opened by its own name for what exempts it, as before: it reads the root.
+        (self.product.dir / "Makefile").write_bytes(
+            b"# ../maelys-system est parti, d\xe9finitivement.\nMAELYS_DEPENDENCIES_DIR ?=\n"
+            b"SYSTEM_DIR ?= $(MAELYS_DEPENDENCIES_DIR)/maelys-system\n")
+        self.tracked()
+        data = self.product.json("check", self.dir)["data"]
+        self.assertTrue(data["valid"], data["violations"])
+        notes = sorted(check["message"] for check in data["checks"]
+                       if check["status"] == "note" and " reads ../maelys-system" in check["message"])
+        self.assertEqual([(note.split(" reads ")[0], note.rpartition("': ")[2]) for note in notes],
+                         [("build.sh line 2", "cd ../maelys-system # d\\xe9p\\xf4t"),
+                          ("other.sh line 1", "cd ../maelys-system # dépôt")])
+
+    def test_a_name_that_is_not_utf_8_is_the_refusal_of_the_search_and_never_a_path_it_opens(self) -> None:
+        """Under core.quotePath=false git writes the name as it is, and no file is opened by a spelled one."""
+        self.tracked()
+        self.product.git(self.product.dir, "config", "core.quotePath", "false")
+        if not track_raw_name(self.product.dir, b"tools/caf\xe9.sh", b"cd ../maelys-system # d\xe9p\xf4t\n"):
+            self.skipTest("this file system holds no such name, and git grep reads the working tree")
+        with self.assertRaises(MODULE.Failure) as refusal:
+            MODULE.sibling_readers(self.product.dir, ["maelys-system"])
+        self.assertEqual(refusal.exception.code, "PRECONDITION_FAILED")
+        self.assertIn("tracks a file whose name is not UTF-8: tools/caf\\xe9.sh.", refusal.exception.message)
 
     def test_prose_and_the_managed_scripts_are_exempt(self) -> None:
         """What every product carries, and would carry a note for forever.
@@ -7457,6 +7533,29 @@ class DocumentationNameRuleTest(unittest.TestCase):
         product.write("maelys-release.conf", product.read("maelys-release.conf") + "\n[docs]\nnamed example/docs-fixture\n")
         self.assertEqual(self.notes(product), [])
 
+    def test_the_name_in_a_prose_that_is_not_utf_8_is_noted_and_refuses_nothing(self) -> None:
+        """The rule says it searched every tracked file, and skipped this one without a word.
+
+        It is read with what does not decode replaced, and the name found
+        there is a note: the file was never refused, and stays so.
+        """
+        product = self.repository()
+        (product.dir / "NOTES.txt").write_bytes(b"D\xe9plac\xe9.\nVoir maelys-docs.\n")
+        product.write("PLAIN.txt", "Déplacé.\nNothing named.\n")
+        product.git(product.dir, "add", "NOTES.txt", "PLAIN.txt")
+        data = product.json("check", str(product.dir))["data"]
+        self.assertTrue(data["valid"], data["violations"])
+        said = [check["status"] + ": " + check["message"] for check in data["checks"]
+                if "names the documentation repository" in check["message"]]
+        self.assertEqual([line.split(",")[0] for line in said],
+                         ["note: NOTES.txt is not UTF-8 and was read with what does not decode replaced: it names the"
+                          " documentation repository at line 2"])
+        # The same line in a file that is UTF-8 is the refusal it was.
+        product.write("PLAIN.txt", "Déplacé.\nVoir maelys-docs.\n")
+        refused = product.json("check", str(product.dir), expect=2)["data"]["conventions"]["violations"]
+        self.assertEqual([line.split(",")[0] for line in refused],
+                         ["PLAIN.txt names the documentation repository at line 2"])
+
     def test_plan_refuses_to_write_the_name_into_an_undeclared_repository(self) -> None:
         product = self.repository()
         decl = MODULE.read_declarations(product.dir, "maelys-fixture", "custom")
@@ -7476,6 +7575,154 @@ class DocumentationNameRuleTest(unittest.TestCase):
         staged = MODULE.stage(decl, "a" * 40, "v9.9.9")
         for relative, (content, _) in staged.items():
             self.assertFalse(MODULE.names_documentation(content), relative)
+
+
+class TrackedNameNotUtf8Test(unittest.TestCase):
+    """A tracked name that is not UTF-8 ends `check` in words, and `adopt` writes nothing it cannot finish.
+
+    `check` ended on a decoding error where the tracked files are listed
+    for the name of the documentation repository. Reading through it is
+    not a patch: the readers of a tracked name open the file by it and
+    write it back, and a name that does not encode emptied the workflow
+    `adopt` was rewriting. One refusal at that listing, in the bytes of
+    the name spelled out; where `[docs] named` is declared the listing is
+    not made, and `check` answers as it did.
+    """
+
+    NAME = b"packaging/homebrew/caf\xe9.rb.in"
+    MESSAGE = ("This repository tracks a file whose name is not UTF-8: packaging/homebrew/caf\\xe9.rb.in. The socle"
+               " reads tracked names as UTF-8, and says nothing of a repository until every name it tracks is one.")
+    HINT = "Renaming it is this repository's own to do: rename, commit, and run the command again."
+
+    def repository(self, conf: str = "") -> "Product":
+        product = Product()
+        self.addCleanup(product.close)
+        if conf:
+            product.write("maelys-release.conf", product.read("maelys-release.conf") + conf)
+        product.run("adopt", str(product.dir), "--apply")
+        product.git(product.dir, "init", "-q")
+        product.git(product.dir, "add", "-A")
+        product.git(product.dir, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "fixture")
+        return product
+
+    def name(self, product, content: bytes = b"class Caf < Formula\nend\n", name: bytes = NAME) -> bool:
+        held = track_raw_name(product.dir, name, content)
+        product.git(product.dir, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "a name from another age")
+        return held
+
+    def state(self, product) -> dict:
+        """Every file of the working tree by its bytes, and what git says changed."""
+        held = {}
+        for directory, _, names in os.walk(os.fsencode(product.dir)):
+            if b"/.git" not in directory:
+                for name in names:
+                    with open(os.path.join(directory, name), "rb") as file:
+                        held[os.path.join(directory, name)] = file.read()
+        held[b"status"] = subprocess.run(["git", "-C", str(product.dir), "status", "--porcelain"], check=True,
+                                         capture_output=True).stdout
+        return held
+
+    def test_several_names_are_counted_and_the_first_five_named(self) -> None:
+        refusal = MODULE.unread_names([b"notes/caf\xe9.txt", *(b"notes/\xff%d.txt" % number for number in range(6))])
+        self.assertIn("tracks 7 files whose name is not UTF-8: notes/caf\\xe9.txt, notes/\\xff0.txt, notes/\\xff1.txt,"
+                      " notes/\\xff2.txt, notes/\\xff3.txt, and 2 more. The socle", refusal.message)
+        self.assertTrue(refusal.hint.startswith("Renaming them is"))
+        # Nothing of it is a lone surrogate: the envelope that carries it can be written again.
+        json.dumps([refusal.message, refusal.hint], ensure_ascii=False).encode("utf-8")
+
+    def test_the_commands_that_ended_on_the_listing_refuse_in_text_and_in_json(self) -> None:
+        product = self.repository()
+        self.name(product)
+        # To an output that refuses what it cannot encode, as a terminal does.
+        product.env["PYTHONIOENCODING"] = "utf-8:strict"
+        for command in ("check", "declarations", "preflight", "adopt", "dependencies"):
+            with self.subTest(command=command):
+                body = product.json(command, str(product.dir), expect=1)
+                self.assertEqual(body["error"], {"code": "PRECONDITION_FAILED", "message": self.MESSAGE,
+                                                 "hint": self.HINT})
+                # What a reader of the envelope holds can be written again.
+                json.dumps(body, ensure_ascii=False).encode("utf-8")
+                said = product.run(command, str(product.dir), expect=1)
+                self.assertEqual((said.stdout, said.stderr),
+                                 ("", f"maelys-release: [PRECONDITION_FAILED] {self.MESSAGE}\nHint: {self.HINT}\n"))
+
+    def test_adopt_apply_writes_nothing(self) -> None:
+        product = self.repository()
+        workflow = product.dir / ".github" / "workflows" / "release.yml"
+        workflow.write_text(workflow.read_text(encoding="utf-8") + "# drifted\n", encoding="utf-8")
+        # There is something to write: the plan says so while every name is UTF-8.
+        planned = {entry["path"]: entry["action"] for entry in product.json("adopt", str(product.dir))["data"]["files"]}
+        self.assertEqual(planned[".github/workflows/release.yml"], "update")
+        self.name(product)
+        before = self.state(product)
+        for output in ("text", "json"):
+            refused = product.run("adopt", str(product.dir), "--apply", "--format", output, expect=1)
+            self.assertNotIn("Traceback", refused.stderr)
+            self.assertIn("packaging/homebrew/caf\\xe9.rb.in", refused.stderr.replace("\\\\", "\\"))
+            self.assertEqual(self.state(product), before)
+        self.assertTrue(workflow.read_bytes().endswith(b"# drifted\n"))
+
+    def test_where_the_documentation_repository_is_named_check_answers_as_it_did(self) -> None:
+        """With `[docs] named` the rule that lists the files is not applied, and nothing ends there.
+
+        The guard is then the one reader of the list, and it has its own
+        answer: the file is counted as left unread, and `check` is green.
+        Held here so that it stays: a refusal placed where every answer of
+        git is read turned this green product red.
+        """
+        product = self.repository("\n[docs]\nnamed example/docs-fixture\n")
+        self.name(product, b"plain words\n", name=b"notes/caf\xe9.txt")
+        counted = "(not read, and nothing is said of them: 1 under a name that is not UTF-8)"
+        self.assertIn(counted, product.run("check", str(product.dir)).stdout)
+        data = product.json("check", str(product.dir))["data"]
+        self.assertTrue(data["valid"], data["violations"])
+        self.assertEqual(data["privacy"]["files"]["unread"], [{"path": "(1 tracked name(s))", "reason": "undecodable"}])
+        self.assertIn(counted, product.run("check", str(product.dir), "--history").stdout)
+
+    def test_no_managed_file_is_opened_before_every_one_of_them_encodes(self) -> None:
+        """Where no rule lists the tracked files, the name reaches what `adopt` writes.
+
+        With `[docs] named` nothing but the guard reads the list, and
+        `adopt` does not run the guard. A formula template is named in
+        release.yml: writing it opened the file, which empties it, and then
+        failed to encode. The seam is the list of the templates, which a
+        directory gives with one lone surrogate a byte where the file
+        system holds such a name; here it is given so wherever it is run.
+        """
+        product = self.repository("\n[docs]\nnamed example/docs-fixture\n")
+        decl = MODULE.read_declarations(product.dir, "maelys-fixture", "maelys-release")
+        decl.formulas = sorted([*decl.formulas, b"caf\xe9".decode("utf-8", "surrogateescape")])
+        staged = MODULE.stage(decl, "f" * 40, "v9.9.9")
+        before = self.state(product)
+        for apply in (True, False):
+            with self.assertRaises(MODULE.Failure) as refused:
+                MODULE.plan(decl, staged, apply=apply)
+            self.assertEqual(
+                (refused.exception.code, refused.exception.message, refused.exception.hint),
+                ("PRECONDITION_FAILED",
+                 "The socle would write a name that is not UTF-8 into .github/workflows/release.yml, where it reads"
+                 " tap-caf\\xe9: -- it writes UTF-8, and encodes every file before it opens the first: nothing was"
+                 " written.",
+                 "A file of this repository carries that name, and the managed files are written from it. Renaming"
+                 " it is this repository's own to do: rename, commit, and run the command again."))
+            json.dumps([refused.exception.message, refused.exception.hint], ensure_ascii=False).encode("utf-8")
+            self.assertEqual(self.state(product), before)
+        # And what encodes is written as it was: the bytes of the text.
+        del staged[".github/workflows/release.yml"], staged["AGENTS.md"], staged["CLAUDE.md"]
+        del staged[".claude/skills/maelys-release/SKILL.md"]
+        staged["scripts/checkout-dependency.sh"] = ("#!/bin/sh\n# café\n", True)
+        MODULE.plan(decl, staged, apply=True)
+        self.assertEqual((product.dir / "scripts" / "checkout-dependency.sh").read_bytes(), "#!/bin/sh\n# café\n".encode())
+        # Through the executable, where the file system holds the name.
+        if not self.name(product):
+            return
+        before = self.state(product)
+        for output in ("text", "json", "text"):
+            refused = product.run("adopt", str(product.dir), "--apply", "--format", output, expect=1)
+            self.assertEqual(refused.stdout, "")
+            self.assertNotIn("Traceback", refused.stderr)
+            self.assertIn("would write a name that is not UTF-8 into .github/workflows/release.yml", refused.stderr)
+            self.assertEqual(self.state(product), before)
 
 
 class DocumentationNameGrammarTest(unittest.TestCase):
