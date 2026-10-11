@@ -1770,8 +1770,19 @@ def handle_render(invocation: Invocation) -> tuple[dict, int]:
     if left:
         raise Failure("VALIDATION_FAILED", f"Unrendered placeholders in {template}: {' '.join(left)}.",
                       "Pass a KEY=VALUE for each of them.")
+    # Encoded before the output is opened: a value given as bytes that are
+    # not UTF-8 reaches here as lone surrogates, and writing the text opened
+    # the file, which empties it, and then failed to encode.
+    try:
+        encoded = text.encode("utf-8")
+    except UnicodeEncodeError:
+        strange = sorted(key for key, value in mapping.items() if not is_utf8(value.encode("utf-8", "surrogateescape")))
+        raise Failure("VALIDATION_FAILED",
+                      f"The value given for {' '.join(strange) or 'a placeholder'} is not UTF-8: {output} is written"
+                      " in UTF-8, and nothing was written.",
+                      "Pass the value as UTF-8.") from None
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(text, encoding="utf-8")
+    output.write_bytes(encoded)
     return {"template": str(template), "output": str(output), "placeholders": sorted(mapping)}, EXIT_OK
 
 

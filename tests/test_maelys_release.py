@@ -24,6 +24,7 @@ import shutil
 import signal
 import socket
 import subprocess
+import sys
 import tempfile
 import textwrap
 import threading
@@ -7688,6 +7689,69 @@ class TrackedNameNotUtf8Test(unittest.TestCase):
         self.assertTrue(data["valid"], data["violations"])
         self.assertEqual(data["privacy"]["files"]["unread"], [{"path": "(1 tracked name(s))", "reason": "undecodable"}])
         self.assertIn(counted, product.run("check", str(product.dir), "--history").stdout)
+
+    def test_migrate_and_cut_end_on_the_refusal_where_git_writes_the_name_as_it_is(self) -> None:
+        """Where core.quotePath is off, every answer that lists a file carries the name's own bytes.
+
+        `migrate` and `cut` read such answers apart from the listing `check`
+        makes, and ended on a decoding error there. Each ends on the refusal
+        of the tracked names, read from the answer git already gave.
+        """
+        product = self.repository()
+        product.write("docs/x.md", "# X\n")
+        product.git(product.dir, "add", "docs/x.md")
+        product.git(product.dir, "config", "core.quotePath", "false")
+        held = track_raw_name(product.dir, b"docs/caf\xe9.md", b"see docs/x.md\n")
+        product.git(product.dir, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "a name from another age")
+        said = ("This repository tracks a file whose name is not UTF-8: docs/caf\\xe9.md. The socle reads tracked"
+                " names as UTF-8, and says nothing of a repository until every name it tracks is one.")
+
+        def refused(call) -> None:
+            with self.assertRaises(MODULE.Failure) as failure:
+                call()
+            self.assertEqual((failure.exception.code, failure.exception.message, failure.exception.hint),
+                             ("PRECONDITION_FAILED", said, self.HINT))
+
+        moving = {"moving": [{"path": "docs/x.md"}]}
+        if held:
+            # The tree is clean: migrate reads what HEAD holds, and who names the document.
+            refused(lambda: MODULE.migration.describe_the_clone(product.dir, "maelys-fixture", moving))
+            refused(lambda: MODULE.referencing_files(product.dir, "docs/x.md"))
+            with open(os.fsencode(product.dir) + b"/docs/caf\xe9.md", "ab") as file:
+                file.write(b"more\n")
+        # The file is changed, or absent where the file system holds no such name.
+        refused(lambda: MODULE.migration.describe_the_clone(product.dir, "maelys-fixture", moving))
+        refused(lambda: MODULE.worktree_paths(product.dir))
+        # And an answer in which every name decodes is the answer it was.
+        product.git(product.dir, "rm", "-q", "--cached", "--", os.fsdecode(b"docs/caf\xe9.md"))
+        product.git(product.dir, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "renamed away")
+        product.write("docs/y.md", "# Y\n")
+        self.assertEqual(MODULE.worktree_paths(product.dir).get("docs/y.md"), "??")
+
+    def test_render_writes_nothing_of_a_value_that_is_not_utf_8(self) -> None:
+        """A value given as such bytes emptied the output and then failed to encode.
+
+        The text was written into a file already opened. It is encoded
+        first: the output keeps what it held, and the command says which
+        placeholder carries the value.
+        """
+        with tempfile.TemporaryDirectory() as directory:
+            template, output = pathlib.Path(directory, "t.in"), pathlib.Path(directory, "out.txt")
+            template.write_text("name @NAME@ of @KIND@\n", encoding="utf-8")
+            output.write_text("what it held\n", encoding="utf-8")
+            command = [sys.executable, str(ROOT / "bin" / "maelys-release"), "render", str(template), str(output)]
+            failed = subprocess.run([*command, b"NAME=caf\xe9", "KIND=x", "--format", "json"], capture_output=True)
+            self.assertEqual(failed.returncode, 1, failed.stderr)
+            self.assertNotIn(b"Traceback", failed.stderr)
+            error = json.loads(failed.stderr.decode("utf-8"))["error"]
+            self.assertEqual(error["code"], "VALIDATION_FAILED")
+            self.assertIn("The value given for NAME is not UTF-8", error["message"])
+            self.assertIn("nothing was written", error["message"])
+            self.assertEqual(output.read_text(encoding="utf-8"), "what it held\n")
+            # A value that is UTF-8 is written as it was, byte for byte.
+            done = subprocess.run([*command, "NAME=café", "KIND=x"], capture_output=True)
+            self.assertEqual(done.returncode, 0, done.stderr)
+            self.assertEqual(output.read_bytes(), "name café of x\n".encode("utf-8"))
 
     def test_no_managed_file_is_opened_before_every_one_of_them_encodes(self) -> None:
         """Where no rule lists the tracked files, the name reaches what `adopt` writes.

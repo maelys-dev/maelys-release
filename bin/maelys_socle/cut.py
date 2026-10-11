@@ -21,7 +21,7 @@ from .declarations import Declarations, version_tuple
 from .github import (check_runs, cut_repository, default_branch, github_api, tag_deployments)
 from .host import git, run
 from .identity import socle_data
-from .project import project_of
+from .project import names_git_gave, project_of
 from .release_checks import repository_checks, tag_checks
 from .writes import confirm_ref, confirm_tag
 from .texts import LABELS, unfenced
@@ -63,8 +63,13 @@ def worktree_paths(project: pathlib.Path) -> dict:
     file, and the first of them is a space often enough that stripping the
     line eats a character of the path.
     """
-    return {line[3:]: line[:2] for line
-            in run(["git", "status", "--porcelain", "-uall"], cwd=project).stdout.split("\n") if line}
+    # A name that is not UTF-8 is written as the repository holds it where
+    # core.quotePath is off, and ended `cut` here on a decoding error.
+    try:
+        answered = run(["git", "status", "--porcelain", "-uall"], cwd=project).stdout
+    except UnicodeDecodeError as error:
+        raise names_git_gave(error, skip=3) from None
+    return {line[3:]: line[:2] for line in answered.split("\n") if line}
 
 
 def entry_heading(project: pathlib.Path, version: str) -> str:
@@ -612,8 +617,11 @@ def moved_pins_named(project: pathlib.Path, entry: str) -> list[tuple[str, str]]
     last = git("describe", "--tags", "--abbrev=0", "--match", "v[0-9]*", cwd=project, check=False)
     if not last:
         return []
-    moved = [line for line in git("diff", "--name-only", f"{last}..HEAD", "--", "dependencies",
-                                  cwd=project, check=False).splitlines()
+    try:
+        answered = git("diff", "--name-only", f"{last}..HEAD", "--", "dependencies", cwd=project, check=False)
+    except UnicodeDecodeError as error:
+        raise names_git_gave(error) from None
+    moved = [line for line in answered.splitlines()
              if line.startswith("dependencies/") and line.endswith(".pin")]
     found = []
     for path in moved:

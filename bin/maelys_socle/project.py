@@ -135,6 +135,18 @@ def spelled(raw: bytes) -> str:
     return raw.decode("utf-8", "backslashreplace")
 
 
+def names_git_gave(error: UnicodeDecodeError, skip: int = 0) -> Exception:
+    """What to raise for a list of names git answered and that did not decode: the refusal, or the error itself.
+
+    git has answered and the error holds the answer, so the names are read
+    from its bytes, one a line past the SKIP columns that say something else
+    of it, and git is not asked again. An answer in which every line decodes
+    is not a name that failed, and the error stays the one it was.
+    """
+    names = sorted({line[skip:] for line in bytes(error.object).split(b"\n") if not is_utf8(line)})
+    return unread_names(names) if names else error
+
+
 def unread_names(names: "list[bytes]") -> Failure:
     """The refusal of a repository that tracks NAMES, which are not UTF-8.
 
