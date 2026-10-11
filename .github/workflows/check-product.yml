@@ -54,10 +54,11 @@ on:
         default: ""
       carried_dependencies:
         description: >-
-          The artifact of carry-dependencies.yml: the legs of `check` clone
-          the pins it carries from its bundles instead of their
-          repositories, and every other pin as usual. Empty, every pin is
-          cloned. For a leg whose runner may not read a private pin.
+          The artifact of carry-dependencies.yml: every job that clones the
+          pins -- the legs of `check`, `fuzz` and `sanitizers` -- clones
+          those it carries from its bundles instead of their repositories,
+          and every other pin as usual. Empty, every pin is cloned. For a
+          job whose runner may not read a private pin.
         required: false
         type: string
         default: ""
@@ -185,7 +186,7 @@ jobs:
           PY
       - name: Carried dependencies
         # Bundles made by carry-dependencies.yml on a machine that may read
-        # them, for a leg whose runner may not: the managed script clones
+        # them, for a job whose runner may not: the managed script clones
         # each from its bundle and checks the pinned commit by its hash.
         if: inputs.carried_dependencies != ''
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -296,6 +297,19 @@ jobs:
           print("apart=" + ("1" if data.get("declared", {}).get("dependenciesApart") else ""))
           print("linux_packages=" + data["linuxPackages"])
           PY
+      - name: Carried dependencies
+        # Bundles made by carry-dependencies.yml on a machine that may read
+        # them, for a job whose runner may not: the managed script clones
+        # each from its bundle and checks the pinned commit by its hash.
+        if: inputs.carried_dependencies != ''
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ inputs.carried_dependencies }}
+          path: ${{ runner.temp }}/maelys-dependency-bundles
+      - name: Point the pinned checkouts at the carried bundles
+        if: inputs.carried_dependencies != ''
+        shell: bash
+        run: echo "MAELYS_DEPENDENCY_BUNDLES=$RUNNER_TEMP/maelys-dependency-bundles" >>"$GITHUB_ENV"
       - name: Pinned dependency checkouts, beside the product
         # The layout a product has until it declares [dependencies] apart:
         # the checkouts land next to it, which is what a `?= ../NAME`
@@ -393,6 +407,19 @@ jobs:
           print("apart=" + ("1" if data.get("declared", {}).get("dependenciesApart") else ""))
           print("linux_packages=" + data["linuxPackages"])
           PY
+      - name: Carried dependencies
+        # Bundles made by carry-dependencies.yml on a machine that may read
+        # them, for a job whose runner may not: the managed script clones
+        # each from its bundle and checks the pinned commit by its hash.
+        if: inputs.carried_dependencies != ''
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ inputs.carried_dependencies }}
+          path: ${{ runner.temp }}/maelys-dependency-bundles
+      - name: Point the pinned checkouts at the carried bundles
+        if: inputs.carried_dependencies != ''
+        shell: bash
+        run: echo "MAELYS_DEPENDENCY_BUNDLES=$RUNNER_TEMP/maelys-dependency-bundles" >>"$GITHUB_ENV"
       - name: Pinned dependency checkouts, beside the product
         # The layout a product has until it declares [dependencies] apart:
         # the checkouts land next to it, which is what a `?= ../NAME`

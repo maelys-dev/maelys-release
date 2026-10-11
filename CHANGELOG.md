@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+- **`fuzz` and `sanitizers` take the carried bundles, as the legs of
+  `check` do.** `check-product.yml` handed `carried_dependencies` to the
+  legs of `check` only: the two other jobs were held to run where the pins
+  are read. That is true of a runner that keeps a credential and false of
+  one made for a single job, which holds none: there the legs of `check`
+  have the bundles, and `fuzz` and `sanitizers`, on the same runner, are
+  left to clone the private pins from their repositories with nothing to
+  read them. Both now download the artifact and set
+  `MAELYS_DEPENDENCY_BUNDLES` before the pinned checkouts, under the same
+  condition: nothing changes for a call that carries nothing, and a job
+  whose runner could read the pins now clones the carried ones from their
+  bundles, checked by the pinned commit as any clone. This was read on the
+  workflow and has not run on a product yet, the failure no more than the
+  correction: the trial is a product whose x86_64 jobs run on single-job
+  machines.
+
 ## 0.64.1 — 2026-10-11
 
 Five corrections found by reading 0.64.0 again, each reproduced before it

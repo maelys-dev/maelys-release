@@ -656,7 +656,8 @@ established, with what was measured said apart from what was reported:
   names — and those only — clones each with the managed script, and uploads
   one git bundle per pin, holding the history up to the pinned commit, as an
   artifact kept one day. `check-product.yml` takes that artifact in
-  `carried_dependencies`; its legs set `MAELYS_DEPENDENCY_BUNDLES`, and
+  `carried_dependencies`; every job of it that clones the pins -- the legs
+  of `check`, `fuzz` and `sanitizers` -- sets `MAELYS_DEPENDENCY_BUNDLES`, and
   `scripts/checkout-dependency.sh` clones `NAME.bundle` from there in place
   of the repository, checks the pinned commit by its hash as for any clone,
   and refuses a pin that declares submodules, which no bundle carries. A pin
