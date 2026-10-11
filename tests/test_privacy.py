@@ -1382,6 +1382,44 @@ class SecretScanningTest(unittest.TestCase):
         self.assertEqual(self.says({"visibility": "public"}), [])
         self.assertEqual(MODULE.github.secret_scanning("o/r", MODULE.github.Repository("unreadable", None)), [])
 
+    def test_preflight_says_it_from_a_constructed_answer_and_only_when_the_member_says_off(self) -> None:
+        """Through the reader `preflight` and `cut` call, on a scripted host.
+
+        The recorded reference no longer shows this note: its recorder
+        drops `security_and_analysis` from every answer, since what the
+        member says of a real repository is not the reference's to publish.
+        So the note is held here, end to end, on answers that are nobody's.
+        """
+        def analysis(scanning, protection):
+            return {"secret_scanning": {"status": scanning}, "secret_scanning_push_protection": {"status": protection}}
+
+        def said(body) -> list:
+            def read(path):
+                return ("ok", body) if path == "repos/o/r" else ("absent", None)
+            with tempfile.TemporaryDirectory(prefix="maelys-preflight-") as directory:
+                decl = MODULE.Declarations(pathlib.Path(directory), "maelys-fixture", "maelys-release")
+                with using_host(FakeHost(read=read)) as host:
+                    found = MODULE.repository_checks(decl)
+            # From the document already read: the repository is asked for once.
+            self.assertEqual(host.reads.count("repos/o/r"), 1)
+            return [(status, message) for status, message in found
+                    if "secret scanning" in message or "push protection" in message]
+
+        off = said({"visibility": "public", "security_and_analysis": analysis("disabled", "disabled")})
+        self.assertEqual([status for status, _ in off], ["note"])
+        self.assertIn("o/r is public and secret scanning and push protection are off", off[0][1])
+        self.assertIn("gh api -X PATCH repos/o/r", off[0][1])
+        half = said({"visibility": "public", "security_and_analysis": analysis("enabled", "disabled")})
+        self.assertEqual([status for status, _ in half], ["note"])
+        self.assertIn("o/r is public and push protection is off", half[0][1])
+        # On: an ok line, and no note. Absent, as for any reader who does not
+        # administer the repository and as in every recorded answer: nothing.
+        self.assertEqual(said({"visibility": "public", "security_and_analysis": analysis("enabled", "enabled")}),
+                         [("ok", "o/r is public, with secret scanning and push protection on")])
+        self.assertEqual(said({"visibility": "public"}), [])
+        self.assertEqual(said({"visibility": "private", "private": True,
+                               "security_and_analysis": analysis("disabled", "disabled")}), [])
+
     def test_preflight_reads_it_from_the_repository_document_and_asks_nothing_more(self) -> None:
         import sys
         source = pathlib.Path(sys.modules["maelys_socle.release_checks"].__file__).read_text(encoding="utf-8")

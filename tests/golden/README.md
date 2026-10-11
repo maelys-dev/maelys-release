@@ -109,6 +109,19 @@ alone, and every one of them has published. These are constructed
 branches, **not** claims about the repositories' actual settings. No real
 settings were changed to manufacture a failure.
 
+One member of GitHub's answers is in no stored response: `security_and_analysis`,
+which a repository document carries for a reader who administers the
+repository and which says whether secret scanning and push protection are
+on. `preflight` reads it to note a public repository that has them off, and
+a reference holding it would say that of two real repositories, by name, on
+the day they were read. The state of a real repository's security settings
+is not this reference's to publish: `record_api.py` drops the member from
+every answer, read live or taken from the cache, before the recorded program
+sees it, so every recorded `preflight` says nothing of those settings and
+`tests/test_record_api.py` holds both halves. The note itself is proven on
+constructed answers — the member present and off, on, and absent — in
+`tests/test_privacy.py`.
+
 `inputs/` freezes the product files (including executable bits), command line,
 and ordered host calls. Git reads run only when recording inputs, in temporary
 local repositories; their stdout, stderr and exit codes become inputs too.

@@ -19,6 +19,16 @@ The manifest says both things a reader needs and cannot infer: sourceCommit
 and sourceVersion are the commit recorded and the VERSION that commit
 carries; frozenVersion is the VERSION the recording ran under, which is the
 one a replay restores.
+
+No answer is stored with `security_and_analysis`: GitHub gives that member
+to a reader who administers the repository, it says whether secret scanning
+and push protection are on, and the state of a real repository's security
+settings is not this reference's to publish. It is dropped from every
+answer, read live or taken from the cache, at whatever depth it stands,
+before the answer is given to the recorded program -- so what is recorded
+is what the program was told, and a recorded `preflight` says nothing of
+those settings. The note `preflight` makes of them is held by tests on
+constructed answers, in tests/test_privacy.py.
 """
 from __future__ import annotations
 
@@ -53,6 +63,19 @@ COMPOSED = ['env', '-u', 'EMAIL', '-u', 'GIT_AUTHOR_NAME', '-u', 'GIT_AUTHOR_EMA
             'GIT_CONFIG_NOSYSTEM=1', 'git', '-C', '/', 'var', 'GIT_COMMITTER_IDENT']
 MACHINE = {'env': '/usr/bin/env',
            'stdout': 'Golden Machine <golden@golden-machine.invalid> 1757980800 +0000\n'}
+# What an answer says of a real repository and the reference does not
+# publish: see the header. One member today; a name added here is dropped
+# from every answer at the next recording, and from nothing already stored.
+WITHHELD = ('security_and_analysis',)
+
+
+def withheld(value):
+    """VALUE as GitHub answered it, without the members the reference does not publish."""
+    if isinstance(value, dict):
+        return {key: withheld(item) for key, item in value.items() if key not in WITHHELD}
+    if isinstance(value, list):
+        return [withheld(item) for item in value]
+    return value
 
 
 def git(project, *args):
@@ -181,7 +204,11 @@ def scenarios():
 class Responses:
     def __init__(self, original, cache, offline=False):
         self.original, self.cache, self.offline = original, cache, offline
-        self.live = replay.read_json(cache) if cache.exists() else {}
+        # Withheld on the way in, whichever way that is: a cache written by
+        # an earlier recorder holds the member, and the file is left as it
+        # is -- a cache nothing was added to is not rewritten.
+        self.live = {endpoint: {**answer, 'body': withheld(answer.get('body'))}
+                     for endpoint, answer in (replay.read_json(cache) if cache.exists() else {}).items()}
         self.used = {}
 
     def read(self, endpoint, profile):
@@ -198,7 +225,7 @@ class Responses:
             state, body = self.original.read(endpoint)
             if state not in ('ok', 'absent'):
                 raise RuntimeError(f'live GET {endpoint}: {state}; do not record a transient failure as live truth')
-            self.live[endpoint] = {'state': state, 'body': body, 'provenance': {'kind': 'live', 'method': 'GET',
+            self.live[endpoint] = {'state': state, 'body': withheld(body), 'provenance': {'kind': 'live', 'method': 'GET',
                 'endpoint': endpoint, 'recordedAt': datetime.datetime.now(datetime.timezone.utc).isoformat()}}
             replay.write_json(self.cache, self.live)
         answer = copy.deepcopy(self.live[endpoint])

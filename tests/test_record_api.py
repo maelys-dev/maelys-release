@@ -167,6 +167,81 @@ class ResponsesTest(unittest.TestCase):
         self.assertIn(ENDPOINT + "/branches", json.loads(self.cache.read_text(encoding="utf-8")))
 
 
+class WithheldTest(unittest.TestCase):
+    """What GitHub says of a real repository's security settings is in no stored answer."""
+
+    SETTINGS = {"secret_scanning": {"status": "disabled"}, "secret_scanning_push_protection": {"status": "disabled"}}
+
+    def setUp(self) -> None:
+        Original.calls = []
+        self.work = pathlib.Path(tempfile.mkdtemp(prefix="maelys-recorder.")).resolve()
+        self.addCleanup(shutil.rmtree, self.work, True)
+        self.cache = self.work / "cache.json"
+        # As GitHub answers an administrator, and as a cache written before
+        # this rule holds it: the member at the top of a repository document,
+        # and once more in a document that embeds one.
+        self.body = {"visibility": "public", "private": False, "default_branch": "main",
+                     "security_and_analysis": self.SETTINGS,
+                     "parent": {"name": "embedded", "security_and_analysis": self.SETTINGS},
+                     "topics": [{"security_and_analysis": self.SETTINGS, "kept": True}]}
+
+    def cached(self) -> None:
+        self.cache.write_text(json.dumps({ENDPOINT: {"state": "ok", "body": self.body, "provenance": {
+            "kind": "live", "method": "GET", "endpoint": ENDPOINT, "recordedAt": "2026-09-16T00:00:00+00:00"}}}),
+            encoding="utf-8")
+
+    def assert_withheld(self, value) -> None:
+        self.assertNotIn(RECORDER.WITHHELD[0], json.dumps(value))
+
+    def test_an_answer_taken_from_the_cache_loses_the_member_and_nothing_else(self) -> None:
+        self.cached()
+        before = self.cache.read_bytes()
+        responses = RECORDER.Responses(Original(), self.cache, offline=True)
+        _, answer = responses.read(ENDPOINT, "live")
+        self.assertEqual(answer["body"], {"visibility": "public", "private": False, "default_branch": "main",
+                                          "parent": {"name": "embedded"}, "topics": [{"kept": True}]})
+        # The answer derived from it for a constructed branch has none either.
+        key, derived = responses.read(ENDPOINT, "private")
+        self.assertEqual((key, derived["body"]["visibility"]), ("private:" + ENDPOINT, "private"))
+        self.assert_withheld(responses.used)
+        self.assertEqual(sorted(responses.used), sorted([ENDPOINT, "private:" + ENDPOINT]))
+        # Nothing was read live, so the cache is the file it was.
+        self.assertEqual((self.cache.read_bytes(), Original.calls), (before, []))
+
+    def test_an_answer_read_live_is_stored_and_cached_without_it(self) -> None:
+        body = self.body
+
+        class Administrator(Original):
+            def read(self, path):
+                Original.calls.append(("read", path))
+                return "ok", json.loads(json.dumps(body))
+
+        responses = RECORDER.Responses(Administrator(), self.cache)
+        _, answer = responses.read(ENDPOINT, "live")
+        self.assertEqual(Original.calls, [("read", ENDPOINT)])
+        self.assertEqual(answer["body"]["default_branch"], "main")
+        for stored in (answer, responses.used, json.loads(self.cache.read_text(encoding="utf-8"))):
+            self.assert_withheld(stored)
+
+    def test_what_is_stored_makes_preflight_say_nothing_of_the_settings(self) -> None:
+        """Both ends: the answer as GitHub gave it makes the note, the answer as stored makes none."""
+        self.cached()
+        _, stored = RECORDER.Responses(Original(), self.cache, offline=True).read(ENDPOINT, "live")
+        github = RECORDER.replay.load_source(ROOT).github
+        repository = ENDPOINT[len("repos/"):]
+        told = github.secret_scanning(repository, github.Repository("ok", self.body))
+        self.assertEqual([status for status, _ in told], ["note"])
+        self.assertIn("secret scanning and push protection are off", told[0][1])
+        self.assertEqual(github.secret_scanning(repository, github.Repository(stored["state"], stored["body"])), [])
+        # And the stored answer is still a public repository's, read as one.
+        self.assertEqual(github.Repository(stored["state"], stored["body"]).visibility, "public")
+
+    def test_only_what_is_named_is_withheld(self) -> None:
+        self.assertEqual(RECORDER.WITHHELD, ("security_and_analysis",))
+        for value in (None, [], "text", 3, {"security": 1, "analysis": {"security_and_analysis_": 2}}):
+            self.assertEqual(RECORDER.withheld(value), value)
+
+
 class RecordingHostTest(unittest.TestCase):
     """What a recorded program may ask the machine, and what is answered in its place."""
 
