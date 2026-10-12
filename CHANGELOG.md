@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- **The cost test of the privacy guard takes the least of three
+  readings.** It compared two single measurements of a few hundredths of
+  a second, and failed again on a shared runner, on the release commit of
+  0.64.2, at 0.224 s against a bound of 0.205 s: the reading had not
+  changed, and the same commit passed when its job was run again, as the
+  commit of 0.64.0 had. Both bounds stay as they are; each measurement is
+  now the least of three.
+- **Impact.** [asks: nothing] [writes: nothing] Nothing for a product to
+  do: a test of this repository, and no code a product runs.
+
 ## 0.64.2 — 2026-10-12
 
 What 0.64.1 named and left: three readings, two writes of `protect`, and
