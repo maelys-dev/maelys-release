@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.64.3 — 2026-10-12
 
 - **`fuzz` and `sanitizers` take the carried bundles, as the legs of
   `check` do.** `check-product.yml` handed `carried_dependencies` to the
