@@ -29607,8 +29607,18 @@
       "kind": "live",
       "method": "GET",
       "endpoint": "repos/maelys-dev/agent-cli-spec/branches/main/protection",
-      "recordedAt": "2026-09-17T10:43:24.156547+00:00"
-    }
+      "recordedAt": "2026-09-17T10:43:24.156547+00:00",
+      "message": {
+        "kind": "live",
+        "method": "GET",
+        "endpoint": "repos/maelys-dev/agent-cli-spec/branches/main/protection",
+        "recordedAt": "2026-10-11",
+        "changes": [
+          "the words of this 404 were not kept when it was first read; a second reading of the same endpoint supplies them, and the first reading keeps its date"
+        ]
+      }
+    },
+    "message": "Branch not protected"
   },
   "repos/maelys-dev/agent-cli-spec/rules/branches/main": {
     "state": "ok",
@@ -29718,9 +29728,11 @@
       "kind": "derived",
       "from": "repos/maelys-dev/maelys-system/branches/main/protection",
       "changes": [
-        "classic protection is absent"
+        "classic protection is absent",
+        "its 404 says 'Branch not protected', GitHub's words for that state"
       ]
-    }
+    },
+    "message": "Branch not protected"
   },
   "open:repos/maelys-dev/maelys-system/rules/branches/main": {
     "state": "ok",
@@ -40143,9 +40155,11 @@
       "kind": "derived",
       "from": "repos/maelys-dev/maelys-system/branches/main/protection",
       "changes": [
-        "classic protection is absent"
+        "classic protection is absent",
+        "its 404 says 'Branch not protected', GitHub's words for that state"
       ]
-    }
+    },
+    "message": "Branch not protected"
   },
   "private-open:repos/maelys-dev/maelys-system/rules/branches/main": {
     "state": "ok",

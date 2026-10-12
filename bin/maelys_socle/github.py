@@ -36,6 +36,12 @@ TAG_WORKFLOWS = ("release", "tap", "channel")
 WITHDRAWN_FILE = "WITHDRAWN"
 
 
+# What GitHub answers, with its 404, for a branch that carries no classic
+# protection. The same status answers a token that may not read protections
+# (`Not Found`) and a branch that does not exist (`Branch not found`).
+NOT_PROTECTED = "Branch not protected"
+
+
 def github_read(path: str) -> tuple[str, object]:
     """(state, body) of one GET through gh, the state saying why there is no body.
 
@@ -48,6 +54,10 @@ def github_read(path: str) -> tuple[str, object]:
     that their default branch was unprotected, at the very moment GitHub was
     refusing to say — measured while the organization was locked for an
     Actions billing overage, which rebates it to the free plan's abilities.
+
+    `absent` is every 404, and a 404 is not one fact: the state keeps the
+    words GitHub answered it in (`host.Absent`), for the reader that writes
+    on an absence and must know which one it was told.
     """
     return host.HOST.read(path)
 
@@ -204,6 +214,17 @@ class Protection:
     @property
     def rule_contexts(self) -> list[str]:
         return rule_contexts(self.rules) if self.ruled_state == "ok" else []
+
+    @property
+    def unprotected(self) -> bool:
+        """Whether GitHub said, in those words, that the branch carries no classic protection.
+
+        The 404 of the classic endpoint is read as an absence by every
+        reader that reports, and each still receives it. `protect` creates
+        a protection on that absence, so it asks for the words: a 404 that
+        says anything else, or nothing, has not said the branch is open.
+        """
+        return self.classic_state == "absent" and getattr(self.classic_state, "message", "") == NOT_PROTECTED
 
     @property
     def unread(self) -> bool:

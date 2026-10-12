@@ -1258,9 +1258,10 @@ had to learn that three times in three different commands: `preflight` in
 told a ruleset-protected repository its branch was not protected while
 proposing to add contexts the ruleset already required. GitHub applies the
 two in union; a reader that sees one of them sees a different repository
-from the one it is describing. And `protect --apply` writes the classic
-protection alone, so on a branch whose ruleset carries the socle's contexts
-it refuses rather than leaving two mechanisms to keep true.
+from the one it is describing. And `protect --apply` writes one mechanism:
+on a branch whose ruleset carries the socle's contexts it writes that
+ruleset, rather than a classic protection beside it and two mechanisms to
+keep true.
 
 `preflight` also reports an unprotected default branch, as a note — and
 tells that apart from a branch whose protection it **cannot read**. Two
@@ -2961,8 +2962,9 @@ that is not one:
   created a classic protection beside it. Refused: this command does not
   create a classic protection beside a ruleset, and does not choose which
   ruleset should require the socle's checks. Once one requires any of them,
-  `--apply` keeps the checks of the first ruleset that requires checks: it
-  writes a ruleset of the repository and refuses one of the organisation.
+  `--apply` writes the checks of that ruleset and of no other: it writes a
+  ruleset of the repository, refuses one of the organisation, and refuses
+  where more than one ruleset requires some of them.
   The `ruleset` line of the plan says `--apply writes this ruleset` of a
   ruleset that carries a check of the socle, and of no other.
 - **An answer that is no protection, and a default branch GitHub did not
@@ -2976,6 +2978,82 @@ that is not one:
 
 `--without-legs` in the first two states is told what it always was where
 no protection exists: nothing requires the legs, adopt first.
+
+**A 404 is an absence only where GitHub says so.** "Nothing protects the
+branch" is two readings, and one answer alone establishes each. For the
+classic protection, a 404 that says `Branch not protected`: GitHub answers
+404 as well to a token that may not read protections — `Not Found` — and
+for a branch that does not exist — `Branch not found` — and every 404 was
+read as the first. For the rules of the branch, `[]`: a 404 there, whatever
+it says, is not a reading of them, and was read as no ruleset. Either is
+now `UNREAD`, and nothing is written. Of such a 404 for the protection the
+plan notes what was read — the status, the words GitHub answered it in, and
+that nothing is concluded from them — and keeps the note of a refusal to
+say for a 403 or a timeout, which GitHub did not answer.
+This is the reading of `protect` alone, the one command that writes on that
+absence: `preflight` and the guard of `adopt` report on a 404 and read it
+as they did. And where the rules are unread, whatever kept them — a 502, a
+timeout, a 404, a body that is not a list — the plan says neither that the
+branch is `NOT protected`, nor what it would be created with, nor that a
+ruleset protects it: it says what was not read, and nothing more of that
+half.
+
+**With several rulesets, the one that carries the socle's checks is the
+one written.** `--apply` used to write the first rule of the branch that
+required checks, whichever ruleset it came from: with `lint` required by
+one ruleset and the three legs by the next, it gave the legs to the first,
+read back the rules of both, and ended in an error on that run and on every
+one after it — which is where the refusal above led an owner who required
+a check of the socle in a second ruleset.
+
+- **Exactly one ruleset carries a check of the socle**: it is the one
+  written, wherever GitHub lists it — a ruleset of the repository; one of
+  the organisation is refused, as before. A ruleset that carries none of
+  the socle's checks is never written, whatever its position.
+- **Beside other rulesets, the one written is given what is its own
+  business and no more**: the checks it holds that the proposal keeps, and
+  the socle's. Given the whole proposal, as one ruleset is, it received
+  `lint` from the ruleset that requires it, bound to the app of its own
+  checks, and then waited on every pull request for a `lint` that app never
+  reports. A check another ruleset or the classic protection requires is
+  not this write's to add; the plan says `ok` of it, since the branch
+  requires it, and `add` of what the write adds. A check pull requests
+  produce and nothing requires yet is added to no ruleset — which of them
+  should require it is read nowhere — and a `note` says it is left out.
+- **Narrowing is judged on what is written.** Of several rulesets one
+  mechanism is written at most: the ruleset that alone carries the socle's
+  checks, or the classic protection where none does. `DROP`, the refusal
+  without `--allow-narrow` and the path that flag opens are said of a check
+  that mechanism holds and the plan leaves out. A check nothing produces
+  that a mechanism this run does not write requires is not one a write
+  stops requiring: it is `STALE … required by a ruleset this command does
+  not write`, no write is refused for it, and for as long as it is required
+  the exit is 2 — in the plan and under `--apply`, whatever the flags, and
+  also when nothing is sent. `--without-legs` takes the legs from the
+  ruleset written and gives it nothing. With one ruleset beside a classic
+  protection, the two are still judged as one union.
+- **More than one carries some**: refused, `REFUSED` and exit 2, in the
+  plan as under `--apply` and in the same words, whatever the flags, and
+  nothing is written. This command does not choose between rulesets that
+  each require some of the socle's checks; which of them should carry
+  them is the repository's to settle, or the organisation's. The rules of
+  the branch are what refuses, so it is said beside any other reading that
+  is not there — the classic protection, the check runs — and not instead
+  of it; only a default branch GitHub did not name leaves it unsaid, its
+  rules being a reading of a guess.
+- **None does**: as above — the classic protection is what `--apply`
+  writes where one requires checks, and no classic protection is created
+  beside a ruleset.
+- **The read-back judges what was written.** Every rule of the branch,
+  from every ruleset, must read back as it was apart from its required
+  checks, and the checks of the ruleset written as they were sent: those
+  of another ruleset are no longer counted with them. What another ruleset
+  requires of its own is neither written nor compared.
+- **`ruleset` in the result, and the `ruleset` line of the plan, are said
+  of the rulesets that carry a check of the socle**: what the one
+  `--apply` writes requires, or what those it does not choose between
+  require; what every ruleset requires where none carries any. `required`
+  and `before` keep the checks of them all.
 
 **What `protect` writes of the release environment.** For a product the
 socle releases — one whose `release.yml` is the generated one — the plan
@@ -3120,9 +3198,9 @@ gh api -X POST repos/OWNER/REPO/environments/release/deployment-branch-policies 
   integration bound to it, compared the same way in every rule that
   requires checks, on two readings that must both hold: the ruleset's own,
   the one the body is made from, which only `--apply` takes; and the rules
-  of the branch, where every rule that requires checks, whichever ruleset
-  it comes from, must name these contexts and no other — what the read-back
-  after a write requires. Where the two disagree the write is sent and read
+  of the branch that come from that ruleset, where every rule that requires
+  checks must name these contexts and no other — what the read-back after
+  a write requires. Where the two disagree the write is sent and read
   back as before, and fails as before when the rules of the branch do not
   show it: a ruleset that holds its checks while the branch does not is
   not passed. Equal, nothing is sent, nothing is read
@@ -3143,8 +3221,8 @@ gh api -X POST repos/OWNER/REPO/environments/release/deployment-branch-policies 
   readings can differ: it names the write, without its body, and where the
   rules of the branch already list the checks a `note` says that the
   ruleset itself is read under `--apply`, which sends nothing when it lists
-  them too and empties `writes`. No note where the rules of the branch do
-  not list them, another ruleset's among them: `--apply` writes there.
+  them too and empties `writes`. No note where the rules of the branch that
+  come from it do not list them: `--apply` writes there.
 - **The app bound to each context of a classic protection is neither
   compared nor verified.** The body names contexts alone, and GitHub's
   reference says a context sent that way may be bound to the app that

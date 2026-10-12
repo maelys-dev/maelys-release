@@ -1,5 +1,62 @@
 # Changelog
 
+## Unreleased
+
+What 0.64.1 named and left: three readings, two writes of `protect`, and
+the trial of `protect --apply` on a repository, which 0.64.1 had not made.
+
+- **`protect` takes a 404 for an absence only where GitHub says so.** A
+  404 on the protection of a branch was read as "no protection" whatever
+  it said, and a 404 on the rules of a branch as "no ruleset": the whole
+  protection could be put on a reading that was not one. Read on GitHub:
+  a branch without protection answers `Branch not protected`, a branch
+  that does not exist `Branch not found`, a repository that is not there
+  or not the reader's to see `Not Found`, and the rules of a branch
+  answer `[]` where none applies, never a 404. Only the first is an
+  absence; every other 404 on the protection, and any on the rules, is
+  unread, as a 403 is, and nothing is written. Where the rules are unread
+  the plan no longer says the branch is not protected. `preflight` and
+  the guard of `adopt` read a 404 as they did. The recorded API reference
+  keeps the words of a 404, which it had not: without them it could not
+  say which of these states it held.
+- **Of several rulesets, `protect` writes the one that carries the
+  socle's checks.** It wrote the first that required any check, whichever
+  carried the socle's, and then failed its own read-back on every run. It
+  writes the one ruleset that carries a check of the socle, wherever it
+  is listed; where more than one does, it refuses and writes none. The
+  ruleset written receives its own checks and the socle's: a check that
+  another ruleset requires is not added to it, and is never said to be
+  dropped by a write that cannot reach it; one that nothing produces
+  keeps the exit at 2, in the plan as under `--apply`. A repository with
+  one ruleset, or none, is written as it was, the reading of a ruleset
+  beside a classic protection included.
+- **A job line that ends in a comment is a job line.** `  check: # the
+  shared checks`, inside the `jobs:` block, is read by every reader as
+  the same line without its comment, and the comment is never read as a
+  line of the job. `protect` computed the socle's checks under the job
+  above such a line; `adopt` ran its `legs` job through one. Nothing else
+  is read that was not: on 17 673 workflows without such a line, no
+  answer and no rewrite differs. What a reader makes of a plain job line
+  it now makes of a commented one, its misreadings included. `rehearse`
+  keeps its own reader.
+- **`migrate`, `cut` and `render` end in words on bytes that are not
+  UTF-8.** `migrate` and `cut` read lists of names from git apart from
+  the listing `check` makes, and ended on a decoding error where
+  `core.quotePath` is off; they end on the refusal of the tracked names.
+  `render` emptied its output and then failed on a value that is not
+  UTF-8; it encodes first and writes nothing.
+- **`protect --apply`, tried on a repository.** With 0.64.1, on a
+  repository protected by a classic protection of five required checks:
+  a run that sends nothing; a narrowing, one PATCH of the required
+  checks; the widening back, one PATCH; a run that sends nothing. The
+  protection read before and after is the same, the app bound to each
+  check included: a PATCH of the same names kept every binding.
+- **Impact.** [asks: nothing] [writes: protect, adopt] Nothing for a
+  product to do. `protect` refuses where it wrote on a 404 that did not
+  say the branch is unprotected, and where several rulesets each carry
+  checks of the socle; `adopt` ends its `legs` job at a job line that
+  carries a comment. No managed text and no workflow moves.
+
 ## 0.64.1 — 2026-10-11
 
 Five corrections found by reading 0.64.0 again, each reproduced before it

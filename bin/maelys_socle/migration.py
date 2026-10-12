@@ -18,7 +18,7 @@ from .context import Context
 from .declarations import Declarations
 from .github import destination_is_public
 from .host import git, run
-from .project import declared_mechanism, engaged_documents, project_of
+from .project import names_git_gave, declared_mechanism, engaged_documents, project_of
 from .texts import is_generated, names_documentation
 from .writes import confirm_ref
 
@@ -54,7 +54,13 @@ def read_prose_records(source: str) -> list[dict]:
 
 def referencing_files(project: pathlib.Path, relative: str) -> list[str]:
     """Files of the product that still name this document, which the move breaks."""
-    completed = run(["git", "grep", "-l", "--fixed-strings", "--", relative], cwd=project)
+    # git writes a name as the repository holds it where core.quotePath is
+    # off, and one that is not UTF-8 ended `migrate` here on a decoding
+    # error, as it did at the two readings of describe_the_clone.
+    try:
+        completed = run(["git", "grep", "-l", "--fixed-strings", "--", relative], cwd=project)
+    except UnicodeDecodeError as error:
+        raise names_git_gave(error) from None
     return [line for line in completed.stdout.splitlines() if line and line != relative]
 
 
@@ -306,14 +312,21 @@ def describe_the_clone(project: pathlib.Path, product: str, data: dict) -> None:
     and a line 2 that name two commits, which `dependencies` refuses in the
     repository that receives it.
     """
-    changed = [line[3:] for line in run(["git", "status", "--porcelain", "--untracked-files=no"],
-                                        cwd=project).stdout.splitlines() if line.strip()]
+    try:
+        changed = [line[3:] for line in run(["git", "status", "--porcelain", "--untracked-files=no"],
+                                            cwd=project).stdout.splitlines() if line.strip()]
+    except UnicodeDecodeError as error:
+        raise names_git_gave(error, skip=3) from None
     if changed:
         raise Failure("PRECONDITION_FAILED",
                       f"{project} has uncommitted changes to {', '.join(changed)}: the migration clones HEAD,"
                       " so it would move a prose and state a version that are not the ones in this tree.",
                       "Commit or stash them, then run migrate again.")
-    committed = set(git("ls-tree", "-r", "--name-only", "HEAD", "--", "docs", cwd=project, check=False).splitlines())
+    try:
+        committed = set(git("ls-tree", "-r", "--name-only", "HEAD", "--", "docs", cwd=project,
+                            check=False).splitlines())
+    except UnicodeDecodeError as error:
+        raise names_git_gave(error) from None
     absent = [entry["path"] for entry in data["moving"] if entry["path"] not in committed]
     if absent:
         raise Failure("PRECONDITION_FAILED",

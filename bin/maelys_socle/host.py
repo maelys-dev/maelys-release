@@ -18,6 +18,24 @@ from maelys_cli import Failure
 
 HTTP_STATUS = re.compile(r"\(HTTP (\d{3})\)")
 
+
+class Absent(str):
+    """The state `absent`, with the words GitHub answered its 404 in.
+
+    One status for several facts: `Branch not protected` for a branch that
+    has no protection, `Not Found` for a token that may not read one,
+    `Branch not found` for a branch that does not exist. It compares as the
+    state it always was, so every reader of an absence receives what it
+    did; the one that must tell those facts apart reads `message`, and a
+    state that carries none has established none of them.
+    """
+
+    def __new__(cls, message: str = "") -> "Absent":
+        state = super().__new__(cls, "absent")
+        state.message = message
+        return state
+
+
 # A runner says that it is one, and with these words: a variable set to
 # `false` or `0` on an author's machine is not a runner. Nothing in the
 # checkout tells either: a job started by a push checks its branch out by
@@ -234,7 +252,11 @@ class Host:
             except json.JSONDecodeError:
                 return "unreadable", None
         status = HTTP_STATUS.search(completed.stderr)
-        return ("absent" if status and status.group(1) == "404" else "unreadable"), None
+        if not status or status.group(1) != "404":
+            return "unreadable", None
+        # gh prints GitHub's message before the status, on the same line.
+        said = completed.stderr[:status.start()].rsplit("\n", 1)[-1]
+        return Absent(said.removeprefix("gh:").strip()), None
 
     def write(self, method: str, endpoint: str, payload: pathlib.Path,
               cwd: pathlib.Path | None = None) -> subprocess.CompletedProcess:
