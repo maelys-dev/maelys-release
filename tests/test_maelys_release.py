@@ -13,6 +13,7 @@ import importlib.util
 import inspect
 import ast
 import atexit
+import copy
 import io
 import base64
 import http.server
@@ -24,6 +25,7 @@ import shutil
 import signal
 import socket
 import subprocess
+import sys
 import tempfile
 import textwrap
 import threading
@@ -133,6 +135,18 @@ def workflow_project(caller="check", fuzz=False):
         yield project
 
 
+def answered_404(message):
+    """What the real `Host.read` makes of a 404 that gh reports with MESSAGE."""
+    said = subprocess.CompletedProcess([], 1, "", f"gh: {message} (HTTP 404)\n")
+    return MODULE.Host.read(FakeHost(run=lambda command, cwd=None, env=None: said), "repos/o/r/any")
+
+
+# What GitHub answers for a branch that carries no classic protection: a 404
+# that says so. `protect` takes no other 404 for that absence, and a fixture
+# that means an open branch says it as GitHub does.
+UNPROTECTED = answered_404("Branch not protected")
+
+
 def protection_host(classic, *, rules=("ok", []), seen=(), open_pulls=(), write=None, read=None):
     """API inputs for real repository, observation and withdrawal readers."""
     answers = {
@@ -155,7 +169,9 @@ def protection_host(classic, *, rules=("ok", []), seen=(), open_pulls=(), write=
             return read(path)
         if path not in answers:
             raise AssertionError(f"undeclared GitHub read: {path}")
-        return json.loads(json.dumps(answers[path]))
+        # The state as it was given: a 404 carries what GitHub said with it.
+        state, body = answers[path]
+        return state, json.loads(json.dumps(body))
     return FakeHost(read=answer, write=write)
 
 
@@ -3035,8 +3051,8 @@ class WorkflowReadingTest(unittest.TestCase):
         self.assertEqual(MODULE.block_list(pushed, "branches"), [])
 
     def test_jobs_and_runners_of_one_file(self) -> None:
-        self.assertEqual(MODULE.JOB_ID.findall(MODULE.top_block(self.BLOCK, "jobs")),
-                         ["check", "package"])
+        named = MODULE.job_names(MODULE.top_block(self.BLOCK, "jobs").split("\n"), True)
+        self.assertEqual([job for job in named if job], ["check", "package"])
         self.assertEqual(MODULE.file_runners("ci.yml", self.BLOCK)[0], ["macos-15", "ubuntu-26.04"])
 
     def test_the_table_is_turned_for_the_reader(self) -> None:
@@ -3122,6 +3138,46 @@ class GitHubReadingTest(unittest.TestCase):
         self.assertEqual(self.read(self.Completed(1, "", "dial tcp: timeout")), ("unreadable", None))
         self.assertEqual(self.read(self.Completed(0, "not json")), ("unreadable", None))
         self.assertEqual(self.read(self.Completed(0, "{}"), gh=False), ("no-gh", None))
+
+    def test_a_404_keeps_the_words_github_answered_it_in(self) -> None:
+        """One status for several facts: a branch without protection, a
+        token that may not read one, a branch that does not exist. Every
+        reader of an absence receives the state it did; the words are
+        beside it, for the one that writes on an absence."""
+        for stderr, message in (("gh: Branch not protected (HTTP 404)\n", "Branch not protected"),
+                                ("gh: Not Found (HTTP 404)", "Not Found"),
+                                ("gh: Branch not found (HTTP 404)\n", "Branch not found"),
+                                ("warning: a newer gh exists\ngh: Branch not protected (HTTP 404)\ngh: more\n",
+                                 "Branch not protected"),
+                                ("(HTTP 404)", "")):
+            with self.subTest(stderr=stderr):
+                state, body = self.read(self.Completed(1, '{"message": "another"}', stderr))
+                self.assertEqual((state, body), ("absent", None))
+                self.assertIn(state, ("ok", "absent"))
+                self.assertEqual((json.dumps(state), f"{state}", {"absent": 1}[state]), ('"absent"', "absent", 1))
+                self.assertEqual(state.message, message)
+                self.assertEqual(copy.deepcopy((state, body))[0].message, message)
+        # A status quoted before the 404 is the one read, as it was: no absence, and no words.
+        state, _ = self.read(self.Completed(1, "", "gh: a proxy said (HTTP 502) then Not Found (HTTP 404)"))
+        self.assertEqual((state, hasattr(state, "message")), ("unreadable", False))
+
+    def test_every_other_reader_of_a_protection_takes_any_404_for_an_absence_as_it_did(self) -> None:
+        """`preflight`, the guard of `adopt` and the selector report on a
+        404 and write nothing on it: what they say of one is unchanged,
+        whatever GitHub said with it."""
+        for message in ("Branch not protected", "Not Found", "Branch not found"):
+            with self.subTest(message=message):
+                gone = answered_404(message)
+                with workflow_project() as project, using_host(protection_host(gone, rules=gone)):
+                    found = MODULE.github.read_protection("o/r", "main")
+                    self.assertEqual((found.classic_state, found.ruled_state, found.unread),
+                                     ("absent", "absent", False))
+                    self.assertEqual(MODULE.required_contexts(project), [])
+                    self.assertIs(MODULE.classic_protection(project), False)
+                    self.assertEqual(MODULE.branch_protection("o/r", "main", found.classic_state, found.ruled_state,
+                                                              found.rules)[0], "note")
+                    self.assertIn("is not protected", MODULE.branch_protection(
+                        "o/r", "main", found.classic_state, found.ruled_state, found.rules)[1])
 
     def test_github_api_still_answers_a_body_or_nothing(self) -> None:
         """The readers that act the same way on every absence keep their shape;
@@ -5379,7 +5435,7 @@ class ProtectByRulesetTest(unittest.TestCase):
         return report
 
     def test_a_ruleset_is_a_protection(self) -> None:
-        report = self.run_protect(("absent", None), ("ok", self.RULESET))
+        report = self.run_protect(UNPROTECTED, ("ok", self.RULESET))
         self.assertTrue(report["protected"])
         self.assertEqual(report["protectedBy"], ["a ruleset"])
         self.assertEqual(report["ruleset"], ["check / check (macos)"])
@@ -5388,7 +5444,7 @@ class ProtectByRulesetTest(unittest.TestCase):
 
     def test_apply_writes_the_ruleset_and_never_a_second_mechanism(self) -> None:
         """The fake API applies the ruleset and serves the verification read."""
-        report = self.run_protect(("absent", None), ("ok", self.RULESET), apply=True)
+        report = self.run_protect(UNPROTECTED, ("ok", self.RULESET), apply=True)
         self.assertTrue(report["applied"])
 
     def test_a_ruleset_that_requires_nothing_of_ours_does_not_refuse(self) -> None:
@@ -5396,7 +5452,7 @@ class ProtectByRulesetTest(unittest.TestCase):
         nothing the socle produces: the rename cannot reach it."""
         theirs = [{"type": "required_status_checks",
                    "parameters": {"required_status_checks": [{"context": "ci"}]}}]
-        report = self.run_protect(("absent", None), ("ok", theirs), apply=False)
+        report = self.run_protect(UNPROTECTED, ("ok", theirs), apply=False)
         self.assertEqual(report["ruleset"], ["ci"])
         self.assertTrue(report["protected"])
 
@@ -5825,7 +5881,7 @@ class LegRenameTest(unittest.TestCase):
             sent["body"] = body
             return subprocess.CompletedProcess([], 0, "", "")
         with using_host(FakeHost(read=read, write=write)):
-            return MODULE.write_ruleset("o/r", "main", applied, contexts), sent
+            return MODULE.write_ruleset("o/r", "main", applied, MODULE.protect.carrying_rules(applied), contexts), sent
 
     def test_the_ruleset_is_written_whole_with_only_its_checks_changed(self) -> None:
         # One context more than it holds: a ruleset that lists them all
@@ -6101,7 +6157,7 @@ class LegAliasTest(unittest.TestCase):
         self.assertIn("create   required_linear_history=false", MODULE.text_protect(absent))
 
     def protect_with_fake(self, fake, seen, apply=True):
-        host = protection_host(fake.read("") if fake else ("absent", None),
+        host = protection_host(fake.read("") if fake else UNPROTECTED,
                                seen=[*seen, *ALL_LEGS], write=fake.write if fake and apply else None)
         original_read = host.reader
         host.reader = lambda path: fake.read(path) if fake and path.endswith("/protection") else original_read(path)
@@ -7698,6 +7754,73 @@ class TrackedNameNotUtf8Test(unittest.TestCase):
         self.assertTrue(data["valid"], data["violations"])
         self.assertEqual(data["privacy"]["files"]["unread"], [{"path": "(1 tracked name(s))", "reason": "undecodable"}])
         self.assertIn(counted, product.run("check", str(product.dir), "--history").stdout)
+
+    def test_migrate_and_cut_end_on_the_refusal_where_git_writes_the_name_as_it_is(self) -> None:
+        """Where core.quotePath is off, every answer that lists a file carries the name's own bytes.
+
+        `migrate` and `cut` read such answers apart from the listing `check`
+        makes, and ended on a decoding error there. Each ends on the refusal
+        of the tracked names, read from the answer git already gave.
+        """
+        product = self.repository()
+        product.write("docs/x.md", "# X\n")
+        product.git(product.dir, "add", "docs/x.md")
+        product.git(product.dir, "config", "core.quotePath", "false")
+        held = track_raw_name(product.dir, b"docs/caf\xe9.md", b"see docs/x.md\n")
+        product.git(product.dir, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "a name from another age")
+        said = ("This repository tracks a file whose name is not UTF-8: docs/caf\\xe9.md. The socle reads tracked"
+                " names as UTF-8, and says nothing of a repository until every name it tracks is one.")
+
+        def refused(call) -> None:
+            with self.assertRaises(MODULE.Failure) as failure:
+                call()
+            self.assertEqual((failure.exception.code, failure.exception.message, failure.exception.hint),
+                             ("PRECONDITION_FAILED", said, self.HINT))
+
+        moving = {"moving": [{"path": "docs/x.md"}]}
+        if held:
+            # The tree is clean: migrate reads what HEAD holds, and who names the document.
+            refused(lambda: MODULE.migration.describe_the_clone(product.dir, "maelys-fixture", moving))
+            refused(lambda: MODULE.referencing_files(product.dir, "docs/x.md"))
+            with open(os.fsencode(product.dir) + b"/docs/caf\xe9.md", "ab") as file:
+                file.write(b"more\n")
+        # The file is changed, or absent where the file system holds no such name.
+        refused(lambda: MODULE.migration.describe_the_clone(product.dir, "maelys-fixture", moving))
+        refused(lambda: MODULE.worktree_paths(product.dir))
+        # And an answer in which every name decodes is the answer it was:
+        # the name leaves the index, and the working tree where it holds it,
+        # since a file nothing tracks is listed there too.
+        product.git(product.dir, "rm", "-q", "--cached", "--", os.fsdecode(b"docs/caf\xe9.md"))
+        product.git(product.dir, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "renamed away")
+        if held:
+            os.remove(os.fsencode(product.dir) + b"/docs/caf\xe9.md")
+        product.write("docs/y.md", "# Y\n")
+        self.assertEqual(MODULE.worktree_paths(product.dir).get("docs/y.md"), "??")
+
+    def test_render_writes_nothing_of_a_value_that_is_not_utf_8(self) -> None:
+        """A value given as such bytes emptied the output and then failed to encode.
+
+        The text was written into a file already opened. It is encoded
+        first: the output keeps what it held, and the command says which
+        placeholder carries the value.
+        """
+        with tempfile.TemporaryDirectory() as directory:
+            template, output = pathlib.Path(directory, "t.in"), pathlib.Path(directory, "out.txt")
+            template.write_text("name @NAME@ of @KIND@\n", encoding="utf-8")
+            output.write_text("what it held\n", encoding="utf-8")
+            command = [sys.executable, str(ROOT / "bin" / "maelys-release"), "render", str(template), str(output)]
+            failed = subprocess.run([*command, b"NAME=caf\xe9", "KIND=x", "--format", "json"], capture_output=True)
+            self.assertEqual(failed.returncode, 1, failed.stderr)
+            self.assertNotIn(b"Traceback", failed.stderr)
+            error = json.loads(failed.stderr.decode("utf-8"))["error"]
+            self.assertEqual(error["code"], "VALIDATION_FAILED")
+            self.assertIn("The value given for NAME is not UTF-8", error["message"])
+            self.assertIn("nothing was written", error["message"])
+            self.assertEqual(output.read_text(encoding="utf-8"), "what it held\n")
+            # A value that is UTF-8 is written as it was, byte for byte.
+            done = subprocess.run([*command, "NAME=café", "KIND=x"], capture_output=True)
+            self.assertEqual(done.returncode, 0, done.stderr)
+            self.assertEqual(output.read_bytes(), "name café of x\n".encode("utf-8"))
 
     def test_no_managed_file_is_opened_before_every_one_of_them_encodes(self) -> None:
         """Where no rule lists the tracked files, the name reaches what `adopt` writes.

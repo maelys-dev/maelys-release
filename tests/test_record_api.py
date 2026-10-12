@@ -167,6 +167,137 @@ class ResponsesTest(unittest.TestCase):
         self.assertIn(ENDPOINT + "/branches", json.loads(self.cache.read_text(encoding="utf-8")))
 
 
+class WordsOfA404Test(unittest.TestCase):
+    """A 404 is stored with the words GitHub answered it in, and given back with them.
+
+    `protect` takes a 404 for an absence only where it says `Branch not
+    protected`. The recorder stored the state alone and the replay gave it
+    back alone: every recorded 404 on a protection replayed as an absence
+    that says nothing, and the reference stopped covering the open branch
+    and the repository a ruleset alone protects.
+    """
+
+    PROTECTION = ENDPOINT + "/branches/main/protection"
+    RULES = ENDPOINT + "/rules/branches/main"
+    RELEASE = ENDPOINT + "/environments/release"
+
+    def setUp(self) -> None:
+        Original.calls = []
+        self.work = pathlib.Path(tempfile.mkdtemp(prefix="maelys-recorder.")).resolve()
+        self.addCleanup(shutil.rmtree, self.work, True)
+        self.cache = self.work / "cache.json"
+        self.socle = RECORDER.replay.load_source(ROOT)
+
+    def github(self, answers):
+        """What stands behind the recorder, answering as the program's own reader does."""
+        socle = self.socle
+
+        class GitHub(Original):
+            def read(self, path):
+                Original.calls.append(("read", path))
+                state, body = answers[path]
+                return (socle.host.Absent(state[4:]) if state.startswith("404 ") else state), body
+
+        return GitHub()
+
+    def replayed(self, stored, key):
+        """One read of KEY through the replay host, from what a recording stored and a file kept."""
+        kept = self.work / "responses.json"
+        RECORDER.replay.write_json(kept, stored)
+        host = RECORDER.replay.replay_host(self.socle, [{"call": {"kind": "read", "path": "any"}, "response": key}],
+                                           RECORDER.replay.read_json(kept), self.work, ROOT)
+        return host.read("any")
+
+    def test_the_words_of_the_open_branch_are_the_program_s(self) -> None:
+        self.assertEqual(RECORDER.NOT_PROTECTED, self.socle.github.NOT_PROTECTED)
+
+    def test_the_words_survive_the_live_read_the_cache_the_store_and_the_replay(self) -> None:
+        for words in ("Branch not protected", "Not Found", "Branch not found"):
+            with self.subTest(words=words):
+                Original.calls = []
+                self.cache.unlink(missing_ok=True)
+                responses = RECORDER.Responses(self.github({self.PROTECTION: ("404 " + words, None)}), self.cache)
+                host = RECORDER.recording_host(self.socle, self.work, ROOT, responses, "live")
+                # What the recorded program is told: the state it always was, and the words beside it.
+                state, body = host.read(self.PROTECTION)
+                self.assertEqual((state, body, state.message), ("absent", None, words))
+                self.assertEqual(Original.calls, [("read", self.PROTECTION)])
+                # What is stored and cached: a plain state, and the words as a member of their own.
+                for stored in (responses.used, json.loads(self.cache.read_text(encoding="utf-8"))):
+                    answer = stored[self.PROTECTION]
+                    self.assertEqual((answer["state"], answer["message"], answer["provenance"]["kind"]),
+                                     ("absent", words, "live"))
+                    self.assertIs(type(answer["state"]), str)
+                # A second recording, offline: the cache answers, with the words.
+                again = RECORDER.Responses(Original(), self.cache, offline=True)
+                state, _ = RECORDER.recording_host(self.socle, self.work, ROOT, again, "live").read(self.PROTECTION)
+                self.assertEqual((state, state.message, again.used), ("absent", words, responses.used))
+                # And the replay of what was stored gives the program the same answer.
+                state, body = self.replayed(responses.used, self.PROTECTION)
+                self.assertEqual((state, body, state.message), ("absent", None, words))
+                unprotected = self.socle.github.Protection(state, body, "ok", []).unprotected
+                self.assertIs(unprotected, words == "Branch not protected")
+
+    def test_an_answer_stored_without_words_is_given_back_as_a_bare_absence(self) -> None:
+        """As every answer stored before the words were kept, and as a 404 that said nothing."""
+        stored = {self.PROTECTION: {"state": "absent", "body": None, "provenance": {
+            "kind": "live", "method": "GET", "endpoint": self.PROTECTION, "recordedAt": "2026-09-17T00:00:00+00:00"}}}
+        self.cache.write_text(json.dumps(stored), encoding="utf-8")
+        responses = RECORDER.Responses(Original(), self.cache, offline=True)
+        recorded = RECORDER.recording_host(self.socle, self.work, ROOT, responses, "live").read(self.PROTECTION)
+        for state, body in (recorded, self.replayed(stored, self.PROTECTION)):
+            self.assertEqual((state, body), ("absent", None))
+            self.assertIs(type(state), str)
+            self.assertIs(self.socle.github.Protection(state, body, "ok", []).unprotected, False)
+        self.assertNotIn("message", responses.used[self.PROTECTION])
+        # A 404 GitHub answered with no word is stored without one either.
+        self.cache.unlink()
+        wordless = RECORDER.Responses(self.github({self.PROTECTION: ("404 ", None)}), self.cache)
+        wordless.read(self.PROTECTION, "live")
+        self.assertNotIn("message", wordless.used[self.PROTECTION])
+        # And a module that knows no words is asked for none: an answer without them needs nothing of it.
+        bare = types.SimpleNamespace(Host=object)
+        self.assertEqual(RECORDER.replay.state_of(bare, stored[self.PROTECTION]), "absent")
+        self.assertEqual(RECORDER.replay.state_of(bare, {"state": "ok", "body": {}}), "ok")
+
+    def test_the_open_branch_is_derived_with_github_s_words_for_it_and_no_other_derivation_has_any(self) -> None:
+        held = {"required_status_checks": {"strict": False, "contexts": ["check"]}}
+        answers = {self.PROTECTION: ("ok", held), self.RULES: ("ok", [{"type": "deletion"}]),
+                   self.RELEASE: ("ok", {"name": "release"})}
+        for profile in ("open", "private-open"):
+            with self.subTest(profile=profile):
+                self.cache.unlink(missing_ok=True)
+                responses = RECORDER.Responses(self.github(answers), self.cache)
+                key, answer = responses.read(self.PROTECTION, profile)
+                self.assertEqual(key, f"{profile}:{self.PROTECTION}")
+                self.assertEqual((answer["state"], answer["body"], answer["message"]),
+                                 ("absent", None, "Branch not protected"))
+                self.assertEqual(answer["provenance"], {"kind": "derived", "from": self.PROTECTION, "changes": [
+                    "classic protection is absent",
+                    "its 404 says 'Branch not protected', GitHub's words for that state"]})
+                state, _ = RECORDER.recording_host(self.socle, self.work, ROOT, responses, profile).read(self.PROTECTION)
+                self.assertIs(self.socle.github.Protection(state, None, "ok", []).unprotected, True)
+                self.assertIs(self.socle.github.Protection(*self.replayed(responses.used, key), "ok", []).unprotected,
+                              True)
+                # The answer it was derived from is stored as it was read.
+                self.assertEqual(responses.used[self.PROTECTION]["state"], "ok")
+                self.assertNotIn("message", responses.used[self.PROTECTION])
+                self.assertNotIn("message", responses.read(self.RULES, profile)[1])
+        # An environment that is derived absent says nothing: no caller reads the words of that 404.
+        self.cache.unlink()
+        responses = RECORDER.Responses(self.github(answers), self.cache)
+        key, answer = responses.read(self.RELEASE, "missing-environment")
+        self.assertEqual((answer["state"], "message" in answer), ("absent", False))
+        self.assertIs(type(self.replayed(responses.used, key)[0]), str)
+        # And a 404 derived into another state does not keep the words of the reading it came from.
+        self.cache.unlink()
+        responses = RECORDER.Responses(self.github({self.PROTECTION: ("404 Branch not protected", None)}), self.cache)
+        key, answer = responses.read(self.PROTECTION, "unreadable")
+        self.assertEqual((answer["state"], "message" in answer), ("unreadable", False))
+        self.assertEqual(responses.used[self.PROTECTION]["message"], "Branch not protected")
+        self.assertEqual(self.replayed(responses.used, key), ("unreadable", None))
+
+
 class WithheldTest(unittest.TestCase):
     """What GitHub says of a real repository's security settings is in no stored answer."""
 

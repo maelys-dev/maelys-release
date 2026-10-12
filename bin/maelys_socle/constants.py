@@ -230,9 +230,18 @@ WORKFLOW_EVENTS = ("push", "pull_request", "pull_request_target", "workflow_disp
                    "workflow_call", "schedule", "release", "merge_group", "issue_comment",
                    "repository_dispatch")
 
-JOB_ID = re.compile(r"^  ([A-Za-z0-9_-]+):\s*$", re.M)
-
+# A job line, for `job_names` of workflows.py and for nothing else: the
+# readers of one ask there, but `shared_ci_call` of rehearse.py, which reads
+# the call exactly or not at all with a reader of its own. `  name:` alone is
+# read wherever it stands, as it always was. Followed by a comment it is read
+# inside the `jobs:` block only, since `env:` and `on:` hold keys at that
+# depth too, and a file whose variable or event carries a comment must keep
+# the answers it had.
 CI_JOB = re.compile(r"^  ([A-Za-z0-9_-]+):\s*$")
+
+CI_JOB_COMMENTED = re.compile(r"^  ([A-Za-z0-9_-]+):[ \t]+#.*$")
+
+JOBS_KEY = re.compile(r"^jobs:(?:\s*|[ \t]+#.*)$")
 
 # What the socle's own sanitizers job builds by default: AddressSanitizer and
 # UndefinedBehaviorSanitizer, on Linux. A product job building those on Linux

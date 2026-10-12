@@ -39,7 +39,7 @@ from maelys_socle.constants import (
     CLI_DECLARATIONS, CLI_GENERATOR, CLI_REFERENCE, CONVENTION_MANAGED, CONVENTION_SEEDED,
     DECLARATION_FILE, DOCUMENTS_REPOSITORY, DEFAULT_IMAGE, DEFAULT_TAP, END, EXPRESSION, PROSE_SUFFIXES,
     FORMER_DECLARATION_FILE, FUZZ_DIRECTORIES, FUZZ_TARGET, GENERATED_HEAD_LINES,
-    GENERATED_MARK, GENERATED_REFUSAL, JOB_ID, LABEL, LEGACY_CLI_REFERENCES, LEGS_JOB,
+    GENERATED_MARK, GENERATED_REFUSAL, LABEL, LEGACY_CLI_REFERENCES, LEGS_JOB,
     LEGS_USES, MANAGED, MATRIX_REFERENCE, MECHANISMS, PIN_SPELLINGS, PLATFORMS, PRODUCT,
     PROGRAM, PUBLISHED_DOWNLOAD, README_LINK, RELEASE_MANAGED, RELEASE_USES, RUNNER_INPUTS,
     RUNS_ON, SANITIZING, SOCLE_CHANNEL_KINDS, SOCLE_COMMIT_VERIFICATIONS, SOCLE_GATES,
@@ -56,8 +56,8 @@ from maelys_socle.texts import (
     touches, unfenced, verified_by,
 )
 from maelys_socle.workflows import (
-    block_list, ci_legs, ci_macos_runner, ci_workflow, file_runners, legs_job,
-    macos_runner_input, matrix_values, release_workflow, runner_inputs, runner_json,
+    block_list, ci_legs, ci_macos_runner, ci_workflow, file_runners, job_names, legs_job,
+    macos_runner_input, matrix_values, names_alone, release_workflow, runner_inputs, runner_json,
     sanitizers_twice, sub_block, top_block, uses_commit, workflow_events, yaml_scalar,
 )
 # Import the module holding the current host, never a copy of its HOST binding.
@@ -706,8 +706,8 @@ def read_declarations(project: pathlib.Path, product: str, mechanism: str = SOCL
                 decl.add("missing", f"{release.name} [check] declares legs, and .github/workflows/ci.yml does"
                                     " not call check-product.yml: adopt writes the legs job beside that call"
                                     " and nowhere else", "conventions")
-            elif decl.legs and re.search(rf"^  {LEGS_JOB}:\s*$", ci_text, re.MULTILINE) \
-                    and not LEGS_USES.search(ci_text):
+            elif decl.legs and LEGS_JOB in job_names(ci_text.split("\n")) \
+                    and not any(LEGS_USES.search(line) for line in names_alone(ci_text.split("\n"))):
                 decl.add("refused", f".github/workflows/ci.yml has a job of its own named {LEGS_JOB}, the name"
                                     f" adopt writes [check] under: rename that job, or its contexts and the"
                                     " legs' would be one prefix", "conventions")
@@ -1770,8 +1770,19 @@ def handle_render(invocation: Invocation) -> tuple[dict, int]:
     if left:
         raise Failure("VALIDATION_FAILED", f"Unrendered placeholders in {template}: {' '.join(left)}.",
                       "Pass a KEY=VALUE for each of them.")
+    # Encoded before the output is opened: a value given as bytes that are
+    # not UTF-8 reaches here as lone surrogates, and writing the text opened
+    # the file, which empties it, and then failed to encode.
+    try:
+        encoded = text.encode("utf-8")
+    except UnicodeEncodeError:
+        strange = sorted(key for key, value in mapping.items() if not is_utf8(value.encode("utf-8", "surrogateescape")))
+        raise Failure("VALIDATION_FAILED",
+                      f"The value given for {' '.join(strange) or 'a placeholder'} is not UTF-8: {output} is written"
+                      " in UTF-8, and nothing was written.",
+                      "Pass the value as UTF-8.") from None
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(text, encoding="utf-8")
+    output.write_bytes(encoded)
     return {"template": str(template), "output": str(output), "placeholders": sorted(mapping)}, EXIT_OK
 
 
