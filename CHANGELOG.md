@@ -16,7 +16,15 @@
   bundles, checked by the pinned commit as any clone. This was read on the
   workflow and has not run on a product yet, the failure no more than the
   correction: the trial is a product whose x86_64 jobs run on single-job
-  machines.
+  machines. One thing changes for a product that carries, read on the
+  workflow as the rest was: the artifact is kept one day, so `fuzz` or
+  `sanitizers` run again alone after that find it gone and stop at its
+  download, as a leg of `check` already did, where they cloned from the
+  repositories before.
+- **Impact.** [asks: nothing] [writes: nothing] Nothing for a product to
+  do: a reusable workflow, taken at the next adoption. A product that
+  carries will see `fuzz` and `sanitizers` clone the carried pins from
+  their bundles.
 
 ## 0.64.2 — 2026-10-12
 
