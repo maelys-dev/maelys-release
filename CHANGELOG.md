@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.64.2 — 2026-10-12
 
 What 0.64.1 named and left: three readings, two writes of `protect`, and
 the trial of `protect --apply` on a repository, which 0.64.1 had not made.
