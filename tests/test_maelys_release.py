@@ -1328,15 +1328,25 @@ class CarriedDependencyTest(unittest.TestCase):
             if "uses: " in line and not line.lstrip().startswith("#"):
                 self.assertRegex(line, r"@[0-9a-f]{40} # v", line)
 
-    def test_the_check_legs_receive_the_carried_bundles(self) -> None:
+    def test_every_job_that_clones_the_pins_receives_the_carried_bundles(self) -> None:
+        """`fuzz` and `sanitizers` were left out, as jobs that run where the
+        pins are read. That holds on a runner that keeps a credential and not
+        on one made for a single job, which holds none: there the two jobs
+        are left to clone the private pins from their repositories, on the
+        runner the legs of `check` were given the bundles for."""
         workflow = (ROOT / ".github" / "workflows" / "check-product.yml").read_text(encoding="utf-8")
         self.assertIn("      carried_dependencies:\n", workflow)
-        check = workflow.split("\n  check:\n", 1)[1].split("\n  fuzz:\n", 1)[0]
-        self.assertEqual(check.count("if: inputs.carried_dependencies != ''"), 2)
-        self.assertLess(check.index("MAELYS_DEPENDENCY_BUNDLES="),
-                        check.index("- name: Pinned dependency checkouts, beside the product"))
-        # Only the legs of check: fuzz and sanitizers run where the pins are read.
-        self.assertEqual(workflow.count("MAELYS_DEPENDENCY_BUNDLES="), 1)
+        jobs = dict(zip(("check", "fuzz", "sanitizers"),
+                        re.split(r"\n  (?:fuzz|sanitizers):\n", workflow.split("\n  check:\n", 1)[1])))
+        self.assertEqual(sorted(jobs), ["check", "fuzz", "sanitizers"])
+        for name, job in jobs.items():
+            with self.subTest(job=name):
+                self.assertEqual(job.count("sh scripts/checkout-dependencies.sh"), 1)
+                self.assertEqual(job.count("if: inputs.carried_dependencies != ''"), 2)
+                self.assertEqual(job.count("MAELYS_DEPENDENCY_BUNDLES="), 1)
+                self.assertLess(job.index("MAELYS_DEPENDENCY_BUNDLES="),
+                                job.index("- name: Pinned dependency checkouts, beside the product"))
+        self.assertEqual(workflow.count("MAELYS_DEPENDENCY_BUNDLES="), 3)
 
     def carry_call(self, body: str) -> None:
         # At the check's own commit, which is what adopt writes and what
