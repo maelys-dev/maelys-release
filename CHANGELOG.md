@@ -21,6 +21,13 @@
   `sanitizers` run again alone after that find it gone and stop at its
   download, as a leg of `check` already did, where they cloned from the
   repositories before.
+- **The cost test of the privacy guard takes the least of three
+  readings.** It compared two single measurements of a few hundredths of
+  a second, and failed again on a shared runner, on the release commit of
+  0.64.2, at 0.224 s against a bound of 0.205 s: the reading had not
+  changed, and the same commit passed when its job was run again, as the
+  commit of 0.64.0 had. Both bounds stay as they are; each measurement is
+  now the least of three.
 - **Impact.** [asks: nothing] [writes: nothing] Nothing for a product to
   do: a reusable workflow, taken at the next adoption. A product that
   carries will see `fuzz` and `sanitizers` clone the carried pins from

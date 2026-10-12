@@ -828,11 +828,23 @@ class CostTest(Tree):
         }
 
     def cpu(self, name: str, text: str, who) -> float:
-        reading = privacy.Reading(privacy.Settings(), who)
-        reading.open(name)
-        started = time.process_time()
-        reading.text(text, privacy.kind(name))
-        return time.process_time() - started
+        """The least of three readings of TEXT, in processor time.
+
+        One reading is a few hundredths of a second for most shapes, and a
+        ratio between two single ones is as much a measure of the machine
+        that minute as of the reading: on a shared runner, with the suite's
+        other classes running beside it, 0.224 s against a bound of 0.205 s
+        failed a reading that had not changed. The least of three is the
+        reading; the rest is what else the machine was doing.
+        """
+        spent = []
+        for _ in range(3):
+            reading = privacy.Reading(privacy.Settings(), who)
+            reading.open(name)
+            started = time.process_time()
+            reading.text(text, privacy.kind(name))
+            spent.append(time.process_time() - started)
+        return min(spent)
 
     def test_every_shape_is_read_in_time_linear_in_its_size(self) -> None:
         """Measured where it was written: 4 MiB of any of these in under a second, 0.73 s for the worst.
