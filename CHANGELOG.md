@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.64.4 — 2026-10-15
 
 - **The bottle of an update sees one formula of its name.** The bottle
   job of `tap.yml` taps the shared tap for the product's dependencies and
