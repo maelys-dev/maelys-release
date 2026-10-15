@@ -169,6 +169,22 @@ jobs:
           shared_tap="${TAP_REPOSITORY%/homebrew-*}/${TAP_REPOSITORY#*/homebrew-}"
           brew tap "$shared_tap"
           brew trust "$shared_tap" >/dev/null 2>&1 || true
+          # One formula of the product's name, and only one, in sight. The
+          # shared tap holds its previous release under that name, and
+          # Homebrew finds a formula by its short name while it fixes the
+          # linkage of what it has just built: two of them stop it, after the
+          # build, with TapFormulaAmbiguityError -- on every update of a
+          # product that ships a library, never on its first release, and so
+          # never on a product that builds a program alone. The shared tap
+          # stays for the product's dependencies; its formula of this name is
+          # set aside in this runner's copy of the tap until the last step of
+          # the job puts it back, whatever happened in between. The pour
+          # below relinks too, and needs it aside as much.
+          shared="$(brew --repository "$shared_tap")"
+          if [ -f "$shared/Formula/${PRODUCT}.rb" ]; then
+            mkdir -p "$RUNNER_TEMP/maelys-shared-formula"
+            mv "$shared/Formula/${PRODUCT}.rb" "$RUNNER_TEMP/maelys-shared-formula/${PRODUCT}.rb"
+          fi
           tap="$(brew --repository maelys-dev/staging)"
           cp "formula/${PRODUCT}.rb" "$tap/Formula/${PRODUCT}.rb"
           brew install --build-bottle "maelys-dev/staging/${PRODUCT}"
@@ -229,6 +245,23 @@ jobs:
         with:
           name: homebrew-bottle-${{ inputs.product }}-${{ matrix.runner }}
           path: bottles/*.bottle.json
+      - name: Put the shared tap's formula of the product back
+        # The runner's copy of the shared tap is the machine's on a runner
+        # that is not made for one job: it is left as the job found it, the
+        # build and the pour having failed or not.
+        if: always()
+        shell: bash
+        env:
+          PRODUCT: ${{ inputs.product }}
+          TAP_REPOSITORY: ${{ inputs.tap_repository }}
+        run: |
+          set -euo pipefail
+          aside="$RUNNER_TEMP/maelys-shared-formula/${PRODUCT}.rb"
+          if [ ! -f "$aside" ]; then
+            exit 0
+          fi
+          shared_tap="${TAP_REPOSITORY%/homebrew-*}/${TAP_REPOSITORY#*/homebrew-}"
+          mv "$aside" "$(brew --repository "$shared_tap")/Formula/${PRODUCT}.rb"
 
   publish:
     needs: [render, bottle]
