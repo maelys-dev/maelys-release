@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased
+
+- **The bottle of an update sees one formula of its name.** The bottle
+  job of `tap.yml` taps the shared tap for the product's dependencies and
+  builds the candidate from a staging tap: the shared tap still holds the
+  release before, under the same name. Homebrew looks a formula up by its
+  short name while it fixes the linkage of a library it has just built,
+  and two of them stop it after the build with
+  `TapFormulaAmbiguityError` -- both macOS bottles of
+  libmaelys-datalog 0.23.0 did. It happens on every update of a product
+  that ships a library, never on a first release, and never on a product
+  that builds a program alone, which is why no release before had met it.
+  The job now sets the shared tap's formula of that name aside in the
+  runner's copy of the tap before it builds, keeps it aside through the
+  pour and the test, and puts it back in a last step that always runs:
+  the dependencies still come from the shared tap. Held by tests that run
+  the job's three steps against a Homebrew that finds formulas the same
+  way -- an update, a first release, a build that fails -- and that show
+  the same step, less what sets the formula aside, stopping as it did.
+  Not yet run where it failed: the release of a library whose previous
+  version is in the tap.
+- **Impact.** [asks: nothing] [writes: nothing] Nothing for a product to
+  do: a reusable workflow, taken at the next adoption. A product whose
+  publication stopped this way replays its tap jobs on the existing tag
+  once it has adopted the version that carries this.
+
 ## 0.64.3 — 2026-10-12
 
 - **`fuzz` and `sanitizers` take the carried bundles, as the legs of
