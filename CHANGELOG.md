@@ -15,6 +15,20 @@
   REST paths; they are the next thing to put behind the interface. The
   first step of hosting the fleet elsewhere without a second socle: the
   conventions say what the forge is, under "The forge".
+- **The entry point holds no command.** `bin/maelys-release` was 2 464
+  lines: the catalog of the command line, the reading of a product -- one
+  function of 529 lines --, the staging of its files, the identity of the
+  running socle, the Impact lines, and the handlers of five commands.
+  They stand in the package now: `reading`, `staging`, `socle_origin`,
+  `impacts`, `cli_reference`, `product_workflows` -- the readers of a
+  product's workflows, which lived in the module of `check` while modules
+  below it needed them -- and one module per command under `commands/`.
+  The context an entry point hands the package is what only it can know,
+  the root and the version of the socle it runs from: an installed copy and
+  a checkout loaded in one interpreter must each read their own. The
+  services it carried while the extraction was under way are package
+  functions that take it. The two recorded references replay with no
+  difference.
 - **Impact.** [asks: nothing] [writes: nothing] Nothing for a product to
   do: no workflow, no managed file and no behaviour moves.
 

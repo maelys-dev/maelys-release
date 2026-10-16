@@ -149,6 +149,6 @@ print(json.dumps({"root": str(module.socle_root()), "share": str(module.share_di
                 self.assertEqual(data["contexts"], ["check", ["check / check (installed)", "check / fuzz"]])
                 self.assertEqual(data["otherContexts"], ["check", [
                     *[f"check / check ({leg})" for leg in MODULE.check_product_legs()], "check / sanitizers"]])
-                self.assertEqual(len(data["modules"]), len(list((ROOT / "bin" / "maelys_socle").glob("*.py"))))
+                self.assertEqual(len(data["modules"]), len(list((ROOT / "bin" / "maelys_socle").rglob("*.py"))))
                 for filename in data["modules"]:
-                    self.assertEqual(pathlib.Path(filename).parent, prefix.resolve() / "bin" / "maelys_socle")
+                    self.assertIn(prefix.resolve() / "bin" / "maelys_socle", pathlib.Path(filename).parents)

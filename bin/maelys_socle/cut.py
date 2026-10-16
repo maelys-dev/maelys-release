@@ -14,7 +14,7 @@ import time
 from typing import Callable
 
 from maelys_cli import EXIT_OK, EXIT_VIOLATIONS, Failure, Invocation
-from . import host
+from . import host, reading, socle_origin
 from .constants import DECLARATION_FILE, PROGRAM, UNPUBLISHED
 from .context import Context
 from .declarations import Declarations, version_tuple
@@ -930,7 +930,7 @@ def handle_cut(invocation: Invocation, context: Context,
         raise Failure("VALIDATION_FAILED", f"VERSION is X.Y.Z: {version}.",
                       "Pass the version this release carries.")
     repository = cut_repository(project)
-    decl = context.read_declarations(project, product, mechanism)
+    decl = reading.read_declarations(context, project, product, mechanism)
     data: dict = {"mode": "apply" if invocation.flag("--apply") else "plan",
                   "stage": "tag" if invocation.flag("--tag") else "open",
                   "product": product, "project": str(project), "repository": repository,
@@ -943,7 +943,7 @@ def handle_cut(invocation: Invocation, context: Context,
                   # GitHub runs and nothing else. A product asked whether a
                   # fix to `cut` could only reach it through an adoption; it
                   # cannot, and now the command says so on its first line.
-                  "socle": socle_data(*context.socle_identity(str(invocation.option("--socle-sha", "")),
+                  "socle": socle_data(*socle_origin.socle_identity(context, str(invocation.option("--socle-sha", "")),
                                                       str(invocation.option("--socle-tag", ""))), context=context),
                   "gate": [], "checks": [], "ready": False}
     log = sys.stderr if invocation.format != "text" else sys.stdout
