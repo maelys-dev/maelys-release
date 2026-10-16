@@ -8,12 +8,12 @@ import re
 from maelys_cli import EXIT_OK, Failure, Invocation
 
 from .constants import DECLARATION_FILE, FORMER_DECLARATION_FILE, PROGRAM, SOCLE_MECHANISM
-from . import authorship
+from . import authorship, impacts, reading, socle_origin, staging
 from .context import Context
 from .identity import socle_data
 from .declarations import require_valid
 from .host import git, run
-from .inspection import pinned_socle
+from .product_workflows import pinned_socle
 from .project import project_of
 from .protect import vanishing_contexts
 from .texts import checks_text
@@ -41,9 +41,9 @@ def move_declaration(project: pathlib.Path, apply: bool) -> str:
 def handle_adopt(invocation: Invocation, context: Context) -> tuple[dict, int]:
     project, product, mechanism = project_of(invocation)
     apply = invocation.flag("--apply")
-    decl = context.read_declarations(project, product, mechanism)
+    decl = reading.read_declarations(context, project, product, mechanism)
     require_valid(decl, "adopt")
-    sha, tag = context.socle_identity(str(invocation.option("--socle-sha", "")), str(invocation.option("--socle-tag", "")))
+    sha, tag = socle_origin.socle_identity(context, str(invocation.option("--socle-sha", "")), str(invocation.option("--socle-tag", "")))
     # A product pins releases of the socle: a commit without a tag has no
     # changelog entry, no trial and no compatibility promise. Trials of a
     # candidate say so explicitly.
@@ -69,7 +69,7 @@ def handle_adopt(invocation: Invocation, context: Context) -> tuple[dict, int]:
                           f" adoption; then '{PROGRAM} protect {project} --apply' requires the new names."
                           " Or pass"
                           " --allow-lock if the protection is being changed by hand in the same breath.")
-    files = context.plan(decl, context.stage(decl, sha, tag), apply)
+    files = staging.plan(decl, staging.stage(context, decl, sha, tag), apply)
     moved = move_declaration(project, apply)
     changed = moved != "" or any(entry["action"] != "same" for entry in files)
     data = {"mode": "apply" if apply else "plan", "product": product, "project": str(project),
@@ -77,7 +77,7 @@ def handle_adopt(invocation: Invocation, context: Context) -> tuple[dict, int]:
             "impactFrom": (pinned or {}).get("tag", ""),
             "checks": decl.applicable(), "files": files}
     # Evaluated on the declarations read before this run wrote anything.
-    data["impact"], data["current"] = context.impact_for(decl, (pinned or {}).get("tag", ""))
+    data["impact"], data["current"] = impacts.impact_for(context, decl, (pinned or {}).get("tag", ""))
     if moved:
         data["moved"] = moved
     # Proposed, never written: the hook is not a managed file, and a

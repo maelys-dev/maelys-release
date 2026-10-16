@@ -8,13 +8,13 @@ import re
 
 from maelys_cli import EXIT_OK, EXIT_VIOLATIONS, Failure, Invocation
 
-from . import host
+from . import host, reading
 from .checkouts import cache_root, checkout_state, git_base, materialise
 from .constants import DECLARATION_FILE, FORMER_DECLARATION_FILE, PROGRAM, SOCLE_REPOSITORY
 from .context import Context
 from .declarations import Declarations, parse_pin
 from .host import git, run
-from .inspection import pinned_socle
+from .product_workflows import pinned_socle
 from .project import is_utf8, project_of, spelled, unread_names
 
 
@@ -247,7 +247,7 @@ def handle_dependencies(invocation: Invocation, context: Context) -> tuple[dict,
     """Every pin of the product at its commit, in a directory that is not a working copy."""
     project, product, mechanism = project_of(invocation)
     apply = invocation.flag("--apply")
-    decl = context.read_declarations(project, product, mechanism)
+    decl = reading.read_declarations(context, project, product, mechanism)
     if decl.pin_problems:
         raise Failure("PRECONDITION_FAILED", "A pin cannot be read: " + "; ".join(decl.pin_problems) + ".",
                       f"Fix the pin; '{PROGRAM} check {project}' reports it.")
