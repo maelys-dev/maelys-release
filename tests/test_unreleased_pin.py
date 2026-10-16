@@ -16,6 +16,7 @@ on a tag.
 """
 from __future__ import annotations
 
+import os
 import pathlib
 import re
 import shutil
@@ -949,16 +950,16 @@ class UnreleasedCheckoutTest(unittest.TestCase):
     def environment(self):
         """The fixture's git configuration, for a call made in this process."""
         keys = [key for key in self.product.env if key.startswith("GIT_CONFIG")]
-        previous = {key: MODULE.os.environ.get(key) for key in keys}
-        MODULE.os.environ.update({key: self.product.env[key] for key in keys})
+        previous = {key: os.environ.get(key) for key in keys}
+        os.environ.update({key: self.product.env[key] for key in keys})
         try:
             yield
         finally:
             for key, value in previous.items():
                 if value is None:
-                    MODULE.os.environ.pop(key, None)
+                    os.environ.pop(key, None)
                 else:
-                    MODULE.os.environ[key] = value
+                    os.environ[key] = value
 
     def apply_plain(self, expect: int = 0) -> dict:
         return self.product.json("dependencies", self.dir, "--apply", expect=expect)["data"]
@@ -978,8 +979,8 @@ class UnreleasedBranchAskedTest(unittest.TestCase):
         self.addCleanup(self.product.close)
         self.third = ThirdParty(self.product)
         self.checkout = self.clone("checkout", self.third.c3)
-        self.previous = {key: MODULE.os.environ.get(key) for key in self.product.env if key.startswith("GIT_CONFIG")}
-        MODULE.os.environ.update({key: self.product.env[key] for key in self.previous})
+        self.previous = {key: os.environ.get(key) for key in self.product.env if key.startswith("GIT_CONFIG")}
+        os.environ.update({key: self.product.env[key] for key in self.previous})
         self.addCleanup(self.restore)
 
     def clone(self, name: str, commit: str, *options: str) -> pathlib.Path:
@@ -993,9 +994,9 @@ class UnreleasedBranchAskedTest(unittest.TestCase):
     def restore(self) -> None:
         for key, value in self.previous.items():
             if value is None:
-                MODULE.os.environ.pop(key, None)
+                os.environ.pop(key, None)
             else:
-                MODULE.os.environ[key] = value
+                os.environ[key] = value
 
     def verdict(self, commit: str, fetch: bool, tag: str = "v1.1.0", branch: str = "main",
                 checkout: "pathlib.Path | None" = None) -> tuple:
@@ -1228,11 +1229,11 @@ class UnreleasedPinCutTest(unittest.TestCase):
         self.product.git(self.product.work, "init", "-q", "--bare", str(origin))
         git("remote", "add", "origin", str(origin))
         git("push", "-q", "origin", "main")
-        saved = {name: MODULE.os.environ.get(name) for name in self.ISOLATE}
-        MODULE.os.environ.update({"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null",
+        saved = {name: os.environ.get(name) for name in self.ISOLATE}
+        os.environ.update({"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null",
                                   "GIT_CONFIG_NOSYSTEM": "1"})
-        self.addCleanup(lambda: [MODULE.os.environ.pop(name, None) if value is None
-                                 else MODULE.os.environ.__setitem__(name, value) for name, value in saved.items()])
+        self.addCleanup(lambda: [os.environ.pop(name, None) if value is None
+                                 else os.environ.__setitem__(name, value) for name, value in saved.items()])
         self.log = open(self.product.work / "cut.log", "w", encoding="utf-8")
         self.addCleanup(self.log.close)
 
