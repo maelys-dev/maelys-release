@@ -12,7 +12,7 @@ import tempfile
 
 from maelys_cli import EXIT_OK, Failure, Invocation
 
-from .checkouts import author_identity
+from .checkouts import author_identity, git_base
 from .constants import CLI_CONTRACT, CLI_REFERENCE
 from .context import Context
 from .declarations import Declarations
@@ -357,7 +357,7 @@ def handle_migrate(invocation: Invocation, context: Context) -> tuple[dict, int]
     project = pathlib.Path(data["project"])
     product = data["product"]
     describe_the_clone(project, product, data)
-    base = os.environ.get("MAELYS_GIT_BASE", "https://github.com/maelys-dev")
+    base = git_base()
     branch = f"migrate/{product}"
     with tempfile.TemporaryDirectory(prefix="maelys-release-migrate.") as temp:
         work = pathlib.Path(temp)

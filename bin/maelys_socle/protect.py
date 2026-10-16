@@ -26,6 +26,7 @@ from .constants import CI_USES, DECLARATION_FILE, LEGS_JOB, SOCLE_MECHANISM
 from .context import Context
 from .declarations import parse_release
 from .environment import Refusal, arm, environment_plan, record, text_environment, violations
+from .forge import forge
 from .github import (github_api, github_list, github_read, github_repository, observed_contexts, protection_settings, read_protection, read_repository, required_contexts, rule_contexts, ruleset_shape, verify_protection, withdrawn_for)
 from .project import project_of
 from .workflows import job_names, yaml_scalar
@@ -233,7 +234,7 @@ def handle_protect(invocation: Invocation, context: Context) -> tuple[dict, int]
     if not repository:
         raise Failure("PRECONDITION_FAILED", f"{project} has no GitHub origin.",
                       "A branch protection is a GitHub setting; this reads and writes one.")
-    if not host.HOST.which("gh"):
+    if not forge().available():
         raise Failure("PRECONDITION_FAILED", "gh is not installed.", "Install gh: this reads the GitHub API.")
     described = read_repository(repository)
     branch = described.default_branch

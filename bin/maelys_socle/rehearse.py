@@ -19,6 +19,7 @@ from .constants import (
 from .context import Context
 from .declarations import Declarations, require_valid
 from .dependencies import CHECKOUT_SCRIPTS
+from .forge import forge
 from .github import cut_repository, github_read
 from .host import run
 from .project import project_of, require_socle_mechanism
@@ -253,7 +254,7 @@ def rehearse_channel(invocation: Invocation, project: pathlib.Path, product: str
     data: dict = {"product": product, "channel": channel, "tag": tag, "repository": repository,
                   "command": "", "assets": [], "recorded": [], "dropped": [], "matches": None}
     try:
-        downloaded = run(["gh", "release", "download", tag, "--repo", repository, "--dir", str(dist)], cwd=project)
+        downloaded = forge().download_release(project, repository, tag, dist)
         if downloaded.returncode != 0:
             raise Failure("PROCESS_FAILED", f"gh release download {tag} failed: {downloaded.stderr.strip()}",
                           "Check the release and the credentials, then rehearse again.")
