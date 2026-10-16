@@ -11,6 +11,7 @@ from . import host
 from .constants import DECLARATION_FILE, PROGRAM
 from .declarations import Declarations
 from .checkouts import git_base
+from .forge import forge
 from .github import (branch_protection, channel_visibility, environment_gate, github_repository,
                      policy_verdicts, publication_record, read_protection, read_release_environment,
                      read_repository, secret_scanning, tap_drift, tap_secrets)
@@ -411,7 +412,7 @@ def repository_checks(decl: Declarations) -> list[tuple[str, str]]:
     repository = github_repository(project)
     if not repository:
         return [("note", "origin is not on GitHub: release environment not checked")]
-    if not host.HOST.which("gh"):
+    if not forge().available():
         return [("note", f"gh is not installed: release environment of {repository} not checked")]
     repository_data = read_repository(repository)
     if repository_data.visibility == "public" and decl.docs_named:

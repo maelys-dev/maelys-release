@@ -11,6 +11,7 @@ from .constants import (
     CHECK_PLATFORMS, DECLARATION_FILE, PROGRAM, SOCLE_CHANNEL_KINDS, SOCLE_COMMIT_VERIFICATIONS,
     SOCLE_GATES, SOCLE_MANIFEST_PATTERNS, SOCLE_MECHANISM, SOCLE_REPOSITORY, SOCLE_RUNNER_KEYS, SOCLE_TARGETS,
 )
+from .forge import forge
 
 # The one shape a `repository` line takes: https, a host name, and a path of
 # plain segments, with `.git` or without. Everything a URL offers beyond that
@@ -20,10 +21,9 @@ from .constants import (
 REPOSITORY_URL = re.compile(r"https://(?P<host>[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?"
                             r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*)"
                             r"(?P<path>(?:/[A-Za-z0-9._~-]+)+)")
-# Where the fleet's own repositories live. On this host a repository is
-# https://host/owner/name and nothing longer, and the owner is compared as
-# the host compares it, whatever the case it is typed in.
-FLEET_HOSTS = ("github.com", "www.github.com")
+# Where the fleet's own repositories live: the forge's hosts. On that host
+# a repository is https://host/owner/name and nothing longer, and the owner
+# is compared as the host compares it, whatever the case it is typed in.
 FLEET_OWNER = SOCLE_REPOSITORY.split("/")[0]
 # The words a line of a pin may start with, after line 2. `sha256` is the
 # digest of a vendored file, which `vendor` writes and reads back.
@@ -69,7 +69,7 @@ def repository_refusal(url: str) -> str:
     segments = shaped.group("path").split("/")[1:]
     if any(segment in (".", "..") for segment in segments):
         return "the repository line must be an https URL whose path holds no '.' or '..' segment"
-    if shaped.group("host").lower() in FLEET_HOSTS and len(segments) != 2:
+    if shaped.group("host").lower() in forge().hosts and len(segments) != 2:
         return (f"the repository line must be an https URL of the shape https://{shaped.group('host')}/owner/name"
                 " on that host")
     return ""
@@ -85,7 +85,7 @@ def fleet_repository(url: str) -> bool:
     repositories. The conventions say so.
     """
     shaped = REPOSITORY_URL.fullmatch(url)
-    return bool(shaped) and shaped.group("host").lower() in FLEET_HOSTS \
+    return bool(shaped) and shaped.group("host").lower() in forge().hosts \
         and shaped.group("path").split("/")[1].lower() == FLEET_OWNER.lower()
 
 

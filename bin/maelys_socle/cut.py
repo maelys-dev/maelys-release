@@ -18,6 +18,7 @@ from . import host
 from .constants import DECLARATION_FILE, PROGRAM, UNPUBLISHED
 from .context import Context
 from .declarations import Declarations, version_tuple
+from .forge import forge
 from .github import (check_runs, cut_repository, default_branch, github_api, tag_deployments)
 from .host import git, run
 from .identity import socle_data
@@ -522,8 +523,7 @@ def signature_gate(project: pathlib.Path, data: dict) -> bool:
 
 def one_pull(project: pathlib.Path, repository: str, branch: str) -> dict | None:
     """The single pull request coming from BRANCH, whatever its state."""
-    listed = run(["gh", "pr", "list", "--repo", repository, "--head", branch, "--state", "all",
-                  "--limit", "10", "--json", "number,url,state,mergeCommit,headRefOid"], cwd=project)
+    listed = forge().pull_requests(project, repository, branch)
     if listed.returncode != 0:
         raise Failure("PROCESS_FAILED", f"gh pr list failed: {listed.stderr.strip()}",
                       "Check 'gh auth status', then run the command again.")
@@ -782,13 +782,12 @@ def cut_open(invocation: Invocation, decl: Declarations, data: dict, log, timeou
         body_file.write_text(f"## {version} — {date}\n\n{body}\n\n---\n\nOpened by `{PROGRAM} cut`."
                              f" The tag is signed on the merge commit of this pull request, once its checks are"
                              f" green, by `{PROGRAM} cut {project.name} {version} --tag --apply`.\n", encoding="utf-8")
-        created = run(["gh", "pr", "create", "--repo", repository, "--base", base, "--head", branch,
-                       "--title", f"{product} {version}", "--body-file", str(body_file)], cwd=project)
+        created = forge().open_pull_request(project, repository, base, branch, f"{product} {version}", body_file)
     if created.returncode != 0:
         raise Failure("PROCESS_FAILED", f"gh pr create failed: {created.stderr.strip()}",
                       f"The signed commit is pushed on {branch}: open the pull request by hand, then"
                       f" '{PROGRAM} cut {project} {version} --tag'.")
-    viewed = run(["gh", "pr", "view", branch, "--repo", repository, "--json", "number,url,state"], cwd=project)
+    viewed = forge().view_pull_request(project, repository, branch)
     pull = json.loads(viewed.stdout) if viewed.returncode == 0 else {"url": created.stdout.strip()}
     data["pullRequest"] = {"number": pull.get("number", 0), "url": pull.get("url", ""),
                            "state": pull.get("state", "OPEN")}

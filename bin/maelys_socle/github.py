@@ -12,6 +12,7 @@ import re
 from maelys_cli import Failure
 from . import host
 from .context import Context
+from .forge import forge
 from .host import git
 from .constants import DECLARATION_FILE, DEFAULT_TAP, PROGRAM, SOCLE_REPOSITORY
 
@@ -87,8 +88,7 @@ def github_list(path: str) -> list:
 def github_repository(project: pathlib.Path) -> str:
     """owner/name of the origin remote when it is on GitHub, else ''."""
     remote = git("remote", "get-url", "origin", cwd=project, check=False)
-    match = re.search(r"github\.com[:/]([^/]+/[^/]+?)(?:\.git)?$", remote)
-    return match.group(1) if match else ""
+    return forge().repository(remote)
 
 
 def cut_repository(project: pathlib.Path) -> str:
@@ -96,7 +96,7 @@ def cut_repository(project: pathlib.Path) -> str:
     if not repository:
         raise Failure("PRECONDITION_FAILED", f"origin of {project} is not on GitHub.",
                       "cut opens a pull request and reads its checks through gh; publish by hand elsewhere.")
-    if not host.HOST.which("gh"):
+    if not forge().available():
         raise Failure("NOT_FOUND", "gh is required to open the pull request and to read its checks.",
                       "Install the GitHub CLI, or run the ceremony by hand.")
     return repository
@@ -178,7 +178,7 @@ def read_repository(repository: str) -> Repository:
 def repository_visibility(project: pathlib.Path, visibility: str) -> bool | None:
     """Whether origin's repository has this visibility; None when GitHub cannot say."""
     repository = github_repository(project)
-    if not repository or not host.HOST.which("gh"):
+    if not repository or not forge().available():
         return None
     found = read_repository(repository).visibility
     return found == visibility if found else None
@@ -259,7 +259,7 @@ def read_protection(repository: str, branch: str, classic: bool = True, rulesets
 def classic_protection(project: pathlib.Path) -> bool | None:
     """Whether the default branch carries a classic protection; None when GitHub cannot say."""
     repository = github_repository(project)
-    if not repository or not host.HOST.which("gh"):
+    if not repository or not forge().available():
         return None
     branch = read_repository(repository).default_branch
     state = read_protection(repository, branch, rulesets=False).classic_state
@@ -1052,7 +1052,7 @@ def required_contexts(project: pathlib.Path) -> list[str] | None:
     answering -- which is not the same as a branch that requires nothing.
     """
     repository = github_repository(project)
-    if not repository or not host.HOST.which("gh"):
+    if not repository or not forge().available():
         return None
     branch = read_repository(repository).default_branch
     # Both endpoints, as `branch_protection` reads them: a repository of the

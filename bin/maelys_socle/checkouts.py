@@ -7,6 +7,7 @@ import pathlib
 
 from maelys_cli import Failure
 from .constants import PROGRAM
+from .forge import forge
 from .host import git, run
 
 
@@ -28,7 +29,7 @@ def cache_root() -> pathlib.Path:
 
 def git_base() -> str:
     """Where a maelys-dev repository is cloned from, as the managed script reads it."""
-    return os.environ.get("MAELYS_GIT_BASE", "https://github.com/maelys-dev")
+    return forge().clone_base()
 
 
 def checkout_state(path: pathlib.Path, pin: dict, repository: str,

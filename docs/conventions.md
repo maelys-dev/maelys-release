@@ -1744,6 +1744,22 @@ does not say where either came from.
   it sends, and what it refuses to send, is under "What `protect` writes of
   the release environment" below.
 
+## The forge
+
+The socle reads and writes the service that hosts a repository through one
+object, the forge, and GitHub is the one it has. What names the forge
+rather than the process -- which remotes are its, how `owner/name` is read
+from one, where the fleet's repositories are cloned from (`MAELYS_GIT_BASE`
+elsewhere), the commands of its CLI that are not a GET of its API -- stands
+in `forge.py`; the readings GitHub answers by its REST paths, of a
+protection, a ruleset, an environment, the check runs of a commit, a
+release, stand in `github.py` and are the next thing to put behind the
+same interface. Nothing else in the socle names github.com, and a test
+holds it. Every answer of the forge is a call on the host, so a recorded
+reference reads the same calls whatever forge answered them: a second forge
+is a second implementation of that object, tried on the pilot as every write
+of the socle is, not a second socle.
+
 ## What the tracked files say of their author
 
 A file can carry the name of the machine it was written on, the home
