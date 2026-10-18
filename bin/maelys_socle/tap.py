@@ -12,6 +12,7 @@ from maelys_cli import EXIT_OK, Failure, Invocation
 from . import host
 from .checkouts import author_identity
 from .constants import DEFAULT_TAP
+from .forge import forge
 from .host import git, run
 from .writes import confirm_contains
 
@@ -57,9 +58,7 @@ def handle_tap(invocation: Invocation) -> tuple[dict, int]:
     version = tag[1:]
     repository = os.environ.get("TAP_REPOSITORY", DEFAULT_TAP)
     token = os.environ.get("TAP_TOKEN", "")
-    url = os.environ.get("TAP_URL") or (
-        f"https://x-access-token:{token}@github.com/{repository}.git" if token
-        else f"https://github.com/{repository}.git")
+    url = os.environ.get("TAP_URL") or forge().clone_url(repository, token)
     owner, _, name = repository.partition("/")
     data: dict = {"mode": "apply" if apply else "plan", "product": product, "version": version,
                   "repository": repository, "formula": f"Formula/{product}.rb", "changed": False}

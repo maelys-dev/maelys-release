@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+- **The forge is one object.** What named GitHub stood in nine places:
+  the pattern that reads `owner/name` from a remote, the hosts a
+  repository URL may carry, the clone base and its variable typed four
+  times, the URL of a tap, and the four commands of `gh` that are not a
+  GET of its API, in `cut` and `rehearse`. They stand in `forge.py`, as
+  one interface and GitHub as its implementation, and every probe for
+  `gh` asks the forge whether it is available. Every answer is still a
+  call on the host, argument for argument: the two recorded references
+  replay with no difference, and no message, exit code or member moves.
+  The readings of `github.py` are reached the same way and keep their
+  REST paths; they are the next thing to put behind the interface. The
+  first step of hosting the fleet elsewhere without a second socle: the
+  conventions say what the forge is, under "The forge".
+- **Impact.** [asks: nothing] [writes: nothing] Nothing for a product to
+  do: no workflow, no managed file and no behaviour moves.
+
 ## 0.64.4 — 2026-10-15
 
 - **The bottle of an update sees one formula of its name.** The bottle

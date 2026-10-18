@@ -98,6 +98,7 @@ from maelys_socle.rehearse import (
     CHANNEL_RECORD_FIELDS, PUBLISH_COMMAND, REHEARSAL, channel_marker, kept_record,
     marker_differences, rehearse_channel, text_rehearse,
 )
+from maelys_socle.forge import forge
 from maelys_socle.host import HTTP_STATUS, Host, git, run
 from maelys_socle.inspection import (
     MOMENTS, pinned_socle, read_runners, read_workflows, strategy_lines, text_check, text_declarations,
@@ -208,7 +209,7 @@ def socle_identity(sha: str, tag: str) -> tuple[str, str]:
         version = socle_version()
         raise Failure("PRECONDITION_FAILED", "This socle is not a git checkout and its archive carries no commit"
                       " (INSTALLED.pin was not expanded), so its commit is unknown, and the pin must name the commit.",
-                      f"Pass the commit of the tag: --socle-sha \"$(git ls-remote https://github.com/{SOCLE_REPOSITORY}.git"
+                      f"Pass the commit of the tag: --socle-sha \"$(git ls-remote {forge().clone_url(SOCLE_REPOSITORY)}"
                       f" 'v{version}^{{}}' | cut -f1)\" --socle-tag v{version}; or run from a checkout at that tag.")
     dirty = git("status", "--porcelain", "--", "share", "bin", "VERSION", cwd=root, check=False)
     if dirty:
@@ -1572,7 +1573,7 @@ def resolve_dependency(spec: str) -> tuple[str, str, str]:
     if not separator or not re.fullmatch(r"[a-z0-9][a-z0-9-]*", name) or not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", tag):
         raise Failure("VALIDATION_FAILED", f"A dependency is NAME@vX.Y.Z, not {spec!r}.",
                       "Pass --depends maelys-system@v0.9.1, once per dependency.")
-    base = os.environ.get("MAELYS_GIT_BASE", "https://github.com/maelys-dev")
+    base = forge().clone_base()
     # The dereferenced tag (^{}) is the commit an annotated tag names, which
     # is what a pin holds; a lightweight tag answers on the first line.
     listed = run(["git", "ls-remote", "--tags", f"{base}/{name}.git", tag, f"{tag}^{{}}"])
@@ -1825,7 +1826,7 @@ def handle_vendor(invocation: Invocation) -> tuple[dict, int]:
     """Refresh bin/maelys_cli.py from maelys-cli at the pinned commit, and record its digest."""
     del invocation
     tag, commit, previous = vendored_pin()
-    base = os.environ.get("MAELYS_GIT_BASE", "https://github.com/maelys-dev")
+    base = forge().clone_base()
     with tempfile.TemporaryDirectory(prefix="maelys-release-vendor.") as temp:
         work = pathlib.Path(temp)
         git("init", "-q", str(work))
