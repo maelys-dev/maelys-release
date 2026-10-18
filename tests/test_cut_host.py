@@ -11,9 +11,11 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 
 import test_maelys_release as fixtures
+import maelys_cli  # noqa: E402  -- on the path once the suite loaded the socle
 from test_allowed_signers import lines_to_run
 
 MODULE = fixtures.MODULE
+PACKAGE = fixtures.PACKAGE
 
 
 class CutHost(fixtures.FakeHost):
@@ -54,7 +56,7 @@ class CutHost(fixtures.FakeHost):
         if command[0] == "git":
             # Real origin is the fixture's bare directory. Every transport
             # except file is disabled, including subcommands not listed here.
-            return MODULE.Host.run(self, command, cwd=cwd, env=self.environment)
+            return PACKAGE.host.Host.run(self, command, cwd=cwd, env=self.environment)
         if command[:3] == ["gh", "pr", "create"]:
             if self.pull is not None:
                 raise AssertionError("a second pull request was opened")
@@ -106,7 +108,7 @@ class CutHostTest(unittest.TestCase):
         self.assertTrue(self.fixture.signing_key())
         # No gpg.ssh.allowedSignersFile: the tag is verified against the
         # file the gate read, which is the fleet's and here the fixture's.
-        self.assertEqual(MODULE.git("config", "--get", "gpg.ssh.allowedSignersFile", cwd=self.dir, check=False), "")
+        self.assertEqual(PACKAGE.host.git("config", "--get", "gpg.ssh.allowedSignersFile", cwd=self.dir, check=False), "")
         self.product.write("CHANGELOG.md", "# Changelog\n\n## 1.3.0 — 2026-09-03\n\n- Next.\n\n"
                            "## 1.2.3 — 2026-09-03\n\n- Previous.\n")
         # Cut also releases repositories with their own publication workflow.
@@ -231,8 +233,8 @@ class CutHostTest(unittest.TestCase):
         # Exercise the same tag implementation with a zero deadline; the CLI
         # deliberately requires at least a minute, unnecessary for this test.
         self.host.conclusion = ""
-        with fixtures.using_host(self.host), self.assertRaises(MODULE.Failure) as raised:
-            MODULE.cut_tag(fixtures.CutTest.Stub(**{"--apply": True}), self.fixture.declarations(),
+        with fixtures.using_host(self.host), self.assertRaises(maelys_cli.Failure) as raised:
+            PACKAGE.cut.cut_tag(fixtures.CutTest.Stub(**{"--apply": True}), self.fixture.declarations(),
                            envelope["data"], self.fixture.log, 0, 0, self.fixture.product.signers)
         self.assertEqual(raised.exception.code, "PRECONDITION_FAILED")
         self.assertIn("No check registered", raised.exception.message)

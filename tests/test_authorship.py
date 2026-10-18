@@ -32,9 +32,9 @@ import unittest
 from unittest.mock import patch
 
 from test_allowed_signers import lines_to_run
-from test_maelys_release import CLI, MODULE, using_host
+from test_maelys_release import CLI, PACKAGE, using_host
 
-AUTHORSHIP = MODULE.authorship
+AUTHORSHIP = PACKAGE.authorship
 SOCLE = ("--socle-sha", "f" * 40, "--socle-tag", "v9.9.9")
 ZEROS = "0" * 40
 
@@ -62,7 +62,7 @@ def real_composed() -> str:
     return completed.stdout.partition("<")[2].partition(">")[0] if completed.returncode == 0 else ""
 
 
-class CountingHost(MODULE.Host):
+class CountingHost(PACKAGE.host.Host):
     """The real host, with every call kept; what git composes with nothing set is the test's."""
 
     def __init__(self, composed: str = OWN, name: str = "Alice Account", refuses: bool = False,

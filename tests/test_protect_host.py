@@ -12,7 +12,7 @@ import unittest
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
 
 import test_maelys_release as fixtures
-from test_maelys_release import (ALL_LEGS, MODULE, UNPROTECTED, FakeHost, FakeProtection,
+from test_maelys_release import (ALL_LEGS, MODULE, PACKAGE, UNPROTECTED, FakeHost, FakeProtection,
                                 answered_404, protection_host, using_host, workflow_project)
 
 
@@ -342,7 +342,7 @@ class NothingDiffersTest(unittest.TestCase):
     def test_the_whole_protection_is_put_as_before_since_no_reading_can_equal_it(self):
         """It is sent only where nothing protects the branch, and it
         creates a protection: there is no reading for it to equal."""
-        body = {**MODULE.PROTECTION_SHAPE, "required_status_checks": {"strict": False, "contexts": ALL_LEGS}}
+        body = {**PACKAGE.protect.PROTECTION_SHAPE, "required_status_checks": {"strict": False, "contexts": ALL_LEGS}}
         code, plan = self.protect(ProtectionHost())
         self.assertEqual(plan["writes"], [{"method": "PUT", "endpoint": PROTECTION, "body": body}])
         host = ProtectionHost()
@@ -476,10 +476,10 @@ class NothingDiffersTest(unittest.TestCase):
         them: the write sets them in each."""
         held, lacking = requiring(bound(ALL_LEGS)), requiring(bound(ALL_LEGS[:1]))
         checks = bound(ALL_LEGS)
-        self.assertTrue(MODULE.protect.checks_held([held, held], checks))
-        self.assertFalse(MODULE.protect.checks_held([held, lacking], checks))
-        self.assertFalse(MODULE.protect.checks_held([lacking, held], checks))
-        self.assertFalse(MODULE.protect.checks_held([{"type": "deletion"}], checks))
+        self.assertTrue(PACKAGE.protect.checks_held([held, held], checks))
+        self.assertFalse(PACKAGE.protect.checks_held([held, lacking], checks))
+        self.assertFalse(PACKAGE.protect.checks_held([lacking, held], checks))
+        self.assertFalse(PACKAGE.protect.checks_held([{"type": "deletion"}], checks))
         host = ProtectionHost(ruleset=ruleset_of(bound(ALL_LEGS), lacking))
         _, text = self.protect(ProtectionHost(ruleset=ruleset_of(bound(ALL_LEGS), lacking)), text=True)
         self.assertNotIn(self.NOTE, text)
@@ -883,7 +883,7 @@ class WholeProtectionTest(unittest.TestCase):
     # -- no classic protection ---------------------------------------------------------------------
 
     def test_where_nothing_protects_the_branch_it_is_still_created_whole_with_its_create_lines(self):
-        body = {**MODULE.PROTECTION_SHAPE, "required_status_checks": {"strict": False, "contexts": ALL_LEGS}}
+        body = {**PACKAGE.protect.PROTECTION_SHAPE, "required_status_checks": {"strict": False, "contexts": ALL_LEGS}}
         code, plan = self.protect(ProtectionHost())
         self.assertEqual((code, plan["writes"]), (0, [{"method": "PUT", "endpoint": PROTECTION, "body": body}]))
         self.assertNotIn("refused", plan)
@@ -1024,7 +1024,7 @@ class AbsenceTest(unittest.TestCase):
     def test_a_404_that_says_branch_not_protected_and_an_empty_list_of_rules_still_create_the_protection_whole(self):
         """The other end: what establishes that nothing protects the
         branch is read as it was, plan and write."""
-        body = {**MODULE.PROTECTION_SHAPE, "required_status_checks": {"strict": False, "contexts": ALL_LEGS}}
+        body = {**PACKAGE.protect.PROTECTION_SHAPE, "required_status_checks": {"strict": False, "contexts": ALL_LEGS}}
         host = ProtectionHost()
         code, plan = self.protect(host)
         self.assertEqual((code, plan["unread"], plan["protected"]), (0, [], False))

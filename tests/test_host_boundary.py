@@ -15,8 +15,9 @@ import tempfile
 import threading
 import unittest
 
-from test_maelys_release import (CLI, MODULE, ROOT, ALL_LEGS, FakeHost, FakeProtection,
+from test_maelys_release import (CLI, MODULE, PACKAGE, ROOT, ALL_LEGS, FakeHost, FakeProtection,
                                 protection_host, using_host, workflow_project)
+import maelys_cli  # noqa: E402  -- on the path once the suite loaded the socle
 
 
 class HostBoundaryTest(unittest.TestCase):
@@ -95,13 +96,15 @@ loader = importlib.machinery.SourceFileLoader("candidate", sys.argv[1])
 spec = importlib.util.spec_from_loader(loader.name, loader)
 module = importlib.util.module_from_spec(spec)
 loader.exec_module(module)
-for operation in (lambda: module.host.HOST.which("python3"),
-                  lambda: module.host.HOST.run(["/unreachable"]),
-                  lambda: module.host.HOST.stream(["/unreachable"], sys.stdout),
-                  lambda: module.host.HOST.exec("/unreachable", ["/unreachable"], dict(os.environ))):
+from maelys_cli import Failure
+from maelys_socle import host
+for operation in (lambda: host.HOST.which("python3"),
+                  lambda: host.HOST.run(["/unreachable"]),
+                  lambda: host.HOST.stream(["/unreachable"], sys.stdout),
+                  lambda: host.HOST.exec("/unreachable", ["/unreachable"], dict(os.environ))):
     try:
         operation()
-    except module.Failure as failure:
+    except Failure as failure:
         assert failure.code == "PRECONDITION_FAILED"
     else:
         raise AssertionError("the invalid environment reached a host operation")
@@ -113,7 +116,7 @@ for operation in (lambda: module.host.HOST.which("python3"),
         self.assertEqual(result.stdout, "")
 
     def test_a_self_test_token_is_unique_and_expires_with_its_context(self):
-        with MODULE.Host.self_test_environment() as first, MODULE.Host.self_test_environment() as second:
+        with PACKAGE.host.Host.self_test_environment() as first, PACKAGE.host.Host.self_test_environment() as second:
             self.assertNotEqual(first["_MAELYS_RELEASE_SELF_TEST"], second["_MAELYS_RELEASE_SELF_TEST"])
             witness = pathlib.Path(first["_MAELYS_RELEASE_SELF_TEST_FILE"])
             self.assertEqual(witness.read_text(), first["_MAELYS_RELEASE_SELF_TEST"])
@@ -160,19 +163,21 @@ for operation in (lambda: module.host.HOST.which("python3"),
                         self.assertNotEqual(node.id, "HOST", "Only host.py owns the current host")
 
     def test_tests_replace_the_host_not_module_functions(self):
-        tree = ast.parse((ROOT / "tests" / "test_maelys_release.py").read_text())
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Store):
-                expression = ast.unparse(node)
-                if expression.startswith("MODULE."):
-                    self.assertEqual(expression, "MODULE.host.HOST")
-            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "setattr":
-                self.assertNotEqual(ast.unparse(node.args[0]), "MODULE")
+        """The suite installs a host; it never replaces a function of the package or of the entry point."""
+        for path in sorted((ROOT / "tests").glob("test_*.py")):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Store):
+                    expression = ast.unparse(node)
+                    if expression.startswith(("MODULE.", "PACKAGE.")):
+                        self.assertEqual(expression, "PACKAGE.host.HOST", f"{path.name}: {expression}")
+                if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "setattr":
+                    self.assertFalse(ast.unparse(node.args[0]).startswith(("MODULE", "PACKAGE")), path.name)
 
     def test_default_host_refuses_every_non_read_gh_command(self):
         self.assertTrue(os.environ.get("_MAELYS_RELEASE_SELF_TEST"))
         self.assertNotIn("_MAELYS_RELEASE_TEST_GH", os.environ)
-        host = MODULE.Host()
+        host = PACKAGE.host.Host()
         for command in (["gh", "pr", "create"], ["gh", "release", "create"], ["gh", "repo", "edit"],
                         ["gh", "api", "repos/o/r", "--field", "private=true"],
                         ["gh", "api", "--method", "DELETE", "repos/o/r"],
@@ -193,7 +198,8 @@ loader = importlib.machinery.SourceFileLoader("candidate", sys.argv[1])
 spec = importlib.util.spec_from_loader(loader.name, loader)
 module = importlib.util.module_from_spec(spec)
 loader.exec_module(module)
-module.host.HOST.run(["gh", "pr", "create"])
+from maelys_socle import host
+host.HOST.run(["gh", "pr", "create"])
 '''
         completed = subprocess.run([sys.executable, "-c", code, str(CLI)],
                                    text=True, capture_output=True, check=False)
@@ -206,12 +212,12 @@ module.host.HOST.run(["gh", "pr", "create"])
             # elsewhere once a test explicitly selected its fake executable.
             env = {**os.environ, "PATH": directory, "_MAELYS_RELEASE_TEST_GH": str(pathlib.Path(directory) / "gh")}
             with self.assertRaisesRegex(AssertionError, "explicitly declared fake"):
-                MODULE.Host().run(["gh", "api", "repos/o/r"], env=env)
+                PACKAGE.host.Host().run(["gh", "api", "repos/o/r"], env=env)
 
     def test_network_pushes_are_refused_even_when_the_remote_is_named(self):
         with tempfile.TemporaryDirectory(prefix="maelys-host-") as directory:
             project = pathlib.Path(directory)
-            host = MODULE.Host()
+            host = PACKAGE.host.Host()
             self.assertEqual(host.run(["git", "init", "-q"], cwd=project).returncode, 0)
             host.run(["git", "remote", "add", "origin", "https://github.com/o/r.git"], cwd=project)
             for remote in ("origin", "https://github.com/o/r.git", "git@github.com:o/r.git"):
@@ -224,7 +230,7 @@ module.host.HOST.run(["gh", "pr", "create"])
             origin, project = work / "origin.git", work / "product"
             origin.mkdir()
             project.mkdir()
-            host = MODULE.Host()
+            host = PACKAGE.host.Host()
             for command, cwd in ((["git", "init", "-q", "--bare"], origin),
                                  (["git", "init", "-q"], project),
                                  (["git", "-c", "user.name=test", "-c", "user.email=test@example.invalid",
@@ -260,7 +266,7 @@ module.host.HOST.run(["gh", "pr", "create"])
         env.update({"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null", "NO_PROXY": "127.0.0.1",
                     "no_proxy": "127.0.0.1"})
         with tempfile.TemporaryDirectory() as directory:
-            done = MODULE.Host().feed(["git", "ls-remote", f"http://127.0.0.1:{listener.getsockname()[1]}/x.git"],
+            done = PACKAGE.host.Host().feed(["git", "ls-remote", f"http://127.0.0.1:{listener.getsockname()[1]}/x.git"],
                                       b"", cwd=pathlib.Path(directory), env=env, timeout=2)
             self.assertLess(done.returncode, 0, done)
             self.assertEqual(done.stdout, b"")
@@ -271,25 +277,25 @@ module.host.HOST.run(["gh", "pr", "create"])
             while held[0].recv(4096):
                 pass
             # Without a time, the call is the one it was.
-            plain = MODULE.Host().feed(["git", "--version"], b"", cwd=pathlib.Path(directory))
+            plain = PACKAGE.host.Host().feed(["git", "--version"], b"", cwd=pathlib.Path(directory))
             self.assertEqual((plain.returncode, plain.stdout[:11]), (0, b"git version"))
 
     def test_public_wrappers_share_the_installed_host_and_restore_it(self):
-        original = MODULE.host.HOST
+        original = PACKAGE.host.HOST
         host = FakeHost({"object": ("ok", {"a": 1}), "array": ("ok", [1, 2])})
         with self.assertRaisesRegex(RuntimeError, "leave"):
             with using_host(host):
-                self.assertEqual(MODULE.github_read("object"), ("ok", {"a": 1}))
-                self.assertEqual(MODULE.github_api("object"), {"a": 1})
-                self.assertEqual(MODULE.github_list("array"), [1, 2])
-                self.assertEqual(MODULE.git("remote", "get-url", "origin"), "https://github.com/o/r.git")
+                self.assertEqual(PACKAGE.github.github_read("object"), ("ok", {"a": 1}))
+                self.assertEqual(PACKAGE.github.github_api("object"), {"a": 1})
+                self.assertEqual(PACKAGE.github.github_list("array"), [1, 2])
+                self.assertEqual(PACKAGE.host.git("remote", "get-url", "origin"), "https://github.com/o/r.git")
                 raise RuntimeError("leave")
-        self.assertIs(MODULE.host.HOST, original)
+        self.assertIs(PACKAGE.host.HOST, original)
         self.assertEqual(host.reads, ["object", "object", "array"])
         self.assertEqual(len(host.commands), 1)
 
     def test_api_write_keeps_method_payload_and_cwd(self):
-        class RecordingHost(MODULE.Host):
+        class RecordingHost(PACKAGE.host.Host):
             def run(self, command, cwd=None, env=None):
                 self.command, self.cwd = command, cwd
                 self.body = json.loads(pathlib.Path(command[-1]).read_text())
@@ -319,10 +325,10 @@ module.host.HOST.run(["gh", "pr", "create"])
                 invocation = type("I", (), {"operands": [str(project)], "format": "json",
                     "flag": lambda self, name: name == "--apply",
                     "option": lambda self, name, default="": default})()
-                with self.assertRaises(MODULE.Failure):
-                    MODULE.handle_protect(invocation)
+                with self.assertRaises(maelys_cli.Failure):
+                    PACKAGE.protect.handle_protect(invocation, MODULE.CONTEXT)
             self.assertEqual(host.writes, [])
-            self.assertIn(f"repos/{MODULE.SOCLE_REPOSITORY}/contents/WITHDRAWN", host.reads)
+            self.assertIn(f"repos/{PACKAGE.constants.SOCLE_REPOSITORY}/contents/WITHDRAWN", host.reads)
 
     def test_undeclared_fake_writes_fail_instead_of_running_gh(self):
         with tempfile.TemporaryDirectory() as directory:

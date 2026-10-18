@@ -26,7 +26,7 @@ import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 
-from test_maelys_release import ALL_LEGS, MODULE, Product, protection_host, using_host
+from test_maelys_release import ALL_LEGS, MODULE, PACKAGE, Product, protection_host, using_host
 # The entry script puts its own package on the path; the readers live there.
 from maelys_socle import inspection
 from maelys_socle import workflows as rules
@@ -47,7 +47,7 @@ DECLARED = [("x", "linux", "true")]
 
 
 def declarations(legs: list) -> object:
-    decl = MODULE.Declarations(pathlib.Path("/nonexistent"), "p")
+    decl = PACKAGE.declarations.Declarations(pathlib.Path("/nonexistent"), "p")
     decl.legs, decl.runners = legs, {}
     return decl
 
@@ -79,14 +79,14 @@ class Readers(unittest.TestCase):
         work = self.project(text)
         read = (work / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
         return {
-            "caller": MODULE.socle_check_contexts(work)[0],
-            "jobs": MODULE.read_workflows(work)[0]["jobs"],
+            "caller": PACKAGE.protect.socle_check_contexts(work, MODULE.CONTEXT)[0],
+            "jobs": PACKAGE.product_workflows.read_workflows(work)[0]["jobs"],
             "carried": [call["job"] for call in inspection.read_carried(work)["calls"]],
-            "sanitizes": [read.splitlines()[number - 1].strip() for number in MODULE.sanitizers_twice(read)],
+            "sanitizes": [read.splitlines()[number - 1].strip() for number in PACKAGE.workflows.sanitizers_twice(read)],
             "refused": any(check["status"] == "refused" and "a job of its own named legs" in check["message"]
-                           for check in MODULE.read_declarations(work, "maelys-fixture").checks),
-            "written": MODULE.ci_legs(read, declarations(DECLARED), *NEW),
-            "removed": MODULE.ci_legs(read, declarations([]), *NEW),
+                           for check in PACKAGE.reading.read_declarations(MODULE.CONTEXT, work, "maelys-fixture").checks),
+            "written": PACKAGE.workflows.ci_legs(read, declarations(DECLARED), *NEW),
+            "removed": PACKAGE.workflows.ci_legs(read, declarations([]), *NEW),
         }
 
     def held(self, name: str, text: str, **expected: object) -> None:
@@ -274,7 +274,7 @@ class EndsInACommentTest(Readers):
         for name, text in (("below a job", HEAD + BUILD + NOTED), ("with no job above", HEAD + NOTED),
                            ("behind a tab", HEAD + BUILD + NOTED.replace(": #", ":\t#")),
                            ("with the line endings of another system", (HEAD + BUILD + NOTED).replace("\n", "\r\n"))):
-            caller, contexts = MODULE.socle_check_contexts(self.project(text))
+            caller, contexts = PACKAGE.protect.socle_check_contexts(self.project(text), MODULE.CONTEXT)
             self.assertEqual(caller, "check", name)
             self.assertEqual(contexts[:3] + contexts[-1:], [*ALL_LEGS, "legs / x"], name)
             self.assertEqual([context for context in contexts if not context.startswith(("check / ", "legs / "))],
@@ -341,7 +341,7 @@ class EndsInACommentTest(Readers):
         """Left out, its pins were neither carried nor unresolved."""
         text = HEAD + BUILD + "  carry: # the private pins\n" + CARRIES + "\n" + NOTED
         work = self.project(text)
-        self.assertEqual(MODULE.read_workflows(work)[0]["jobs"], ["build", "carry", "check"])
+        self.assertEqual(PACKAGE.product_workflows.read_workflows(work)[0]["jobs"], ["build", "carry", "check"])
         self.assertEqual(inspection.read_carried(work), {
             "dependencies": ["pinned"], "unresolved": [], "calls": [
                 {"file": "ci.yml", "job": "carry", "dependencies": ["pinned"], "runner": ["ubuntu-26.04-arm"]}]})
@@ -414,7 +414,7 @@ class TheCommentIsNoLineOfTheJobTest(Readers):
             self.alike("below the calling job", HEAD + CHECK + CARRY + "  build:" + comment + "\n"
                        + BUILD.split("\n", 1)[1], comment, caller="check", carried=["carry"])
             none = HEAD + "  build:" + comment + "\n" + BUILD.split("\n", 1)[1]
-            self.assertEqual(MODULE.socle_check_contexts(self.project(none))[0], "", comment)
+            self.assertEqual(PACKAGE.protect.socle_check_contexts(self.project(none), MODULE.CONTEXT)[0], "", comment)
             self.assertEqual(inspection.read_carried(self.project(none))["calls"], [], comment)
 
     def test_a_job_of_the_products_own_named_legs_is_not_the_socles_by_its_comment(self) -> None:

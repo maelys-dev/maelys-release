@@ -9,7 +9,7 @@ import subprocess
 import sys
 import unittest
 
-from test_maelys_release import CLI, MODULE, ROOT, Product
+from test_maelys_release import CLI, MODULE, PACKAGE, ROOT, Product
 
 
 class PackageLayoutTest(unittest.TestCase):
@@ -98,6 +98,9 @@ other_loader = importlib.machinery.SourceFileLoader("other_socle", sys.argv[2])
 other_spec = importlib.util.spec_from_loader(other_loader.name, other_loader)
 other = importlib.util.module_from_spec(other_spec)
 other_loader.exec_module(other)
+# One package for both, and each entry point's own context: every read of
+# the running socle below is given one of the two, and must answer for it.
+from maelys_socle import github, host, protect, socle_origin
 # Resource reads remain lazy and rooted in each entry point, even though
 # the second loader reuses the first loader's already imported package.
 workflow = module.socle_root() / ".github/workflows/check-product.yml"
@@ -110,23 +113,24 @@ ci = project / ".github/workflows/ci.yml"
 ci.parent.mkdir(parents=True)
 ci.write_text("jobs:\\n  check:\\n    uses: maelys-dev/maelys-release/.github/workflows/check-product.yml@"
               + "f" * 40 + " # v9.9.9\\n")
-class RecordedHost(module.Host):
+class RecordedHost(host.Host):
     def read(self, path):
         assert path == "repos/maelys-dev/maelys-release/contents/WITHDRAWN"
         return "ok", {"encoding": "base64", "content": base64.b64encode(
             b"99.98.97 protect installed-version\\n").decode()}
-module.host.HOST = RecordedHost()
-print(json.dumps({"root": str(module.socle_root()), "share": str(module.share_dir()),
-                  "identity": module.socle_data("f" * 40, "v99.98.97"),
-                  "otherIdentity": other.socle_data("e" * 40, "other"),
-                  "withdrawal": module.withdrawn_for("protect"),
-                  "otherRoot": str(other.socle_root()), "otherWithdrawal": other.withdrawn_for("protect"),
-                  "legs": module.check_product_legs(), "otherLegs": other.check_product_legs(),
-                  "aliases": module.check_product_aliases(), "otherAliases": other.check_product_aliases(),
-                  "default": module.check_product_default("fuzz_command"),
-                  "otherDefault": other.check_product_default("fuzz_command"),
-                  "contexts": module.socle_check_contexts(project),
-                  "otherContexts": other.socle_check_contexts(project),
+host.HOST = RecordedHost()
+one, two = module.CONTEXT, other.CONTEXT
+print(json.dumps({"root": str(module.socle_root()), "share": str(socle_origin.share_dir(one)),
+                  "identity": socle_origin.socle_data(one, "f" * 40, "v99.98.97"),
+                  "otherIdentity": socle_origin.socle_data(two, "e" * 40, "other"),
+                  "withdrawal": github.withdrawn_for("protect", one),
+                  "otherRoot": str(other.socle_root()), "otherWithdrawal": github.withdrawn_for("protect", two),
+                  "legs": protect.check_product_legs(one), "otherLegs": protect.check_product_legs(two),
+                  "aliases": protect.check_product_aliases(one), "otherAliases": protect.check_product_aliases(two),
+                  "default": protect.check_product_default("fuzz_command", one),
+                  "otherDefault": protect.check_product_default("fuzz_command", two),
+                  "contexts": protect.socle_check_contexts(project, one),
+                  "otherContexts": protect.socle_check_contexts(project, two),
                   "modules": [value.__file__ for name, value in sys.modules.items()
                               if name == "maelys_socle" or name.startswith("maelys_socle.")]}))
 '''
@@ -141,14 +145,14 @@ print(json.dumps({"root": str(module.socle_root()), "share": str(module.share_di
                 self.assertEqual(data["otherRoot"], str(ROOT))
                 self.assertIsNone(data["otherWithdrawal"])
                 self.assertEqual(data["legs"], ["installed"])
-                self.assertEqual(data["otherLegs"], MODULE.check_product_legs())
+                self.assertEqual(data["otherLegs"], PACKAGE.protect.check_product_legs(MODULE.CONTEXT))
                 self.assertEqual(data["aliases"], [["former", "installed"]])
-                self.assertEqual(data["otherAliases"], [list(pair) for pair in MODULE.check_product_aliases()])
+                self.assertEqual(data["otherAliases"], [list(pair) for pair in PACKAGE.protect.check_product_aliases(MODULE.CONTEXT)])
                 self.assertEqual(data["default"], " prefix-fuzz")
-                self.assertEqual(data["otherDefault"], MODULE.check_product_default("fuzz_command"))
+                self.assertEqual(data["otherDefault"], PACKAGE.protect.check_product_default("fuzz_command", MODULE.CONTEXT))
                 self.assertEqual(data["contexts"], ["check", ["check / check (installed)", "check / fuzz"]])
                 self.assertEqual(data["otherContexts"], ["check", [
-                    *[f"check / check ({leg})" for leg in MODULE.check_product_legs()], "check / sanitizers"]])
+                    *[f"check / check ({leg})" for leg in PACKAGE.protect.check_product_legs(MODULE.CONTEXT)], "check / sanitizers"]])
                 self.assertEqual(len(data["modules"]), len(list((ROOT / "bin" / "maelys_socle").rglob("*.py"))))
                 for filename in data["modules"]:
                     self.assertIn(prefix.resolve() / "bin" / "maelys_socle", pathlib.Path(filename).parents)

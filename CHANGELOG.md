@@ -30,9 +30,11 @@
   functions that take it. The command line stands apart in `cli/`: the
   program, the catalog of commands and their output schemas, and the text
   of each result, built for one entry point by `catalog.build(context)`.
-  The entry point is 287 lines, most of them the names the tests still
-  reach on it. The two recorded references replay with no difference and
-  `describe` is byte-identical.
+  The entry point is 63 lines: it finds the socle it belongs to, builds
+  the context and the program, and runs it. The suite reads what it tests
+  where it lives, in the package, and the entry point only for what the
+  entry point is. The two recorded references replay with no difference
+  and `describe` is byte-identical.
 - **Impact.** [asks: nothing] [writes: nothing] Nothing for a product to
   do: no workflow, no managed file and no behaviour moves.
 

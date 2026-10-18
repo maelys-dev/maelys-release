@@ -26,9 +26,9 @@ import time
 import unittest
 import uuid
 
-from test_maelys_release import MODULE, FakeHost, Product, using_host
+from test_maelys_release import MODULE, PACKAGE, FakeHost, Product, using_host
 
-privacy = MODULE.privacy
+privacy = PACKAGE.privacy
 
 # Assembled, never spelled: a person, their machine on a home network, and
 # what a file would carry of them.
@@ -102,7 +102,7 @@ class Tree(unittest.TestCase):
         if tracked:
             git(self.dir, "init", "-q")
             git(self.dir, "add", "-A")
-            again, searched = self.guard(MODULE.Host(), machines, terms)
+            again, searched = self.guard(PACKAGE.host.Host(), machines, terms)
             self.assertEqual(sorted(map(repr, map(where, searched["findings"]))),
                              sorted(map(repr, map(where, data["findings"]))),
                              "what git names as candidates is narrower than the rule")
@@ -523,16 +523,16 @@ class LocalTest(Tree):
         self.assertIn("not looked for on a CI runner", there.says())
         saved = {name: os.environ.pop(name, None) for name in ("CI", "GITHUB_ACTIONS")}
         try:
-            self.assertFalse(MODULE.Host().is_runner())
+            self.assertFalse(PACKAGE.host.Host().is_runner())
             for name in ("CI", "GITHUB_ACTIONS"):
                 os.environ[name] = "true"
-                self.assertTrue(MODULE.Host().is_runner())
+                self.assertTrue(PACKAGE.host.Host().is_runner())
                 del os.environ[name]
         finally:
             os.environ.update({name: value for name, value in saved.items() if value is not None})
 
     def test_a_self_test_asks_no_machine_its_name_but_the_one_a_test_wrote(self) -> None:
-        host = MODULE.Host()
+        host = PACKAGE.host.Host()
         self.assertIsNone(host.which("hostname"))
         self.assertIsNone(host.which("scutil"))
         fake = pathlib.Path(self.work.name).resolve() / "bin" / "hostname"
@@ -576,15 +576,15 @@ class LocalTest(Tree):
 
         try:
             os.environ["XDG_CONFIG_HOME"] = str(home)
-            self.assertEqual(MODULE.Host().private_terms(), home / "maelys-release" / "private-terms")
+            self.assertEqual(PACKAGE.host.Host().private_terms(), home / "maelys-release" / "private-terms")
             with using_host(Bare()):
                 self.assertEqual(privacy.read_local().terms, [(3, TERM)])
             # The developer's own list is not a fixture: outside the temporary
             # directory a self-test reads none, set or not.
             os.environ["XDG_CONFIG_HOME"] = str(pathlib.Path.home() / ".config")
-            self.assertIsNone(MODULE.Host().private_terms())
+            self.assertIsNone(PACKAGE.host.Host().private_terms())
             del os.environ["XDG_CONFIG_HOME"]
-            self.assertIsNone(MODULE.Host().private_terms())
+            self.assertIsNone(PACKAGE.host.Host().private_terms())
         finally:
             if previous is None:
                 os.environ.pop("XDG_CONFIG_HOME", None)
@@ -742,7 +742,7 @@ class DeclarationTest(Tree):
                 "except a.json family host YXRlbGllci5ob21lIGlzIGEgaG9zdA9x",
                 "except fixtures/" + "0a1b2c3d" * 2 + ".json family host kept")))
         # parse_release names the section and judges none of its lines: the guard does, for every repository.
-        MODULE.parse_release("[privacy]\nrefuse everything\n")
+        PACKAGE.declarations.parse_release("[privacy]\nrefuse everything\n")
 
 
 class UnreadTest(Tree):
@@ -778,7 +778,7 @@ class UnreadTest(Tree):
         original = privacy.decode
         privacy.decode = lambda data: opened.append(len(data)) or original(data)
         try:
-            checks, data = self.guard(MODULE.Host())
+            checks, data = self.guard(PACKAGE.host.Host())
         finally:
             privacy.decode = original
         self.assertEqual(sorted(finding["path"] for finding in data["findings"]), ["link", "tracked.md"])
@@ -891,7 +891,7 @@ class CostTest(Tree):
         privacy.decode = lambda data: opened.append(1) or original(data)
         started = time.process_time()
         try:
-            checks, data = self.guard(MODULE.Host(), machines=[MACHINE], terms=[(1, TERM)])
+            checks, data = self.guard(PACKAGE.host.Host(), machines=[MACHINE], terms=[(1, TERM)])
         finally:
             privacy.decode = original
         self.assertEqual((data["files"]["tracked"], data["files"]["searched"], data["files"]["read"]), (2501, 2501, 1))
@@ -899,7 +899,7 @@ class CostTest(Tree):
         self.assertLess(time.process_time() - started, 1.0)
         # And where nothing holds a shape, nothing is opened and the line says so.
         (self.dir / "d00" / "held.txt").write_text("nothing\n", encoding="utf-8")
-        checks, data = self.guard(MODULE.Host())
+        checks, data = self.guard(PACKAGE.host.Host())
         self.assertIn("privacy: 2501 of 2501 tracked files searched for the shapes of six families, and none held one;",
                       checks[0][1])
         self.assertEqual(data["files"]["read"], 0)
@@ -918,7 +918,7 @@ class CostTest(Tree):
         git(self.dir, "add", "-A")
         asked = []
 
-        class Plain(MODULE.Host):
+        class Plain(PACKAGE.host.Host):
             def run(self, command, cwd=None, env=None):
                 if command[:2] == ["git", "grep"]:
                     asked.append(command[5])
@@ -928,7 +928,7 @@ class CostTest(Tree):
 
         saved = list(privacy.DIALECTS)
         try:
-            for hosted, dialects in ((MODULE.Host(), ["-P", "-E"]), (Plain(), ["-P", "-E"]), (MODULE.Host(), ["-E"])):
+            for hosted, dialects in ((PACKAGE.host.Host(), ["-P", "-E"]), (Plain(), ["-P", "-E"]), (PACKAGE.host.Host(), ["-E"])):
                 privacy.DIALECTS[:] = dialects
                 _, data = self.guard(hosted)
                 self.assertEqual(sorted(map(repr, map(where, data["findings"]))), expected)
@@ -944,7 +944,7 @@ class CostTest(Tree):
         git(self.dir, "add", "-A")
         seen = []
 
-        class Watching(MODULE.Host):
+        class Watching(PACKAGE.host.Host):
             def run(self, command, cwd=None, env=None):
                 seen.append(" ".join(command))
                 return super().run(command, cwd=cwd, env=env)
@@ -986,7 +986,7 @@ class HistoryTest(unittest.TestCase):
         original = privacy.read_local
         privacy.read_local = lambda: local(machines, terms)
         try:
-            with using_host(MODULE.Host()):
+            with using_host(PACKAGE.host.Host()):
                 return privacy.check_tree(directory or self.dir, history=True)
         finally:
             privacy.read_local = original
@@ -1100,7 +1100,7 @@ class HistoryTest(unittest.TestCase):
     def test_a_listing_git_refused_is_said_and_is_not_an_empty_history(self) -> None:
         self.commit({"records/a.json": json.dumps({"peerName": HOST})}, "one")
 
-        class Refusing(MODULE.Host):
+        class Refusing(PACKAGE.host.Host):
             def feed(self, command, data, cwd=None):
                 if command[:2] == ["git", "rev-list"]:
                     return subprocess.CompletedProcess(command, 128, b"", b"fatal")
@@ -1152,7 +1152,7 @@ class HistoryTest(unittest.TestCase):
         original = privacy.read_local
         privacy.read_local = lambda: local()
         try:
-            with using_host(MODULE.Host()):
+            with using_host(PACKAGE.host.Host()):
                 checks, _ = privacy.check_tree(self.dir)
         finally:
             privacy.read_local = original
@@ -1378,7 +1378,7 @@ class SecretScanningTest(unittest.TestCase):
     """preflight's note, from the document it already read: no call of its own."""
 
     def says(self, body) -> list:
-        return MODULE.github.secret_scanning("o/r", MODULE.github.Repository("ok", body))
+        return PACKAGE.github.secret_scanning("o/r", PACKAGE.github.Repository("ok", body))
 
     def test_a_public_repository_without_them_is_told_and_nobody_else_is(self) -> None:
         def analysis(scanning, protection):
@@ -1396,7 +1396,7 @@ class SecretScanningTest(unittest.TestCase):
         self.assertEqual(self.says({"visibility": "private", "private": True,
                                     "security_and_analysis": analysis("disabled", "disabled")}), [])
         self.assertEqual(self.says({"visibility": "public"}), [])
-        self.assertEqual(MODULE.github.secret_scanning("o/r", MODULE.github.Repository("unreadable", None)), [])
+        self.assertEqual(PACKAGE.github.secret_scanning("o/r", PACKAGE.github.Repository("unreadable", None)), [])
 
     def test_preflight_says_it_from_a_constructed_answer_and_only_when_the_member_says_off(self) -> None:
         """Through the reader `preflight` and `cut` call, on a scripted host.
@@ -1413,9 +1413,9 @@ class SecretScanningTest(unittest.TestCase):
             def read(path):
                 return ("ok", body) if path == "repos/o/r" else ("absent", None)
             with tempfile.TemporaryDirectory(prefix="maelys-preflight-") as directory:
-                decl = MODULE.Declarations(pathlib.Path(directory), "maelys-fixture", "maelys-release")
+                decl = PACKAGE.declarations.Declarations(pathlib.Path(directory), "maelys-fixture", "maelys-release")
                 with using_host(FakeHost(read=read)) as host:
-                    found = MODULE.repository_checks(decl)
+                    found = PACKAGE.release_checks.repository_checks(decl)
             # From the document already read: the repository is asked for once.
             self.assertEqual(host.reads.count("repos/o/r"), 1)
             return [(status, message) for status, message in found
@@ -1440,7 +1440,7 @@ class SecretScanningTest(unittest.TestCase):
         import sys
         source = pathlib.Path(sys.modules["maelys_socle.release_checks"].__file__).read_text(encoding="utf-8")
         self.assertIn("found.extend(secret_scanning(repository, repository_data))", source)
-        body = pathlib.Path(MODULE.github.__file__).read_text(encoding="utf-8")
+        body = pathlib.Path(PACKAGE.github.__file__).read_text(encoding="utf-8")
         function = body[body.index("def secret_scanning"):body.index("def read_repository")]
         for call in ("github_read", "github_api", "github_list", "host."):
             self.assertNotIn(call, function)

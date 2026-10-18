@@ -13,7 +13,7 @@ import shutil
 import subprocess
 import unittest
 
-from test_maelys_release import MODULE, ROOT, FakeHost, Product, using_host
+from test_maelys_release import MODULE, PACKAGE, ROOT, FakeHost, Product, using_host
 
 from maelys_socle.release_checks import formula_checks, style_offenses
 
@@ -60,7 +60,7 @@ class FormulaChecksTest(unittest.TestCase):
         self.product.write("packaging/homebrew/maelys-fixture.rb.in", self.TEMPLATE)
 
     def declarations(self):
-        return MODULE.read_declarations(self.product.dir, "maelys-fixture", "maelys-release")
+        return PACKAGE.reading.read_declarations(MODULE.CONTEXT, self.product.dir, "maelys-fixture", "maelys-release")
 
     def check(self, host):
         # The declarations are read with the real host: what the fake gates
@@ -123,7 +123,7 @@ class TheSocleHoldsItsOwnFormulaToItTest(unittest.TestCase):
     """
 
     def test_the_template_of_this_repository_renders(self) -> None:
-        decl = MODULE.read_declarations(ROOT, "maelys-release", "custom")
+        decl = PACKAGE.reading.read_declarations(MODULE.CONTEXT, ROOT, "maelys-release", "custom")
         self.assertEqual(decl.formulas, ["maelys-release"], "this repository carries one formula template")
         found = formula_checks(decl)
         self.assertEqual([status for status, _ in found if status == "fail"], [], found)

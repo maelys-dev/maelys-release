@@ -17,7 +17,7 @@ import re
 import subprocess
 import unittest
 
-from test_maelys_release import MODULE, PINNED_TAG, Product
+from test_maelys_release import MODULE, PACKAGE, PINNED_TAG, Product
 
 
 class OnRequestPinTest(unittest.TestCase):
@@ -35,10 +35,10 @@ class OnRequestPinTest(unittest.TestCase):
         self.home = (self.product.work / "cache" / "maelys-release" / "dependencies" / "maelys-fixture").resolve()
 
     def test_the_grammar_takes_the_word_and_nothing_after_it(self) -> None:
-        pin, problems = MODULE.parse_pin("x", f"v1\n{'a' * 40}\non-request\n")
+        pin, problems = PACKAGE.declarations.parse_pin("x", f"v1\n{'a' * 40}\non-request\n")
         self.assertEqual((pin["on_request"], problems), (True, []))
-        self.assertFalse(MODULE.parse_pin("x", f"v1\n{'a' * 40}\n")[0]["on_request"])
-        _, problems = MODULE.parse_pin("x", f"v1\n{'a' * 40}\non-request sometimes\n")
+        self.assertFalse(PACKAGE.declarations.parse_pin("x", f"v1\n{'a' * 40}\n")[0]["on_request"])
+        _, problems = PACKAGE.declarations.parse_pin("x", f"v1\n{'a' * 40}\non-request sometimes\n")
         self.assertEqual(problems, ["dependencies/x.pin: the on-request line takes nothing"])
 
     def test_it_is_still_a_pin_and_check_says_what_it_is(self) -> None:
@@ -104,15 +104,15 @@ class OnRequestPinTest(unittest.TestCase):
     def test_a_release_build_that_names_its_pins_leaves_it_out(self) -> None:
         """The older layout writes one line per pin into release.yml; the
         current one calls the loop, which skips it by itself."""
-        decl = MODULE.read_declarations(self.product.dir, "maelys-fixture", "maelys-release")
-        apart = MODULE.release_workflow(decl, "f" * 40, "v9.9.9", "0.0.0")
+        decl = PACKAGE.reading.read_declarations(MODULE.CONTEXT, self.product.dir, "maelys-fixture", "maelys-release")
+        apart = PACKAGE.workflows.release_workflow(decl, "f" * 40, "v9.9.9", "0.0.0")
         self.assertIn("sh scripts/checkout-dependencies.sh", apart)
         decl.dependencies_apart = False
-        named = MODULE.release_workflow(decl, "f" * 40, "v9.9.9", "0.0.0")
+        named = PACKAGE.workflows.release_workflow(decl, "f" * 40, "v9.9.9", "0.0.0")
         self.assertEqual(re.findall(r"sh scripts/checkout-dependency\.sh (\S+)", named), ["maelys-system"])
 
     def test_a_product_whose_only_pin_is_on_request_asks_the_release_for_no_checkout(self) -> None:
         (self.product.dir / "dependencies" / "maelys-system.pin").unlink()
-        decl = MODULE.read_declarations(self.product.dir, "maelys-fixture", "maelys-release")
+        decl = PACKAGE.reading.read_declarations(MODULE.CONTEXT, self.product.dir, "maelys-fixture", "maelys-release")
         self.assertEqual(decl.dependencies, ["maelys-extra"])
-        self.assertNotIn("dependency_checkout", MODULE.release_workflow(decl, "f" * 40, "v9.9.9", "0.0.0"))
+        self.assertNotIn("dependency_checkout", PACKAGE.workflows.release_workflow(decl, "f" * 40, "v9.9.9", "0.0.0"))

@@ -20,7 +20,7 @@ import subprocess
 import unittest
 from unittest import mock
 
-from test_maelys_release import MODULE, PINNED_TAG, Product, using_host
+from test_maelys_release import MODULE, PACKAGE, PINNED_TAG, Product, using_host
 
 SAID = " is also written in "
 HOSTILE = """\
@@ -41,7 +41,7 @@ HOSTILE = """\
 """
 
 
-class Recording(MODULE.Host):
+class Recording(PACKAGE.host.Host):
     """The real host, with every command it was asked for kept."""
 
     def __init__(self) -> None:
@@ -192,10 +192,10 @@ class PinCopiesTest(unittest.TestCase):
     def test_prose_under_docs_is_read_in_every_form_it_takes(self) -> None:
         """The exemption is for data. A `.rst` or a `.txt` is prose as much
         as a `.md`, by the socle's own list, and was passing for data."""
-        for suffix in MODULE.PROSE_SUFFIXES:
+        for suffix in PACKAGE.constants.PROSE_SUFFIXES:
             self.product.write(f"docs/build{suffix.upper() if suffix == '.md' else suffix}", f"`{self.commit}`\n")
         self.track()
-        self.assertEqual(sorted(MODULE.PROSE_SUFFIXES), [".markdown", ".md", ".rst", ".txt"])
+        self.assertEqual(sorted(PACKAGE.constants.PROSE_SUFFIXES), [".markdown", ".md", ".rst", ".txt"])
         self.assertEqual(self.listed(),
                          "docs/build.MD:1, docs/build.markdown:1, docs/build.rst:1, docs/build.txt:1")
 
@@ -262,7 +262,7 @@ class PinCopiesTest(unittest.TestCase):
             self.assertIn("scripts/bootstrap.sh", subprocess.run(
                 ["git", "-C", str(self.product.dir / "scripts"), "-c", "color.ui=false", "grep", "-l", "-F",
                  "-e", self.commit], check=True, text=True, stdout=subprocess.PIPE).stdout)
-            self.assertEqual(MODULE.inspection.pin_copies(self.product.dir / "scripts", self.pins()),
+            self.assertEqual(PACKAGE.inspection.pin_copies(self.product.dir / "scripts", self.pins()),
                              {"maelys-system": {"bootstrap.sh": [1]}})
 
     def test_a_submodule_is_another_repository_s_files(self) -> None:
@@ -308,7 +308,7 @@ class PinCopiesTest(unittest.TestCase):
         self.assertEqual([check for check in checks if SAID in check["message"]], [])
 
     def pins(self) -> dict[str, dict]:
-        return MODULE.read_declarations(self.product.dir, "maelys-fixture", "maelys-release").pins
+        return PACKAGE.reading.read_declarations(MODULE.CONTEXT, self.product.dir, "maelys-fixture", "maelys-release").pins
 
     def test_every_pin_is_searched_in_one_call(self) -> None:
         """`check` runs on every product and in every CI run."""
@@ -322,7 +322,7 @@ class PinCopiesTest(unittest.TestCase):
         pins = self.pins()
         self.assertEqual(sorted(pins), ["maelys-extra", "maelys-system"])
         with using_host(Recording()) as host:
-            copies = MODULE.inspection.pin_copies(self.product.dir, pins)
+            copies = PACKAGE.inspection.pin_copies(self.product.dir, pins)
         self.assertEqual(copies, {"maelys-system": {"scripts/one.sh": [1], "scripts/two.sh": [2]},
                                   "maelys-extra": {"scripts/two.sh": [1]}})
         self.assertEqual(len(host.commands), 1, host.commands)
@@ -333,13 +333,13 @@ class PinCopiesTest(unittest.TestCase):
             self.assertIn(commit, search)
         self.assertIn("--fixed-strings", search)
         # Every setting is on the command, before the word that runs it.
-        for setting in MODULE.inspection.PIN_SEARCH_SETTINGS:
+        for setting in PACKAGE.inspection.PIN_SEARCH_SETTINGS:
             self.assertLess(search.index(setting), search.index("grep"))
             self.assertEqual(search[search.index(setting) - 1], "-c")
 
     def test_a_product_that_pins_nothing_is_not_searched(self) -> None:
         with using_host(Recording()) as host:
-            self.assertEqual(MODULE.inspection.pin_copies(self.product.dir, {}), {})
+            self.assertEqual(PACKAGE.inspection.pin_copies(self.product.dir, {}), {})
         self.assertEqual(host.commands, [])
 
     def test_a_path_is_named_whole_and_the_list_can_be_cut_again(self) -> None:
@@ -352,7 +352,7 @@ class PinCopiesTest(unittest.TestCase):
             self.product.write(relative, f"x\n{self.commit}\n")
         self.product.write("scripts/plain.txt", f"{self.commit}\n")
         self.track()
-        copies = MODULE.inspection.pin_copies(self.product.dir, self.pins())
+        copies = PACKAGE.inspection.pin_copies(self.product.dir, self.pins())
         self.assertEqual(copies, {"maelys-system": {**{relative: [2] for relative in odd}, "scripts/plain.txt": [1]}})
         listed = self.listed()
         self.assertNotIn("\n", listed)
@@ -377,7 +377,7 @@ class PinCopiesTest(unittest.TestCase):
     def test_a_name_git_quotes_is_read_back_and_a_name_that_is_not_utf8_raises_nothing(self) -> None:
         """A file system that takes any byte in a name is not the one this
         suite runs on everywhere; what git prints for such a name is."""
-        unquoted = MODULE.inspection.unquoted_path
+        unquoted = PACKAGE.inspection.unquoted_path
         self.assertEqual(unquoted("scripts/plain.txt"), "scripts/plain.txt")
         self.assertEqual(unquoted('"caf\\303\\251.md"'), "café.md")
         self.assertEqual(unquoted('"new\\nline \\"q\\" back\\\\slash\\ttab"'), 'new\nline "q" back\\slash\ttab')

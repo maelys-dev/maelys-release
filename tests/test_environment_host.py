@@ -25,7 +25,7 @@ import unittest
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
 
 import test_maelys_release as fixtures
-from test_maelys_release import ALL_LEGS, MODULE, ROOT, FakeHost, FakeProtection, protection_host, using_host
+from test_maelys_release import ALL_LEGS, MODULE, PACKAGE, ROOT, FakeHost, FakeProtection, protection_host, using_host
 # The module and not its test class: a class imported by name is a class of
 # this module too, and the suite ran its tests a second time from here.
 import test_protect_host
@@ -300,7 +300,7 @@ class ProtectEnvironmentTest(unittest.TestCase):
                     host = EnvironmentHost(environment(), held)
                     with using_host(EnvironmentHost(environment(), held)):
                         said = [message for status, message in
-                                MODULE.policy_verdicts(MODULE.read_release_environment("o/r"), ".")
+                                PACKAGE.github.policy_verdicts(PACKAGE.github.read_release_environment("o/r"), ".")
                                 if status == "fail" and "also admits" in message]
                     self.assertEqual(len(said), 1)
                     self.assertIn(f"-X DELETE {POLICIES}/{beside['id']}", said[0])
@@ -342,8 +342,8 @@ class ProtectEnvironmentTest(unittest.TestCase):
                 return ("ok", []) if path == ENVIRONMENT else super().read(path)
         host = Odd(environment(None, REVIEWER))
         with using_host(host):
-            reading = MODULE.read_release_environment("o/r")
-            verdicts = MODULE.policy_verdicts(reading, ".")
+            reading = PACKAGE.github.read_release_environment("o/r")
+            verdicts = PACKAGE.github.policy_verdicts(reading, ".")
         self.assertEqual((reading.missing, reading.unreadable), (False, True))
         self.assertEqual([status for status, _ in verdicts], ["note"])
         code, result = self.run_protect(host, "--apply")
@@ -661,7 +661,7 @@ class ProtectEnvironmentTest(unittest.TestCase):
         # And the same reading through the verdict `preflight` and `cut` print.
         with using_host(host):
             host.environment = environment(PROTECTED, TIMER)
-            said = MODULE.environment_gate("o/r", host.environment, "reviewer")[0][1]
+            said = PACKAGE.github.environment_gate("o/r", host.environment, "reviewer")[0][1]
         self.assertEqual(self.remedy(said), {"reviewers": [{"type": "User", "id": 4242}],
                                              "deployment_branch_policy": PROTECTED, "wait_timer": 30})
 
@@ -675,7 +675,7 @@ class ProtectEnvironmentTest(unittest.TestCase):
 
     def test_no_line_is_printed_for_what_no_line_can_carry(self) -> None:
         unknown = {"id": 9, "type": "a_rule_of_tomorrow"}
-        said = MODULE.environment_gate("o/r", environment(CUSTOM, unknown), "reviewer")[0][1]
+        said = PACKAGE.github.environment_gate("o/r", environment(CUSTOM, unknown), "reviewer")[0][1]
         self.assertNotIn("gh api -X PUT", said)
         self.assertIn("https://github.com/o/r/settings/environments", said)
         self.assertIn("a protection rule of type a_rule_of_tomorrow", said)
@@ -690,14 +690,14 @@ class ProtectEnvironmentTest(unittest.TestCase):
     def test_the_gate_is_read_by_the_parser_preflight_reads_it_with(self) -> None:
         for gate in ("reviewer", "none", ""):
             with self.subTest(gate=gate), released_project(gate) as project:
-                self.assertEqual(MODULE.protect.declared_gate(project), gate)
-                self.assertEqual(MODULE.protect.declared_gate(project),
-                                 MODULE.read_declarations(project, "maelys-fixture", "maelys-release").gate)
+                self.assertEqual(PACKAGE.protect.declared_gate(project), gate)
+                self.assertEqual(PACKAGE.protect.declared_gate(project),
+                                 PACKAGE.reading.read_declarations(MODULE.CONTEXT, project, "maelys-fixture", "maelys-release").gate)
         with released_project("none") as project:
             # A section the grammar refuses is not a gate declared in passing:
             # the scan this replaced answered `none` here.
             (project / "maelys-release.conf").write_text("[gate]\nnone\nreviewer\n")
-            self.assertEqual(MODULE.protect.declared_gate(project), "")
+            self.assertEqual(PACKAGE.protect.declared_gate(project), "")
         source = (ROOT / "bin" / "maelys_socle" / "protect.py").read_text(encoding="utf-8")
         self.assertNotIn("declared_word", source)
 
@@ -849,8 +849,8 @@ class ProtectEnvironmentTest(unittest.TestCase):
         with using_host(FakeHost({})):
             for held, state in ((None, "absent"), ({"deployment_branch_policy": None}, "ok"),
                                 ({"deployment_branch_policy": PROTECTED}, "ok")):
-                reading = MODULE.github.release_environment("o/r", held, state)
-                found = MODULE.policy_verdicts(reading, "/where/the/product/is")
+                reading = PACKAGE.github.release_environment("o/r", held, state)
+                found = PACKAGE.github.policy_verdicts(reading, "/where/the/product/is")
                 self.assertEqual([status for status, _ in found], ["fail"])
                 self.assertIn("'maelys-release protect /where/the/product/is --apply'", found[0][1])
                 self.assertNotIn("gh api", found[0][1])

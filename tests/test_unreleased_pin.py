@@ -25,13 +25,14 @@ import tempfile
 import unittest
 from contextlib import contextmanager
 
-from test_maelys_release import MODULE, PINNED_TAG, ROOT, Product, RealGitHost
+from test_maelys_release import MODULE, PACKAGE, PINNED_TAG, ROOT, Product, RealGitHost
+import maelys_cli  # noqa: E402  -- on the path once the suite loaded the socle
 
 THIRD = "https://third.example.invalid"
 
 
 def parse(text: str, name: str = "lib") -> tuple[dict, list[str]]:
-    return MODULE.parse_pin(name, text)
+    return PACKAGE.declarations.parse_pin(name, text)
 
 
 class UnreleasedGrammarTest(unittest.TestCase):
@@ -935,7 +936,7 @@ class UnreleasedCheckoutTest(unittest.TestCase):
         """`--all` on line 1 was an instruction to `git rev-list`, and answered with a commit."""
         self.apply_plain()
         checkout = self.home / "maelys-system"
-        named = MODULE.dependencies.named_by
+        named = PACKAGE.dependencies.named_by
         with self.environment():
             self.assertEqual(named(PINNED_TAG, checkout), self.product.tagged)
             for line in ("--all", "--branches", "-n2", "--remotes"):
@@ -1001,7 +1002,7 @@ class UnreleasedBranchAskedTest(unittest.TestCase):
     def verdict(self, commit: str, fetch: bool, tag: str = "v1.1.0", branch: str = "main",
                 checkout: "pathlib.Path | None" = None) -> tuple:
         pin = {"name": "lib", "tag": tag, "commit": commit, "unreleased": branch}
-        return MODULE.dependencies.unreleased_pin(pin, f"{THIRD}/lib.git", checkout or self.checkout,
+        return PACKAGE.dependencies.unreleased_pin(pin, f"{THIRD}/lib.git", checkout or self.checkout,
                                                   fetch=fetch, current=False)
 
     def test_asked_and_still_there(self) -> None:
@@ -1171,10 +1172,10 @@ class UnreleasedPinMovedTest(unittest.TestCase):
 
     def test_an_entry_that_does_not_name_it_is_refused_and_naming_it_is_enough(self) -> None:
         project = self.repository()
-        found = MODULE.moved_pins_named(project, "- Something else changed.")
+        found = PACKAGE.cut.moved_pins_named(project, "- Something else changed.")
         self.assertEqual([status for status, _ in found], ["fail"])
         self.assertIn("does not name lib", found[0][1])
-        found = MODULE.moved_pins_named(project, "- Re-pins lib further along its main branch.")
+        found = PACKAGE.cut.moved_pins_named(project, "- Re-pins lib further along its main branch.")
         self.assertEqual([status for status, _ in found], ["ok"])
 
 
@@ -1243,12 +1244,12 @@ class UnreleasedPinCutTest(unittest.TestCase):
         data = {"mode": "plan", "stage": "open", "product": "maelys-fixture", "project": str(self.dir),
                 "repository": "maelys-dev/maelys-fixture", "version": "1.3.0", "tag": "v1.3.0",
                 "branch": "release/v1.3.0", "base": "main", "gate": [], "checks": [], "ready": False}
-        decl = MODULE.read_declarations(self.dir, "maelys-fixture", "custom")
-        return MODULE.cut_open(self.Stub(), decl, data, self.log, 1, 1, self.product.signers)
+        decl = PACKAGE.reading.read_declarations(MODULE.CONTEXT, self.dir, "maelys-fixture", "custom")
+        return PACKAGE.cut.cut_open(self.Stub(), decl, data, self.log, 1, 1, self.product.signers)
 
     def test_a_release_that_moves_one_and_does_not_name_it_is_not_cut(self) -> None:
         data, code = self.plan("- Something else changed.")
-        self.assertEqual((code, data["ready"]), (MODULE.EXIT_VIOLATIONS, False))
+        self.assertEqual((code, data["ready"]), (maelys_cli.EXIT_VIOLATIONS, False))
         failed = [line["message"] for line in data["gate"] if line["status"] == "fail"]
         self.assertEqual(len(failed), 1, data["gate"])
         self.assertIn("dependencies/lib.pin moved since v1.2.2 and the entry of this version does not name lib",
@@ -1257,7 +1258,7 @@ class UnreleasedPinCutTest(unittest.TestCase):
 
     def test_naming_it_in_the_entry_opens_the_gate(self) -> None:
         data, code = self.plan("- Re-pins lib further along its main branch.")
-        self.assertEqual((code, data["ready"]), (MODULE.EXIT_OK, True), data["gate"])
+        self.assertEqual((code, data["ready"]), (maelys_cli.EXIT_OK, True), data["gate"])
         self.assertIn("dependencies/lib.pin moved since v1.2.2, and the entry names lib",
                       [line["message"] for line in data["gate"]])
 

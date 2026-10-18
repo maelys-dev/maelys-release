@@ -99,8 +99,9 @@ jobs:
           socle = importlib.util.module_from_spec(spec)
           loader.exec_module(socle)
           root = pathlib.Path(".").resolve()
-          decl = socle.read_declarations(root, "maelys-release", "custom")
-          markdown, contract = socle.render_cli_reference(decl)
+          from maelys_socle import cli_reference, reading
+          decl = reading.read_declarations(socle.CONTEXT, root, "maelys-release", "custom")
+          markdown, contract = cli_reference.render_cli_reference(decl)
           failed = [check["message"] for check in decl.checks if "did not run" in check["message"]
                     or "not available" in check["message"]]
           for name, fresh in (("docs/cli.md", markdown), ("docs/cli-contract.json", contract)):

@@ -50,9 +50,11 @@ import pathlib
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 
 import capture_api as replay
+
 
 REPOSITORIES = ('maelys-dev/maelys-system', 'maelys-dev/agent-cli-spec')
 DATE = '2026-09-16T00:00:00+0000'
@@ -132,13 +134,13 @@ def fixture(module, parent, repository, commit, kind):
     (project / 'scripts/package-release.sh').chmod(0o755)
     # Build managed files using the named, clean implementation, before origin
     # exists. This changes only a temporary product, never a fleet checkout.
-    original = module.host.HOST
-    class Bootstrap(module.Host):
+    original = replay.socle_host(module).HOST
+    class Bootstrap(replay.socle_host(module).Host):
         def read(self, path):
             raise AssertionError(f'fixture setup attempted GitHub: {path}')
         def which(self, name):
             return None
-    module.host.HOST = Bootstrap()
+    replay.socle_host(module).HOST = Bootstrap()
     try:
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
@@ -148,7 +150,7 @@ def fixture(module, parent, repository, commit, kind):
         if code:
             raise RuntimeError(err.getvalue())
     finally:
-        module.host.HOST = original
+        replay.socle_host(module).HOST = original
     if kind == 'seeded-name':
         # The line the seed of 0.58.0 to 0.59.1 wrote for every product: a
         # note since 0.60.0, a refusal from 0.61.0 -- this case is where the
@@ -320,8 +322,8 @@ class Responses:
 
 
 def recording_host(module, project, source, responses, profile):
-    original = module.Host()
-    class RecordingHost(module.Host):
+    original = replay.socle_host(module).Host()
+    class RecordingHost(replay.socle_host(module).Host):
         def __init__(self):
             self.events = []
         def which(self, name):
@@ -431,7 +433,7 @@ def main():
         commit, source = args.commit, (replay.frozen_socle(source, args.reference.resolve(), work)
                                        if args.reference else source)
         module = replay.load_source(source)
-        responses = Responses(module.Host(), args.responses_cache.resolve(), offline=args.offline)
+        responses = Responses(replay.socle_host(module).Host(), args.responses_cache.resolve(), offline=args.offline)
         manifest = {**provenance(commit, own_version, module.socle_version()), 'cases': [], 'sha256': {}}
         for case in scenarios():
             folder = work / case['id']

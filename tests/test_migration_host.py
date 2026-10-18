@@ -16,6 +16,7 @@ from unittest.mock import patch
 import test_maelys_release as fixtures
 
 MODULE = fixtures.MODULE
+PACKAGE = fixtures.PACKAGE
 
 
 class MigrationHost(fixtures.FakeHost):
@@ -47,7 +48,7 @@ class MigrationHost(fixtures.FakeHost):
             self.pushes.append((command, pathlib.Path(cwd)))
             if self.fail_product_push and pathlib.Path(cwd).name == "product":
                 return subprocess.CompletedProcess(command, 23, "", "fixture refuses second push")
-        return MODULE.Host.run(self, command, cwd=cwd, env=self.environment)
+        return PACKAGE.host.Host.run(self, command, cwd=cwd, env=self.environment)
 
 
 @unittest.skipUnless(shutil.which("git-filter-repo"), "git-filter-repo is required to rewrite history")

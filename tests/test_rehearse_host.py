@@ -11,7 +11,7 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from unittest.mock import patch
 
-from test_maelys_release import APART, MODULE, FakeHost, Product, using_host
+from test_maelys_release import APART, MODULE, PACKAGE, FakeHost, Product, using_host
 
 
 class RehearsalHost(FakeHost):
@@ -34,7 +34,7 @@ class RehearsalHost(FakeHost):
         if cwd == self.product.dir.resolve() and command[:2] in (["git", "grep"], ["git", "rev-parse"],
                                                                  ["git", "config"], ["git", "symbolic-ref"],
                                                                  ["git", "log"], ["git", "for-each-ref"]):
-            return MODULE.Host.run(self, command, cwd=cwd, env=self.product.env)
+            return PACKAGE.host.Host.run(self, command, cwd=cwd, env=self.product.env)
         if self.mode == "channel" and command == ["gh", "release", "download", "v1.2.3", "--repo", "o/r",
                                                   "--dir", str(self.product.dir.resolve() / "dist")]:
             dist = self.product.dir / "dist"
@@ -94,7 +94,7 @@ class RehearseHostTest(unittest.TestCase):
                     self.assertIn(value, command)
                 # The line of a check travels with a check, and with nothing else.
                 self.assertEqual("CHECK_COMMAND=make check" in command, mode == "check")
-                self.assertEqual(command[-3:], ["bash", "-c", MODULE.REHEARSAL])
+                self.assertEqual(command[-3:], ["bash", "-c", PACKAGE.rehearse.REHEARSAL])
                 self.assertEqual((cwd, env, host.writes, host.reads), (None, None, [], []))
 
     def test_container_failure_keeps_the_process_code_in_the_contract_error(self):

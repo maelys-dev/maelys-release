@@ -88,13 +88,13 @@ class ApiGoldenBoundaryTest(unittest.TestCase):
         for words in ('Branch not protected', 'Not Found'):
             state, body = host.read('repos/example/product')
             self.assertEqual((state, body, state.message), ('absent', None, words))
-            self.assertIsInstance(state, candidate.host.Absent)
-            self.assertIs(candidate.github.Protection(state, body, 'ok', []).unprotected,
+            self.assertIsInstance(state, REPLAY.socle_host(candidate).Absent)
+            self.assertIs(sys.modules["maelys_socle.github"].Protection(state, body, 'ok', []).unprotected,
                           words == 'Branch not protected')
         state, body = host.read('repos/example/product')
         self.assertEqual((state, body), ('absent', None))
         self.assertIs(type(state), str)
-        self.assertIs(candidate.github.Protection(state, body, 'ok', []).unprotected, False)
+        self.assertIs(sys.modules["maelys_socle.github"].Protection(state, body, 'ok', []).unprotected, False)
         state, body = host.read('repos/example/product')
         self.assertEqual((state, body, type(state)), ('ok', {'a': 1}, str))
         host.finish()
