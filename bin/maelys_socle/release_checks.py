@@ -454,7 +454,9 @@ def repository_checks(decl: Declarations) -> list[tuple[str, str]]:
     found.extend(channel_visibility(repository, decl.channels))
     branch = repository_data.default_branch
     protection = read_protection(repository, branch)
-    found.append(branch_protection(repository, branch, protection.classic_state, protection.ruled_state,
+    # As GitHub said it: an open branch only in the words it uses for one,
+    # and a 404 that says anything else is a refusal to say, as a 403 is.
+    found.append(branch_protection(repository, branch, protection.classic_reading, protection.rules_reading,
                                    protection.rules, decl.commit_verification))
     # Last, and a note whatever it says: what the repository has already
     # published. Everything above is configuration, and a configuration that

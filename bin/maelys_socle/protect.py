@@ -794,8 +794,11 @@ def rulesets_requiring(rules: object) -> list[list[dict]]:
 def ruleset_checks(rules: list, contexts: list[str]) -> list[dict]:
     """The required checks a write gives a ruleset: each context with the integration allowed to report it.
 
-    A context the rules already carry keeps its own, and a new one takes the
-    one its neighbours carry most often.
+    A context the rules already carry keeps what it has -- its integration,
+    or none: a check bound to no app is one any source may report, and
+    binding it to its neighbours' app made every pull request wait for a
+    report that app never sends. A new one takes the integration its
+    neighbours carry most often.
     """
     integration = {}
     for rule in rules:
@@ -808,9 +811,8 @@ def ruleset_checks(rules: list, contexts: list[str]) -> list[dict]:
                     integration[check["context"]] = check.get("integration_id")
     known = [value for value in integration.values() if value]
     default = max(set(known), key=known.count) if known else None
-    return [{"context": name, **({"integration_id": integration.get(name) or default}
-                                 if (integration.get(name) or default) else {})}
-            for name in contexts]
+    bound = {name: integration[name] if name in integration else default for name in contexts}
+    return [{"context": name, **({"integration_id": bound[name]} if bound[name] else {})} for name in contexts]
 
 
 def checks_held(rules: list, checks: list[dict]) -> bool:

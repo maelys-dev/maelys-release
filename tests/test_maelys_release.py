@@ -3171,23 +3171,32 @@ class GitHubReadingTest(unittest.TestCase):
         state, _ = self.read(self.Completed(1, "", "gh: a proxy said (HTTP 502) then Not Found (HTTP 404)"))
         self.assertEqual((state, hasattr(state, "message")), ("unreadable", False))
 
-    def test_every_other_reader_of_a_protection_takes_any_404_for_an_absence_as_it_did(self) -> None:
-        """`preflight`, the guard of `adopt` and the selector report on a
-        404 and write nothing on it: what they say of one is unchanged,
-        whatever GitHub said with it."""
-        for message in ("Branch not protected", "Not Found", "Branch not found"):
-            with self.subTest(message=message):
+    def test_preflight_and_the_selector_state_an_absence_only_in_github_s_words_for_one(self) -> None:
+        """`preflight` said a branch was not protected, and the `classic-protection` selector said
+        False, on any 404 -- a token that may not read the protection and a branch that is not there
+        included. Only `Branch not protected` is an open branch; any other 404 is a refusal to say,
+        as a 403 is. The rules of a branch answer `[]` where none applies: a 404 there is no answer.
+        The guard of `adopt` reads what answered and is silent on the rest, as it is when GitHub
+        cannot be asked at all."""
+        for message, rules_gone in (("Branch not protected", False), ("Not Found", False),
+                                    ("Branch not found", False), ("Branch not protected", True)):
+            with self.subTest(message=message, rules_gone=rules_gone):
                 gone = answered_404(message)
-                with workflow_project() as project, using_host(protection_host(gone, rules=gone)):
+                host = protection_host(gone, rules=answered_404("Not Found") if rules_gone else ("ok", []))
+                with workflow_project() as project, using_host(host):
                     found = PACKAGE.github.read_protection("o/r", "main")
-                    self.assertEqual((found.classic_state, found.ruled_state, found.unread),
-                                     ("absent", "absent", False))
+                    said = PACKAGE.github.branch_protection("o/r", "main", found.classic_reading, found.rules_reading,
+                                                            found.rules)
+                    open_branch = message == "Branch not protected" and not rules_gone
+                    self.assertEqual(said[0], "note")
+                    if open_branch:
+                        self.assertIn("is not protected", said[1])
+                    else:
+                        self.assertIn("cannot read", said[1])
+                        self.assertNotIn("is not protected", said[1])
+                    self.assertIs(PACKAGE.github.classic_protection(project),
+                                  False if message == "Branch not protected" else None)
                     self.assertEqual(PACKAGE.github.required_contexts(project), [])
-                    self.assertIs(PACKAGE.github.classic_protection(project), False)
-                    self.assertEqual(PACKAGE.github.branch_protection("o/r", "main", found.classic_state, found.ruled_state,
-                                                              found.rules)[0], "note")
-                    self.assertIn("is not protected", PACKAGE.github.branch_protection(
-                        "o/r", "main", found.classic_state, found.ruled_state, found.rules)[1])
 
     def test_github_api_still_answers_a_body_or_nothing(self) -> None:
         """The readers that act the same way on every absence keep their shape;
@@ -7806,6 +7815,29 @@ class TrackedNameNotUtf8Test(unittest.TestCase):
             os.remove(os.fsencode(product.dir) + b"/docs/caf\xe9.md")
         product.write("docs/y.md", "# Y\n")
         self.assertEqual(PACKAGE.cut.worktree_paths(product.dir).get("docs/y.md"), "??")
+
+    def test_a_name_in_the_working_tree_alone_is_not_said_to_be_tracked(self) -> None:
+        """A file nothing tracks, under such a name, is the working tree's: the refusal says so.
+
+        `git status` lists it with `??`; the refusal said the repository
+        tracked it, and whoever read it looked in the history for a file
+        that was never there. Where the file system refuses such a name the
+        state cannot be made, and the test says so.
+        """
+        product = self.repository()
+        product.git(product.dir, "config", "core.quotePath", "false")
+        try:
+            with open(os.fsencode(product.dir) + b"/notes-caf\xe9.txt", "wb") as file:
+                file.write(b"x\n")
+        except OSError:
+            self.skipTest("this file system holds no name that is not UTF-8")
+        with self.assertRaises(maelys_cli.Failure) as failure:
+            PACKAGE.cut.worktree_paths(product.dir)
+        self.assertEqual(failure.exception.message,
+                         "This working tree holds a file that nothing tracks and whose name is not UTF-8:"
+                         " notes-caf\\xe9.txt. The socle reads the names of a working tree as UTF-8, and says"
+                         " nothing of it until every one is.")
+        self.assertNotIn("tracks a file", failure.exception.message)
 
     def test_render_writes_nothing_of_a_value_that_is_not_utf_8(self) -> None:
         """A value given as such bytes emptied the output and then failed to encode.

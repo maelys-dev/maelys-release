@@ -143,12 +143,20 @@ def names_git_gave(error: UnicodeDecodeError, skip: int = 0) -> Exception:
     of it, and git is not asked again. An answer in which every line decodes
     is not a name that failed, and the error stays the one it was.
     """
-    names = sorted({line[skip:] for line in bytes(error.object).split(b"\n") if not is_utf8(line)})
-    return unread_names(names) if names else error
+    failing = [line for line in bytes(error.object).split(b"\n") if not is_utf8(line)]
+    # In the short format of `git status`, `??` is a file nothing tracks: a
+    # name there is the working tree's, and saying the repository tracks it
+    # sends whoever reads it to look in the history for a file that is not
+    # there. A tracked name is said first, being the one a commit carries.
+    tracked = sorted({line[skip:] for line in failing if not (skip and line.startswith(b"??"))})
+    untracked = sorted({line[skip:] for line in failing if skip and line.startswith(b"??")})
+    if tracked:
+        return unread_names(tracked)
+    return unread_names(untracked, tracked=False) if untracked else error
 
 
-def unread_names(names: "list[bytes]") -> Failure:
-    """The refusal of a repository that tracks NAMES, which are not UTF-8.
+def unread_names(names: "list[bytes]", tracked: bool = True) -> Failure:
+    """The refusal of a repository that holds NAMES, which are not UTF-8: tracked, or in its working tree alone.
 
     The readers of a tracked name read it as text, open the file by it and
     write it back, in a note or in a generated file. One such name ended
@@ -159,6 +167,13 @@ def unread_names(names: "list[bytes]") -> Failure:
     """
     shown = ", ".join(spelled(name) for name in names[:5]) + (f", and {len(names) - 5} more" if len(names) > 5 else "")
     one = len(names) == 1
+    if not tracked:
+        return Failure("PRECONDITION_FAILED",
+                       f"This working tree holds {'a file' if one else f'{len(names)} files'} that nothing tracks"
+                       f" and whose name is not UTF-8: {shown}. The socle reads the names of a working tree as"
+                       " UTF-8, and says nothing of it until every one is.",
+                       f"Renaming or removing {'it' if one else 'them'} is this repository's own to do, then run the"
+                       " command again.")
     return Failure("PRECONDITION_FAILED",
                    f"This repository tracks {'a file' if one else f'{len(names)} files'} whose name is not UTF-8:"
                    f" {shown}. The socle reads tracked names as UTF-8, and says nothing of a repository until"

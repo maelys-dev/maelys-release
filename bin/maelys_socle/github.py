@@ -227,6 +227,30 @@ class Protection:
         return self.classic_state == "absent" and getattr(self.classic_state, "message", "") == NOT_PROTECTED
 
     @property
+    def classic_reading(self) -> str:
+        """The classic endpoint as a report may state it: `absent` only where GitHub said so.
+
+        A 404 is every absence to the host, and the words tell them apart:
+        `Branch not protected` is a branch with no classic protection; `Not
+        Found` is a token that may not read it, `Branch not found` a branch
+        that is not there. Those, and a 404 with no words, are `unreadable`
+        here, as a 403 is.
+        """
+        if self.classic_state == "absent":
+            return "absent" if self.unprotected else "unreadable"
+        return str(self.classic_state)
+
+    @property
+    def rules_reading(self) -> str:
+        """The rules of the branch as a report may state them: GitHub answers `[]` where none applies.
+
+        A 404 there is not an answer, and neither is a body that is not a list.
+        """
+        if self.ruled_state == "absent" or (self.ruled_state == "ok" and not isinstance(self.rules, list)):
+            return "unreadable"
+        return str(self.ruled_state)
+
+    @property
     def unread(self) -> bool:
         """Neither endpoint answered: not the same fact as a branch that requires nothing."""
         return self.classic_state not in ("ok", "absent") and self.ruled_state not in ("ok", "absent")
@@ -262,7 +286,9 @@ def classic_protection(project: pathlib.Path) -> bool | None:
     if not repository or not forge().available():
         return None
     branch = read_repository(repository).default_branch
-    state = read_protection(repository, branch, rulesets=False).classic_state
+    # False only where GitHub said the branch has no classic protection: a
+    # 404 in other words, or none, is a question it did not answer.
+    state = read_protection(repository, branch, rulesets=False).classic_reading
     return True if state == "ok" else False if state == "absent" else None
 
 

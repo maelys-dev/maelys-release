@@ -366,12 +366,28 @@ class NothingDiffersTest(unittest.TestCase):
                 self.assertEqual([event for event in host.events if event == ("read", RULESET)][:1],
                                  [("read", RULESET)])
 
+    def test_a_check_bound_to_no_app_stays_bound_to_none(self):
+        """A check a ruleset requires from any source keeps it so, written or not.
+
+        The write gave it the app its neighbours were bound to, and every pull
+        request then waited for a report that app never sends, where another
+        app -- or the status API -- reported it. A context the ruleset does
+        not carry yet still takes the app its neighbours carry most often.
+        """
+        mixed = [*bound(ALL_LEGS[:2]), *loose(ALL_LEGS[2:])]
+        self.assertEqual(PACKAGE.protect.ruleset_checks(rules_of(ruleset_of(mixed)), ALL_LEGS), mixed)
+        host = ProtectionHost(ruleset=ruleset_of(mixed))
+        code, data = self.protect(host, "--apply")
+        self.assertEqual((code, data["written"], data["nothingToChange"]), (0, [], True))
+        # One leg missing: it is added bound as its neighbours are, and the
+        # check bound to none stays bound to none.
+        short = [*bound(ALL_LEGS[:1]), *loose(ALL_LEGS[2:])]
+        self.assertEqual(PACKAGE.protect.ruleset_checks(rules_of(ruleset_of(short)), ALL_LEGS), mixed)
+
     def test_a_ruleset_is_written_as_before_when_one_member_differs(self):
         for why, checks, sent in (
                 ("a context is missing", bound(ALL_LEGS[:2]), bound(ALL_LEGS)),
                 ("a context is listed twice", bound([*ALL_LEGS, ALL_LEGS[0]]), bound(ALL_LEGS)),
-                ("a context is bound to no integration, and the write gives it its neighbours'",
-                 [*bound(ALL_LEGS[:2]), *loose(ALL_LEGS[2:])], bound(ALL_LEGS)),
                 ("an integration read as null is not one left out",
                  [dict(check, integration_id=None) for check in loose(ALL_LEGS)], loose(ALL_LEGS))):
             with self.subTest(why=why):
@@ -395,9 +411,11 @@ class NothingDiffersTest(unittest.TestCase):
         change`, and --apply, which makes the body from the second, wrote."""
         mixed = [*bound(ALL_LEGS[:2]), *loose(ALL_LEGS[2:])]
         for why, state, sends in (
+                # The third check is bound to no app, any source may report
+                # it, and the write keeps it so: the ruleset holds the checks.
                 ("the rules name no integration, the ruleset binds two contexts of three",
                  lambda: ProtectionHost(ruleset=ruleset_of(mixed), view=lambda host: unbound(host.applied_rules())),
-                 bound(ALL_LEGS)),
+                 None),
                 ("the rules list every leg, the ruleset lacks one",
                  lambda: ProtectionHost(ruleset=ruleset_of(bound(ALL_LEGS[:2])),
                                         view=rules_of(ruleset_of(bound(ALL_LEGS)))), bound(ALL_LEGS)),
