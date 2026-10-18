@@ -1,5 +1,35 @@
 # Changelog
 
+## Unreleased
+
+Three readings that said more than they knew, named when 0.64.2 and 0.64.3
+were cut and left for later.
+
+- **`preflight` says a branch is open only in GitHub's words for one.** It
+  said the default branch was not protected on any 404, and the
+  `classic-protection` selector answered no: a token that may not read the
+  protection (`Not Found`) and a branch that is not there (`Branch not
+  found`) included. `protect` tells them apart since 0.64.2. Only `Branch
+  not protected` is an open branch now; any other 404, and a 404 on the
+  rules of a branch, which GitHub answers with `[]` where none applies, is
+  a refusal to say, reported as a 403 is, and the selector says it does
+  not know. The guard of `adopt` already read only what answered.
+- **A check a ruleset requires from any source stays so.** A write of a
+  ruleset gave a check bound to no app the app its neighbours were bound
+  to: if another app, or the status API, reported it, every pull request
+  then waited for a report that never came. A check the ruleset carries
+  keeps what it has, bound or not; a new one still takes the app its
+  neighbours carry most often.
+- **A name that is not UTF-8 in the working tree alone is not said to be
+  tracked.** `cut` refused such a file, which `git status` lists with `??`,
+  by saying the repository tracked it, and whoever read it looked in the
+  history for a file that was never there. The refusal says the working
+  tree holds it and nothing tracks it.
+- **Impact.** [asks: nothing] [writes: protect] Nothing for a product to
+  do. `protect` writes a ruleset without binding a check that was bound to
+  no app; `preflight` notes it cannot read a protection where it said the
+  branch was open.
+
 ## 0.64.5 — 2026-10-18
 
 - **The forge is one object.** What named GitHub stood in nine places:
