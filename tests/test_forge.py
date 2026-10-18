@@ -108,7 +108,7 @@ class GitHubForgeTest(unittest.TestCase):
 class OneForgeTest(unittest.TestCase):
     """Nothing but the forge and GitHub's own module names the forge."""
 
-    SOURCES = [ROOT / "bin" / "maelys-release", *sorted(SOCLE.glob("*.py"))]
+    SOURCES = [ROOT / "bin" / "maelys-release", *sorted(SOCLE.rglob("*.py"))]
 
     def test_nothing_else_names_github_com(self) -> None:
         # What is left names no host a repository is reached at: an address

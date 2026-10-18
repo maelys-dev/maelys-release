@@ -98,6 +98,22 @@ the fleet at each product's next adoption.
   "Compatibility of the managed files"): a patch changes the workflows only, a
   minor may change a managed text and says so in the changelog, a major breaks
   the product contract.
+- **The code is in layers, and the entry point is only an entry point.**
+  `bin/maelys-release` finds the socle it belongs to and hands the package
+  that root and version as a `Context`; it holds no command. In
+  `bin/maelys_socle/`: `cli/` is the command line (the program, the catalog
+  of commands with their schemas, the text of each result); `commands/` and
+  the command modules beside it (`adoption`, `inspection`, `cut`, `protect`,
+  `rehearse`, `migration`, `dependencies`, `signers`, `tap`) say what each
+  command does; the readers and writers below them (`reading`,
+  `product_workflows`, `staging`, `declarations`, `workflows`, `privacy`,
+  `impacts`, `socle_origin`...) know a product and the socle; `host` and
+  `forge` (with `github`) are the only way out to a process or to the
+  service that hosts a repository. A module imports from the layers below
+  it; a module that needs one above it, or its own layer, imports the
+  module (`from . import reading`) and reads it at call time. A function
+  that reads the running socle takes the context first; nothing finds the
+  root from its own file.
 - **Use `git -C /abs/path` for every git call**, never a `cd` chain: a script
   that changed directory once tagged the wrong repository.
 - This repository publishes no artifact. Its release is the signed tag alone,

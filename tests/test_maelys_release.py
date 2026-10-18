@@ -730,8 +730,9 @@ class AdoptTest(unittest.TestCase):
         pinned_sha = product.git(copy, "rev-parse", "HEAD")
         self.assertEqual(json.loads(relocated.stdout)["data"]["socle"]["sha"], pinned_sha)
         self.assertTrue((product.work / "cache" / "maelys-release" / pinned_sha / "bin" / "maelys-release").is_file())
-        for path in (ROOT / "bin" / "maelys_socle").glob("*.py"):
-            self.assertEqual((product.work / "cache" / "maelys-release" / pinned_sha / "bin" / "maelys_socle" / path.name).read_bytes(),
+        for path in (ROOT / "bin" / "maelys_socle").rglob("*.py"):
+            relative = path.relative_to(ROOT / "bin" / "maelys_socle")
+            self.assertEqual((product.work / "cache" / "maelys-release" / pinned_sha / "bin" / "maelys_socle" / relative).read_bytes(),
                              path.read_bytes())
         text = subprocess.run([str(CLI), "check", self.dir], env=env, check=False, text=True,
                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -4003,7 +4004,7 @@ class OperatorIdentityTest(unittest.TestCase):
     """
 
     TREES = [ast.parse(path.read_text(encoding="utf-8"))
-             for path in [CLI, *sorted((ROOT / "bin" / "maelys_socle").glob("*.py"))]]
+             for path in [CLI, *sorted((ROOT / "bin" / "maelys_socle").rglob("*.py"))]]
 
     def test_no_commit_switches_a_signature_off(self) -> None:
         self.assertNotIn("commit.gpgsign=false", [node.value for tree in self.TREES
@@ -6348,7 +6349,7 @@ class RepositoryChecksTest(unittest.TestCase):
         moment of cutting a release. An optional parameter is a way to lose
         something quietly."""
         source = "\n".join(path.read_text(encoding="utf-8") for path in
-                           [CLI, *sorted((ROOT / "bin" / "maelys_socle").glob("*.py"))])
+                           [CLI, *sorted((ROOT / "bin" / "maelys_socle").rglob("*.py"))])
         self.assertIn("def repository_checks(decl: Declarations)", source)
         callers = [line.strip() for line in source.splitlines() if "repository_checks(" in line
                    and not line.strip().startswith("def ")]

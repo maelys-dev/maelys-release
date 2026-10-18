@@ -11,7 +11,7 @@ import sys
 import tempfile
 
 from maelys_cli import EXIT_OK, EXIT_VIOLATIONS, Failure, Invocation
-from . import host
+from . import host, reading, socle_origin
 from .constants import (
     CHECK_JOB_MINUTES, CHECK_JOB_PACKAGES, CHECK_LEG_OF, DECLARATION_FILE, DEFAULT_IMAGE, LEGS_JOB, PLATFORMS,
     PROGRAM, SOCLE_LINUX_PACKAGES, SOCLE_MECHANISM, SOCLE_REPOSITORY,
@@ -612,11 +612,11 @@ def rehearsal_coverage(project: pathlib.Path, context: Context, decl: Declaratio
 def handle_rehearse(invocation: Invocation, context: Context) -> tuple[dict, int]:
     """Replay one step of one Linux job in Docker: the release's packaging, or the check of a leg."""
     project, product, mechanism = project_of(invocation)
-    context.run_pinned_socle(invocation, project)
+    socle_origin.run_pinned_socle(context, invocation, project)
     log = sys.stderr if invocation.format != "text" else sys.stdout
     if invocation.option("--channel"):
         require_socle_mechanism(project, mechanism, "rehearse")
-        return rehearse_channel(invocation, project, product, context.read_declarations(project, product, mechanism), log)
+        return rehearse_channel(invocation, project, product, reading.read_declarations(context, project, product, mechanism), log)
     mode = "check" if invocation.flag("--check") else "package"
     # The check leg is not the release mechanism: a product that publishes
     # by its own means and calls check-product.yml has that leg like any
@@ -673,7 +673,7 @@ def handle_rehearse(invocation: Invocation, context: Context) -> tuple[dict, int
         as_the_job = package_command == PACKAGE_DEFAULT
     if not host.HOST.which("docker"):
         raise Failure("NOT_FOUND", "docker is required to rehearse a Linux build.", "Install Docker and retry.")
-    decl = context.read_declarations(project, product, mechanism)
+    decl = reading.read_declarations(context, project, product, mechanism)
     require_valid(decl, "rehearse")
     needed = CHECKOUT_SCRIPTS if decl.dependencies_apart else CHECKOUT_SCRIPTS[:1]
     absent = [name for name in needed if not os.access(project / name, os.X_OK)] if decl.dependencies else []

@@ -11,6 +11,7 @@ import sys
 import tempfile
 
 from maelys_cli import EXIT_OK, Failure, Invocation
+from . import reading
 
 from .checkouts import author_identity, git_base
 from .constants import CLI_CONTRACT, CLI_REFERENCE
@@ -103,7 +104,7 @@ def plan_with_declarations(invocation: Invocation, context: Context) -> tuple[di
                       "Regenerate it with maelys-platform for this product.")
     # What the product keeps, and on which ground: the plan says it before
     # anything is written, so the operator judges the whole docs/ at once.
-    decl = context.read_declarations(project, product, declared_mechanism(project))
+    decl = reading.read_declarations(context, project, product, declared_mechanism(project))
     moved = {entry["path"] for entry in moving}
     staying = []
     docs = project / "docs"

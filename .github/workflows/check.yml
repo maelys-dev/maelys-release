@@ -37,7 +37,7 @@ jobs:
         run: shellcheck share/templates/checkout-dependency.sh share/templates/checkout-dependencies.sh
       - name: Contract of the CLI
         run: |
-          python3 -m py_compile bin/maelys-release bin/maelys_socle/*.py
+          python3 -m py_compile bin/maelys-release && python3 -m compileall -q bin/maelys_socle
           bin/maelys-release describe --format json --compact >/dev/null
           bin/maelys-release version --json --compact
       - name: Self-test on a fixture
