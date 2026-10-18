@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.64.5 — 2026-10-18
 
 - **The forge is one object.** What named GitHub stood in nine places:
   the pattern that reads `owner/name` from a remote, the hosts a
