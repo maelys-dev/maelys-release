@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.64.6 — 2026-10-18
 
 Three readings that said more than they knew, named when 0.64.2 and 0.64.3
 were cut and left for later.
