@@ -35,6 +35,16 @@
   where it lives, in the package, and the entry point only for what the
   entry point is. The two recorded references replay with no difference
   and `describe` is byte-identical.
+- **One rule, one function.** `read_declarations`, what the socle reads of
+  a product, was one function of 529 lines. It is 29 now: the declaration,
+  then each rule in turn -- VERSION, the packager, the changelog, the
+  formulas, the pins and what they ask of a build, the documentation
+  name, the declaration file, the channels -- each a function of its own,
+  moved verbatim and called in the order the checks are reported in. The
+  two largest parts of the declaration file's reading, `[dependencies]
+  apart` and `[runners]`, are rules of their own too, called inside the
+  same refusal of a value they were in. The recorded references replay
+  with no difference.
 - **Impact.** [asks: nothing] [writes: nothing] Nothing for a product to
   do: no workflow, no managed file and no behaviour moves.
 

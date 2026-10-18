@@ -123,7 +123,39 @@ def read_authorship(decl: Declarations) -> None:
 
 
 def read_declarations(context: Context, project: pathlib.Path, product: str, mechanism: str = SOCLE_MECHANISM) -> Declarations:
+    """What the socle reads of a product: every rule in turn, each a function of its own.
+
+    The order is the order the checks are reported in, and a later rule may read what an
+    earlier one set on the declaration: the pins before what they ask of a build, the
+    declaration file before the channels it declares.
+    """
     decl = Declarations(project, product, mechanism)
+    read_version(decl)
+    read_packager(decl)
+    read_changelog(decl)
+    read_formulas(decl)
+    read_verifier(decl)
+    read_renderer(decl)
+    read_pins(decl)
+    read_pin_notes(decl)
+    read_stray_checkouts(decl)
+    read_documentation_name(decl)
+    read_own_ci(decl)
+    read_docs(decl)
+    read_packages(decl)
+    read_declaration_file(decl)
+    read_fuzz(decl)
+    read_channel_publisher(decl)
+    read_branch(decl)
+    read_authorship(decl)
+    read_strategy(decl)
+    read_coming(context, decl)
+    return decl
+
+
+def read_version(decl: Declarations) -> None:
+    """VERSION: present, and X.Y.Z."""
+    project = decl.project
     version_file = project / "VERSION"
     if not version_file.is_file():
         decl.add("missing", "VERSION file", "conventions")
@@ -134,9 +166,19 @@ def read_declarations(context: Context, project: pathlib.Path, product: str, mec
             decl.add("ok", "VERSION file", "conventions")
         else:
             decl.add("missing", "VERSION must be X.Y.Z", "conventions")
+
+
+def read_packager(decl: Declarations) -> None:
+    """scripts/package-release.sh: present and executable."""
+    project = decl.project
     packager = project / "scripts" / "package-release.sh"
     decl.add("ok" if packager.is_file() and os.access(packager, os.X_OK) else "missing",
              "scripts/package-release.sh TARGET writing dist/")
+
+
+def read_changelog(decl: Declarations) -> None:
+    """CHANGELOG.md: present, and the entry of the version it says was published."""
+    project = decl.project
     changelog = project / "CHANGELOG.md"
     if not changelog.is_file():
         decl.add("missing", "CHANGELOG.md", "conventions")
@@ -188,6 +230,11 @@ def read_declarations(context: Context, project: pathlib.Path, product: str, mec
                 decl.add("note", f"CHANGELOG.md carries ## {UNPUBLISHED} above ## {above}: that entry"
                                  " says nothing was published yet, so no release comes before it. Nothing"
                                  " asks for it any more: delete it, or move it to the end", "conventions")
+
+
+def read_formulas(decl: Declarations) -> None:
+    """The Homebrew formula templates, one tap job each."""
+    project = decl.project
     # Every packaging/homebrew/NAME.rb.in becomes one tap job publishing NAME:
     # a formula is named after what it installs, not after the repository.
     homebrew = project / "packaging" / "homebrew"
@@ -196,6 +243,11 @@ def read_declarations(context: Context, project: pathlib.Path, product: str, mec
         decl.add("ok", "Homebrew formula templates: " + " ".join(decl.formulas))
     else:
         decl.add("note", "no packaging/homebrew/*.rb.in: no tap job")
+
+
+def read_verifier(decl: Declarations) -> None:
+    """scripts/verify-release.sh, when the product ships one."""
+    project = decl.project
     verifier = project / "scripts" / "verify-release.sh"
     if verifier.is_file() and os.access(verifier, os.X_OK):
         # bash, like the package_command beside it. `sh` is dash on Ubuntu
@@ -206,6 +258,11 @@ def read_declarations(context: Context, project: pathlib.Path, product: str, mec
         # nearly paid for it.
         decl.verify_command = "bash scripts/verify-release.sh TARGET"
         decl.add("ok", "scripts/verify-release.sh TARGET runs before packaging at the tag")
+
+
+def read_renderer(decl: Declarations) -> None:
+    """scripts/render-homebrew-formula.sh, which the socle's own rendering replaced."""
+    project = decl.project
     renderer = project / "scripts" / "render-homebrew-formula.sh"
     if renderer.is_file() and os.access(renderer, os.X_OK):
         decl.render_command = "sh scripts/render-homebrew-formula.sh TAG OUTPUT"
@@ -244,6 +301,11 @@ def read_declarations(context: Context, project: pathlib.Path, product: str, mec
                      f" {' or '.join(PUBLISHED_DOWNLOAD)}, which is what the socle looks for -- a renderer"
                      " that fetches the published bytes another way is right and unrecognised", "release")
         decl.add("ok", "scripts/render-homebrew-formula.sh renders the formula")
+
+
+def read_pins(decl: Declarations) -> None:
+    """Every dependencies/NAME.pin: its tag, its commit and what its later lines declare."""
+    project = decl.project
     # Dependencies: one dependencies/NAME.pin per repository the build reads,
     # the pinned commit on line 2 and, on line 1 for humans, the tag that
     # commit carries -- parse_pin says what line 1 holds when it carries
@@ -288,6 +350,11 @@ def read_declarations(context: Context, project: pathlib.Path, product: str, mec
             decl.add("note", f"dependencies/{pin['name']}.pin: {line!r} starts with no word this socle knows"
                      f" ({', '.join(PIN_ATTRIBUTES[:4])}): nothing here reads it, and neither does the managed"
                      " script", "conventions")
+
+
+def read_pin_notes(decl: Declarations) -> None:
+    """What the pins ask of a build, said once they are all read."""
+    project = decl.project
     if (project / "adapter").is_dir():
         decl.add("refused", "adapter/ is the pre-0.14 layout: git mv adapter/<NAME>_PIN dependencies/<name>.pin"
                  " and adapter/PACKAGES dependencies/packages, then delete adapter/ and the Makefile lines that read it")
@@ -313,6 +380,11 @@ def read_declarations(context: Context, project: pathlib.Path, product: str, mec
                  f" past {pin['tag']} and under no tag, on purpose. Read from the pin alone, its grammar and"
                  f" the string of its URL: nothing here asked that repository anything, and '{PROGRAM}"
                  f" dependencies DIR --apply' is what asks whether {branch} still holds it", "conventions")
+
+
+def read_stray_checkouts(decl: Declarations) -> None:
+    """scripts/checkout-*.sh that the socle does not manage: refused."""
+    project = decl.project
     scripts = project / "scripts"
     managed_names = {name.split("/")[-1] for name in CHECKOUT_SCRIPTS}
     stray = sorted(path.name for path in scripts.glob("checkout-*.sh")
@@ -322,7 +394,11 @@ def read_declarations(context: Context, project: pathlib.Path, product: str, mec
                  + ": dependencies are cloned from dependencies/*.pin by the managed"
                  " scripts/checkout-dependency.sh NAME and"
                  " scripts/checkout-dependencies.sh DESTINATION; delete these")
-    ci = project / ".github" / "workflows" / "ci.yml"
+
+
+def read_documentation_name(decl: Declarations) -> None:
+    """Whether the documentation repository may be named, and the files that name it."""
+    project = decl.project
     # The two words the declaration carries before the rest of it parses:
     # a ci.yml rule and the managed block need them even when a later
     # section is refused, so they are read by the tolerant scan and not by
@@ -409,6 +485,13 @@ def read_declarations(context: Context, project: pathlib.Path, product: str, mec
                                     f"{', …' if len(lines) > 8 else ''}, which this repository's files do not unless"
                                     f" {DECLARATION_FILE} declares [docs] named OWNER/NAME: remove the name (a public"
                                     " reader may see it), or declare the repository on a private one", "conventions")
+
+
+def read_own_ci(decl: Declarations) -> None:
+    """[ci] own: a repository whose CI is entirely its own."""
+    project = decl.project
+    product = decl.product
+    ci = project / ".github" / "workflows" / "ci.yml"
     # A repository whose CI is entirely its own calls no shared CI, and
     # `check` must not create a ci.yml for it nor warn that none calls
     # check-product.yml. The socle is the first: its CI lints the workflows
@@ -449,7 +532,12 @@ def read_declarations(context: Context, project: pathlib.Path, product: str, mec
             decl.add("warn", ".github/workflows/ci.yml does not call the socle's check-product.yml: add a job"
                      f" 'uses: {SOCLE_REPOSITORY}/.github/workflows/check-product.yml@SHA # TAG'"
                      f" with 'product: {product}', as adopt would create it")
-    read_docs(decl)
+
+
+def read_packages(decl: Declarations) -> None:
+    """dependencies/packages: the system packages the build installs."""
+    project = decl.project
+    dependencies = project / "dependencies"
     packages = dependencies / "packages"
     if packages.is_file():
         try:
@@ -458,6 +546,12 @@ def read_declarations(context: Context, project: pathlib.Path, product: str, mec
                      "conventions")
         except ValueError as error:
             decl.add("missing", f"dependencies/packages: {error}", "conventions")
+
+
+def read_declaration_file(decl: Declarations) -> None:
+    """maelys-release.conf, and the former home of the declaration."""
+    project = decl.project
+    ci = project / ".github" / "workflows" / "ci.yml"
     # The former home is still read, so a repository mid-move keeps its
     # targets and its channels; carrying it is the violation, not a silence.
     release, former = project / DECLARATION_FILE, project / FORMER_DECLARATION_FILE
@@ -526,95 +620,117 @@ def read_declarations(context: Context, project: pathlib.Path, product: str, mec
             if decl.commit_verification:
                 decl.add("ok", f"{release.name} [commit] {decl.commit_verification}: the release asks"
                          " that of the commit the tag names, beyond the tag's own signature")
-            if decl.dependencies_apart:
-                # What is said here is what the declaration asks and what the
-                # socle does with it, never what the build reads: release.yml
-                # may still hold the sibling checkouts of a former adoption,
-                # and this line stood as an "ok" two lines above the file that
-                # contradicted it. maelys-egress read that pair.
-                decl.add("ok", f"{release.name} [dependencies] apart: the pins are materialised under"
-                         f" ${DEPENDENCIES_VARIABLE}, never beside the product")
-                # What the trial of 0.45.0 found, reported before a push
-                # instead of by six red jobs after it: the socle exports the
-                # root in the job it runs, and a job of the product clones
-                # on its own runner where that path names nothing.
-                #
-                # A note, and the status matters here. `check` collects
-                # everything that is not ok or note into its violations, so
-                # a warning makes it exit 2 while adopt still proceeds --
-                # the worst pairing, a product adopting and going red. And a
-                # second red would say nothing new: a job that clones beside
-                # itself already fails on the build's own message. Naming
-                # the line is the whole value.
-                #
-                # Every tracked file, and not ci.yml alone: 0.45.0 named the
-                # fifteen lines of one workflow to maelys-egress and left
-                # four other files silent -- an image, two scripts with a
-                # hard-coded fallback, and a third they only found after a
-                # second red round, in the line below the one they had just
-                # fixed. Three red CI rounds for what one search names at
-                # once.
-                # The socle is the last neighbour a build still read: it is
-                # not a pin, so the search could not see it, and two products
-                # keep a `MAELYS_RELEASE_DIR ?= ../maelys-release` whose
-                # target moves as much as any working copy.
-                for path, number, name, text in sibling_readers(
-                        project, decl.dependencies + ([SOCLE_NAME] if pinned_socle(project) else [])):
-                    if name and DEPENDENCIES_VARIABLE in text:
-                        decl.add("note", f"{path} line {number} falls back to ../{name} when"
-                                 f" ${DEPENDENCIES_VARIABLE} is unset, which is the fallback nobody"
-                                 " ever sees taken: it reads whatever is next door, and the working"
-                                 " copy of someone who also develops that dependency is what sits"
-                                 f" there. Refuse instead: {text}", "conventions")
-                    elif name == SOCLE_NAME:
-                        decl.add("note", f"{path} line {number} reads ../{name}, a working copy that moves"
-                                 f" as much as any other. ${SOCLE_VARIABLE} names the socle this"
-                                 " repository pins, written by 'dependencies DIR --apply' and by"
-                                 f" scripts/checkout-dependencies.sh in a job: {text}", "conventions")
-                    elif name:
-                        decl.add("note", f"{path} line {number} reads ../{name}, and the pins are under"
-                                 f" ${DEPENDENCIES_VARIABLE} since this repository declares"
-                                 f" '[dependencies] apart': {text}", "conventions")
-                    elif BESIDE_CALL.search(text) and path.startswith(".github/workflows/"):
-                        decl.add("note", f"{path} line {number} clones beside the product,"
-                                 " which the build no longer reads: one line gives it the root instead,"
-                                 " 'sh scripts/checkout-dependencies.sh \"$RUNNER_TEMP/dependencies\""
-                                 " >>\"$GITHUB_ENV\"'", "conventions")
-                    else:
-                        decl.add("note", f"{path} line {number} clones one pin on its own, and the root"
-                                 " is then nobody's: 'sh scripts/checkout-dependencies.sh DESTINATION'"
-                                 f" writes every pin there and prints ${DEPENDENCIES_VARIABLE} for the"
-                                 f" build to read: {text}", "conventions")
-            elif decl.dependencies:
-                # Read after the declaration file and not with the pins: the
-                # pins are read first, so a rule placed there sees a
-                # declaration that has not been parsed yet. That is the
-                # second time in a day; the fix is the placement, and the
-                # test below is what makes it stay fixed.
-                decl.add("missing", f"dependencies/ pins {' '.join(decl.dependencies)} and"
-                         f" {release.name} does not declare '[dependencies] apart': the build still"
-                         f" assumes a sibling, which is also where the working copies of whoever"
-                         f" develops those dependencies live. Read ${DEPENDENCIES_VARIABLE} for the"
-                         f" root -- '{PROGRAM} dependencies DIR --apply' writes the checkouts and"
-                         " prints the variable -- then declare it", "conventions")
-            for key in SOCLE_RUNNER_KEYS:
-                if not decl.runners.get(key):
-                    continue
-                decl.add("ok", f"{release.name} [runners] {key}: " + " ".join(decl.runners[key])
-                               + " (honoured on a private repository only)")
-                # ci.yml belongs to the product: adopt keeps its socle line
-                # current and writes nothing else there. A declared runner
-                # reaches release.yml, which the socle owns, and is reported
-                # here rather than written -- the socle reports drift in what
-                # it does not own instead of editing it.
-                ci_file = project / ".github" / "workflows" / "ci.yml"
-                if ci_file.is_file() and f"{RUNNER_INPUTS[key]}:" not in ci_file.read_text(encoding="utf-8"):
-                    decl.add("warn", f"[runners] {key} declares {' '.join(decl.runners[key])} and"
-                             " .github/workflows/ci.yml does not pass it to check-product.yml:"
-                             f" '{PROGRAM} adopt DIR --apply' writes the line")
+            read_dependencies_apart(decl, release)
+            read_runner_declarations(decl, release)
         except ValueError as error:
             decl.add("missing", f"{release.name}: {error}")
-    read_fuzz(decl)
+
+
+def read_dependencies_apart(decl: Declarations, release: pathlib.Path) -> None:
+    """[dependencies] apart: the pins are materialised away from the product, and nothing may read them beside it.
+
+    Called inside the reading of the declaration file, whose refusal of a value it shares.
+    """
+    project = decl.project
+    if decl.dependencies_apart:
+        # What is said here is what the declaration asks and what the
+        # socle does with it, never what the build reads: release.yml
+        # may still hold the sibling checkouts of a former adoption,
+        # and this line stood as an "ok" two lines above the file that
+        # contradicted it. maelys-egress read that pair.
+        decl.add("ok", f"{release.name} [dependencies] apart: the pins are materialised under"
+                 f" ${DEPENDENCIES_VARIABLE}, never beside the product")
+        # What the trial of 0.45.0 found, reported before a push
+        # instead of by six red jobs after it: the socle exports the
+        # root in the job it runs, and a job of the product clones
+        # on its own runner where that path names nothing.
+        #
+        # A note, and the status matters here. `check` collects
+        # everything that is not ok or note into its violations, so
+        # a warning makes it exit 2 while adopt still proceeds --
+        # the worst pairing, a product adopting and going red. And a
+        # second red would say nothing new: a job that clones beside
+        # itself already fails on the build's own message. Naming
+        # the line is the whole value.
+        #
+        # Every tracked file, and not ci.yml alone: 0.45.0 named the
+        # fifteen lines of one workflow to maelys-egress and left
+        # four other files silent -- an image, two scripts with a
+        # hard-coded fallback, and a third they only found after a
+        # second red round, in the line below the one they had just
+        # fixed. Three red CI rounds for what one search names at
+        # once.
+        # The socle is the last neighbour a build still read: it is
+        # not a pin, so the search could not see it, and two products
+        # keep a `MAELYS_RELEASE_DIR ?= ../maelys-release` whose
+        # target moves as much as any working copy.
+        for path, number, name, text in sibling_readers(
+                project, decl.dependencies + ([SOCLE_NAME] if pinned_socle(project) else [])):
+            if name and DEPENDENCIES_VARIABLE in text:
+                decl.add("note", f"{path} line {number} falls back to ../{name} when"
+                         f" ${DEPENDENCIES_VARIABLE} is unset, which is the fallback nobody"
+                         " ever sees taken: it reads whatever is next door, and the working"
+                         " copy of someone who also develops that dependency is what sits"
+                         f" there. Refuse instead: {text}", "conventions")
+            elif name == SOCLE_NAME:
+                decl.add("note", f"{path} line {number} reads ../{name}, a working copy that moves"
+                         f" as much as any other. ${SOCLE_VARIABLE} names the socle this"
+                         " repository pins, written by 'dependencies DIR --apply' and by"
+                         f" scripts/checkout-dependencies.sh in a job: {text}", "conventions")
+            elif name:
+                decl.add("note", f"{path} line {number} reads ../{name}, and the pins are under"
+                         f" ${DEPENDENCIES_VARIABLE} since this repository declares"
+                         f" '[dependencies] apart': {text}", "conventions")
+            elif BESIDE_CALL.search(text) and path.startswith(".github/workflows/"):
+                decl.add("note", f"{path} line {number} clones beside the product,"
+                         " which the build no longer reads: one line gives it the root instead,"
+                         " 'sh scripts/checkout-dependencies.sh \"$RUNNER_TEMP/dependencies\""
+                         " >>\"$GITHUB_ENV\"'", "conventions")
+            else:
+                decl.add("note", f"{path} line {number} clones one pin on its own, and the root"
+                         " is then nobody's: 'sh scripts/checkout-dependencies.sh DESTINATION'"
+                         f" writes every pin there and prints ${DEPENDENCIES_VARIABLE} for the"
+                         f" build to read: {text}", "conventions")
+    elif decl.dependencies:
+        # Read after the declaration file and not with the pins: the
+        # pins are read first, so a rule placed there sees a
+        # declaration that has not been parsed yet. That is the
+        # second time in a day; the fix is the placement, and the
+        # test below is what makes it stay fixed.
+        decl.add("missing", f"dependencies/ pins {' '.join(decl.dependencies)} and"
+                 f" {release.name} does not declare '[dependencies] apart': the build still"
+                 f" assumes a sibling, which is also where the working copies of whoever"
+                 f" develops those dependencies live. Read ${DEPENDENCIES_VARIABLE} for the"
+                 f" root -- '{PROGRAM} dependencies DIR --apply' writes the checkouts and"
+                 " prints the variable -- then declare it", "conventions")
+
+
+def read_runner_declarations(decl: Declarations, release: pathlib.Path) -> None:
+    """[runners]: the machine each leg of the shared CI runs on, and what ci.yml passes for it.
+
+    Called inside the reading of the declaration file, whose refusal of a value it shares.
+    """
+    project = decl.project
+    for key in SOCLE_RUNNER_KEYS:
+        if not decl.runners.get(key):
+            continue
+        decl.add("ok", f"{release.name} [runners] {key}: " + " ".join(decl.runners[key])
+                       + " (honoured on a private repository only)")
+        # ci.yml belongs to the product: adopt keeps its socle line
+        # current and writes nothing else there. A declared runner
+        # reaches release.yml, which the socle owns, and is reported
+        # here rather than written -- the socle reports drift in what
+        # it does not own instead of editing it.
+        ci_file = project / ".github" / "workflows" / "ci.yml"
+        if ci_file.is_file() and f"{RUNNER_INPUTS[key]}:" not in ci_file.read_text(encoding="utf-8"):
+            decl.add("warn", f"[runners] {key} declares {' '.join(decl.runners[key])} and"
+                     " .github/workflows/ci.yml does not pass it to check-product.yml:"
+                     f" '{PROGRAM} adopt DIR --apply' writes the line")
+
+
+def read_channel_publisher(decl: Declarations) -> None:
+    """scripts/publish-channel.sh, for a product that declares channels."""
+    project = decl.project
     publisher = project / "scripts" / "publish-channel.sh"
     publishes = publisher.is_file() and os.access(publisher, os.X_OK)
     if decl.channels and not publishes:
@@ -646,11 +762,6 @@ def read_declarations(context: Context, project: pathlib.Path, product: str, mec
     elif publishes:
         decl.add("note", f"scripts/publish-channel.sh exists but {DECLARATION_FILE} declares no"
                          " [channels]: nothing calls it, and no channel job is written")
-    read_branch(decl)
-    read_authorship(decl)
-    read_strategy(decl)
-    read_coming(context, decl)
-    return decl
 
 
 # What a later version will refuse, said a version early. A rule that turns
