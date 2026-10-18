@@ -20,13 +20,13 @@ import pathlib
 import re
 import unittest
 
-from test_maelys_release import MODULE, ROOT, Product
+from test_maelys_release import PACKAGE, ROOT, Product
 # The entry script puts its own package on the path; the rule lives there.
 from maelys_socle import workflows as rules
 
 WORKFLOWS = ROOT / ".github" / "workflows"
 LOCAL_CALL = re.compile(r"^\s*uses:\s*\./\.github/workflows/([A-Za-z0-9_-]+\.yml)\s*$", re.M)
-SOCLE_CALL = re.compile(r"^\s*uses:\s*" + re.escape(MODULE.SOCLE_REPOSITORY)
+SOCLE_CALL = re.compile(r"^\s*uses:\s*" + re.escape(PACKAGE.constants.SOCLE_REPOSITORY)
                         + r"/\.github/workflows/([A-Za-z0-9_-]+\.yml)@", re.M)
 
 

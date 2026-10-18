@@ -38,6 +38,11 @@ def load_recorder():
 
 
 RECORDER = load_recorder()
+
+
+def package(name: str):
+    """A module of the socle's package, as the candidate entry point loaded it: the entry point names none."""
+    return sys.modules[f"maelys_socle.{name}"]
 ENDPOINT = "repos/" + RECORDER.REPOSITORIES[0]
 
 
@@ -196,7 +201,7 @@ class WordsOfA404Test(unittest.TestCase):
             def read(self, path):
                 Original.calls.append(("read", path))
                 state, body = answers[path]
-                return (socle.host.Absent(state[4:]) if state.startswith("404 ") else state), body
+                return (package("host").Absent(state[4:]) if state.startswith("404 ") else state), body
 
         return GitHub()
 
@@ -209,7 +214,7 @@ class WordsOfA404Test(unittest.TestCase):
         return host.read("any")
 
     def test_the_words_of_the_open_branch_are_the_program_s(self) -> None:
-        self.assertEqual(RECORDER.NOT_PROTECTED, self.socle.github.NOT_PROTECTED)
+        self.assertEqual(RECORDER.NOT_PROTECTED, package("github").NOT_PROTECTED)
 
     def test_the_words_survive_the_live_read_the_cache_the_store_and_the_replay(self) -> None:
         for words in ("Branch not protected", "Not Found", "Branch not found"):
@@ -235,7 +240,7 @@ class WordsOfA404Test(unittest.TestCase):
                 # And the replay of what was stored gives the program the same answer.
                 state, body = self.replayed(responses.used, self.PROTECTION)
                 self.assertEqual((state, body, state.message), ("absent", None, words))
-                unprotected = self.socle.github.Protection(state, body, "ok", []).unprotected
+                unprotected = package("github").Protection(state, body, "ok", []).unprotected
                 self.assertIs(unprotected, words == "Branch not protected")
 
     def test_an_answer_stored_without_words_is_given_back_as_a_bare_absence(self) -> None:
@@ -248,7 +253,7 @@ class WordsOfA404Test(unittest.TestCase):
         for state, body in (recorded, self.replayed(stored, self.PROTECTION)):
             self.assertEqual((state, body), ("absent", None))
             self.assertIs(type(state), str)
-            self.assertIs(self.socle.github.Protection(state, body, "ok", []).unprotected, False)
+            self.assertIs(package("github").Protection(state, body, "ok", []).unprotected, False)
         self.assertNotIn("message", responses.used[self.PROTECTION])
         # A 404 GitHub answered with no word is stored without one either.
         self.cache.unlink()
@@ -276,8 +281,8 @@ class WordsOfA404Test(unittest.TestCase):
                     "classic protection is absent",
                     "its 404 says 'Branch not protected', GitHub's words for that state"]})
                 state, _ = RECORDER.recording_host(self.socle, self.work, ROOT, responses, profile).read(self.PROTECTION)
-                self.assertIs(self.socle.github.Protection(state, None, "ok", []).unprotected, True)
-                self.assertIs(self.socle.github.Protection(*self.replayed(responses.used, key), "ok", []).unprotected,
+                self.assertIs(package("github").Protection(state, None, "ok", []).unprotected, True)
+                self.assertIs(package("github").Protection(*self.replayed(responses.used, key), "ok", []).unprotected,
                               True)
                 # The answer it was derived from is stored as it was read.
                 self.assertEqual(responses.used[self.PROTECTION]["state"], "ok")
@@ -358,7 +363,8 @@ class WithheldTest(unittest.TestCase):
         """Both ends: the answer as GitHub gave it makes the note, the answer as stored makes none."""
         self.cached()
         _, stored = RECORDER.Responses(Original(), self.cache, offline=True).read(ENDPOINT, "live")
-        github = RECORDER.replay.load_source(ROOT).github
+        RECORDER.replay.load_source(ROOT)
+        github = sys.modules["maelys_socle.github"]
         repository = ENDPOINT[len("repos/"):]
         told = github.secret_scanning(repository, github.Repository("ok", self.body))
         self.assertEqual([status for status, _ in told], ["note"])
@@ -433,15 +439,15 @@ class RecordingHostTest(unittest.TestCase):
         socle = RECORDER.replay.load_source(ROOT)
         # The recorder's spelling is the program's, setting for setting.
         self.assertEqual(RECORDER.PIN_SEARCH,
-                         ["git", *(word for setting in socle.inspection.PIN_SEARCH_SETTINGS for word in ("-c", setting)),
+                         ["git", *(word for setting in package("inspection").PIN_SEARCH_SETTINGS for word in ("-c", setting)),
                           "grep"])
         commit = "a" * 40
-        previous, socle.host.HOST = socle.host.HOST, self.host
+        previous, package("host").HOST = package("host").HOST, self.host
         try:
             # The program itself, on a product with one pin: the command it builds goes through.
-            self.assertEqual(socle.inspection.pin_copies(self.project, {"dependency": {"commit": commit}}), {})
+            self.assertEqual(package("inspection").pin_copies(self.project, {"dependency": {"commit": commit}}), {})
         finally:
-            socle.host.HOST = previous
+            package("host").HOST = previous
         asked = [call[1] for call in Original.calls]
         self.assertEqual(len(asked), 1)
         self.assertEqual((asked[0][:len(RECORDER.PIN_SEARCH)], asked[0][-2:]), (RECORDER.PIN_SEARCH, ["-e", commit]))

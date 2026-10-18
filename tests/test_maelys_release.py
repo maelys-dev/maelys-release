@@ -52,34 +52,43 @@ def load_module():
 
 
 MODULE = load_module()
+# The package the entry point runs, which it put on the path: the suite reads
+# what it tests where it lives, and MODULE only for what the entry point
+# itself is -- its program, its context, the root of its socle.
+import maelys_cli  # noqa: E402
+import maelys_socle as PACKAGE  # noqa: E402
+
+for _source in sorted((ROOT / "bin" / "maelys_socle").rglob("*.py")):
+    _dotted = ".".join(_source.relative_to(ROOT / "bin").with_suffix("").parts)
+    importlib.import_module(_dotted.removesuffix(".__init__"))
 # What `check` says to an author and not to a job -- the identity git would
 # use, the version `cut` will refuse -- is silent wherever these are set,
 # and a runner sets both: dropped here, once and before anything reads
 # them, so that a fixture is the same checkout on a laptop and in the
 # workflow that runs this suite. The tests that measure the silence set
 # them back for themselves.
-for _runner_variable in MODULE.host.RUNNER_VARIABLES:
+for _runner_variable in PACKAGE.host.RUNNER_VARIABLES:
     os.environ.pop(_runner_variable, None)
 # Also guard direct unittest runs and every CLI subprocess they start. Import
 # first so an invalid inherited self-test environment fails instead of being
 # silently replaced by a fresh token. A self-test child reuses its live token.
-if not MODULE.host.HOST._self_test():
-    _test_environment = MODULE.host.HOST.self_test_environment()
+if not PACKAGE.host.HOST._self_test():
+    _test_environment = PACKAGE.host.HOST.self_test_environment()
     os.environ.update(_test_environment.__enter__())
     atexit.register(_test_environment.__exit__, None, None, None)
 
 
 @contextmanager
 def using_host(host):
-    previous = MODULE.host.HOST
-    MODULE.host.HOST = host
+    previous = PACKAGE.host.HOST
+    PACKAGE.host.HOST = host
     try:
         yield host
     finally:
-        MODULE.host.HOST = previous
+        PACKAGE.host.HOST = previous
 
 
-class FakeHost(MODULE.Host):
+class FakeHost(PACKAGE.host.Host):
     """No shell or network fallback. Each write needs an explicit handler."""
 
     def __init__(self, answers=None, *, read=None, write=None, run=None, gh=True):
@@ -138,7 +147,7 @@ def workflow_project(caller="check", fuzz=False):
 def answered_404(message):
     """What the real `Host.read` makes of a 404 that gh reports with MESSAGE."""
     said = subprocess.CompletedProcess([], 1, "", f"gh: {message} (HTTP 404)\n")
-    return MODULE.Host.read(FakeHost(run=lambda command, cwd=None, env=None: said), "repos/o/r/any")
+    return PACKAGE.host.Host.read(FakeHost(run=lambda command, cwd=None, env=None: said), "repos/o/r/any")
 
 
 # What GitHub answers for a branch that carries no classic protection: a 404
@@ -159,13 +168,13 @@ def protection_host(classic, *, rules=("ok", []), seen=(), open_pulls=(), write=
             ("ok", {"check_runs": [{"name": name, "conclusion": "success"} for name in seen]}),
         "repos/o/r/pulls?state=open&base=main&per_page=50":
             ("ok", [{"number": number} for number in open_pulls]),
-        f"repos/{MODULE.SOCLE_REPOSITORY}/contents/WITHDRAWN":
+        f"repos/{PACKAGE.constants.SOCLE_REPOSITORY}/contents/WITHDRAWN":
             ("ok", {"encoding": "base64", "content": ""}),
     }
 
     def answer(path):
         # Protection/rules callbacks own the same state the writer updates.
-        if read and path not in ("repos/o/r", f"repos/{MODULE.SOCLE_REPOSITORY}/contents/WITHDRAWN"):
+        if read and path not in ("repos/o/r", f"repos/{PACKAGE.constants.SOCLE_REPOSITORY}/contents/WITHDRAWN"):
             return read(path)
         if path not in answers:
             raise AssertionError(f"undeclared GitHub read: {path}")
@@ -491,13 +500,13 @@ class AdoptTest(unittest.TestCase):
             # not left, which the declarations read since the address note.
             self.assertIn(command[:2], (["git", "grep"], ["git", "rev-parse"], ["git", "config"],
                                         ["git", "symbolic-ref"], ["git", "log"], ["git", "for-each-ref"]))
-            return MODULE.Host.run(fake, command, cwd=cwd, env=self.product.env)
+            return PACKAGE.host.Host.run(fake, command, cwd=cwd, env=self.product.env)
         fake.runner = local_read
         invocation, _ = MODULE.APP.parse(["adopt", self.dir, *Product.SOCLE, "--apply"])
         # MODULE and its context already exist when the host is replaced.
         # The real declaration reader and lock guard must still reach it.
-        with using_host(fake), self.assertRaises(MODULE.Failure) as refused:
-            MODULE.handle_adopt(invocation)
+        with using_host(fake), self.assertRaises(maelys_cli.Failure) as refused:
+            PACKAGE.adoption.handle_adopt(invocation, MODULE.CONTEXT)
         self.assertEqual(refused.exception.code, "PRECONDITION_FAILED")
         self.assertIn("check / check (gone)", refused.exception.message)
         self.assertIn("--without-legs --apply", refused.exception.hint)
@@ -1800,7 +1809,7 @@ class MigrateTest(unittest.TestCase):
         self.assertNotIn("maelys-docs", example)
         self.assertEqual([(entry["path"], entry["line"]) for entry in data["remaining"]],
                          [("examples/README.md", 1)])
-        self.assertIn("BY HAND  examples/README.md:1 still names docs/guide.md", MODULE.text_migrate(data))
+        self.assertIn("BY HAND  examples/README.md:1 still names docs/guide.md", PACKAGE.migration.text_migrate(data))
 
     def test_a_document_that_moves_keeps_its_own_relative_links(self) -> None:
         self.product.write("docs/other.md", "Also [guide](guide.md), which travels with it.\n")
@@ -1828,7 +1837,7 @@ class MigrateTest(unittest.TestCase):
         the one line the refusal did not read (maelys-system#43)."""
         data = self.migrate("--apply")["data"]
         message = self.product.git(pathlib.Path(data["kept"]) / "product", "log", "-1", "--format=%B")
-        self.assertFalse(MODULE.names_documentation(message), message)
+        self.assertFalse(PACKAGE.texts.names_documentation(message), message)
         self.assertNotIn("maelys-docs", message)
         self.assertIn("docs: the prose leaves this repository", message)
         self.assertIn("2 documents are no longer kept here", message)
@@ -1879,7 +1888,7 @@ class MigrateTest(unittest.TestCase):
         self.assertEqual(described, f"v1.2.3-1-g{head[:7]}")
         # The socle's own reading of a pin, on the pin the socle wrote.
         self.assertEqual(self.product.git(self.product.dir, "rev-list", "-n", "1", described), commit)
-        self.assertEqual(MODULE.parse_pin("maelys-fixture", f"{described}\n{commit}\n")[1], [])
+        self.assertEqual(PACKAGE.declarations.parse_pin("maelys-fixture", f"{described}\n{commit}\n")[1], [])
         # The version of the commit that was cloned, and the same word in
         # the commit that carries it.
         self.assertEqual((documents / "maelys-fixture" / "VERSION").read_text(), "1.2.4\n")
@@ -2014,8 +2023,8 @@ class DocsContractTest(unittest.TestCase):
         if not platform or not platform.is_file():
             self.skipTest("MAELYS_PLATFORM_DIR names no maelys-platform checkout")
         text = platform.read_text(encoding="utf-8")
-        self.assertIn(MODULE.VERIFIED_MARK.pattern, text)
-        self.assertIn(MODULE.README_LINK.pattern, text)
+        self.assertIn(PACKAGE.constants.VERIFIED_MARK.pattern, text)
+        self.assertIn(PACKAGE.constants.README_LINK.pattern, text)
 
     def test_prose_is_a_note_by_default_and_a_violation_on_demand(self) -> None:
         self.product.write("docs/architecture.md", "# Architecture\n\nProse.\n")
@@ -2181,8 +2190,8 @@ class DocsContractTest(unittest.TestCase):
         self.assertNotIn("docs/cli-contract.json", {entry["path"] for entry in data["files"]})
 
 
-COMING_NOTE = ("coming in maelys-release " + MODULE.COMING[0][0] + ": " + MODULE.COMING[0][2]) \
-    if MODULE.COMING else ""
+COMING_NOTE = ("coming in maelys-release " + PACKAGE.reading.COMING[0][0] + ": " + PACKAGE.reading.COMING[0][2]) \
+    if PACKAGE.reading.COMING else ""
 
 
 class GoldenTest(unittest.TestCase):
@@ -2205,7 +2214,7 @@ class GoldenTest(unittest.TestCase):
         # machine has a name specific enough to look for is the machine's
         # answer, asked here the way `check` asks it.
         "ok       privacy: 18 of 18 files read, every file since this is not a git repository;"
-        f" {MODULE.privacy.read_local().says()}; nothing found\n")
+        f" {PACKAGE.privacy.read_local().says()}; nothing found\n")
     # The fixture is a directory with no git identity anywhere, which is what
     # the address note of CONTRACT reads: the text a human reads there, in full.
     FILES = textwrap.dedent("""\
@@ -2329,7 +2338,7 @@ class GoldenTest(unittest.TestCase):
         # This fixture is a repository, where the other two are directories:
         # git names the files that hold a shape, and the line counts them.
         contract = (self.CONTRACT[:self.CONTRACT.rindex("ok       privacy:")]
-                    + "ok       " + MODULE.privacy.check_tree(self.product.dir)[0][0][1] + "\n")
+                    + "ok       " + PACKAGE.privacy.check_tree(self.product.dir)[0][0][1] + "\n")
         self.assertRegex(contract, r"privacy: 18 of 18 tracked files searched for the shapes of six families,"
                                    r" and (the [0-9]+ that held one read|none held one); ")
         self.assertEqual(completed.stdout, contract + self.FILES + self.VERDICTS + textwrap.dedent("""\
@@ -2461,7 +2470,7 @@ class CutTest(unittest.TestCase):
         self.product.close()
 
     def declarations(self, mechanism: str = "custom"):
-        return MODULE.read_declarations(self.dir, "maelys-fixture", mechanism)
+        return PACKAGE.reading.read_declarations(MODULE.CONTEXT, self.dir, "maelys-fixture", mechanism)
 
     def cut(self, version: str = "1.3.0", **options):
         data = {"mode": "apply" if options.get("--apply") else "plan", "stage": "open",
@@ -2471,11 +2480,11 @@ class CutTest(unittest.TestCase):
         # A real stream: cut hands the verify command's output straight to
         # this file descriptor, so an operator watching a long `make check`
         # sees it as it runs rather than at the end.
-        return MODULE.cut_open(self.Stub(**options), self.declarations(), data, self.log, 1, 1,
+        return PACKAGE.cut.cut_open(self.Stub(**options), self.declarations(), data, self.log, 1, 1,
                                self.product.signers)
 
-    def refusal(self, version: str = "1.3.0", **options) -> MODULE.Failure:
-        with self.assertRaises(MODULE.Failure) as raised:
+    def refusal(self, version: str = "1.3.0", **options) -> maelys_cli.Failure:
+        with self.assertRaises(maelys_cli.Failure) as raised:
             self.cut(version, **options)
         return raised.exception
 
@@ -2520,12 +2529,12 @@ class CutTest(unittest.TestCase):
         self.assertIn("HEAD is on work", failure.message)
 
     def test_the_gate_reads_the_signing_configuration_of_this_checkout(self) -> None:
-        gate = MODULE.cut_gate(self.declarations(), "1.3.0", self.product.signers)
+        gate = PACKAGE.cut.cut_gate(self.declarations(), "1.3.0", self.product.signers)
         self.assertTrue(any(status == "fail" and "tag.gpgsign" in message for status, message in gate))
         self.product.git(self.dir, "config", "tag.gpgsign", "true")
         self.product.git(self.dir, "config", "gpg.format", "ssh")
         self.product.git(self.dir, "config", "user.signingkey", str(self.product.work / "signing-key"))
-        gate = MODULE.cut_gate(self.declarations(), "1.3.0", self.product.signers)
+        gate = PACKAGE.cut.cut_gate(self.declarations(), "1.3.0", self.product.signers)
         self.assertEqual([status for status, _ in gate if status == "fail"], [])
         self.assertIn("tag v1.3.0 is free", [message for _, message in gate])
         # A repository the socle does not release has no release environment
@@ -2533,11 +2542,11 @@ class CutTest(unittest.TestCase):
         self.assertEqual([message for _, message in gate if "environment" in message], [])
 
     def test_the_changelog_entry_is_read_in_the_worktree_and_at_a_commit(self) -> None:
-        self.assertEqual(MODULE.changelog_entry(self.dir, "1.2.3"), ("2026-09-03", "- Something."))
-        self.assertEqual(MODULE.changelog_entry(self.dir, "9.9.9"), ("", ""))
+        self.assertEqual(PACKAGE.cut.changelog_entry(self.dir, "1.2.3"), ("2026-09-03", "- Something."))
+        self.assertEqual(PACKAGE.cut.changelog_entry(self.dir, "9.9.9"), ("", ""))
         self.product.write("CHANGELOG.md", "# Changelog\n\n## 1.2.3 — 2026-09-04\n\n- Rewritten.\n")
-        self.assertEqual(MODULE.changelog_entry(self.dir, "1.2.3")[0], "2026-09-04")
-        self.assertEqual(MODULE.changelog_entry(self.dir, "1.2.3", at="HEAD")[0], "2026-09-03")
+        self.assertEqual(PACKAGE.cut.changelog_entry(self.dir, "1.2.3")[0], "2026-09-04")
+        self.assertEqual(PACKAGE.cut.changelog_entry(self.dir, "1.2.3", at="HEAD")[0], "2026-09-03")
 
     def test_a_check_that_skipped_is_not_a_refusal_and_no_check_is_not_a_pass(self) -> None:
         data = {"project": "/p", "version": "1.3.0", "branch": "release/v1.3.0", "gate": [],
@@ -2545,12 +2554,12 @@ class CutTest(unittest.TestCase):
         green = [{"name": "check", "status": "completed", "conclusion": "success"},
                  {"name": "package", "status": "completed", "conclusion": "skipped"},
                  {"name": "lint", "status": "completed", "conclusion": "neutral"}]
-        self.assertEqual(MODULE.cut_report(dict(data, gate=[]), green)[1], MODULE.EXIT_OK)
+        self.assertEqual(PACKAGE.cut.cut_report(dict(data, gate=[]), green)[1], maelys_cli.EXIT_OK)
         red = green + [{"name": "fuzz", "status": "completed", "conclusion": "cancelled"}]
-        self.assertEqual(MODULE.cut_report(dict(data, gate=[]), red)[1], MODULE.EXIT_VIOLATIONS)
+        self.assertEqual(PACKAGE.cut.cut_report(dict(data, gate=[]), red)[1], maelys_cli.EXIT_VIOLATIONS)
         # A commit with no check at all has not passed: it has not been read.
-        empty, code = MODULE.cut_report(dict(data, gate=[]), [])
-        self.assertEqual(code, MODULE.EXIT_VIOLATIONS)
+        empty, code = PACKAGE.cut.cut_report(dict(data, gate=[]), [])
+        self.assertEqual(code, maelys_cli.EXIT_VIOLATIONS)
         self.assertFalse(empty["ready"])
         self.assertIn("no check is registered", empty["gate"][0]["message"])
 
@@ -2563,7 +2572,7 @@ class CutTest(unittest.TestCase):
         self.product.git(self.dir, "config", "gpg.format", "ssh")
         self.product.git(self.dir, "config", "user.signingkey", str(self.product.work / "signing-key"))
         data, code = self.cut()
-        self.assertEqual(code, MODULE.EXIT_OK)
+        self.assertEqual(code, maelys_cli.EXIT_OK)
         self.assertEqual(data["next"], f"maelys-release cut {self.dir} 1.3.0 --apply")
 
     def test_the_gate_names_the_product_own_verify_command(self) -> None:
@@ -2575,7 +2584,7 @@ class CutTest(unittest.TestCase):
         self.product.git(self.dir, "config", "gpg.format", "ssh")
         self.product.git(self.dir, "config", "user.signingkey", str(self.product.work / "signing-key"))
         data, code = self.cut()
-        self.assertEqual(code, MODULE.EXIT_OK)
+        self.assertEqual(code, maelys_cli.EXIT_OK)
         self.assertTrue(data["ready"])
         self.assertEqual([item for item in data["gate"] if "verify-release" in item["message"]], [])
         self.product.write("scripts/verify-release.sh", "#!/bin/sh\nexit 0\n", executable=True)
@@ -2601,7 +2610,7 @@ class CutTest(unittest.TestCase):
         space: a stripped line loses the first character of the path."""
         self.product.write("AGENTS.md", "# Agent instructions\n\nEdited.\n")
         self.product.write("scripts/new-file.sh", "#!/bin/sh\n")
-        paths = MODULE.worktree_paths(self.dir)
+        paths = PACKAGE.cut.worktree_paths(self.dir)
         self.assertEqual(paths.get("AGENTS.md"), " M")
         self.assertEqual(paths.get("scripts/new-file.sh"), "??")
 
@@ -2679,7 +2688,7 @@ class CutTest(unittest.TestCase):
         self.product.git(self.dir, "push", "-q", "origin", "main")
 
         data, code = self.cut(**{"--apply": True})
-        self.assertEqual(code, MODULE.EXIT_OK, data)
+        self.assertEqual(code, maelys_cli.EXIT_OK, data)
         self.assertTrue(data["ready"])
         self.assertEqual(data["regenerated"], ["include/version.h"])
         # The declared gate ran before anything was written.
@@ -2691,7 +2700,7 @@ class CutTest(unittest.TestCase):
         self.assertEqual(sorted(committed), ["VERSION", "include/version.h"])
         self.assertIn("SIGNATURE", self.product.git(self.dir, "cat-file", "-p", "HEAD"))
         # The worktree is clean: nothing the command touched was left behind.
-        self.assertEqual([path for path, code in MODULE.worktree_paths(self.dir).items() if code != "??"], [])
+        self.assertEqual([path for path, code in PACKAGE.cut.worktree_paths(self.dir).items() if code != "??"], [])
 
     def github_says(self, verified: bool, reason: str) -> None:
         (self.product.work / "fake-bin" / "commit.json").write_text(json.dumps(
@@ -2714,7 +2723,7 @@ class CutTest(unittest.TestCase):
         self.ready_to_cut()
         self.github_says(False, "no_user")
         data, code = self.cut(**{"--apply": True})
-        self.assertEqual(code, MODULE.EXIT_VIOLATIONS, data)
+        self.assertEqual(code, maelys_cli.EXIT_VIOLATIONS, data)
         self.assertFalse(data["ready"])
         refused = [item["message"] for item in data["gate"] if item["status"] == "fail"]
         self.assertEqual(len(refused), 1, data["gate"])
@@ -2724,7 +2733,7 @@ class CutTest(unittest.TestCase):
         self.assertIn("commit --amend --reset-author -S --no-edit", data["next"])
         self.assertIn("push --force-with-lease origin release/v1.3.0", data["next"])
         self.assertIn("cut", data["next"])
-        self.assertIn(f"cut: fix it, then sign the commit again", MODULE.text_cut(data))
+        self.assertIn(f"cut: fix it, then sign the commit again", PACKAGE.cut.text_cut(data))
         # Refused before the wait: the checks of a commit about to be
         # replaced are nobody's. And nothing is undone -- the pull request
         # is open, the commit is on its branch, the entry it carries is safe.
@@ -2739,7 +2748,7 @@ class CutTest(unittest.TestCase):
         self.ready_to_cut()
         self.github_says(False, "unknown_key")
         data, code = self.cut(**{"--apply": True})
-        self.assertEqual(code, MODULE.EXIT_VIOLATIONS)
+        self.assertEqual(code, maelys_cli.EXIT_VIOLATIONS)
         self.assertIn("not registered on GitHub as a signing key", data["gate"][-1]["message"])
         self.assertNotIn("--amend", data["next"])
         self.assertIn("the commit itself need not change", data["next"])
@@ -2756,9 +2765,9 @@ class CutTest(unittest.TestCase):
         # forces its own address on every call: amended within the same
         # second under the same one, an Ed25519 signature is the same bytes
         # and the "replaced" commit is the refused one.
-        MODULE.git("config", "user.email", "known@example.invalid", cwd=self.dir)
-        MODULE.git("commit", "-q", "--amend", "--reset-author", "-S", "--no-edit", cwd=self.dir)
-        MODULE.git("push", "-q", "--force-with-lease", "origin", "release/v1.3.0", cwd=self.dir)
+        PACKAGE.host.git("config", "user.email", "known@example.invalid", cwd=self.dir)
+        PACKAGE.host.git("commit", "-q", "--amend", "--reset-author", "-S", "--no-edit", cwd=self.dir)
+        PACKAGE.host.git("push", "-q", "--force-with-lease", "origin", "release/v1.3.0", cwd=self.dir)
         self.assertEqual(self.product.git(self.dir, "log", "-1", "--format=%ce"), "known@example.invalid")
         replaced = self.product.git(self.dir, "rev-parse", "HEAD")
         self.assertNotEqual(replaced, refused["commit"])
@@ -2767,11 +2776,11 @@ class CutTest(unittest.TestCase):
               "mergeCommit": None, "headRefOid": replaced}]), encoding="utf-8")
         # GitHub still says no: the second run reads the new commit and stops again.
         again, code = self.cut(**{"--apply": True})
-        self.assertEqual((code, again["commit"]), (MODULE.EXIT_VIOLATIONS, replaced))
+        self.assertEqual((code, again["commit"]), (maelys_cli.EXIT_VIOLATIONS, replaced))
         self.assertIn(replaced[:7], again["gate"][-1]["message"])
         self.github_says(True, "valid")
         data, code = self.cut(**{"--apply": True})
-        self.assertEqual(code, MODULE.EXIT_OK, data)
+        self.assertEqual(code, maelys_cli.EXIT_OK, data)
         self.assertEqual(data["commit"], replaced)
         self.assertIn({"status": "ok", "message": f"GitHub verifies the release commit {replaced[:7]}"}, data["gate"])
         self.assertTrue(data["ready"])
@@ -2781,7 +2790,7 @@ class CutTest(unittest.TestCase):
             self.skipTest("ssh-keygen is needed to sign the bump commit")
         self.ready_to_cut()
         data, code = self.cut(**{"--apply": True})
-        self.assertEqual(code, MODULE.EXIT_OK, data)
+        self.assertEqual(code, maelys_cli.EXIT_OK, data)
         said = [item for item in data["gate"] if "release commit" in item["message"]]
         self.assertEqual([item["status"] for item in said], ["note"], data["gate"])
         self.assertIn("did not say", said[0]["message"])
@@ -2794,7 +2803,7 @@ class CutTest(unittest.TestCase):
         if not self.signing_key():
             self.skipTest("ssh-keygen is needed to sign the tag")
         self.ready_to_cut()
-        self.assertEqual(MODULE.git("config", "--get", "gpg.ssh.allowedSignersFile", cwd=self.dir, check=False), "")
+        self.assertEqual(PACKAGE.host.git("config", "--get", "gpg.ssh.allowedSignersFile", cwd=self.dir, check=False), "")
         # What GitHub would hold once the pull request of 1.3.0 is merged.
         self.product.git(self.dir, "switch", "-q", "-c", "release/v1.3.0")
         self.product.write("VERSION", "1.3.0\n")
@@ -2811,18 +2820,18 @@ class CutTest(unittest.TestCase):
         data = {"mode": "apply", "stage": "tag", "product": "maelys-fixture", "project": str(self.dir),
                 "repository": "maelys-dev/maelys-fixture", "version": "1.3.0", "tag": "v1.3.0",
                 "branch": "release/v1.3.0", "base": "main", "gate": [], "checks": [], "ready": False}
-        data, code = MODULE.cut_tag(self.Stub(**{"--apply": True, "--tag": True}), self.declarations(), data,
+        data, code = PACKAGE.cut.cut_tag(self.Stub(**{"--apply": True, "--tag": True}), self.declarations(), data,
                                     self.log, 1, 1, self.product.signers)
-        self.assertEqual(code, MODULE.EXIT_OK, data)
+        self.assertEqual(code, maelys_cli.EXIT_OK, data)
         self.assertTrue(data["pushed"])
         self.assertEqual(self.product.git(self.origin, "rev-parse", "refs/tags/v1.3.0^{commit}"), merge)
         self.assertEqual(self.product.git(self.origin, "cat-file", "-t", "refs/tags/v1.3.0"), "tag")
         # The difference this makes, on the tag just signed: git's own
         # reading of it, in this checkout, has no file to verify against.
-        bare = MODULE.run(["git", "tag", "-v", "v1.3.0"], cwd=self.dir)
+        bare = PACKAGE.host.run(["git", "tag", "-v", "v1.3.0"], cwd=self.dir)
         self.assertNotEqual(bare.returncode, 0)
         self.assertIn("allowedSignersFile", bare.stderr)
-        named = MODULE.run(["git", "-c", f"gpg.ssh.allowedSignersFile={self.product.signers}", "tag", "-v", "v1.3.0"],
+        named = PACKAGE.host.run(["git", "-c", f"gpg.ssh.allowedSignersFile={self.product.signers}", "tag", "-v", "v1.3.0"],
                            cwd=self.dir)
         self.assertEqual(named.returncode, 0, named.stderr)
 
@@ -2888,7 +2897,7 @@ class CutTest(unittest.TestCase):
         self.product.write("CHANGELOG.md",
                            "# Changelog\n\n## 1.3.0 — 2026-09-03\n\n- Next.\n\n## 1.2.3 — 2026-09-03\n\n- Something.\n")
         data, code = self.cut()
-        self.assertEqual(code, MODULE.EXIT_OK)
+        self.assertEqual(code, maelys_cli.EXIT_OK)
         notes = [entry["message"] for entry in data["gate"] if entry["status"] == "note"]
         self.assertTrue(any("include/version.h" in note and "after-version" in note for note in notes), notes)
 
@@ -2907,7 +2916,7 @@ class CutTest(unittest.TestCase):
         self.product.git(self.dir, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "declare the generator")
         self.product.git(self.dir, "push", "-q", "origin", "main")
         data, code = self.cut(**{"--apply": True})
-        self.assertEqual(code, MODULE.EXIT_OK, data)
+        self.assertEqual(code, maelys_cli.EXIT_OK, data)
         self.assertEqual(self.product.read("include/version.h"), '#define VERSION "1.3.0"\n')
         verdicts = {entry["message"] for entry in data["bump"] if entry["status"] == "ok"}
         self.assertIn("include/version.h carries 1.3.0", verdicts)
@@ -2916,7 +2925,7 @@ class CutTest(unittest.TestCase):
         """No previous bump is a note, never a refusal."""
         self.product.write("CHANGELOG.md",
                            "# Changelog\n\n## 1.3.0 — 2026-09-03\n\n- Next.\n\n## 1.2.3 — 2026-09-03\n\n- Something.\n")
-        audit, stale = MODULE.bump_audit(self.dir, "1.2.3", "1.3.0")
+        audit, stale = PACKAGE.cut.bump_audit(self.dir, "1.2.3", "1.3.0")
         self.assertEqual(stale, [])
         self.assertEqual([status for status, _ in audit], ["note"])
         self.assertIn("no previous bump", audit[0][1])
@@ -2935,7 +2944,7 @@ class CutTest(unittest.TestCase):
         # The generated reference stopped naming a version altogether.
         self.product.write("docs/reference.md", "# Reference\n\nNo version here any more.\n")
         self.product.write("include/version.h", '#define VERSION "1.3.0"\n')
-        audit, stale = MODULE.bump_audit(self.dir, "1.2.3", "1.3.0")
+        audit, stale = PACKAGE.cut.bump_audit(self.dir, "1.2.3", "1.3.0")
         self.assertEqual(stale, [], "a retired carrier must not stop the release")
         verdicts = {name: status for status, name in
                     ((status, message.split()[0]) for status, message in audit)}
@@ -2945,14 +2954,14 @@ class CutTest(unittest.TestCase):
     def test_a_carrier_still_holding_the_old_version_is_a_refusal(self) -> None:
         """The other reading, where nothing else explains the file."""
         self.previous_release("1.2.2", "1.2.3", "include/version.h")
-        audit, stale = MODULE.bump_audit(self.dir, "1.2.3", "1.3.0")
+        audit, stale = PACKAGE.cut.bump_audit(self.dir, "1.2.3", "1.3.0")
         self.assertEqual(stale, ["include/version.h"])
         self.assertIn("still holds 1.2.3", audit[0][1])
 
     def test_a_carrier_that_left_the_tree_is_a_note(self) -> None:
         self.previous_release("1.2.2", "1.2.3", "include/version.h")
         (self.dir / "include" / "version.h").unlink()
-        audit, stale = MODULE.bump_audit(self.dir, "1.2.3", "1.3.0")
+        audit, stale = PACKAGE.cut.bump_audit(self.dir, "1.2.3", "1.3.0")
         self.assertEqual(stale, [])
         self.assertIn("no longer in the tree", audit[0][1])
 
@@ -3032,29 +3041,29 @@ class WorkflowReadingTest(unittest.TestCase):
         """)
 
     def test_the_three_shapes_of_on(self) -> None:
-        self.assertEqual(MODULE.workflow_events(self.BLOCK),
+        self.assertEqual(PACKAGE.workflows.workflow_events(self.BLOCK),
                          ["push", "pull_request", "workflow_dispatch"])
-        self.assertEqual(MODULE.workflow_events("on: [push, pull_request]\njobs:\n"),
+        self.assertEqual(PACKAGE.workflows.workflow_events("on: [push, pull_request]\njobs:\n"),
                          ["push", "pull_request"])
-        self.assertEqual(MODULE.workflow_events("on: workflow_dispatch\njobs:\n"),
+        self.assertEqual(PACKAGE.workflows.workflow_events("on: workflow_dispatch\njobs:\n"),
                          ["workflow_dispatch"])
-        self.assertEqual(MODULE.workflow_events("name: x\njobs:\n"), [])
+        self.assertEqual(PACKAGE.workflows.workflow_events("name: x\njobs:\n"), [])
 
     def test_a_push_says_which_push(self) -> None:
         """push alone, push on a branch and push on a tag are three facts."""
-        block = MODULE.top_block(self.BLOCK, "on")
-        self.assertEqual(MODULE.block_list(MODULE.sub_block(block, "push"), "branches"), ["main"])
+        block = PACKAGE.workflows.top_block(self.BLOCK, "on")
+        self.assertEqual(PACKAGE.workflows.block_list(PACKAGE.workflows.sub_block(block, "push"), "branches"), ["main"])
         tagged = self.BLOCK.replace("branches: [main]", "tags:\n      - 'v*'")
-        pushed = MODULE.sub_block(MODULE.top_block(tagged, "on"), "push")
+        pushed = PACKAGE.workflows.sub_block(PACKAGE.workflows.top_block(tagged, "on"), "push")
         # A tag filter is not label-shaped: a reader that kept only labels
         # would drop the rule that says this workflow releases.
-        self.assertEqual(MODULE.block_list(pushed, "tags"), ["v*"])
-        self.assertEqual(MODULE.block_list(pushed, "branches"), [])
+        self.assertEqual(PACKAGE.workflows.block_list(pushed, "tags"), ["v*"])
+        self.assertEqual(PACKAGE.workflows.block_list(pushed, "branches"), [])
 
     def test_jobs_and_runners_of_one_file(self) -> None:
-        named = MODULE.job_names(MODULE.top_block(self.BLOCK, "jobs").split("\n"), True)
+        named = PACKAGE.workflows.job_names(PACKAGE.workflows.top_block(self.BLOCK, "jobs").split("\n"), True)
         self.assertEqual([job for job in named if job], ["check", "package"])
-        self.assertEqual(MODULE.file_runners("ci.yml", self.BLOCK)[0], ["macos-15", "ubuntu-26.04"])
+        self.assertEqual(PACKAGE.workflows.file_runners("ci.yml", self.BLOCK)[0], ["macos-15", "ubuntu-26.04"])
 
     def test_the_table_is_turned_for_the_reader(self) -> None:
         """The JSON is per file, because that is where the facts are read; a
@@ -3065,13 +3074,13 @@ class WorkflowReadingTest(unittest.TestCase):
             {"file": "release.yml", "events": ["push", "workflow_dispatch"], "branches": [],
              "tags": ["v*"], "jobs": ["r"], "runners": [], "unresolved": [], "delegates": False},
         ]
-        lines = MODULE.strategy_lines(workflows)
+        lines = PACKAGE.inspection.strategy_lines(workflows)
         self.assertEqual([line.split("  ")[0] for line in lines],
                          ["pull request", "push (every branch)", "tag v*", "manual"])
         self.assertIn("2 jobs, one of them the socle's", lines[0])
         self.assertIn("1 job ", lines[2] + " ")
         # An event the socle does not order is still named, never dropped.
-        odd = MODULE.strategy_lines([{"file": "x.yml", "events": ["merge_group"], "branches": [],
+        odd = PACKAGE.inspection.strategy_lines([{"file": "x.yml", "events": ["merge_group"], "branches": [],
                                       "tags": [], "jobs": [], "runners": [], "unresolved": [],
                                       "delegates": False}])
         self.assertEqual(len(odd), 1)
@@ -3128,7 +3137,7 @@ class GitHubReadingTest(unittest.TestCase):
         host = FakeHost(run=lambda *args, **kwargs: completed, gh=gh)
         # Exercise Host.read itself, with only its process result replaced.
         with using_host(host):
-            return MODULE.Host.read(host, "repos/x/y")
+            return PACKAGE.host.Host.read(host, "repos/x/y")
 
     def test_the_four_states(self) -> None:
         self.assertEqual(self.read(self.Completed(0, '{"a": 1}')), ("ok", {"a": 1}))
@@ -3170,14 +3179,14 @@ class GitHubReadingTest(unittest.TestCase):
             with self.subTest(message=message):
                 gone = answered_404(message)
                 with workflow_project() as project, using_host(protection_host(gone, rules=gone)):
-                    found = MODULE.github.read_protection("o/r", "main")
+                    found = PACKAGE.github.read_protection("o/r", "main")
                     self.assertEqual((found.classic_state, found.ruled_state, found.unread),
                                      ("absent", "absent", False))
-                    self.assertEqual(MODULE.required_contexts(project), [])
-                    self.assertIs(MODULE.classic_protection(project), False)
-                    self.assertEqual(MODULE.branch_protection("o/r", "main", found.classic_state, found.ruled_state,
+                    self.assertEqual(PACKAGE.github.required_contexts(project), [])
+                    self.assertIs(PACKAGE.github.classic_protection(project), False)
+                    self.assertEqual(PACKAGE.github.branch_protection("o/r", "main", found.classic_state, found.ruled_state,
                                                               found.rules)[0], "note")
-                    self.assertIn("is not protected", MODULE.branch_protection(
+                    self.assertIn("is not protected", PACKAGE.github.branch_protection(
                         "o/r", "main", found.classic_state, found.ruled_state, found.rules)[1])
 
     def test_github_api_still_answers_a_body_or_nothing(self) -> None:
@@ -3185,13 +3194,13 @@ class GitHubReadingTest(unittest.TestCase):
         a list is not a body for them, because they index it by name."""
         self.assertEqual(self.read(self.Completed(0, '[1, 2]')), ("ok", [1, 2]))
         with using_host(FakeHost({"repos/x/y": ("ok", [1, 2])})):
-            self.assertIsNone(MODULE.github_api("repos/x/y"))
-            self.assertEqual(MODULE.github_list("repos/x/y"), [1, 2])
+            self.assertIsNone(PACKAGE.github.github_api("repos/x/y"))
+            self.assertEqual(PACKAGE.github.github_list("repos/x/y"), [1, 2])
 
 
     def test_what_protects_a_branch_and_what_cannot_be_read(self) -> None:
         def verdict(classic, ruled, rules):
-            return MODULE.branch_protection("o/r", "main", classic, ruled, rules)
+            return PACKAGE.github.branch_protection("o/r", "main", classic, ruled, rules)
         self.assertEqual(verdict("ok", "ok", [])[0], "ok")
         self.assertIn("branch protection", verdict("ok", "ok", [])[1])
         # A ruleset alone protects, and reading only the first endpoint
@@ -3214,16 +3223,16 @@ class GitHubReadingTest(unittest.TestCase):
         there are none, and the check proves what the tag already proved.
         The pattern is `[gate] reviewer` against an environment that
         requires nobody, which preflight already fails on."""
-        status, message = MODULE.branch_protection("o/r", "main", "absent", "ok", [],
+        status, message = PACKAGE.github.branch_protection("o/r", "main", "absent", "ok", [],
                                                    "signed-on-default-branch")
         self.assertEqual(status, "fail")
         self.assertIn("declares '[commit] signed-on-default-branch'", message)
         self.assertIn("protect . --apply", message)
         # `signed` promises nothing about the branch, so it stays a note.
-        self.assertEqual(MODULE.branch_protection("o/r", "main", "absent", "ok", [], "signed")[0], "note")
+        self.assertEqual(PACKAGE.github.branch_protection("o/r", "main", "absent", "ok", [], "signed")[0], "note")
         # And a refusal to say is never a violation, whatever was declared:
         # GitHub declining to answer is not an open branch.
-        refused = MODULE.branch_protection("o/r", "main", "unreadable", "unreadable", [],
+        refused = PACKAGE.github.branch_protection("o/r", "main", "unreadable", "unreadable", [],
                                            "signed-on-default-branch")
         self.assertEqual(refused[0], "note")
         self.assertIn("cannot read", refused[1])
@@ -3273,22 +3282,22 @@ class RehearsalCopyTest(unittest.TestCase):
     """
 
     def test_it_clones_and_carries_the_uncommitted_changes(self) -> None:
-        self.assertIn("git clone -q --no-hardlinks /src /work/product", MODULE.REHEARSAL)
-        self.assertIn("git -C /src diff --binary HEAD", MODULE.REHEARSAL)
-        self.assertIn("git -C /work/product apply", MODULE.REHEARSAL)
-        self.assertNotIn("tar -C /src", MODULE.REHEARSAL)
+        self.assertIn("git clone -q --no-hardlinks /src /work/product", PACKAGE.rehearse.REHEARSAL)
+        self.assertIn("git -C /src diff --binary HEAD", PACKAGE.rehearse.REHEARSAL)
+        self.assertIn("git -C /work/product apply", PACKAGE.rehearse.REHEARSAL)
+        self.assertNotIn("tar -C /src", PACKAGE.rehearse.REHEARSAL)
 
     def test_it_says_what_it_left_behind(self) -> None:
         """CI has no untracked file either, and a rehearsal that silently
         added one would answer about a tree nobody else will build."""
-        self.assertIn("ls-files --others --exclude-standard", MODULE.REHEARSAL)
-        self.assertIn("left behind, as CI would", MODULE.REHEARSAL)
+        self.assertIn("ls-files --others --exclude-standard", PACKAGE.rehearse.REHEARSAL)
+        self.assertIn("left behind, as CI would", PACKAGE.rehearse.REHEARSAL)
 
     def test_a_directory_that_is_not_a_repository_still_rehearses(self) -> None:
         """With a warning saying what it carries, which is everything."""
-        self.assertIn("cp -a /src/. /work/product/", MODULE.REHEARSAL)
-        self.assertIn("::warning::/src is not a git repository", MODULE.REHEARSAL)
-        self.assertIn("rm -rf /work/product/dist", MODULE.REHEARSAL)
+        self.assertIn("cp -a /src/. /work/product/", PACKAGE.rehearse.REHEARSAL)
+        self.assertIn("::warning::/src is not a git repository", PACKAGE.rehearse.REHEARSAL)
+        self.assertIn("rm -rf /work/product/dist", PACKAGE.rehearse.REHEARSAL)
 
 
 class DeclarationHomeTest(unittest.TestCase):
@@ -3505,7 +3514,7 @@ class SaidWhereItIsReadTest(unittest.TestCase):
         for text, expected in (("[commit]\nnone\n", "signed or signed-on-default-branch"),
                                ("[commit]\nsigned\nsigned\n", "holds one line")):
             with self.assertRaises(ValueError) as refusal:
-                MODULE.parse_release(text)
+                PACKAGE.declarations.parse_release(text)
             self.assertIn(expected, str(refusal.exception))
 
     def test_a_custom_render_is_told_it_runs_on_another_platform(self) -> None:
@@ -3519,7 +3528,7 @@ class SaidWhereItIsReadTest(unittest.TestCase):
         checks = self.product.json("check", self.dir)["data"]["checks"]
         self.assertTrue(any(check["status"] == "note" and "renders on macOS" in check["message"]
                             for check in checks), checks)
-        self.assertTrue(any(check["status"] == "note" and MODULE.PUBLISHED_DOWNLOAD[0] in check["message"]
+        self.assertTrue(any(check["status"] == "note" and PACKAGE.constants.PUBLISHED_DOWNLOAD[0] in check["message"]
                             for check in checks), checks)
         tap = (ROOT / ".github" / "workflows" / "tap.yml").read_text(encoding="utf-8")
         self.assertIn("Hash the published archive", tap)
@@ -3559,7 +3568,7 @@ class SaidWhereItIsReadTest(unittest.TestCase):
                 and "render-homebrew-formula.sh" in check["message"]]
         self.assertEqual(len(note), 1, checks)
         self.assertTrue(note[0]["message"].startswith("the socle cannot tell from here"), note[0])
-        for shape in MODULE.PUBLISHED_DOWNLOAD:
+        for shape in PACKAGE.constants.PUBLISHED_DOWNLOAD:
             self.assertIn(shape, note[0]["message"])
 
     def test_a_render_that_downloads_the_tag_archive_is_told_it_is_right(self) -> None:
@@ -3584,7 +3593,7 @@ class SaidWhereItIsReadTest(unittest.TestCase):
         """A recogniser that named something else would send every product
         to rewrite a script that was right."""
         tap = (ROOT / ".github" / "workflows" / "tap.yml").read_text(encoding="utf-8")
-        self.assertIn(MODULE.PUBLISHED_DOWNLOAD[0], tap)
+        self.assertIn(PACKAGE.constants.PUBLISHED_DOWNLOAD[0], tap)
 
 
 class VanishingContextTest(unittest.TestCase):
@@ -3600,7 +3609,7 @@ class VanishingContextTest(unittest.TestCase):
     def read(self, required: list, produced: list, caller: str = "check"):
         host = protection_host(("ok", {"required_status_checks": {"contexts": required}}))
         with workflow_project(caller, fuzz=f"{caller} / fuzz" in produced) as project, using_host(host):
-            return MODULE.vanishing_contexts(project)
+            return PACKAGE.protect.vanishing_contexts(project, MODULE.CONTEXT)
 
     def test_a_required_leg_this_socle_no_longer_produces(self) -> None:
         # A name no alias covers: the 0.54.0 names are aliases since 0.57.0,
@@ -3620,13 +3629,13 @@ class VanishingContextTest(unittest.TestCase):
         rules = [{"type": "deletion"}, {"type": "required_status_checks",
                   "parameters": {"required_status_checks": [{"context": "check / check (ubuntu-24.04)"}]}}]
         with workflow_project() as project, using_host(protection_host(("absent", None), rules=("ok", rules))):
-            self.assertEqual(MODULE.vanishing_contexts(project), ["check / check (ubuntu-24.04)"])
+            self.assertEqual(PACKAGE.protect.vanishing_contexts(project, MODULE.CONTEXT), ["check / check (ubuntu-24.04)"])
 
     def test_a_refusal_to_answer_stops_the_check_and_not_the_adoption(self) -> None:
         """An adoption must not depend on the network to be possible."""
         with workflow_project() as project, using_host(protection_host(
                 ("unreadable", None), rules=("unreadable", None))):
-            self.assertEqual(MODULE.vanishing_contexts(project), [])
+            self.assertEqual(PACKAGE.protect.vanishing_contexts(project, MODULE.CONTEXT), [])
 
 
 class LinuxRunnersTest(unittest.TestCase):
@@ -3655,8 +3664,8 @@ class LinuxRunnersTest(unittest.TestCase):
         The image now lives beside the leg, in its runner, where it can
         change without anyone's protection noticing."""
         self.assertIn("name: check (${{ matrix.leg }})", self.WORKFLOW)
-        self.assertEqual(MODULE.check_product_legs(), ["linux", "linux-arm64", "macos"])
-        for leg in MODULE.check_product_legs():
+        self.assertEqual(PACKAGE.protect.check_product_legs(MODULE.CONTEXT), ["linux", "linux-arm64", "macos"])
+        for leg in PACKAGE.protect.check_product_legs(MODULE.CONTEXT):
             # An architecture is a name (arm64); an image release is a
             # version (26.04, macos-15). Only the second turns an upgrade
             # into a lock.
@@ -3671,12 +3680,12 @@ class LinuxRunnersTest(unittest.TestCase):
         self.assertNotIn("\n    runs-on: ubuntu-26.04\n", self.WORKFLOW)
 
     def test_adopt_writes_one_line_per_declared_leg(self) -> None:
-        written = MODULE.ci_macos_runner(CI_CALL, {"macos": ["m1"], "linux-x86_64": ["self-hosted", "Linux"]})
+        written = PACKAGE.workflows.ci_macos_runner(CI_CALL, {"macos": ["m1"], "linux-x86_64": ["self-hosted", "Linux"]})
         self.assertIn("      macos_runner: '\"m1\"'", written)
         self.assertIn("      linux_x86_64_runner: '[\"self-hosted\", \"Linux\"]'", written)
         self.assertNotIn("linux_arm64_runner", written)
         # And an emptied declaration takes every line away again.
-        self.assertNotIn("_runner:", MODULE.ci_macos_runner(written, {}))
+        self.assertNotIn("_runner:", PACKAGE.workflows.ci_macos_runner(written, {}))
 
 
 class ImpactLinesTest(unittest.TestCase):
@@ -3708,7 +3717,7 @@ class ImpactLinesTest(unittest.TestCase):
         versions = [entry["version"] for entry in data["impact"]]
         self.assertTrue(versions, data)
         self.assertNotIn("0.49.0", versions, "the version a product already has says nothing to it")
-        self.assertEqual(versions, sorted(versions, key=MODULE.version_tuple), "oldest first")
+        self.assertEqual(versions, sorted(versions, key=PACKAGE.declarations.version_tuple), "oldest first")
         for entry in data["impact"]:
             self.assertTrue(entry["says"].strip(), entry)
 
@@ -3747,15 +3756,15 @@ class ImpactLinesTest(unittest.TestCase):
         self.assertNotIn("--without-legs --apply`; adopt", text)
 
     def test_a_selector_that_holds_asks_and_an_unknown_one_does_not_hide_it(self) -> None:
-        decl = MODULE.Declarations(pathlib.Path("/nonexistent"), "p")
+        decl = PACKAGE.declarations.Declarations(pathlib.Path("/nonexistent"), "p")
         decl.channels = [("npm", "github-packages")]
-        self.assertIs(MODULE.asks_this(decl, ["channels"], {}), True)
-        self.assertIs(MODULE.asks_this(decl, ["nothing"], {}), False)
-        self.assertIs(MODULE.asks_this(decl, ["pins", "formulas"], {}), False)
-        self.assertIsNone(MODULE.asks_this(decl, None, {}), "a line without the marker is unknown")
-        unknown = {"selectors": {**MODULE.impact_selectors(decl), "old-legs": lambda: None}}
-        self.assertIsNone(MODULE.asks_this(decl, ["old-legs"], dict(unknown)))
-        self.assertIs(MODULE.asks_this(decl, ["old-legs", "channels"], dict(unknown)), True)
+        self.assertIs(PACKAGE.impacts.asks_this(decl, ["channels"], {}), True)
+        self.assertIs(PACKAGE.impacts.asks_this(decl, ["nothing"], {}), False)
+        self.assertIs(PACKAGE.impacts.asks_this(decl, ["pins", "formulas"], {}), False)
+        self.assertIsNone(PACKAGE.impacts.asks_this(decl, None, {}), "a line without the marker is unknown")
+        unknown = {"selectors": {**PACKAGE.impacts.impact_selectors(decl), "old-legs": lambda: None}}
+        self.assertIsNone(PACKAGE.impacts.asks_this(decl, ["old-legs"], dict(unknown)))
+        self.assertIs(PACKAGE.impacts.asks_this(decl, ["old-legs", "channels"], dict(unknown)), True)
 
     def test_the_documentation_selector_answers_the_condition_not_the_visibility(self) -> None:
         """Two products read "0.60.0 and 0.61.0 ask you a gesture", checked
@@ -3763,21 +3772,21 @@ class ImpactLinesTest(unittest.TestCase):
         marker said `public`, which names who could be subject to the rule,
         where what asks is carrying the line. The socle already reads that,
         for the violation of the same name."""
-        decl = MODULE.read_declarations(self.product.dir, "maelys-fixture", "maelys-release")
+        decl = PACKAGE.reading.read_declarations(MODULE.CONTEXT, self.product.dir, "maelys-fixture", "maelys-release")
         self.assertEqual(decl.documentation_named, [])
-        self.assertIs(MODULE.asks_this(decl, ["names-documentation"], {}), False)
+        self.assertIs(PACKAGE.impacts.asks_this(decl, ["names-documentation"], {}), False)
         self.product.write("docs/architecture.md", "# Architecture\n\nThe rest lives in maelys-dev/maelys-docs.\n")
         # The rule reads what the repository tracks: a file nobody committed
         # is a draft, and a public reader never sees it.
         self.product.git(self.product.dir, "init", "-q")
         self.product.git(self.product.dir, "add", "-A")
         self.product.git(self.product.dir, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "prose")
-        named = MODULE.read_declarations(self.product.dir, "maelys-fixture", "maelys-release")
+        named = PACKAGE.reading.read_declarations(MODULE.CONTEXT, self.product.dir, "maelys-fixture", "maelys-release")
         self.assertEqual(named.documentation_named, ["docs/architecture.md"])
-        self.assertIs(MODULE.asks_this(named, ["names-documentation"], {}), True)
+        self.assertIs(PACKAGE.impacts.asks_this(named, ["names-documentation"], {}), True)
         # And the two lines that asked it now say so: the prose of a
         # published entry is untouched, its selectors are made exact.
-        entries = {entry["version"]: entry["asks"] for entry in MODULE.socle_impact_entries("v0.59.2")}
+        entries = {entry["version"]: entry["asks"] for entry in PACKAGE.impacts.socle_impact_entries(MODULE.CONTEXT, "v0.59.2")}
         self.assertEqual(entries["0.60.0"], ["old-legs", "names-documentation"])
         self.assertEqual(entries["0.61.0"], ["names-documentation", "checkout-script"])
 
@@ -3786,19 +3795,19 @@ class ImpactLinesTest(unittest.TestCase):
         of 0.61.0 is a script the socle does not write for every product
         that pins: one declaring `[ci] own` carries none, and read that the
         version asked it something it had no file to do."""
-        decl = MODULE.read_declarations(self.product.dir, "maelys-fixture", "maelys-release")
+        decl = PACKAGE.reading.read_declarations(MODULE.CONTEXT, self.product.dir, "maelys-fixture", "maelys-release")
         self.assertTrue(decl.dependencies)
-        self.assertIs(MODULE.asks_this(decl, ["pins"], {}), True)
-        self.assertIs(MODULE.asks_this(decl, ["checkout-script"], {}), True)
+        self.assertIs(PACKAGE.impacts.asks_this(decl, ["pins"], {}), True)
+        self.assertIs(PACKAGE.impacts.asks_this(decl, ["checkout-script"], {}), True)
         self.product.write("maelys-release.conf", "[ci]\nown\n" + APART.lstrip("\n"))
-        own = MODULE.read_declarations(self.product.dir, "maelys-fixture", "maelys-release")
+        own = PACKAGE.reading.read_declarations(MODULE.CONTEXT, self.product.dir, "maelys-fixture", "maelys-release")
         self.assertTrue(own.dependencies, "it still pins: that is what makes the two selectors differ")
-        self.assertIs(MODULE.asks_this(own, ["pins"], {}), True)
-        self.assertIs(MODULE.asks_this(own, ["checkout-script"], {}), False)
+        self.assertIs(PACKAGE.impacts.asks_this(own, ["pins"], {}), True)
+        self.assertIs(PACKAGE.impacts.asks_this(own, ["checkout-script"], {}), False)
 
     def test_every_marker_names_selectors_the_socle_evaluates(self) -> None:
-        known = set(MODULE.impact_selectors(MODULE.Declarations(pathlib.Path("/nonexistent"), "p")))
-        entries = MODULE.socle_impact_entries("v0.47.0")
+        known = set(PACKAGE.impacts.impact_selectors(PACKAGE.declarations.Declarations(pathlib.Path("/nonexistent"), "p")))
+        entries = PACKAGE.impacts.socle_impact_entries(MODULE.CONTEXT, "v0.47.0")
         self.assertTrue(entries)
         for entry in entries:
             self.assertIsNotNone(entry["asks"], f"{entry['version']} carries no [asks: ...] marker")
@@ -3856,7 +3865,7 @@ class TagDeploymentsTest(unittest.TestCase):
                 return "ok", {"total_count": len(runs), "workflow_runs": runs}
             return "ok", deployments.get(path, [])
         with using_host(FakeHost(read=answer)):
-            return MODULE.tag_deployments("o/r", "v1.0.0")
+            return PACKAGE.github.tag_deployments("o/r", "v1.0.0")
 
     def test_the_runs_endpoint_is_read_as_an_object(self) -> None:
         """An object for runs and an array for deployments must reach the result.
@@ -3899,7 +3908,7 @@ class TagDeploymentsTest(unittest.TestCase):
         this line, which is how a reader that could not work shipped and was
         tagged. Nothing exercises `cut --tag` but a real release; the socle
         makes one most days, and now it exercises this."""
-        body = inspect.getsource(MODULE.cut_tag)
+        body = inspect.getsource(PACKAGE.cut.cut_tag)
         self.assertIn("data[\"deployments\"] = tag_deployments(repository, tag)", body)
         self.assertNotIn('if decl.gate == "reviewer" or decl.channels:', body)
 
@@ -3909,17 +3918,17 @@ class TagDeploymentsTest(unittest.TestCase):
         workflow, so the pin governs what GitHub runs and nothing else. A
         product asked whether a fix to `cut` could only reach it through an
         adoption. It cannot."""
-        for handler in (MODULE.handle_cut, MODULE.cut.handle_cut, MODULE.cut_tag, MODULE.cut_open):
+        for handler in (PACKAGE.cut.handle_cut, PACKAGE.cut.cut_tag, PACKAGE.cut.cut_open):
             body = inspect.getsource(handler)
             self.assertNotIn("run_pinned_socle", body, handler)
-        text = MODULE.text_cut({"stage": "open", "product": "p", "version": "1.0.0", "branch": "b",
+        text = PACKAGE.cut.text_cut({"stage": "open", "product": "p", "version": "1.0.0", "branch": "b",
                                 "base": "main", "repository": "o/r", "gate": [], "checks": [],
                                 "ready": False, "socle": {"tag": "v9.9.9", "sha": "f" * 40}})
         self.assertIn("socle    v9.9.9 (fffffff), this checkout", text)
 
     def test_none_pending_is_not_nothing_left_to_approve(self) -> None:
         """The channel's deployment does not exist yet when the tag is pushed."""
-        text = MODULE.text_cut({"stage": "tag", "product": "p", "version": "1.0.0", "branch": "b",
+        text = PACKAGE.cut.text_cut({"stage": "tag", "product": "p", "version": "1.0.0", "branch": "b",
                                 "base": "main", "repository": "o/r", "gate": [], "checks": [],
                                 "ready": True, "pushed": True, "deployments": [],
                                 "next": "v1.0.0 is published on abc1234"})
@@ -3987,7 +3996,7 @@ class ChannelGateTest(unittest.TestCase):
         for text, expected in (("[channels]\nnpm github-packages sometimes\n", "reviewer or none"),
                                ("[channels]\nnpm\n", "names one registry, and may add its gate")):
             with self.assertRaises(ValueError) as refusal:
-                MODULE.parse_release(text)
+                PACKAGE.declarations.parse_release(text)
             self.assertIn(expected, str(refusal.exception))
 
 
@@ -4060,7 +4069,7 @@ class SocleAsADependencyTest(unittest.TestCase):
 
     def test_the_rehearsal_exports_what_ci_exports(self) -> None:
         """The third place, and the one that would have been forgotten."""
-        self.assertIn("export MAELYS_RELEASE_DIR", MODULE.REHEARSAL)
+        self.assertIn("export MAELYS_RELEASE_DIR", PACKAGE.rehearse.REHEARSAL)
 
     def test_a_pin_for_the_socle_is_refused(self) -> None:
         """One commit, one source: the `uses:` line."""
@@ -4076,9 +4085,9 @@ class SocleAsADependencyTest(unittest.TestCase):
         """maelys-cli writes `## 0.5.29 - 2026-09-14`; the hint showed an em dash."""
         work = pathlib.Path(tempfile.mkdtemp(prefix="maelys-release-heading."))
         self.addCleanup(shutil.rmtree, work, True)
-        self.assertEqual(MODULE.entry_heading(work, "1.0.0"), "## 1.0.0 — YYYY-MM-DD")
+        self.assertEqual(PACKAGE.cut.entry_heading(work, "1.0.0"), "## 1.0.0 — YYYY-MM-DD")
         (work / "CHANGELOG.md").write_text("# Changelog\n\n## Unreleased\n\n## 0.5.29 - 2026-09-14\n\n- x\n")
-        self.assertEqual(MODULE.entry_heading(work, "0.5.30"), "## 0.5.30 - YYYY-MM-DD")
+        self.assertEqual(PACKAGE.cut.entry_heading(work, "0.5.30"), "## 0.5.30 - YYYY-MM-DD")
 
     def test_a_pin_for_the_socle_is_the_one_source_where_no_workflow_names_it(self) -> None:
         """maelys-platform: no workflow calls the socle, and the pin chooses the
@@ -4089,7 +4098,7 @@ class SocleAsADependencyTest(unittest.TestCase):
         (work / ".github" / "workflows" / "check.yml").write_text("jobs:\n  test:\n    runs-on: ubuntu-26.04\n")
         (work / "dependencies").mkdir()
         (work / "dependencies" / "maelys-release.pin").write_text("v0.56.0\n" + "a" * 40 + "\n")
-        decl = MODULE.read_declarations(work, "maelys-platform", "custom")
+        decl = PACKAGE.reading.read_declarations(MODULE.CONTEXT, work, "maelys-platform", "custom")
         self.assertFalse([check for check in decl.checks if "the socle is pinned by the 'uses:' line" in check["message"]])
         self.assertIn("maelys-release", decl.dependencies)
 
@@ -4123,16 +4132,16 @@ class SeriesTest(unittest.TestCase):
 
     def test_what_a_series_is(self) -> None:
         """Below 1.0 the minor breaks, above it the major does."""
-        self.assertEqual(MODULE.series("v0.1.3"), "0.1")
-        self.assertEqual(MODULE.series("v0.2.0"), "0.2")
-        self.assertEqual(MODULE.series("v1.4.0"), "1")
-        self.assertEqual(MODULE.series("v2.0.1"), "2")
+        self.assertEqual(PACKAGE.dependencies.series("v0.1.3"), "0.1")
+        self.assertEqual(PACKAGE.dependencies.series("v0.2.0"), "0.2")
+        self.assertEqual(PACKAGE.dependencies.series("v1.4.0"), "1")
+        self.assertEqual(PACKAGE.dependencies.series("v2.0.1"), "2")
         # A tag the socle cannot read is not a series, and refuses nothing.
-        self.assertEqual(MODULE.series("mbedtls-3.6.7"), "")
-        self.assertEqual(MODULE.series("nightly"), "")
+        self.assertEqual(PACKAGE.dependencies.series("mbedtls-3.6.7"), "")
+        self.assertEqual(PACKAGE.dependencies.series("nightly"), "")
 
     def test_a_patch_apart_is_still_a_note(self) -> None:
-        self.assertEqual(MODULE.series("v0.5.25"), MODULE.series("v0.5.27"))
+        self.assertEqual(PACKAGE.dependencies.series("v0.5.25"), PACKAGE.dependencies.series("v0.5.27"))
 
 
 class MaterialisedMarkTest(unittest.TestCase):
@@ -4210,10 +4219,10 @@ class OneRunnerRuleTest(unittest.TestCase):
         self.assertEqual(self.CHANNEL.count("runs-on: ${{ fromJSON(inputs.linux_x86_64_runner) }}"), 3)
 
     def test_adopt_writes_the_declaration_into_every_call(self) -> None:
-        declaration = MODULE.Declarations(pathlib.Path("."), "maelys-fixture")
+        declaration = PACKAGE.declarations.Declarations(pathlib.Path("."), "maelys-fixture")
         declaration.channels = [("npm", "github-packages")]
         declaration.runners = {"macos": ["m1"], "linux-x86_64": ["self-hosted", "Linux"]}
-        written = MODULE.release_workflow(declaration, "0" * 40, "v9.9.9", "9.9.9")
+        written = PACKAGE.workflows.release_workflow(declaration, "0" * 40, "v9.9.9", "9.9.9")
         release = written.split("  release:", 1)[1].split("\n\n  ", 1)[0]
         channel = written.split("  channel-npm:", 1)[1].split("\n\n  ", 1)[0]
         self.assertIn("""      macos_runner: '"m1"'""", release)
@@ -4238,7 +4247,7 @@ class ComingRuleTest(unittest.TestCase):
 
     def test_a_product_on_the_shared_ci_is_told(self) -> None:
         said = self.notes()
-        self.assertEqual(len(said), len(MODULE.COMING), said)
+        self.assertEqual(len(said), len(PACKAGE.reading.COMING), said)
         for message in said:
             self.assertIn("coming in maelys-release", message)
 
@@ -4255,7 +4264,7 @@ class ComingRuleTest(unittest.TestCase):
         ci.write_text("name: ci\n\njobs:\n  mine:\n    runs-on: ubuntu-26.04\n", encoding="utf-8")
         # Only the announcements that reach `socle`: one that reaches `all`
         # (0.61.0's seeded-text rule) is told to every repository.
-        socle_only = [says for _, reaches, says in MODULE.COMING if reaches == "socle"]
+        socle_only = [says for _, reaches, says in PACKAGE.reading.COMING if reaches == "socle"]
         said = [check["message"] for check
                 in self.product.json("check", self.dir, expect=2)["data"]["checks"]
                 if check["message"].startswith("coming in ")
@@ -4263,8 +4272,8 @@ class ComingRuleTest(unittest.TestCase):
         self.assertEqual(said, [])
 
     def test_a_version_already_shipped_says_nothing(self) -> None:
-        here = MODULE.version_tuple((ROOT / "VERSION").read_text(encoding="utf-8").strip())
-        self.assertTrue(all(MODULE.version_tuple(version) > here for version, _, _ in MODULE.COMING))
+        here = PACKAGE.declarations.version_tuple((ROOT / "VERSION").read_text(encoding="utf-8").strip())
+        self.assertTrue(all(PACKAGE.declarations.version_tuple(version) > here for version, _, _ in PACKAGE.reading.COMING))
 
 
 class SanitizersTwiceTest(unittest.TestCase):
@@ -4282,7 +4291,7 @@ class SanitizersTwiceTest(unittest.TestCase):
             "    with:\n      product: p\n")
 
     def test_a_product_job_that_sanitizes_beside_the_socle_is_named(self) -> None:
-        lines = MODULE.sanitizers_twice(self.CALL + "  own:\n    steps:\n"
+        lines = PACKAGE.workflows.sanitizers_twice(self.CALL + "  own:\n    steps:\n"
                                         "      - run: make asan\n      - run: make ubsan\n")
         # One line per job, the first that builds what the socle's job builds.
         self.assertEqual(lines, [8])
@@ -4295,7 +4304,7 @@ class SanitizersTwiceTest(unittest.TestCase):
             "        run: make asan-ubsan\n"
             "  linux:\n    strategy:\n      matrix:\n        runner: [ubuntu-24.04, ubuntu-24.04-arm]\n"
             "    runs-on: ${{ matrix.runner }}\n    steps:\n      - run: make check CFLAGS=-fsanitize=address\n")
-        lines = MODULE.sanitizers_twice(text)
+        lines = PACKAGE.workflows.sanitizers_twice(text)
         self.assertEqual([text.splitlines()[n - 1].strip() for n in lines], ["- run: make check CFLAGS=-fsanitize=address"])
 
     def test_a_call_that_sets_the_input_is_the_product_having_chosen(self) -> None:
@@ -4303,20 +4312,20 @@ class SanitizersTwiceTest(unittest.TestCase):
         job. That is the choice the socle cannot make for a product, and
         having made it is the end of the matter."""
         text = self.CALL.replace("      product: p\n", '      product: p\n      sanitizer_command: ""\n')
-        self.assertEqual(MODULE.sanitizers_twice(text + "  own:\n    steps:\n      - run: make asan\n"), [])
+        self.assertEqual(PACKAGE.workflows.sanitizers_twice(text + "  own:\n    steps:\n      - run: make asan\n"), [])
 
     def test_the_call_block_itself_is_not_a_second_job(self) -> None:
         """Its `with:` names sanitizer_command, and a comment beside it says
         what the socle's job runs."""
         text = self.CALL.replace("    with:\n", "    # the socle's asan/ubsan job\n    with:\n")
-        self.assertEqual(MODULE.sanitizers_twice(text), [])
+        self.assertEqual(PACKAGE.workflows.sanitizers_twice(text), [])
 
     def test_a_comment_is_not_a_job(self) -> None:
         """Unlike the sibling search, where a commented `docker build
         --build-context …=../maelys-system` is an instruction a human
         follows, nothing runs a YAML comment. maelys-json carries one naming
         the socle's sanitizers, and it was the rule's only false line."""
-        self.assertEqual(MODULE.sanitizers_twice(self.CALL + "  own:\n    # sanitizers run here too\n"), [])
+        self.assertEqual(PACKAGE.workflows.sanitizers_twice(self.CALL + "  own:\n    # sanitizers run here too\n"), [])
 
 
 class DependenciesApartTest(unittest.TestCase):
@@ -4379,7 +4388,7 @@ class DependenciesApartTest(unittest.TestCase):
         for text, expected in (("[dependencies]\nmaelys-json MAELYS_JSON_DIR\n", "single word apart"),
                                ("[dependencies]\napart\napart\n", "holds one line")):
             with self.assertRaises(ValueError) as refusal:
-                MODULE.parse_release(text)
+                PACKAGE.declarations.parse_release(text)
             self.assertIn(expected, str(refusal.exception))
 
     def script(self, *arguments: str, expect: int = 0) -> subprocess.CompletedProcess:
@@ -4619,8 +4628,8 @@ class DependenciesApartTest(unittest.TestCase):
         self.product.git(self.product.dir, "config", "core.quotePath", "false")
         if not track_raw_name(self.product.dir, b"tools/caf\xe9.sh", b"cd ../maelys-system # d\xe9p\xf4t\n"):
             self.skipTest("this file system holds no such name, and git grep reads the working tree")
-        with self.assertRaises(MODULE.Failure) as refusal:
-            MODULE.sibling_readers(self.product.dir, ["maelys-system"])
+        with self.assertRaises(maelys_cli.Failure) as refusal:
+            PACKAGE.dependencies.sibling_readers(self.product.dir, ["maelys-system"])
         self.assertEqual(refusal.exception.code, "PRECONDITION_FAILED")
         self.assertIn("tracks a file whose name is not UTF-8: tools/caf\\xe9.sh.", refusal.exception.message)
 
@@ -4760,7 +4769,7 @@ class DependenciesTest(unittest.TestCase):
         self.product.git(path, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "one pin ago")
         self.product.git(path, "checkout", "-q", "--detach")
         self.product.git(path, "remote", "add", "origin", f"{self.product.env['MAELYS_GIT_BASE']}/maelys-release.git")
-        self.product.git(path, "config", "--local", MODULE.MATERIALISED, "maelys-release")
+        self.product.git(path, "config", "--local", PACKAGE.checkouts.MATERIALISED, "maelys-release")
         return self.product.git(path, "rev-parse", "HEAD")
 
     def test_the_socle_s_own_line_says_what_it_would_refresh(self) -> None:
@@ -4795,14 +4804,14 @@ class DependenciesTest(unittest.TestCase):
         """Whatever builds an entry, for a pin or for the socle: each action
         carries the field its line prints."""
         pin = {"name": "x", "tag": "v1", "commit": "c" * 40, "submodules": None}
-        build = MODULE.dependencies.dependency_entry
+        build = PACKAGE.dependencies.dependency_entry
         self.assertEqual(build(pin, "r", pathlib.Path("/p"), "refresh", "", "a" * 40)["previous"], "a" * 40)
         self.assertEqual(build(pin, "r", pathlib.Path("/p"), "blocked", "why", "")["reason"], "why")
         for action in ("clone", "same"):
             entry = build(pin, "r", pathlib.Path("/p"), action, "", "")
             self.assertNotIn("previous", entry)
             self.assertNotIn("reason", entry)
-            MODULE.dependencies.text_dependencies({"dependencies": [entry], "notes": [], "mode": "plan",
+            PACKAGE.dependencies.text_dependencies({"dependencies": [entry], "notes": [], "mode": "plan",
                                                    "directory": "/d", "variable": "V", "declared": True,
                                                    "blocked": False, "socle": ""})
 
@@ -4895,7 +4904,7 @@ class DependenciesTest(unittest.TestCase):
     def test_the_clone_is_the_managed_script_s_clone(self) -> None:
         """One object, whether CI made it next to the product or this made it here."""
         template = (ROOT / "share" / "templates" / "checkout-dependency.sh").read_text(encoding="utf-8")
-        self.assertIn(" ".join(MODULE.CLONE_FLAGS), template)
+        self.assertIn(" ".join(PACKAGE.checkouts.CLONE_FLAGS), template)
 
 
 class RealGitHost(FakeHost):
@@ -4929,12 +4938,12 @@ class RealGitHost(FakeHost):
 
     def run(self, command, cwd=None, env=None):
         self.commands.append(command)
-        return MODULE.Host.run(self, command, cwd=cwd, env=self.environment(command, env)[0])
+        return PACKAGE.host.Host.run(self, command, cwd=cwd, env=self.environment(command, env)[0])
 
     def feed(self, command, data, cwd=None, env=None, timeout=None):
         self.commands.append(command)
         environment, added = self.environment(command, env)
-        done = MODULE.Host.feed(self, command, data, cwd=cwd, env=environment, timeout=timeout)
+        done = PACKAGE.host.Host.feed(self, command, data, cwd=cwd, env=environment, timeout=timeout)
         self.fed.append({"command": command, "added": added, "timeout": timeout, "said": done.stderr})
         return done
 
@@ -5105,12 +5114,12 @@ class TagMadeSinceTheCloneTest(unittest.TestCase):
         self.assertEqual(said, ("refresh", [], []))
         self.assertEqual(reaching, [["git", "fetch", "--quiet", "origin", newer]], "the refresh, and no question")
         # Read from the two lines, as this git reads it once it holds the commit.
-        named = MODULE.dependencies.by_its_hash
+        named = PACKAGE.dependencies.by_its_hash
         for line in (f"{PINNED_TAG}-2-g{newer[:7]}", f"a-b-10-g{newer[:4]}", f"{PINNED_TAG}-2-g{newer.upper()}",
                      newer[:12].upper(), newer):
             with self.subTest(line=line):
                 self.assertTrue(named(line, newer))
-                self.assertEqual(MODULE.dependencies.named_by(line, self.checkout, fetching=False), newer)
+                self.assertEqual(PACKAGE.dependencies.named_by(line, self.checkout, fetching=False), newer)
         for line in ("", "v0.0.2", f"{PINNED_TAG}-2-g", f"{PINNED_TAG}-2-g{newer[:3]}", f"anything-g{newer[:7]}",
                      f"{PINNED_TAG}-2-G{newer[:7]}", f"{PINNED_TAG}-2-g{self.product.tagged[:7]}",
                      f"{newer[:7]}-dirty"):
@@ -5430,7 +5439,7 @@ class ProtectByRulesetTest(unittest.TestCase):
             invocation = type("I", (), {"operands": [str(project)],
                 "flag": lambda self, name: apply and name == "--apply",
                 "option": lambda self, name, default="": default, "format": "json"})()
-            report = MODULE.handle_protect(invocation)[0]
+            report = PACKAGE.protect.handle_protect(invocation, MODULE.CONTEXT)[0]
         if apply:
             self.assertEqual(len(sent), 1)
         return report
@@ -5478,24 +5487,24 @@ class PackageTargetsTest(unittest.TestCase):
 
     def test_the_section_names_targets_of_this_release(self) -> None:
         declared = "[targets]\nlinux-x86_64\nlinux-arm64\nmacos-arm64\n\n[package]\nlinux-x86_64\n"
-        self.assertEqual(MODULE.parse_release(declared)[-2], ["linux-x86_64"])
+        self.assertEqual(PACKAGE.declarations.parse_release(declared)[-2], ["linux-x86_64"])
         # Without [targets], the socle's three targets are the release's.
-        self.assertEqual(MODULE.parse_release("[package]\nmacos-arm64\n")[-2], ["macos-arm64"])
+        self.assertEqual(PACKAGE.declarations.parse_release("[package]\nmacos-arm64\n")[-2], ["macos-arm64"])
         for text, expected in (("[package]\nwasm32\n", "not a target of this release"),
                                ("[package]\nlinux-x86_64 linux-x86_64\n", "twice")):
             with self.assertRaises(ValueError) as refusal:
-                MODULE.parse_release(text)
+                PACKAGE.declarations.parse_release(text)
             self.assertIn(expected, str(refusal.exception))
 
     def test_adopt_marks_the_targets_that_only_verify(self) -> None:
-        declaration = MODULE.Declarations(pathlib.Path("."), "p")
+        declaration = PACKAGE.declarations.Declarations(pathlib.Path("."), "p")
         declaration.package = ["linux-x86_64"]
-        written = MODULE.release_workflow(declaration, "0" * 40, "v9.9.9", "9.9.9")
+        written = PACKAGE.workflows.release_workflow(declaration, "0" * 40, "v9.9.9", "9.9.9")
         line = [row for row in written.splitlines() if "targets:" in row][0]
         entries = json.loads(line.split("targets: ", 1)[1].strip("'"))
         self.assertEqual([entry.get("package", True) for entry in entries], [True, False, False])
         # Saying nothing renders nothing: every target packages, as before.
-        self.assertNotIn("targets:", MODULE.release_workflow(MODULE.Declarations(pathlib.Path("."), "p"),
+        self.assertNotIn("targets:", PACKAGE.workflows.release_workflow(PACKAGE.declarations.Declarations(pathlib.Path("."), "p"),
                                                              "0" * 40, "v9.9.9", "9.9.9"))
 
     def test_the_workflow_verifies_everywhere_and_packages_where_declared(self) -> None:
@@ -5547,7 +5556,7 @@ class NoEvidenceTest(unittest.TestCase):
                                         "flag": lambda self, name: False,
                                         "option": lambda self, name, default="": default,
                                         "format": "json"})()
-            return MODULE.handle_protect(invocation)[0]
+            return PACKAGE.protect.handle_protect(invocation, MODULE.CONTEXT)[0]
 
     def test_the_tip_of_the_default_branch_is_never_the_evidence(self) -> None:
         data = self.report([{"merged_at": None, "head": {"sha": "open"}}])
@@ -5614,7 +5623,7 @@ class WidenAfterTheMergeTest(unittest.TestCase):
         with workflow_project() as project, using_host(host):
             invocation = type("I", (), {"operands": [str(project)], "flag": lambda self, name: flags.get(name, False),
                                         "option": lambda self, name, default="": default, "format": "json"})()
-            return MODULE.handle_protect(invocation)[0]
+            return PACKAGE.protect.handle_protect(invocation, MODULE.CONTEXT)[0]
 
     def test_widening_before_the_merge_is_refused_and_names_the_open_pulls(self) -> None:
         # A refusal is a line of the result since the two halves of protect
@@ -5633,7 +5642,7 @@ class WidenAfterTheMergeTest(unittest.TestCase):
         self.addCleanup(shutil.rmtree, work, True)
         (work / ".github" / "workflows").mkdir(parents=True)
         (work / ".github" / "workflows" / "ci.yml").write_text("jobs:\n  mbedtls:\n    runs-on: x\n")
-        text = MODULE.text_protect({"branch": "main", "repository": "o/r", "protected": True, "caller": "check",
+        text = PACKAGE.protect.text_protect({"branch": "main", "repository": "o/r", "protected": True, "caller": "check",
                                     "socleContexts": [], "proposed": [], "required": [], "requiredButNeverRun": [],
                                     "missingFromRuns": [], "fromTag": [], "applied": False, "pullRequests": 3,
                                     "seenOnSome": {"fuzz": 1, "mbedtls (macos-15)": 2}, "gone": ["fuzz"]})
@@ -5649,12 +5658,12 @@ class WidenAfterTheMergeTest(unittest.TestCase):
                            cwd=work, check=True, capture_output=True)
         git("init", "-q"); (work / "VERSION").write_text("0.2.0\n")
         git("add", "-A"); git("commit", "-q", "-m", "0.2.0"); git("tag", "-a", "-m", "0.2.0", "v0.2.0")
-        between = [found for found in MODULE.tag_checks(work, "0.2.0", MODULE.identity.allowed_signers(MODULE.socle_root()),
+        between = [found for found in PACKAGE.release_checks.tag_checks(work, "0.2.0", PACKAGE.identity.allowed_signers(MODULE.socle_root()),
                                                  between_releases=True)
                    if "v0.2.0" in found[1] and "annotated" not in found[1] and "signed" not in found[1]]
         self.assertEqual([status for status, _ in between], ["note"])
         # cut keeps the failure: there, an existing tag is a collision.
-        collision = [found for found in MODULE.tag_checks(work, "0.2.0", MODULE.identity.allowed_signers(MODULE.socle_root()))
+        collision = [found for found in PACKAGE.release_checks.tag_checks(work, "0.2.0", PACKAGE.identity.allowed_signers(MODULE.socle_root()))
                      if "already exists" in found[1]]
         self.assertEqual([status for status, _ in collision], ["fail"])
 
@@ -5677,37 +5686,37 @@ class ProductLegsTest(unittest.TestCase):
             "    runs-on: ubuntu-26.04\n")
 
     def declarations(self, legs, runners=None):
-        decl = MODULE.Declarations(pathlib.Path("/nonexistent"), "p")
+        decl = PACKAGE.declarations.Declarations(pathlib.Path("/nonexistent"), "p")
         decl.legs = legs
         decl.runners = runners or {}
         return decl
 
     def test_names_are_one_each_on_a_known_platform(self) -> None:
-        self.assertEqual(MODULE.parse_release("[check]\nagent-off linux make check AGENT=off\n")[-1],
+        self.assertEqual(PACKAGE.declarations.parse_release("[check]\nagent-off linux make check AGENT=off\n")[-1],
                          [("agent-off", "linux", "make check AGENT=off")])
         for text in ("[check]\nAgent linux true\n", "[check]\nx windows true\n", "[check]\nx linux\n",
                      "[check]\nx linux true\nx macos true\n"):
             with self.assertRaises(ValueError):
-                MODULE.parse_release(text)
+                PACKAGE.declarations.parse_release(text)
 
     def test_the_job_is_written_replaced_and_taken_away(self) -> None:
         legs = [("agent-off", "linux", "make check AGENT='off'")]
-        written = MODULE.ci_legs(self.CALL, self.declarations(legs), "b" * 40, "v1.0.0")
+        written = PACKAGE.workflows.ci_legs(self.CALL, self.declarations(legs), "b" * 40, "v1.0.0")
         self.assertTrue(written.startswith(self.CALL), "the product's jobs are left byte for byte")
         self.assertIn("  legs:\n", written)
         self.assertIn("check-legs.yml@" + "b" * 40 + " # v1.0.0", written)
         self.assertIn("AGENT=''off''", written, "a quote is written twice in single-quoted YAML")
-        self.assertEqual(MODULE.ci_legs(written, self.declarations(legs), "b" * 40, "v1.0.0"), written)
-        moved = MODULE.ci_legs(written, self.declarations(legs), "c" * 40, "v2.0.0")
+        self.assertEqual(PACKAGE.workflows.ci_legs(written, self.declarations(legs), "b" * 40, "v1.0.0"), written)
+        moved = PACKAGE.workflows.ci_legs(written, self.declarations(legs), "c" * 40, "v2.0.0")
         self.assertNotIn("b" * 40, moved)
-        self.assertEqual(MODULE.ci_legs(written, self.declarations([]), "b" * 40, "v1.0.0"), self.CALL)
+        self.assertEqual(PACKAGE.workflows.ci_legs(written, self.declarations([]), "b" * 40, "v1.0.0"), self.CALL)
 
     def test_a_job_of_the_products_own_named_legs_is_left_alone(self) -> None:
         own = self.CALL + "\n  legs:\n    runs-on: ubuntu-26.04\n"
-        self.assertEqual(MODULE.ci_legs(own, self.declarations([("x", "linux", "true")]), "b" * 40, "v1"), own)
+        self.assertEqual(PACKAGE.workflows.ci_legs(own, self.declarations([("x", "linux", "true")]), "b" * 40, "v1"), own)
 
     def test_runners_follow_the_declaration(self) -> None:
-        written = MODULE.ci_legs(self.CALL, self.declarations([("x", "macos", "true")],
+        written = PACKAGE.workflows.ci_legs(self.CALL, self.declarations([("x", "macos", "true")],
                                                               {"macos": ["self-hosted", "macOS"]}), "b" * 40, "v1")
         self.assertIn("      macos_runner: '[\"self-hosted\", \"macOS\"]'", written.split("  legs:", 1)[1])
 
@@ -5719,12 +5728,12 @@ class ProductLegsTest(unittest.TestCase):
         (work / ".github" / "workflows").mkdir(parents=True)
         (work / ".github" / "workflows" / "ci.yml").write_text(self.CALL)
         (work / "maelys-release.conf").write_text("[check]\nagent-off linux make check AGENT=off\n")
-        caller, contexts = MODULE.socle_check_contexts(work)
+        caller, contexts = PACKAGE.protect.socle_check_contexts(work, MODULE.CONTEXT)
         self.assertEqual(caller, "check")
         self.assertIn("legs / agent-off", contexts)
         self.assertIn("check / check (linux)", contexts)
-        self.assertTrue(MODULE.socle_owned("legs / agent-on", caller))
-        self.assertFalse(MODULE.socle_owned("clang (ubuntu-26.04)", caller))
+        self.assertTrue(PACKAGE.protect.socle_owned("legs / agent-on", caller))
+        self.assertFalse(PACKAGE.protect.socle_owned("clang (ubuntu-26.04)", caller))
 
     def test_the_workflow_runs_them_with_the_same_setup_and_the_same_runner_rule(self) -> None:
         self.assertIn("name: ${{ matrix.name }}", self.WORKFLOW)
@@ -5755,20 +5764,20 @@ class TouchesTest(unittest.TestCase):
                 "    # Why the job is here.\n    with:\n      product: p\n")
 
     def test_text_is_prose(self) -> None:
-        self.assertEqual(MODULE.touches("AGENTS.md", "a\n", "b\n"), "prose")
+        self.assertEqual(PACKAGE.texts.touches("AGENTS.md", "a\n", "b\n"), "prose")
 
     def test_a_comment_is_prose(self) -> None:
-        self.assertEqual(MODULE.touches("x.yml", self.WORKFLOW,
+        self.assertEqual(PACKAGE.texts.touches("x.yml", self.WORKFLOW,
                                         self.WORKFLOW.replace("Why the job is here.", "Why it is.")), "prose")
 
     def test_the_commit_a_workflow_names_is_a_pin(self) -> None:
         moved = self.WORKFLOW.replace("a" * 40 + " # v1.0.0", "b" * 40 + " # v1.1.0") \
             .replace("v1.0.0 (1.0.0)", "v1.1.0 (1.1.0)").replace("Why the job is here.", "Why it is.")
-        self.assertEqual(MODULE.touches("x.yml", self.WORKFLOW, moved), "pin")
+        self.assertEqual(PACKAGE.texts.touches("x.yml", self.WORKFLOW, moved), "pin")
 
     def test_anything_that_runs_is_mechanism(self) -> None:
-        self.assertEqual(MODULE.touches("x.yml", self.WORKFLOW, self.WORKFLOW + "      sbom: true\n"), "mechanism")
-        self.assertEqual(MODULE.touches("scripts/checkout-dependency.sh", "set -eu\n# a\n", "set -euo\n# a\n"),
+        self.assertEqual(PACKAGE.texts.touches("x.yml", self.WORKFLOW, self.WORKFLOW + "      sbom: true\n"), "mechanism")
+        self.assertEqual(PACKAGE.texts.touches("scripts/checkout-dependency.sh", "set -eu\n# a\n", "set -euo\n# a\n"),
                          "mechanism")
 
 
@@ -5796,17 +5805,17 @@ class MovedPinNamedTest(unittest.TestCase):
         return work
 
     def test_an_entry_that_does_not_name_it_is_refused(self) -> None:
-        found = MODULE.moved_pins_named(self.repository(), "- Something else changed.")
+        found = PACKAGE.cut.moved_pins_named(self.repository(), "- Something else changed.")
         self.assertEqual([status for status, _ in found], ["fail"])
         self.assertIn("does not name maelys-json", found[0][1])
 
     def test_naming_it_is_enough(self) -> None:
-        found = MODULE.moved_pins_named(self.repository(), "- Re-pins maelys-json on v0.2.0.")
+        found = PACKAGE.cut.moved_pins_named(self.repository(), "- Re-pins maelys-json on v0.2.0.")
         self.assertEqual([status for status, _ in found], ["ok"])
 
     def test_a_longer_name_is_not_the_dependency(self) -> None:
         """maelys-json-schema is not maelys-json."""
-        found = MODULE.moved_pins_named(self.repository(), "- Adds maelys-json-schema.")
+        found = PACKAGE.cut.moved_pins_named(self.repository(), "- Adds maelys-json-schema.")
         self.assertEqual([status for status, _ in found], ["fail"])
 
 
@@ -5882,7 +5891,7 @@ class LegRenameTest(unittest.TestCase):
             sent["body"] = body
             return subprocess.CompletedProcess([], 0, "", "")
         with using_host(FakeHost(read=read, write=write)):
-            return MODULE.write_ruleset("o/r", "main", applied, MODULE.protect.carrying_rules(applied), contexts), sent
+            return PACKAGE.protect.write_ruleset("o/r", "main", applied, PACKAGE.protect.carrying_rules(applied), contexts), sent
 
     def test_the_ruleset_is_written_whole_with_only_its_checks_changed(self) -> None:
         # One context more than it holds: a ruleset that lists them all
@@ -5907,7 +5916,7 @@ class LegRenameTest(unittest.TestCase):
 
     def test_a_ruleset_of_the_organisation_is_refused_before_anything_is_sent(self) -> None:
         organisation = [dict(rule, ruleset_source_type="Organization") for rule in self.APPLIED]
-        with self.assertRaises(MODULE.Failure) as refusal:
+        with self.assertRaises(maelys_cli.Failure) as refusal:
             self.write(["check / check (linux)"], applied=organisation)
         self.assertIn("ruleset of the organisation", refusal.exception.message)
 
@@ -5920,9 +5929,9 @@ class LegRenameTest(unittest.TestCase):
     def test_nothing_is_announced_once_the_rename_ships(self) -> None:
         """The announcement is honoured, so it leaves: an entry left standing
         would be a note about a change every adopter already has."""
-        here = MODULE.version_tuple((ROOT / "VERSION").read_text(encoding="utf-8").strip())
-        self.assertFalse([entry for entry in MODULE.COMING if "renamed" in entry[2]
-                          and MODULE.version_tuple(entry[0]) <= here])
+        here = PACKAGE.declarations.version_tuple((ROOT / "VERSION").read_text(encoding="utf-8").strip())
+        self.assertFalse([entry for entry in PACKAGE.reading.COMING if "renamed" in entry[2]
+                          and PACKAGE.declarations.version_tuple(entry[0]) <= here])
 
 
 class OwnCiTest(unittest.TestCase):
@@ -5942,9 +5951,9 @@ class OwnCiTest(unittest.TestCase):
     def test_own_ci_writes_no_ci_yml_and_warns_of_none(self) -> None:
         work = self.work()
         (work / "maelys-release.conf").write_text("[ci]\nown\n")
-        decl = MODULE.read_declarations(work, "p", "custom")
+        decl = PACKAGE.reading.read_declarations(MODULE.CONTEXT, work, "p", "custom")
         self.assertTrue(decl.own_ci)
-        self.assertNotIn(".github/workflows/ci.yml", MODULE.stage(decl, "a" * 40, "v9.9.9"))
+        self.assertNotIn(".github/workflows/ci.yml", PACKAGE.staging.stage(MODULE.CONTEXT, decl, "a" * 40, "v9.9.9"))
         self.assertFalse([c for c in decl.checks if "does not call the socle's check-product.yml" in c["message"]])
 
     def test_own_ci_and_a_call_to_the_shared_ci_contradict(self) -> None:
@@ -5953,14 +5962,14 @@ class OwnCiTest(unittest.TestCase):
         (work / ".github" / "workflows" / "ci.yml").write_text(
             "jobs:\n  check:\n    uses: maelys-dev/maelys-release/.github/workflows/check-product.yml@"
             + "a" * 40 + " # v1\n")
-        decl = MODULE.read_declarations(work, "p", "custom")
+        decl = PACKAGE.reading.read_declarations(MODULE.CONTEXT, work, "p", "custom")
         self.assertTrue([c for c in decl.checks if c["status"] == "missing" and "[ci] own" in c["message"]])
 
     def test_the_section_holds_one_word_and_excludes_legs(self) -> None:
         with self.assertRaises(ValueError):
-            MODULE.parse_release("[ci]\nshared\n")
+            PACKAGE.declarations.parse_release("[ci]\nshared\n")
         with self.assertRaises(ValueError):
-            MODULE.parse_release("[ci]\nown\n\n[check]\nx linux true\n")
+            PACKAGE.declarations.parse_release("[ci]\nown\n\n[check]\nx linux true\n")
 
     def test_a_reusable_workflow_describes_its_callers_not_its_repository(self) -> None:
         work = self.work()
@@ -5970,7 +5979,7 @@ class OwnCiTest(unittest.TestCase):
         (work / ".github" / "workflows" / "ci.yml").write_text(
             "on: [push]\njobs:\n  a:\n    steps:\n      - run: sh scripts/checkout-dependency.sh \"$name\"\n")
         subprocess.run(["git", "-C", str(work.resolve()), "add", "-A"], cwd=work, check=True)
-        found = [path for path, *_ in MODULE.sibling_readers(work, ["x"])]
+        found = [path for path, *_ in PACKAGE.dependencies.sibling_readers(work, ["x"])]
         self.assertEqual(found, [".github/workflows/ci.yml"])
 
     def test_the_socle_checks_itself_in_its_ci(self) -> None:
@@ -5983,34 +5992,34 @@ class WardenAdoptionTest(unittest.TestCase):
     """maelys-warden, custom, private, pins apart, bound to be public; and
     agent-cli-spec's adoption of 0.57.1 refused over a job that reports."""
 
-    def product(self, conf: str, mechanism: str = "custom") -> MODULE.Declarations:
+    def product(self, conf: str, mechanism: str = "custom") -> PACKAGE.declarations.Declarations:
         work = pathlib.Path(tempfile.mkdtemp(prefix="maelys-release-warden."))
         self.addCleanup(shutil.rmtree, work, True)
         (work / "dependencies").mkdir()
         (work / "dependencies" / "maelys-cli.pin").write_text("v0.5.23\n" + "a" * 40 + "\n")
         (work / "VERSION").write_text("1.0.0\n")
         (work / "maelys-release.conf").write_text(conf)
-        return MODULE.read_declarations(work, "maelys-warden", mechanism)
+        return PACKAGE.reading.read_declarations(MODULE.CONTEXT, work, "maelys-warden", mechanism)
 
     def test_a_custom_product_that_pins_receives_the_checkout_scripts_in_its_conventions(self) -> None:
         decl = self.product("[dependencies]\napart\n")
-        staged = MODULE.stage(decl, "a" * 40, "v9.9.9")
-        for script in MODULE.CHECKOUT_SCRIPTS:
+        staged = PACKAGE.staging.stage(MODULE.CONTEXT, decl, "a" * 40, "v9.9.9")
+        for script in PACKAGE.dependencies.CHECKOUT_SCRIPTS:
             self.assertIn(script, staged)
             self.assertTrue(staged[script][1], "executable")
-        scopes = {entry["path"]: entry["scope"] for entry in MODULE.plan(decl, staged, apply=False)}
+        scopes = {entry["path"]: entry["scope"] for entry in PACKAGE.staging.plan(decl, staged, apply=False)}
         self.assertEqual(scopes["scripts/checkout-dependencies.sh"], "conventions",
                          "a release-scope drift on a custom product raises instead of reporting")
-        self.assertNotIn("scripts/checkout-dependency.sh", MODULE.stage(
+        self.assertNotIn("scripts/checkout-dependency.sh", PACKAGE.staging.stage(MODULE.CONTEXT, 
             self.product("[dependencies]\napart\n", mechanism="none"), "a" * 40, "v9.9.9"))
-        self.assertNotIn("scripts/checkout-dependency.sh", MODULE.stage(
+        self.assertNotIn("scripts/checkout-dependency.sh", PACKAGE.staging.stage(MODULE.CONTEXT, 
             self.product("[dependencies]\napart\n\n[ci]\nown\n"), "a" * 40, "v9.9.9"),
             "a repository whose CI calls no shared CI has nothing that runs them")
 
     def test_the_block_names_no_documentation_repository_unless_declared(self) -> None:
         for mechanism in ("custom", "maelys-release"):
-            default = MODULE.stage(self.product("[dependencies]\napart\n", mechanism), "a" * 40, "v9.9.9")["AGENTS.md"][0]
-            named = MODULE.stage(self.product("[dependencies]\napart\n\n[docs]\nnamed example/docs-fixture\n", mechanism),
+            default = PACKAGE.staging.stage(MODULE.CONTEXT, self.product("[dependencies]\napart\n", mechanism), "a" * 40, "v9.9.9")["AGENTS.md"][0]
+            named = PACKAGE.staging.stage(MODULE.CONTEXT, self.product("[dependencies]\napart\n\n[docs]\nnamed example/docs-fixture\n", mechanism),
                                  "a" * 40, "v9.9.9")["AGENTS.md"][0]
             self.assertNotIn("maelys-docs", default, mechanism)
             self.assertIn("declares `[docs] named`", default, mechanism)
@@ -6020,13 +6029,13 @@ class WardenAdoptionTest(unittest.TestCase):
         self.assertTrue([c for c in decl.checks if "is the default since 0.58.0" in c["message"]])
         for text in ("[docs]\npublic\n", "[docs]\nnamed example/docs-fixture\nunnamed\n"):
             with self.assertRaises(ValueError):
-                MODULE.parse_release(text)
+                PACKAGE.declarations.parse_release(text)
 
     def test_the_adoption_guard_counts_a_turned_off_job_as_reporting(self) -> None:
         required = ["check / check (linux)", "check / sanitizers", "check / gone"]
         with workflow_project() as project, using_host(protection_host(
                 ("ok", {"required_status_checks": {"contexts": required}}))):
-            self.assertEqual(MODULE.vanishing_contexts(project), ["check / gone"])
+            self.assertEqual(PACKAGE.protect.vanishing_contexts(project, MODULE.CONTEXT), ["check / gone"])
 
 
 class WithdrawnVersionTest(unittest.TestCase):
@@ -6039,8 +6048,8 @@ class WithdrawnVersionTest(unittest.TestCase):
             text = text.replace("0.57.0", MODULE.socle_version())
         answer = ("unreadable", None) if text is None else (
             "ok", {"encoding": "base64", "content": base64.b64encode(text.encode()).decode()})
-        with using_host(FakeHost({f"repos/{MODULE.SOCLE_REPOSITORY}/contents/WITHDRAWN": answer})):
-            return MODULE.withdrawn_for("protect")
+        with using_host(FakeHost({f"repos/{PACKAGE.constants.SOCLE_REPOSITORY}/contents/WITHDRAWN": answer})):
+            return PACKAGE.github.withdrawn_for("protect", MODULE.CONTEXT)
 
     def test_a_listed_version_is_withdrawn_for_its_command_alone(self) -> None:
         listed = "# comment\n0.57.0 protect writes the whole protection\n0.57.1 tap something\n"
@@ -6074,11 +6083,11 @@ class LegAliasTest(unittest.TestCase):
     WORKFLOW = (ROOT / ".github" / "workflows" / "check-product.yml").read_text(encoding="utf-8")
 
     def test_no_alias_remains_and_the_reader_finds_none(self) -> None:
-        self.assertEqual(MODULE.check_product_aliases(), [])
+        self.assertEqual(PACKAGE.protect.check_product_aliases(MODULE.CONTEXT), [])
         self.assertNotIn("alias", self.WORKFLOW)
-        self.assertEqual(MODULE.check_product_legs(), ["linux", "linux-arm64", "macos"])
+        self.assertEqual(PACKAGE.protect.check_product_legs(MODULE.CONTEXT), ["linux", "linux-arm64", "macos"])
         # The announcement did not outlive the version that honoured it.
-        self.assertFalse([entry for entry in MODULE.COMING if entry[0] == "0.60.0"])
+        self.assertFalse([entry for entry in PACKAGE.reading.COMING if entry[0] == "0.60.0"])
 
     def protect(self, required, seen, apply=False):
         fake = FakeProtection(required)
@@ -6092,7 +6101,7 @@ class LegAliasTest(unittest.TestCase):
             invocation = type("I", (), {"operands": [str(project)],
                 "flag": lambda self, name: apply and name == "--apply",
                 "option": lambda self, name, default="": default, "format": "json"})()
-            return MODULE.handle_protect(invocation), [body for _, _, body in host.writes]
+            return PACKAGE.protect.handle_protect(invocation, MODULE.CONTEXT), [body for _, _, body in host.writes]
 
     def test_an_old_name_still_required_is_stale_and_never_dropped_silently(self) -> None:
         # What the 0.60.0 Impact line says: a branch that still requires an
@@ -6105,7 +6114,7 @@ class LegAliasTest(unittest.TestCase):
         self.assertEqual(sorted(report["requiredButNeverRun"]), ["check / check (macos-15)", "check / check (ubuntu-26.04)"])
         self.assertEqual(sorted(report["dropping"]), ["check / check (macos-15)", "check / check (ubuntu-26.04)"])
         self.assertEqual(written, [])
-        text = MODULE.text_protect(report)
+        text = PACKAGE.protect.text_protect(report)
         self.assertIn("STALE    check / check (ubuntu-26.04) is required and no run", text)
         self.assertIn("DROP     check / check (macos-15) is required and this plan leaves it out", text)
         # And the whole way through, not the flag alone: a product renaming
@@ -6115,9 +6124,9 @@ class LegAliasTest(unittest.TestCase):
         self.assertIn("--allow-narrow' drops those, then merge a pull request", text)
         (refused, code), written = self.protect(old, seen, apply=True)
         self.assertIn("--allow-narrow", refused["refused"]["hint"])
-        self.assertEqual((code, written, refused["applied"]), (MODULE.EXIT_VIOLATIONS, [], False))
-        self.assertIn("REFUSED  this write would stop requiring", MODULE.text_protect(refused))
-        self.assertIn("protect: refused; the protection is not written", MODULE.text_protect(refused))
+        self.assertEqual((code, written, refused["applied"]), (maelys_cli.EXIT_VIOLATIONS, [], False))
+        self.assertIn("REFUSED  this write would stop requiring", PACKAGE.protect.text_protect(refused))
+        self.assertIn("protect: refused; the protection is not written", PACKAGE.protect.text_protect(refused))
 
     def test_the_output_keeps_what_the_branch_required_before(self) -> None:
         old = ["check / check (linux)", "mine"]
@@ -6127,9 +6136,9 @@ class LegAliasTest(unittest.TestCase):
         self.assertEqual(report["before"]["rulesets"], [])
         self.assertIsInstance(report["before"]["classic"], dict)
         self.assertIn("enforce_admins", report["before"]["classic"])
-        self.assertNotIn("before   ", MODULE.text_protect(report))
+        self.assertNotIn("before   ", PACKAGE.protect.text_protect(report))
         report["applied"] = True
-        self.assertIn('before   {"classic": {', MODULE.text_protect(report))
+        self.assertIn('before   {"classic": {', PACKAGE.protect.text_protect(report))
 
     def test_a_write_that_moves_any_other_setting_fails_loudly(self) -> None:
         """The property maelys-oci asked for: after --apply, no setting but the
@@ -6141,7 +6150,7 @@ class LegAliasTest(unittest.TestCase):
                       {"required_status_checks": {"strict": False, "contexts": []}},
                       {"required_pull_request_reviews": {"required_approving_review_count": 0}}):
             fake = FakeProtection(required, strict=True, drift=moved)
-            with self.assertRaises(MODULE.Failure) as refusal:
+            with self.assertRaises(maelys_cli.Failure) as refusal:
                 self.protect_with_fake(fake, seen)
             self.assertIn("changed beyond what the plan said", refusal.exception.message, moved)
 
@@ -6152,10 +6161,10 @@ class LegAliasTest(unittest.TestCase):
         report = self.protect_with_fake(fake, ["check / check (linux)"], apply=False)
         self.assertEqual(report["keeps"]["strict"], True)
         self.assertEqual(report["keeps"]["required_linear_history"], True)
-        self.assertIn("keeps    every other setting as it is: strict=true", MODULE.text_protect(report))
+        self.assertIn("keeps    every other setting as it is: strict=true", PACKAGE.protect.text_protect(report))
         absent = self.protect_with_fake(None, ["check / check (linux)"], apply=False)
         self.assertEqual(absent["creates"]["required_linear_history"], False)
-        self.assertIn("create   required_linear_history=false", MODULE.text_protect(absent))
+        self.assertIn("create   required_linear_history=false", PACKAGE.protect.text_protect(absent))
 
     def protect_with_fake(self, fake, seen, apply=True):
         host = protection_host(fake.read("") if fake else UNPROTECTED,
@@ -6166,14 +6175,14 @@ class LegAliasTest(unittest.TestCase):
             invocation = type("I", (), {"operands": [str(project)],
                 "flag": lambda self, name: apply and name == "--apply",
                 "option": lambda self, name, default="": default, "format": "json"})()
-            return MODULE.handle_protect(invocation)[0]
+            return PACKAGE.protect.handle_protect(invocation, MODULE.CONTEXT)[0]
 
     def test_a_yaml_comment_is_not_a_command(self) -> None:
         """agent-cli-spec: `sanitizer_command: ''   # no compiled code here`."""
         for raw, value in (("''   # no compiled code here", "''"), ('""', '""'), ("make asan  # both", "make asan"),
                            ("'a # b'", "'a # b'"), ("'it''s # x'  # c", "'it''s # x'"), ("|", "|"),
                            ("make a#b", "make a#b")):
-            self.assertEqual(MODULE.yaml_scalar(raw), value, raw)
+            self.assertEqual(PACKAGE.workflows.yaml_scalar(raw), value, raw)
 
     def test_a_turned_off_job_already_required_is_kept_and_blocks_no_swap(self) -> None:
         """The refusal agent-cli-spec met after merging its adoption: sanitizers
@@ -6200,7 +6209,7 @@ class LegAliasTest(unittest.TestCase):
         with workflow_project() as project, using_host(host):
             invocation = type("I", (), {"operands": [str(project)], "flag": lambda self, name: name in on,
                                         "option": lambda self, name, default="": default, "format": "json"})()
-            return MODULE.handle_protect(invocation)[0], commands
+            return PACKAGE.protect.handle_protect(invocation, MODULE.CONTEXT)[0], commands
 
     @staticmethod
     def answers(required, seen, strict=True, timeout=()):
@@ -6255,7 +6264,7 @@ class LegAliasTest(unittest.TestCase):
         (report, code), written = self.protect(["check / check (ubuntu-26.04)"], ["check / check (ubuntu-26.04)"],
                                                apply=True)
         self.assertTrue(report["refused"]["message"])
-        self.assertEqual((code, written), (MODULE.EXIT_VIOLATIONS, []))
+        self.assertEqual((code, written), (maelys_cli.EXIT_VIOLATIONS, []))
 
     def test_an_adoption_refuses_a_branch_requiring_an_old_name(self) -> None:
         # Until 0.59.2 the aliases were produced and the guard let them be;
@@ -6264,7 +6273,7 @@ class LegAliasTest(unittest.TestCase):
                     "check / check (macos-15)", "check / check (gone)"]
         with workflow_project() as project, using_host(protection_host(
                 ("ok", {"required_status_checks": {"contexts": required}}))):
-            self.assertEqual(MODULE.vanishing_contexts(project),
+            self.assertEqual(PACKAGE.protect.vanishing_contexts(project, MODULE.CONTEXT),
                              ["check / check (gone)", "check / check (macos-15)", "check / check (ubuntu-26.04)",
                               "check / check (ubuntu-26.04-arm)"])
 
@@ -6299,25 +6308,25 @@ jobs:
         return work
 
     def test_the_legs_come_from_the_workflow_not_from_a_list(self) -> None:
-        legs = MODULE.check_product_legs()
+        legs = PACKAGE.protect.check_product_legs(MODULE.CONTEXT)
         self.assertTrue(legs, "check-product.yml must name its legs")
         self.assertIn("macos", legs)
 
     def test_the_calling_job_prefixes_every_name(self) -> None:
         """Some products call it check; maelys-egress calls it socle."""
-        caller, contexts = MODULE.socle_check_contexts(self.product("socle"))
+        caller, contexts = PACKAGE.protect.socle_check_contexts(self.product("socle"), MODULE.CONTEXT)
         self.assertEqual(caller, "socle")
         for name in contexts:
             self.assertTrue(name.startswith("socle / "), name)
 
     def test_sanitizers_is_opt_out_and_fuzz_is_opt_in(self) -> None:
         """Their inputs have opposite defaults, and both decide a job."""
-        _, plain = MODULE.socle_check_contexts(self.product())
+        _, plain = PACKAGE.protect.socle_check_contexts(self.product(), MODULE.CONTEXT)
         self.assertIn("check / sanitizers", plain)
         self.assertNotIn("check / fuzz", plain)
-        _, fuzzing = MODULE.socle_check_contexts(self.product(inputs="      fuzz_command: make fuzz-smoke\n"))
+        _, fuzzing = PACKAGE.protect.socle_check_contexts(self.product(inputs="      fuzz_command: make fuzz-smoke\n"), MODULE.CONTEXT)
         self.assertIn("check / fuzz", fuzzing)
-        _, quiet = MODULE.socle_check_contexts(self.product(inputs="      sanitizer_command: ''\n"))
+        _, quiet = PACKAGE.protect.socle_check_contexts(self.product(inputs="      sanitizer_command: ''\n"), MODULE.CONTEXT)
         self.assertNotIn("check / sanitizers", quiet)
 
     def test_a_block_scalar_is_a_value_and_not_an_absence(self) -> None:
@@ -6327,8 +6336,8 @@ jobs:
         repositories required a job that never runs, when it runs and passes
         on every pull request they have.
         """
-        _, contexts = MODULE.socle_check_contexts(
-            self.product(inputs="      sanitizer_command: |\n        make asan\n"))
+        _, contexts = PACKAGE.protect.socle_check_contexts(
+            self.product(inputs="      sanitizer_command: |\n        make asan\n"), MODULE.CONTEXT)
         self.assertIn("check / sanitizers", contexts)
 
     def test_a_product_that_does_not_call_the_socle_has_no_socle_contexts(self) -> None:
@@ -6337,7 +6346,7 @@ jobs:
         (work / ".github" / "workflows").mkdir(parents=True)
         (work / ".github" / "workflows" / "ci.yml").write_text("name: ci\njobs:\n  mine:\n    runs-on: x\n",
                                                                encoding="utf-8")
-        self.assertEqual(MODULE.socle_check_contexts(work), ("", []))
+        self.assertEqual(PACKAGE.protect.socle_check_contexts(work, MODULE.CONTEXT), ("", []))
 
 
 class RepositoryChecksTest(unittest.TestCase):
@@ -6376,7 +6385,7 @@ class TapSecretsTest(unittest.TestCase):
 
     def read(self, contents: dict, formulas=("libmaelys-p",)):
         with using_host(FakeHost(read=lambda path: contents.get(path, ("absent", None)))):
-            return MODULE.tap_secrets("maelys-dev/p", list(formulas))
+            return PACKAGE.github.tap_secrets("maelys-dev/p", list(formulas))
 
     def test_a_repository_that_sees_both_is_told_it_will_push(self) -> None:
         found = self.read(self.secrets([], ["HOMEBREW_TAP_TOKEN", "HOMEBREW_TAP_SIGNING_KEY"]))
@@ -6426,7 +6435,7 @@ class ChannelVisibilityTest(unittest.TestCase):
 
     def read(self, answer, channels=(("npm", "github-packages"),)):
         with using_host(FakeHost({self.PATH: answer})):
-            return MODULE.channel_visibility("maelys-dev/p", list(channels))
+            return PACKAGE.github.channel_visibility("maelys-dev/p", list(channels))
 
     def package(self, visibility: str, repository: str = "maelys-dev/p") -> dict:
         return {"name": "@maelys/p", "visibility": visibility,
@@ -6480,7 +6489,7 @@ class TapDriftTest(unittest.TestCase):
 
     def drift(self, contents: dict, repository: str, declared: list):
         with using_host(FakeHost(read=lambda path: contents.get(path, ("absent", None)))):
-            return MODULE.tap_drift(repository, declared)
+            return PACKAGE.github.tap_drift(repository, declared)
 
     def test_a_formula_nobody_declares_is_named_with_what_it_serves(self) -> None:
         contents = self.formulas(("maelys-datalog", "maelys-datalog", "v0.1.0-alpha.3"))
@@ -6519,7 +6528,7 @@ class RunnerDeclarationTest(unittest.TestCase):
     """[runners], and the one line adopt keeps in a ci.yml it does not own."""
 
     def parse(self, text: str):
-        return MODULE.parse_release(textwrap.dedent(text))
+        return PACKAGE.declarations.parse_release(textwrap.dedent(text))
 
     def test_labels_are_read(self) -> None:
         *_, runner, runners, _, _, _, _, unknown, _, _ = self.parse("[runners]\nmacos self-hosted macOS ARM64\n")
@@ -6538,12 +6547,12 @@ class RunnerDeclarationTest(unittest.TestCase):
         self.assertEqual(unknown, [])
         # macos keeps its bare word: ten repositories already declare it, and
         # renaming a key of a file the socle reads refuses them all at once.
-        self.assertEqual(MODULE.SOCLE_RUNNER_KEYS, ("macos", "linux-x86_64", "linux-arm64"))
+        self.assertEqual(PACKAGE.constants.SOCLE_RUNNER_KEYS, ("macos", "linux-x86_64", "linux-arm64"))
 
     def test_one_label_is_a_string_and_several_are_an_array(self) -> None:
         """runs-on takes either, and the difference is not cosmetic."""
-        self.assertEqual(MODULE.runner_json(["macos-15"]), '"macos-15"')
-        self.assertEqual(MODULE.runner_json(["self-hosted", "macOS"]), '["self-hosted", "macOS"]')
+        self.assertEqual(PACKAGE.workflows.runner_json(["macos-15"]), '"macos-15"')
+        self.assertEqual(PACKAGE.workflows.runner_json(["self-hosted", "macOS"]), '["self-hosted", "macOS"]')
 
     def test_the_section_is_refused_when_it_makes_no_sense(self) -> None:
         for text, expected in (("[runners]\nbsd ubuntu-26.04\n", "knows macos, linux-x86_64, linux-arm64"),
@@ -6555,11 +6564,11 @@ class RunnerDeclarationTest(unittest.TestCase):
             self.assertIn(expected, str(refusal.exception))
 
     def test_it_reaches_the_tap_job_of_release_yml(self) -> None:
-        declaration = MODULE.Declarations(pathlib.Path("."), "maelys-fixture")
+        declaration = PACKAGE.declarations.Declarations(pathlib.Path("."), "maelys-fixture")
         declaration.formulas = ["maelys-fixture"]
         declaration.runners = {"macos": ["self-hosted", "macOS", "ARM64"],
                                "linux-x86_64": ["self-hosted", "Linux"]}
-        workflow = MODULE.release_workflow(declaration, "0" * 40, "v9.9.9", "9.9.9")
+        workflow = PACKAGE.workflows.release_workflow(declaration, "0" * 40, "v9.9.9", "9.9.9")
         self.assertIn("""      macos_runner: '["self-hosted", "macOS", "ARM64"]'""", workflow)
         # And not the Linux one in the tap's own call: tap.yml renders a
         # formula on macOS and declares no other input, so a line it does not
@@ -6571,7 +6580,7 @@ class RunnerDeclarationTest(unittest.TestCase):
         self.assertIn("linux_x86_64_runner", release)
 
     def test_adopt_writes_the_line_under_the_socle_call(self) -> None:
-        written = MODULE.ci_macos_runner(CI_CALL, {"macos": ["self-hosted", "macOS", "ARM64"]})
+        written = PACKAGE.workflows.ci_macos_runner(CI_CALL, {"macos": ["self-hosted", "macOS", "ARM64"]})
         # First line of the with: block, so the placement is the same
         # whatever inputs the product has added below it.
         self.assertIn("""    with:
@@ -6582,25 +6591,25 @@ class RunnerDeclarationTest(unittest.TestCase):
 
     def test_an_empty_declaration_takes_the_line_away(self) -> None:
         """The declaration decides in both directions, or it decides nothing."""
-        written = MODULE.ci_macos_runner(CI_CALL, ["macos-15"])
-        self.assertEqual(MODULE.ci_macos_runner(written, []), CI_CALL)
+        written = PACKAGE.workflows.ci_macos_runner(CI_CALL, ["macos-15"])
+        self.assertEqual(PACKAGE.workflows.ci_macos_runner(written, []), CI_CALL)
 
     def test_a_declared_runner_replaces_the_one_already_there(self) -> None:
-        first = MODULE.ci_macos_runner(CI_CALL, ["macos-15"])
-        second = MODULE.ci_macos_runner(first, ["self-hosted", "macOS"])
+        first = PACKAGE.workflows.ci_macos_runner(CI_CALL, ["macos-15"])
+        second = PACKAGE.workflows.ci_macos_runner(first, ["self-hosted", "macOS"])
         self.assertNotIn("macos-15", second)
         self.assertEqual(second.count("macos_runner:"), 1)
 
     def test_a_ci_that_does_not_call_the_socle_is_left_alone(self) -> None:
         foreign = "name: ci\n\njobs:\n  mine:\n    runs-on: ubuntu-26.04\n"
-        self.assertEqual(MODULE.ci_macos_runner(foreign, ["self-hosted"]), foreign)
+        self.assertEqual(PACKAGE.workflows.ci_macos_runner(foreign, ["self-hosted"]), foreign)
 
 
 class SbomDeclarationTest(unittest.TestCase):
     """The [sbom] section of the declaration file."""
 
     def parse(self, text: str):
-        return MODULE.parse_release(textwrap.dedent(text))
+        return PACKAGE.declarations.parse_release(textwrap.dedent(text))
 
     def test_one_glob_is_read(self) -> None:
         _, _, _, _, sbom, _, _, _, _, _, _, unknown, _, _ = self.parse("""\
@@ -6621,14 +6630,14 @@ class SbomDeclarationTest(unittest.TestCase):
         self.assertEqual(sbom, "")
 
     def test_it_renders_into_the_workflow(self) -> None:
-        declaration = MODULE.Declarations(pathlib.Path("."), "maelys-fixture")
+        declaration = PACKAGE.declarations.Declarations(pathlib.Path("."), "maelys-fixture")
         declaration.sbom_pattern = "*.spdx.json"
-        workflow = MODULE.release_workflow(declaration, "0" * 40, "v9.9.9", "9.9.9")
+        workflow = PACKAGE.workflows.release_workflow(declaration, "0" * 40, "v9.9.9", "9.9.9")
         self.assertIn("      sbom_pattern: '*.spdx.json'", workflow)
 
     def test_nothing_is_rendered_without_it(self) -> None:
-        declaration = MODULE.Declarations(pathlib.Path("."), "maelys-fixture")
-        self.assertNotIn("sbom_pattern", MODULE.release_workflow(declaration, "0" * 40, "v9.9.9", "9.9.9"))
+        declaration = PACKAGE.declarations.Declarations(pathlib.Path("."), "maelys-fixture")
+        self.assertNotIn("sbom_pattern", PACKAGE.workflows.release_workflow(declaration, "0" * 40, "v9.9.9", "9.9.9"))
 
 
 class ChannelMarkerTest(unittest.TestCase):
@@ -6647,7 +6656,7 @@ class ChannelMarkerTest(unittest.TestCase):
         itself. One product removed a field of its own to make its rehearsal
         agree, which is the shape of the problem.
         """
-        marker = MODULE.channel_marker("maelys-datalog", "v0.2.0", "npm",
+        marker = PACKAGE.rehearse.channel_marker("maelys-datalog", "v0.2.0", "npm",
                                        {"registry": "npm.pkg.github.com", "package": "@maelys/datalog"},
                                        "(rehearsal)")
         self.assertEqual(marker["product"], "maelys-datalog")
@@ -6658,7 +6667,7 @@ class ChannelMarkerTest(unittest.TestCase):
     def test_a_record_cannot_overwrite_what_the_release_says(self) -> None:
         """The former expression put the record last, so a record naming
         `tag` rewrote the tag of the release it was attached to."""
-        marker = MODULE.channel_marker("p", "v1.0.0", "npm",
+        marker = PACKAGE.rehearse.channel_marker("p", "v1.0.0", "npm",
                                        {"channel": "npm-next", "tag": "v9.9.9", "registry": "r"}, "run")
         self.assertEqual(marker["channel"], "npm")
         self.assertEqual(marker["tag"], "v1.0.0")
@@ -6668,14 +6677,14 @@ class ChannelMarkerTest(unittest.TestCase):
         """Dropped, because the publication has already happened when this is
         read: a refusal here leaves a registry holding a version and a
         release saying nothing about it."""
-        kept, dropped = MODULE.kept_record({"registry": "r", "already_published": True,
+        kept, dropped = PACKAGE.rehearse.kept_record({"registry": "r", "already_published": True,
                                             "version": "1.0.0", "count": 3})
         self.assertEqual(kept, {"registry": "r", "version": "1.0.0"})
         self.assertEqual(dropped, ["already_published", "count"])
         # A known field of the wrong type is not a marker field either: a
         # marker is read by eye as often as by jq.
-        self.assertEqual(MODULE.kept_record({"version": 1.0}), ({}, ["version"]))
-        self.assertEqual(MODULE.kept_record([1, 2]), ({}, []))
+        self.assertEqual(PACKAGE.rehearse.kept_record({"version": 1.0}), ({}, ["version"]))
+        self.assertEqual(PACKAGE.rehearse.kept_record([1, 2]), ({}, []))
 
     def test_the_workflow_keeps_the_same_four_fields(self) -> None:
         """The parity that matters: the rehearsal composes in Python and the
@@ -6685,7 +6694,7 @@ class ChannelMarkerTest(unittest.TestCase):
         self.assertTrue(listed, channel)
         for names in listed:
             self.assertEqual([name.strip('"') for name in names.split(",")],
-                             list(MODULE.CHANNEL_RECORD_FIELDS))
+                             list(PACKAGE.rehearse.CHANNEL_RECORD_FIELDS))
 
     def test_what_counts_as_a_disagreement_with_the_attached_marker(self) -> None:
         """published and run differ by construction; anything else means the
@@ -6693,18 +6702,18 @@ class ChannelMarkerTest(unittest.TestCase):
         attached = {"product": "p", "tag": "v1.0.0", "channel": "npm", "published": "2026-09-01T00:00:00Z",
                     "run": "https://example.invalid/1", "registry": "npm.pkg.github.com"}
         same = dict(attached, published="2026-09-11T12:00:00Z", run="(rehearsal)")
-        self.assertEqual(MODULE.marker_differences(same, attached), [])
-        self.assertEqual(MODULE.marker_differences(dict(same, registry="registry.npmjs.org"), attached),
+        self.assertEqual(PACKAGE.rehearse.marker_differences(same, attached), [])
+        self.assertEqual(PACKAGE.rehearse.marker_differences(dict(same, registry="registry.npmjs.org"), attached),
                          ["registry"])
         # A field the script stopped recording is a disagreement too.
         missing = {key: value for key, value in same.items() if key != "registry"}
-        self.assertEqual(MODULE.marker_differences(missing, attached), ["registry"])
+        self.assertEqual(PACKAGE.rehearse.marker_differences(missing, attached), ["registry"])
 
     def test_the_socle_records_the_fact_without_a_record_file(self) -> None:
         """The file is optional: the marker exists because the channel published."""
-        marker = MODULE.channel_marker("p", "v1.0.0", "npm", {}, "r")
+        marker = PACKAGE.rehearse.channel_marker("p", "v1.0.0", "npm", {}, "r")
         self.assertEqual(sorted(marker), ["channel", "product", "published", "run", "tag"])
-        self.assertEqual(MODULE.kept_record({}), ({}, []))
+        self.assertEqual(PACKAGE.rehearse.kept_record({}), ({}, []))
 
 
 class RehearseChannelRefusalTest(unittest.TestCase):
@@ -6745,10 +6754,10 @@ class RehearseChannelRefusalTest(unittest.TestCase):
 
     def test_the_token_is_the_operator_s_and_never_the_socle_s(self) -> None:
         """The socle never reads a token from a file and never supplies one."""
-        decl = MODULE.read_declarations(self.product.dir, "maelys-fixture", "maelys-release")
+        decl = PACKAGE.reading.read_declarations(MODULE.CONTEXT, self.product.dir, "maelys-fixture", "maelys-release")
         invocation = CutTest.Stub(**{"--channel": "npm", "--tag": "v1.2.3"})
-        with using_host(FakeHost()), self.assertRaises(MODULE.Failure) as refusal:
-            MODULE.rehearse_channel(invocation, self.product.dir, "maelys-fixture", decl, io.StringIO())
+        with using_host(FakeHost()), self.assertRaises(maelys_cli.Failure) as refusal:
+            PACKAGE.rehearse.rehearse_channel(invocation, self.product.dir, "maelys-fixture", decl, io.StringIO())
         self.assertEqual(refusal.exception.code, "PRECONDITION_FAILED")
         self.assertIn("never supplies it", refusal.exception.message)
 
@@ -6823,36 +6832,36 @@ class RenderAndTapTest(unittest.TestCase):
 
 class UnitTest(unittest.TestCase):
     def test_parse_packages(self) -> None:
-        self.assertEqual(MODULE.parse_packages("[linux]\na\nb\n[macos]\nc\n"), ("a b", "c"))
-        self.assertEqual(MODULE.parse_packages("# only comments\n"), ("", ""))
+        self.assertEqual(PACKAGE.declarations.parse_packages("[linux]\na\nb\n[macos]\nc\n"), ("a b", "c"))
+        self.assertEqual(PACKAGE.declarations.parse_packages("# only comments\n"), ("", ""))
         for text in ("a\n", "[bsd]\na\n", "[linux]\na b\n", "[linux]\n-a\n"):
             with self.assertRaises(ValueError):
-                MODULE.parse_packages(text)
+                PACKAGE.declarations.parse_packages(text)
 
     def test_matrix_values(self) -> None:
         block = "    strategy:\n      matrix:\n        os:\n          - ubuntu-24.04\n          - self-hosted\n"
-        self.assertEqual(MODULE.matrix_values(block, "os"), ["self-hosted", "ubuntu-24.04"])
+        self.assertEqual(PACKAGE.workflows.matrix_values(block, "os"), ["self-hosted", "ubuntu-24.04"])
         # The include form names the key on each entry; it is what
         # maelys-datalog writes, and reading only the list form reported it
         # unresolved.
         include = "      matrix:\n        include:\n          - os: ubuntu-24.04\n            target: linux-x86_64\n"
-        self.assertEqual(MODULE.matrix_values(include, "os"), ["ubuntu-24.04"])
-        self.assertEqual(MODULE.matrix_values("        os: [a, \"b\"]\n", "os"), ["a", "b"])
+        self.assertEqual(PACKAGE.workflows.matrix_values(include, "os"), ["ubuntu-24.04"])
+        self.assertEqual(PACKAGE.workflows.matrix_values("        os: [a, \"b\"]\n", "os"), ["a", "b"])
         # An expression is not a literal and is never guessed at.
-        self.assertEqual(MODULE.matrix_values("        os: [${{ inputs.x }}]\n", "os"), [])
-        self.assertEqual(MODULE.matrix_values("        other: [a]\n", "os"), [])
+        self.assertEqual(PACKAGE.workflows.matrix_values("        os: [${{ inputs.x }}]\n", "os"), [])
+        self.assertEqual(PACKAGE.workflows.matrix_values("        other: [a]\n", "os"), [])
 
     def test_a_label_the_socle_cannot_vouch_for_is_unresolved(self) -> None:
         """A label of the wrong shape is not a label. Accepting one let a jq
         line of the socle's own release.yml pass as a runner, and worse: it
         made `found` non-empty, so a runs-on nobody could read counted as
         resolved and the hole it should have shown disappeared."""
-        self.assertEqual(MODULE.matrix_values('        os: [ubuntu-24.04]\n', "os"), ["ubuntu-24.04"])
+        self.assertEqual(PACKAGE.workflows.matrix_values('        os: [ubuntu-24.04]\n', "os"), ["ubuntu-24.04"])
         jq = '          runner: (if has("runner") then (.runner | tojson) else x end)}]}\n'
-        self.assertEqual(MODULE.matrix_values(jq, "runner"), [])
+        self.assertEqual(PACKAGE.workflows.matrix_values(jq, "runner"), [])
 
     def test_version_pattern_matches_a_version_and_not_a_longer_one(self) -> None:
-        inside = MODULE.version_pattern("0.1.1")
+        inside = PACKAGE.cut.version_pattern("0.1.1")
         self.assertTrue(inside.search("v0.1.1"))
         self.assertTrue(inside.search("#define VERSION \"0.1.1\""))
         # The reason the pattern exists at all: a dot that continues the
@@ -6868,23 +6877,23 @@ class UnitTest(unittest.TestCase):
         self.assertTrue(inside.search("pip install maelys-egress==0.1.1"))
 
     def test_parse_release(self) -> None:
-        self.assertEqual(MODULE.parse_release("[targets]\nlinux-arm64\nwasm32 ubuntu-26.04\n"),
+        self.assertEqual(PACKAGE.declarations.parse_release("[targets]\nlinux-arm64\nwasm32 ubuntu-26.04\n"),
                          ([("linux-arm64", ""), ("wasm32", "ubuntu-26.04")], [], [], {}, "", [], {}, False, "", "", "", [], [], []))
-        self.assertEqual(MODULE.parse_release("[targets]\nmacos-arm64 self-hosted ARM64\n"),
+        self.assertEqual(PACKAGE.declarations.parse_release("[targets]\nmacos-arm64 self-hosted ARM64\n"),
                          ([("macos-arm64", ["self-hosted", "ARM64"])], [], [], {}, "", [], {}, False, "", "", "", [], [], []))
-        self.assertEqual(MODULE.parse_release("[manifest]\n*.wasm\n"), ([], ["*.wasm"], [], {}, "", [], {}, False, "", "", "", [], [], []))
-        self.assertEqual(MODULE.parse_release("[channels]\nnpm github-packages\n"),
+        self.assertEqual(PACKAGE.declarations.parse_release("[manifest]\n*.wasm\n"), ([], ["*.wasm"], [], {}, "", [], {}, False, "", "", "", [], [], []))
+        self.assertEqual(PACKAGE.declarations.parse_release("[channels]\nnpm github-packages\n"),
                          ([], [], [("npm", "github-packages")], {}, "", [], {}, False, "", "", "", [], [], []))
-        self.assertEqual(MODULE.parse_release("[gate]\nnone\n"), ([], [], [], {}, "", [], {}, False, "", "none", "", [], [], []))
-        self.assertEqual(MODULE.parse_release("[gate]\nreviewer\n"), ([], [], [], {}, "", [], {}, False, "", "reviewer", "", [], [], []))
-        self.assertEqual(MODULE.parse_release("# nothing declared\n"), ([], [], [], {}, "", [], {}, False, "", "", "", [], [], []))
+        self.assertEqual(PACKAGE.declarations.parse_release("[gate]\nnone\n"), ([], [], [], {}, "", [], {}, False, "", "none", "", [], [], []))
+        self.assertEqual(PACKAGE.declarations.parse_release("[gate]\nreviewer\n"), ([], [], [], {}, "", [], {}, False, "", "reviewer", "", [], [], []))
+        self.assertEqual(PACKAGE.declarations.parse_release("# nothing declared\n"), ([], [], [], {}, "", [], {}, False, "", "", "", [], [], []))
         # A section this socle does not know is named and skipped, never fatal:
         # a product pins the socle by commit, and losing its targets in
         # silence on an older socle is worse than an unapplied section.
-        self.assertEqual(MODULE.parse_release("[targets]\nlinux-arm64\n[bsd]\nx\n"),
+        self.assertEqual(PACKAGE.declarations.parse_release("[targets]\nlinux-arm64\n[bsd]\nx\n"),
                          ([("linux-arm64", "")], [], [], {}, "", [], {}, False, "", "", "", ["[bsd] at line 3"], [], []))
         # A version materialised twice: the command that regenerates the second.
-        self.assertEqual(MODULE.parse_release("[cut]\nafter-version bash scripts/header.sh\n"),
+        self.assertEqual(PACKAGE.declarations.parse_release("[cut]\nafter-version bash scripts/header.sh\n"),
                          ([], [], [], {}, "", [], {}, False, "", "", "bash scripts/header.sh", [], [], []))
         for text in ("linux-arm64\n",                      # outside a section
                      "[targets]\nwasm32\n",                # no runner and no default
@@ -6903,7 +6912,7 @@ class UnitTest(unittest.TestCase):
                      "[cut]\nafter-version\n",             # names no command
                      "[cut]\nafter-version a\nafter-version b\n"):  # one command, not two
             with self.assertRaises(ValueError, msg=text):
-                MODULE.parse_release(text)
+                PACKAGE.declarations.parse_release(text)
 
     def test_the_readme_pointer_never_names_a_destination_a_reader_cannot_open(self) -> None:
         """maelys-docs is private; a public README naming it sends the reader
@@ -6916,7 +6925,7 @@ class UnitTest(unittest.TestCase):
             with using_host(FakeHost({"repos/maelys-dev/maelys-docs": answer})), tempfile.TemporaryDirectory() as clone:
                 readme = pathlib.Path(clone) / "README.md"
                 readme.write_text("# P\n\nSee [architecture](docs/architecture.md).\n")
-                report = MODULE.rewrite_readme(pathlib.Path(clone), "maelys-egress", data)
+                report = PACKAGE.migration.rewrite_readme(pathlib.Path(clone), "maelys-egress", data)
                 written = readme.read_text()
                 self.assertEqual("maelys-dev/maelys-docs" in written, expected, written)
                 self.assertNotIn("docs/architecture.md", written)
@@ -6937,16 +6946,16 @@ class UnitTest(unittest.TestCase):
         bare = {"protection_rules": [], "can_admins_bypass": True}
         armed = {"protection_rules": [reviewers()], "can_admins_bypass": False}
         # A repository that has not chosen is told, never refused.
-        self.assertEqual([s for s, _ in MODULE.environment_gate("o/r", bare)], ["note"])
+        self.assertEqual([s for s, _ in PACKAGE.github.environment_gate("o/r", bare)], ["note"])
         # One that asked for a reviewer and has none broke its own promise.
-        self.assertEqual([s for s, _ in MODULE.environment_gate("o/r", bare, "reviewer")], ["fail"])
+        self.assertEqual([s for s, _ in PACKAGE.github.environment_gate("o/r", bare, "reviewer")], ["fail"])
         # One that declared it wants none is right, and stays green.
-        declared_none = MODULE.environment_gate("o/r", bare, "none")
+        declared_none = PACKAGE.github.environment_gate("o/r", bare, "none")
         self.assertEqual([s for s, _ in declared_none], ["ok"])
         self.assertIn("[gate] none declares", declared_none[0][1])
-        self.assertEqual([s for s, _ in MODULE.environment_gate("o/r", armed, "reviewer")], ["ok"])
+        self.assertEqual([s for s, _ in PACKAGE.github.environment_gate("o/r", armed, "reviewer")], ["ok"])
         # Stricter than declared is not a failure, but it is worth saying.
-        self.assertEqual([s for s, _ in MODULE.environment_gate("o/r", armed, "none")], ["ok", "note"])
+        self.assertEqual([s for s, _ in PACKAGE.github.environment_gate("o/r", armed, "none")], ["ok", "note"])
 
     def test_environment_gate(self) -> None:
         """The conventions call the release environment the human gate. The
@@ -6957,18 +6966,18 @@ class UnitTest(unittest.TestCase):
             return {"type": "required_reviewers", "prevent_self_review": prevent_self_review,
                     "reviewers": [{"reviewer": {"login": login}}]}
 
-        self.assertEqual(MODULE.environment_gate("o/r", None), [])
-        empty = MODULE.environment_gate("o/r", {"protection_rules": [], "can_admins_bypass": True}, "reviewer")
+        self.assertEqual(PACKAGE.github.environment_gate("o/r", None), [])
+        empty = PACKAGE.github.environment_gate("o/r", {"protection_rules": [], "can_admins_bypass": True}, "reviewer")
         self.assertEqual([status for status, _ in empty], ["fail"])
         self.assertIn("runs unattended", empty[0][1])
         self.assertIn("gh api -X PUT repos/o/r/environments/release", empty[0][1])
 
-        pause = MODULE.environment_gate("o/r", {"protection_rules": [reviewers(False)],
+        pause = PACKAGE.github.environment_gate("o/r", {"protection_rules": [reviewers(False)],
                                                 "can_admins_bypass": True})
         self.assertEqual([status for status, _ in pause], ["ok", "note", "note"])
         self.assertTrue(all("a pause, not a control" in message for _, message in pause[1:]), pause)
 
-        control = MODULE.environment_gate("o/r", {"protection_rules": [reviewers(True, "another")],
+        control = PACKAGE.github.environment_gate("o/r", {"protection_rules": [reviewers(True, "another")],
                                                   "can_admins_bypass": False})
         self.assertEqual(control, [("ok", "environment release of o/r requires a reviewer: another")])
 
@@ -6986,7 +6995,7 @@ class UnitTest(unittest.TestCase):
             host = FakeHost({endpoint + "?per_page=100&page=1":
                              ("ok", {"total_count": len(policies), "branch_policies": list(policies)})})
             with using_host(host):
-                return MODULE.deployment_policies("o/r", custom)
+                return PACKAGE.github.deployment_policies("o/r", custom)
 
         limited = verdicts(tag_rule)
         self.assertEqual(limited, [("ok", "environment release of o/r limits deployments to tags v*")])
@@ -7008,9 +7017,9 @@ class UnitTest(unittest.TestCase):
         without reading the list: GitHub creates a missing environment on
         first use, without rules, so presence proves nothing."""
         with using_host(FakeHost({})) as host:
-            missing = MODULE.deployment_policies("o/r", None)
-            unlimited = MODULE.deployment_policies("o/r", {"deployment_branch_policy": None})
-            protected = MODULE.deployment_policies(
+            missing = PACKAGE.github.deployment_policies("o/r", None)
+            unlimited = PACKAGE.github.deployment_policies("o/r", {"deployment_branch_policy": None})
+            protected = PACKAGE.github.deployment_policies(
                 "o/r", {"deployment_branch_policy": {"protected_branches": True,
                                                      "custom_branch_policies": False}})
             self.assertEqual(host.reads, [])
@@ -7034,8 +7043,8 @@ class UnitTest(unittest.TestCase):
         answer; the review of the first version of these readers found the
         same collapse three times here."""
         with using_host(FakeHost({})):
-            missing = MODULE.deployment_policies("o/r", None, "absent")
-            unreadable = MODULE.deployment_policies("o/r", None, "unreadable")
+            missing = PACKAGE.github.deployment_policies("o/r", None, "absent")
+            unreadable = PACKAGE.github.deployment_policies("o/r", None, "unreadable")
         self.assertEqual([status for status, _ in missing], ["fail"])
         self.assertIn("is missing in o/r", missing[0][1])
         self.assertEqual([status for status, _ in unreadable], ["note"])
@@ -7044,13 +7053,13 @@ class UnitTest(unittest.TestCase):
         custom = {"deployment_branch_policy": {"custom_branch_policies": True}}
         listing = "repos/o/r/environments/release/deployment-branch-policies?per_page=100&page=1"
         with using_host(FakeHost({listing: ("unreadable", None)})):
-            refused = MODULE.deployment_policies("o/r", custom)
+            refused = PACKAGE.github.deployment_policies("o/r", custom)
         self.assertEqual([status for status, _ in refused], ["note"])
         self.assertIn("deployment policies of o/r could not be read", refused[0][1])
         self.assertIn("page 1 could not be read (unreadable)", refused[0][1])
 
         with using_host(FakeHost({"repos/o/r/releases?per_page=100&page=1": ("unreadable", None)})):
-            history = MODULE.publication_record("o/r")
+            history = PACKAGE.github.publication_record("o/r")
         self.assertEqual([status for status, _ in history], ["note"])
         self.assertNotIn("has published yet", history[0][1])
         self.assertIn("could not be read (unreadable)", history[0][1])
@@ -7072,8 +7081,8 @@ class UnitTest(unittest.TestCase):
             return "ok", ([] if "page=2" in path else [{"tag_name": "v9.0.0", "draft": True, "assets": []}])
 
         with using_host(FakeHost(read=pages)) as host:
-            found = MODULE.deployment_policies("o/r", {"deployment_branch_policy": {"custom_branch_policies": True}})
-            record = MODULE.publication_record("o/r")
+            found = PACKAGE.github.deployment_policies("o/r", {"deployment_branch_policy": {"custom_branch_policies": True}})
+            record = PACKAGE.github.publication_record("o/r")
         self.assertEqual(len([status for status, _ in found if status == "fail"]), 30)
         self.assertTrue(any(f"{listing}/31" in message for _, message in found), found[-1])
         self.assertEqual(sum("page=2" in path for path in host.reads), 2)  # both readers asked for it
@@ -7102,7 +7111,7 @@ class UnitTest(unittest.TestCase):
         with using_host(FakeHost(read=lambda path: ("ok", {"total_count": 101, "branch_policies":
                                                            [{"id": 0, "type": "tag", "name": "v*"}] + widening[:99]})
                                  if page_of(path) == 1 else ("unreadable", None))):
-            refused = MODULE.deployment_policies("o/r", custom)
+            refused = PACKAGE.github.deployment_policies("o/r", custom)
         self.assertEqual(sum(status == "fail" for status, _ in refused), 99)
         self.assertEqual(refused[-1][0], "note")
         self.assertIn("page 2 could not be read (unreadable)", refused[-1][1])
@@ -7113,7 +7122,7 @@ class UnitTest(unittest.TestCase):
                   + [{"id": 501, "type": "tag", "name": "v*"}])
         with using_host(FakeHost(read=lambda path: ("ok", {"total_count": 501, "branch_policies":
                                                            beyond[(page_of(path) - 1) * 100:page_of(path) * 100]}))):
-            truncated = MODULE.deployment_policies("o/r", custom)
+            truncated = PACKAGE.github.deployment_policies("o/r", custom)
         self.assertEqual(sum(status == "fail" for status, _ in truncated), 500)
         self.assertFalse(any("without the tag rule" in message for _, message in truncated))
         self.assertIn("whether the tag rule v* is there at all is unanswered", truncated[-1][1])
@@ -7125,7 +7134,7 @@ class UnitTest(unittest.TestCase):
         listing = "repos/o/r/environments/release/deployment-branch-policies"
         batch = [{"id": n, "name": f"branch-{n}", "type": "branch"} for n in range(1, 101)]
         with using_host(FakeHost(read=lambda path: ("ok", {"total_count": 900, "branch_policies": batch}))):
-            found = MODULE.deployment_policies("o/r", {"deployment_branch_policy": {"custom_branch_policies": True}})
+            found = PACKAGE.github.deployment_policies("o/r", {"deployment_branch_policy": {"custom_branch_policies": True}})
         self.assertEqual(found[-1][0], "note")
         self.assertIn("500 of the 900 deployment policies of o/r were read", found[-1][1])
         self.assertTrue(all(status == "fail" for status, _ in found[:-1]))
@@ -7141,7 +7150,7 @@ class UnitTest(unittest.TestCase):
                              # reader asks the next one, which ends the history.
                              "repos/o/r/releases?per_page=100&page=2": ("ok", [])})
             with using_host(host):
-                found = MODULE.publication_record("o/r")
+                found = PACKAGE.github.publication_record("o/r")
             self.assertEqual([status for status, _ in found], ["note"], releases)
             return found[0][1]
 
@@ -7160,10 +7169,10 @@ class UnitTest(unittest.TestCase):
 
     def test_managed_block(self) -> None:
         block = "new\n"
-        self.assertEqual(MODULE.managed_block(None, block), f"{MODULE.BEGIN}\nnew\n{MODULE.END}\n")
-        self.assertEqual(MODULE.managed_block("head\n", block), f"head\n\n{MODULE.BEGIN}\nnew\n{MODULE.END}\n")
-        existing = f"head\n{MODULE.BEGIN}\nold\n{MODULE.END}\ntail\n"
-        self.assertEqual(MODULE.managed_block(existing, block), f"head\n{MODULE.BEGIN}\nnew\n{MODULE.END}\ntail\n")
+        self.assertEqual(PACKAGE.texts.managed_block(None, block), f"{PACKAGE.constants.BEGIN}\nnew\n{PACKAGE.constants.END}\n")
+        self.assertEqual(PACKAGE.texts.managed_block("head\n", block), f"head\n\n{PACKAGE.constants.BEGIN}\nnew\n{PACKAGE.constants.END}\n")
+        existing = f"head\n{PACKAGE.constants.BEGIN}\nold\n{PACKAGE.constants.END}\ntail\n"
+        self.assertEqual(PACKAGE.texts.managed_block(existing, block), f"head\n{PACKAGE.constants.BEGIN}\nnew\n{PACKAGE.constants.END}\ntail\n")
 
     def test_catalog_consistency(self) -> None:
         built_in = {"help", "version", "describe", "completion", "complete.candidates"}
@@ -7171,12 +7180,12 @@ class UnitTest(unittest.TestCase):
         self.assertEqual(len(identifiers), len(set(identifiers)))
         for command in MODULE.APP.catalog:
             if command["id"] not in built_in:
-                self.assertIn(command["id"], MODULE.TEXT)          # every socle command renders text
+                self.assertIn(command["id"], PACKAGE.cli.texts.TEXT)          # every socle command renders text
             self.assertTrue(command["usage"].startswith(" ".join(command["pattern"])))
             if isinstance(command["effect"], dict):
                 self.assertTrue(any(item["long"] == "--apply" for item in command["options"]))
             self.assertIn("outputSchema", command)
-        self.assertEqual(MODULE.cli.FRAMEWORK.split()[0], "maelys_cli")
+        self.assertEqual(maelys_cli.FRAMEWORK.split()[0], "maelys_cli")
 
     def test_socle_version_is_a_bare_version(self) -> None:
         raw = (ROOT / "VERSION").read_bytes()
@@ -7197,7 +7206,7 @@ class UnitTest(unittest.TestCase):
         entries = re.findall(r"^## ([0-9]+\.[0-9]+\.[0-9]+) ", changelog, re.MULTILINE)
         self.assertIn(entries.index(version), (0, 1), f"{version} is not the newest entry nor the one after it")
         self.assertEqual(len(entries), len(set(entries)), "duplicate entries")
-        self.assertEqual(entries, sorted(entries, key=MODULE.version_tuple, reverse=True), "entries out of order")
+        self.assertEqual(entries, sorted(entries, key=PACKAGE.declarations.version_tuple, reverse=True), "entries out of order")
 
     def test_every_changelog_entry_says_its_impact_on_a_product(self) -> None:
         """One line that answers "must we open a pull request?" in ten seconds.
@@ -7212,7 +7221,7 @@ class UnitTest(unittest.TestCase):
         entries = re.findall(r"^## ([0-9]+\.[0-9]+\.[0-9]+) [^\n]*\n(.*?)(?=^## |\Z)",
                              changelog, re.MULTILINE | re.DOTALL)
         held = [(version, body) for version, body in entries
-                if MODULE.version_tuple(version) >= (0, 49, 0)]
+                if PACKAGE.declarations.version_tuple(version) >= (0, 49, 0)]
         self.assertTrue(held, "no entry is under the rule yet")
         for version, body in held:
             self.assertIn("- **Impact.**", body, f"{version} does not say its impact on a product")
@@ -7228,10 +7237,10 @@ class UnitTest(unittest.TestCase):
         so an entry still here when that version ships fails the suite until
         the rule is written or the date is moved, in the open.
         """
-        here = MODULE.version_tuple((ROOT / "VERSION").read_text(encoding="utf-8").strip())
-        for version, reaches, says in MODULE.COMING:
+        here = PACKAGE.declarations.version_tuple((ROOT / "VERSION").read_text(encoding="utf-8").strip())
+        for version, reaches, says in PACKAGE.reading.COMING:
             self.assertRegex(version, r"^[0-9]+\.[0-9]+\.[0-9]+$")
-            self.assertGreater(MODULE.version_tuple(version), here,
+            self.assertGreater(PACKAGE.declarations.version_tuple(version), here,
                                f"{version} is announced and has shipped: write the rule or move the date")
             self.assertIn(reaches, ("socle", "channels", "all"))
             self.assertTrue(says.strip(), version)
@@ -7240,7 +7249,7 @@ class UnitTest(unittest.TestCase):
             self.assertGreater(len(says), 80, version)
 
     def test_linux_baseline_is_ubuntu_26(self) -> None:
-        self.assertEqual(MODULE.DEFAULT_IMAGE, "ubuntu:26.04")
+        self.assertEqual(PACKAGE.constants.DEFAULT_IMAGE, "ubuntu:26.04")
         for relative in (".github/workflows/check.yml", ".github/workflows/check-product.yml",
                          ".github/workflows/release.yml"):
             workflow = (ROOT / relative).read_text()
@@ -7250,11 +7259,11 @@ class UnitTest(unittest.TestCase):
         self.assertIn("ubuntu-26.04-arm", actionlint)
 
     def test_release_workflow_text(self) -> None:
-        decl = MODULE.Declarations(pathlib.Path("/p"), "maelys-x")
+        decl = PACKAGE.declarations.Declarations(pathlib.Path("/p"), "maelys-x")
         decl.dependencies = ["maelys-json"]
         decl.formulas = ["maelys-x"]
         decl.render_command = "sh scripts/render-homebrew-formula.sh TAG OUTPUT"
-        text = MODULE.release_workflow(decl, "a" * 40, "v9.9.9", "9.9.9")
+        text = PACKAGE.workflows.release_workflow(decl, "a" * 40, "v9.9.9", "9.9.9")
         self.assertIn("render_command: sh scripts/render-homebrew-formula.sh TAG OUTPUT maelys-x", text)
         self.assertIn(textwrap.dedent("""\
             dependency_checkout: |
@@ -7307,15 +7316,15 @@ class OnePullTest(unittest.TestCase):
         merged = {"number": 126, "url": "u/126", "state": "MERGED", "mergeCommit": {"oid": "b" * 40},
                   "headRefOid": "c" * 40}
         with using_host(self.listing([merged, closed])):
-            self.assertEqual(MODULE.one_pull(pathlib.Path("."), "o/r", "release/v0.59.0")["number"], 126)
+            self.assertEqual(PACKAGE.cut.one_pull(pathlib.Path("."), "o/r", "release/v0.59.0")["number"], 126)
         with using_host(self.listing([closed])):
-            self.assertIsNone(MODULE.one_pull(pathlib.Path("."), "o/r", "release/v0.59.0"))
+            self.assertIsNone(PACKAGE.cut.one_pull(pathlib.Path("."), "o/r", "release/v0.59.0"))
 
     def test_two_live_pull_requests_are_still_refused(self) -> None:
         live = [{"number": n, "url": f"u/{n}", "state": "OPEN", "mergeCommit": None, "headRefOid": "a" * 40}
                 for n in (1, 2)]
-        with using_host(self.listing(live)), self.assertRaises(MODULE.Failure) as refusal:
-            MODULE.one_pull(pathlib.Path("."), "o/r", "release/v0.59.0")
+        with using_host(self.listing(live)), self.assertRaises(maelys_cli.Failure) as refusal:
+            PACKAGE.cut.one_pull(pathlib.Path("."), "o/r", "release/v0.59.0")
         self.assertIn("2 pull requests", refusal.exception.message)
 
 
@@ -7333,31 +7342,31 @@ class RepositoryReaderTest(unittest.TestCase):
         answered = FakeHost({"repos/o/r": ("ok", {"visibility": "public", "private": False,
                                                     "default_branch": "trunk"})}, run=no_head)
         with using_host(answered):
-            found = MODULE.read_repository("o/r")
+            found = PACKAGE.github.read_repository("o/r")
             self.assertTrue(found.read)
             self.assertEqual((found.visibility, found.private, found.default_branch), ("public", False, "trunk"))
-            self.assertTrue(MODULE.destination_is_public("o/r"))
-            self.assertEqual(MODULE.default_branch(pathlib.Path("."), "o/r"), "trunk")
+            self.assertTrue(PACKAGE.github.destination_is_public("o/r"))
+            self.assertEqual(PACKAGE.github.default_branch(pathlib.Path("."), "o/r"), "trunk")
         # Three readers, three GETs: each site still reads once, where it did.
         self.assertEqual(answered.reads, ["repos/o/r"] * 3)
 
     def test_what_github_did_not_say_is_not_an_answer(self) -> None:
         for state in ("absent", "unreadable", "no-gh"):
             with using_host(FakeHost({"repos/o/r": (state, None)})):
-                found = MODULE.read_repository("o/r")
+                found = PACKAGE.github.read_repository("o/r")
                 self.assertFalse(found.read, state)
                 self.assertEqual((found.visibility, found.private, found.default_branch), ("", False, "main"))
                 # The migration asks whether a stranger can read the prose's
                 # destination; a refusal is neither yes nor no.
-                self.assertIsNone(MODULE.destination_is_public("o/r"))
+                self.assertIsNone(PACKAGE.github.destination_is_public("o/r"))
 
     def test_a_repository_that_names_no_visibility_answers_nobody(self) -> None:
         # The `public` selector says nothing rather than something on an
         # answer without the field; the migration's reader says False, as
         # both always did.
         with using_host(FakeHost({"repos/o/r": ("ok", {"default_branch": "main"})})):
-            self.assertFalse(MODULE.destination_is_public("o/r"))
-            self.assertEqual(MODULE.read_repository("o/r").visibility, "")
+            self.assertFalse(PACKAGE.github.destination_is_public("o/r"))
+            self.assertEqual(PACKAGE.github.read_repository("o/r").visibility, "")
 
 
 class DeclaredWordsTest(unittest.TestCase):
@@ -7377,17 +7386,17 @@ class DeclaredWordsTest(unittest.TestCase):
         return work
 
     def test_the_declaration_carries_both_words(self) -> None:
-        decl = MODULE.read_declarations(self.work("[ci]\nown\n[docs]\nnamed example/docs-fixture\n"), "p", "custom")
+        decl = PACKAGE.reading.read_declarations(MODULE.CONTEXT, self.work("[ci]\nown\n[docs]\nnamed example/docs-fixture\n"), "p", "custom")
         self.assertTrue(decl.own_ci)
         self.assertTrue(decl.docs_named)
-        decl = MODULE.read_declarations(self.work("[docs]\nunnamed\n"), "p", "custom")
+        decl = PACKAGE.reading.read_declarations(MODULE.CONTEXT, self.work("[docs]\nunnamed\n"), "p", "custom")
         self.assertFalse(decl.own_ci)
         self.assertFalse(decl.docs_named)
 
     def test_the_words_hold_when_a_later_section_is_refused(self) -> None:
         # What the scan is for: the ci.yml rule and the managed block need
         # the words even when parse_release refuses the rest of the file.
-        decl = MODULE.read_declarations(self.work("[ci]\nown\n[docs]\nnamed example/docs-fixture\n[cut]\nnonsense\n"), "p", "custom")
+        decl = PACKAGE.reading.read_declarations(MODULE.CONTEXT, self.work("[ci]\nown\n[docs]\nnamed example/docs-fixture\n[cut]\nnonsense\n"), "p", "custom")
         self.assertTrue(decl.own_ci)
         self.assertTrue(decl.docs_named)
         self.assertTrue([c for c in decl.checks if c["status"] == "missing" and "[cut]" in c["message"]])
@@ -7407,7 +7416,7 @@ class NamingNoPrivateRepositoryTest(unittest.TestCase):
     """
 
     def test_the_seeded_texts_name_no_documentation_repository(self) -> None:
-        for path in sorted((MODULE.share_dir() / "templates").glob("*.md")):
+        for path in sorted((PACKAGE.socle_origin.share_dir(MODULE.CONTEXT) / "templates").glob("*.md")):
             self.assertNotIn("maelys-docs", path.read_text(encoding="utf-8"), path.name)
 
     def clone(self) -> pathlib.Path:
@@ -7423,20 +7432,20 @@ class NamingNoPrivateRepositoryTest(unittest.TestCase):
 
     def test_a_named_destination_is_written_as_before(self) -> None:
         clone = self.clone()
-        self.assertEqual(MODULE.rewrite_markdown(clone, "p", self.DATA, True), ["AGENTS.md"])
+        self.assertEqual(PACKAGE.migration.rewrite_markdown(clone, "p", self.DATA, True), ["AGENTS.md"])
         self.assertEqual((clone / "AGENTS.md").read_text(encoding="utf-8"),
                          "Read the guide; it is maelys-docs/p/guide.md.\n")
         # Markdown is what the socle rewrites: named, none of it is reported.
-        remaining, _ = MODULE.surviving_references(clone, self.DATA, True)
+        remaining, _ = PACKAGE.migration.surviving_references(clone, self.DATA, True)
         self.assertEqual(remaining, [])
 
     def test_an_unnamed_destination_keeps_the_path_and_reports_it(self) -> None:
         clone = self.clone()
-        self.assertEqual(MODULE.rewrite_markdown(clone, "p", self.DATA, False), ["AGENTS.md"])
+        self.assertEqual(PACKAGE.migration.rewrite_markdown(clone, "p", self.DATA, False), ["AGENTS.md"])
         text = (clone / "AGENTS.md").read_text(encoding="utf-8")
         self.assertEqual(text, "Read the guide; it is docs/guide.md.\n")
         self.assertNotIn("maelys-docs", text)
-        remaining, _ = MODULE.surviving_references(clone, self.DATA, False)
+        remaining, _ = PACKAGE.migration.surviving_references(clone, self.DATA, False)
         self.assertEqual([(entry["path"], entry["line"]) for entry in remaining],
                          [("AGENTS.md", 1), ("README.md", 1)])
 
@@ -7447,14 +7456,14 @@ class ImpactWritesTest(unittest.TestCase):
 
     def test_the_marker_is_read_and_nothing_means_an_empty_list(self) -> None:
         line = "[asks: nothing] [writes: protect, tap] The plan says more."
-        marker = MODULE.IMPACT_ASKS.match(line)
+        marker = PACKAGE.impacts.IMPACT_ASKS.match(line)
         self.assertEqual(marker.group(3), "protect, tap")
         self.assertEqual(line[marker.end():], "The plan says more.")
-        self.assertEqual(MODULE.IMPACT_ASKS.match("[asks: old-legs] [writes: nothing] Text.").group(3), "nothing")
+        self.assertEqual(PACKAGE.impacts.IMPACT_ASKS.match("[asks: old-legs] [writes: nothing] Text.").group(3), "nothing")
         # Superseded-by keeps its place, before writes.
-        both = MODULE.IMPACT_ASKS.match("[asks: channels] [superseded-by: 0.57.0] [writes: tap] Text.")
+        both = PACKAGE.impacts.IMPACT_ASKS.match("[asks: channels] [superseded-by: 0.57.0] [writes: tap] Text.")
         self.assertEqual((both.group(2), both.group(3)), ("0.57.0", "tap"))
-        self.assertIsNone(MODULE.IMPACT_ASKS.match("[asks: nothing] Text.").group(3))
+        self.assertIsNone(PACKAGE.impacts.IMPACT_ASKS.match("[asks: nothing] Text.").group(3))
 
     def test_adopt_prints_the_marker_beside_the_line(self) -> None:
         data = {"mode": "plan", "files": [], "impactFrom": "v0.59.2", "checks": [], "changed": False,
@@ -7463,7 +7472,7 @@ class ImpactWritesTest(unittest.TestCase):
                             "supersededBy": None, "writes": ["protect"]},
                            {"version": "0.60.1", "says": "More.", "asks": ["nothing"], "asksThis": False,
                             "supersededBy": None, "writes": []}]}
-        text = MODULE.text_adopt(data)
+        text = PACKAGE.adoption.text_adopt(data)
         self.assertIn("0.60.0   -    Text. [writes: protect]", text)
         self.assertIn("0.60.1   -    More.\n", text)
 
@@ -7488,7 +7497,7 @@ class SeededNamingRuleTest(unittest.TestCase):
         product.git(product.dir, "init", "-q")
         product.git(product.dir, "add", "-A")
         product.git(product.dir, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "fixture")
-        decl = MODULE.read_declarations(product.dir, "maelys-fixture", "custom")
+        decl = PACKAGE.reading.read_declarations(MODULE.CONTEXT, product.dir, "maelys-fixture", "custom")
         found = self.named(decl)
         self.assertEqual(len(found), 1, found)
         self.assertTrue(found[0].startswith("LICENSING.md names"))
@@ -7497,9 +7506,9 @@ class SeededNamingRuleTest(unittest.TestCase):
         # rule arrives.
         # A note in 0.60.0, a refusal since 0.61.0, as announced.
         self.assertEqual([c["status"] for c in decl.checks if c["message"] == found[0]], ["missing"])
-        self.assertFalse([entry for entry in MODULE.COMING if entry[0] == "0.61.0"])
+        self.assertFalse([entry for entry in PACKAGE.reading.COMING if entry[0] == "0.61.0"])
         product.write("maelys-release.conf", product.read("maelys-release.conf") + "\n[docs]\nnamed example/docs-fixture\n")
-        self.assertEqual(self.named(MODULE.read_declarations(product.dir, "maelys-fixture", "custom")), [])
+        self.assertEqual(self.named(PACKAGE.reading.read_declarations(MODULE.CONTEXT, product.dir, "maelys-fixture", "custom")), [])
 
     def test_a_seeded_text_naming_nothing_passes(self) -> None:
         product = Product()
@@ -7507,7 +7516,7 @@ class SeededNamingRuleTest(unittest.TestCase):
         product.run("adopt", str(product.dir), "--apply")
         for name in ("RELEASING.md", "LICENSING.md", "SECURITY.md"):
             self.assertNotIn("maelys-docs", product.read(name), name)
-        self.assertEqual(self.named(MODULE.read_declarations(product.dir, "maelys-fixture", "custom")), [])
+        self.assertEqual(self.named(PACKAGE.reading.read_declarations(MODULE.CONTEXT, product.dir, "maelys-fixture", "custom")), [])
 
 
 class FuzzNoteTest(unittest.TestCase):
@@ -7529,7 +7538,7 @@ class FuzzNoteTest(unittest.TestCase):
         return product
 
     def fuzz(self, product) -> tuple[str, list[str]]:
-        decl = MODULE.read_declarations(product.dir, "maelys-fixture", "custom")
+        decl = PACKAGE.reading.read_declarations(MODULE.CONTEXT, product.dir, "maelys-fixture", "custom")
         return decl.fuzz_runs, [c["status"] + ": " + c["message"] for c in decl.checks
                                 if "fuzz" in c["message"].lower()]
 
@@ -7587,14 +7596,14 @@ class DocumentationNameRuleTest(unittest.TestCase):
         return product
 
     def notes(self, product) -> list[str]:
-        decl = MODULE.read_declarations(product.dir, "maelys-fixture", "custom")
+        decl = PACKAGE.reading.read_declarations(MODULE.CONTEXT, product.dir, "maelys-fixture", "custom")
         return [c["status"] + ": " + c["message"] for c in decl.checks if "names the documentation repository" in c["message"]]
 
     def test_the_predicate_reads_lines_outside_the_managed_block(self) -> None:
-        text = "a\n" + MODULE.BEGIN + "\nlives in maelys-dev/maelys-docs\n" + MODULE.END + "\nsee maelys-docs/p/x.md\nplain\n"
-        self.assertEqual(MODULE.documentation_name_lines(text), [5])
-        self.assertTrue(MODULE.names_documentation("x maelys-docs y"))
-        self.assertFalse(MODULE.names_documentation(MODULE.BEGIN + "\nmaelys-docs\n" + MODULE.END + "\n"))
+        text = "a\n" + PACKAGE.constants.BEGIN + "\nlives in maelys-dev/maelys-docs\n" + PACKAGE.constants.END + "\nsee maelys-docs/p/x.md\nplain\n"
+        self.assertEqual(PACKAGE.texts.documentation_name_lines(text), [5])
+        self.assertTrue(PACKAGE.texts.names_documentation("x maelys-docs y"))
+        self.assertFalse(PACKAGE.texts.names_documentation(PACKAGE.constants.BEGIN + "\nmaelys-docs\n" + PACKAGE.constants.END + "\n"))
 
     def test_check_searches_every_tracked_file_and_names_the_lines(self) -> None:
         product = self.repository()
@@ -7635,23 +7644,23 @@ class DocumentationNameRuleTest(unittest.TestCase):
 
     def test_plan_refuses_to_write_the_name_into_an_undeclared_repository(self) -> None:
         product = self.repository()
-        decl = MODULE.read_declarations(product.dir, "maelys-fixture", "custom")
-        with self.assertRaises(MODULE.Failure) as refusal:
-            MODULE.plan(decl, {"SECURITY.md": ("Report to maelys-docs/maelys-fixture/.\n", False)}, apply=False)
+        decl = PACKAGE.reading.read_declarations(MODULE.CONTEXT, product.dir, "maelys-fixture", "custom")
+        with self.assertRaises(maelys_cli.Failure) as refusal:
+            PACKAGE.staging.plan(decl, {"SECURITY.md": ("Report to maelys-docs/maelys-fixture/.\n", False)}, apply=False)
         self.assertIn("would write the name of the documentation repository into SECURITY.md", refusal.exception.message)
         self.assertIn("defect of the socle", refusal.exception.hint)
         self.assertFalse((product.dir / "SECURITY.md").read_text().startswith("Report to maelys-docs"))
         decl.docs_named = True
-        MODULE.plan(decl, {"SECURITY.md": ("Report to maelys-docs/maelys-fixture/.\n", False)}, apply=False)
+        PACKAGE.staging.plan(decl, {"SECURITY.md": ("Report to maelys-docs/maelys-fixture/.\n", False)}, apply=False)
 
     def test_nothing_the_socle_writes_today_trips_the_guard(self) -> None:
         # Measured on what adopt stages for an undeclared product: the
         # templates of this version carry no name.
         product = self.repository()
-        decl = MODULE.read_declarations(product.dir, "maelys-fixture", "custom")
-        staged = MODULE.stage(decl, "a" * 40, "v9.9.9")
+        decl = PACKAGE.reading.read_declarations(MODULE.CONTEXT, product.dir, "maelys-fixture", "custom")
+        staged = PACKAGE.staging.stage(MODULE.CONTEXT, decl, "a" * 40, "v9.9.9")
         for relative, (content, _) in staged.items():
-            self.assertFalse(MODULE.names_documentation(content), relative)
+            self.assertFalse(PACKAGE.texts.names_documentation(content), relative)
 
 
 class TrackedNameNotUtf8Test(unittest.TestCase):
@@ -7700,7 +7709,7 @@ class TrackedNameNotUtf8Test(unittest.TestCase):
         return held
 
     def test_several_names_are_counted_and_the_first_five_named(self) -> None:
-        refusal = MODULE.unread_names([b"notes/caf\xe9.txt", *(b"notes/\xff%d.txt" % number for number in range(6))])
+        refusal = PACKAGE.project.unread_names([b"notes/caf\xe9.txt", *(b"notes/\xff%d.txt" % number for number in range(6))])
         self.assertIn("tracks 7 files whose name is not UTF-8: notes/caf\\xe9.txt, notes/\\xff0.txt, notes/\\xff1.txt,"
                       " notes/\\xff2.txt, notes/\\xff3.txt, and 2 more. The socle", refusal.message)
         self.assertTrue(refusal.hint.startswith("Renaming them is"))
@@ -7773,7 +7782,7 @@ class TrackedNameNotUtf8Test(unittest.TestCase):
                 " names as UTF-8, and says nothing of a repository until every name it tracks is one.")
 
         def refused(call) -> None:
-            with self.assertRaises(MODULE.Failure) as failure:
+            with self.assertRaises(maelys_cli.Failure) as failure:
                 call()
             self.assertEqual((failure.exception.code, failure.exception.message, failure.exception.hint),
                              ("PRECONDITION_FAILED", said, self.HINT))
@@ -7781,13 +7790,13 @@ class TrackedNameNotUtf8Test(unittest.TestCase):
         moving = {"moving": [{"path": "docs/x.md"}]}
         if held:
             # The tree is clean: migrate reads what HEAD holds, and who names the document.
-            refused(lambda: MODULE.migration.describe_the_clone(product.dir, "maelys-fixture", moving))
-            refused(lambda: MODULE.referencing_files(product.dir, "docs/x.md"))
+            refused(lambda: PACKAGE.migration.describe_the_clone(product.dir, "maelys-fixture", moving))
+            refused(lambda: PACKAGE.migration.referencing_files(product.dir, "docs/x.md"))
             with open(os.fsencode(product.dir) + b"/docs/caf\xe9.md", "ab") as file:
                 file.write(b"more\n")
         # The file is changed, or absent where the file system holds no such name.
-        refused(lambda: MODULE.migration.describe_the_clone(product.dir, "maelys-fixture", moving))
-        refused(lambda: MODULE.worktree_paths(product.dir))
+        refused(lambda: PACKAGE.migration.describe_the_clone(product.dir, "maelys-fixture", moving))
+        refused(lambda: PACKAGE.cut.worktree_paths(product.dir))
         # And an answer in which every name decodes is the answer it was:
         # the name leaves the index, and the working tree where it holds it,
         # since a file nothing tracks is listed there too.
@@ -7796,7 +7805,7 @@ class TrackedNameNotUtf8Test(unittest.TestCase):
         if held:
             os.remove(os.fsencode(product.dir) + b"/docs/caf\xe9.md")
         product.write("docs/y.md", "# Y\n")
-        self.assertEqual(MODULE.worktree_paths(product.dir).get("docs/y.md"), "??")
+        self.assertEqual(PACKAGE.cut.worktree_paths(product.dir).get("docs/y.md"), "??")
 
     def test_render_writes_nothing_of_a_value_that_is_not_utf_8(self) -> None:
         """A value given as such bytes emptied the output and then failed to encode.
@@ -7834,13 +7843,13 @@ class TrackedNameNotUtf8Test(unittest.TestCase):
         system holds such a name; here it is given so wherever it is run.
         """
         product = self.repository("\n[docs]\nnamed example/docs-fixture\n")
-        decl = MODULE.read_declarations(product.dir, "maelys-fixture", "maelys-release")
+        decl = PACKAGE.reading.read_declarations(MODULE.CONTEXT, product.dir, "maelys-fixture", "maelys-release")
         decl.formulas = sorted([*decl.formulas, b"caf\xe9".decode("utf-8", "surrogateescape")])
-        staged = MODULE.stage(decl, "f" * 40, "v9.9.9")
+        staged = PACKAGE.staging.stage(MODULE.CONTEXT, decl, "f" * 40, "v9.9.9")
         before = self.state(product)
         for apply in (True, False):
-            with self.assertRaises(MODULE.Failure) as refused:
-                MODULE.plan(decl, staged, apply=apply)
+            with self.assertRaises(maelys_cli.Failure) as refused:
+                PACKAGE.staging.plan(decl, staged, apply=apply)
             self.assertEqual(
                 (refused.exception.code, refused.exception.message, refused.exception.hint),
                 ("PRECONDITION_FAILED",
@@ -7855,7 +7864,7 @@ class TrackedNameNotUtf8Test(unittest.TestCase):
         del staged[".github/workflows/release.yml"], staged["AGENTS.md"], staged["CLAUDE.md"]
         del staged[".claude/skills/maelys-release/SKILL.md"]
         staged["scripts/checkout-dependency.sh"] = ("#!/bin/sh\n# café\n", True)
-        MODULE.plan(decl, staged, apply=True)
+        PACKAGE.staging.plan(decl, staged, apply=True)
         self.assertEqual((product.dir / "scripts" / "checkout-dependency.sh").read_bytes(), "#!/bin/sh\n# café\n".encode())
         # Through the executable, where the file system holds the name.
         if not self.name(product):
@@ -7878,37 +7887,37 @@ class DocumentationNameGrammarTest(unittest.TestCase):
     """
 
     def test_named_carries_the_repository_and_the_bare_word_is_refused(self) -> None:
-        MODULE.parse_release("[docs]\nnamed example/docs-fixture\n")
+        PACKAGE.declarations.parse_release("[docs]\nnamed example/docs-fixture\n")
         with self.assertRaises(ValueError) as bare:
-            MODULE.parse_release("[docs]\nnamed\n")
+            PACKAGE.declarations.parse_release("[docs]\nnamed\n")
         self.assertIn("takes the repository it names", str(bare.exception))
         self.assertIn("bare word spelled the socle's default until 0.60.0", str(bare.exception))
         with self.assertRaises(ValueError) as wrong:
-            MODULE.parse_release("[docs]\nnamed not-a-repository\n")
+            PACKAGE.declarations.parse_release("[docs]\nnamed not-a-repository\n")
         self.assertIn("not 'not-a-repository'", str(wrong.exception))
 
     def test_the_tolerant_scan_reads_the_value(self) -> None:
         work = pathlib.Path(tempfile.mkdtemp(prefix="maelys-release-value."))
         self.addCleanup(shutil.rmtree, work, True)
         (work / "maelys-release.conf").write_text("[gate]\nnone\n\n[docs]\nnamed example/docs-fixture   \n")
-        self.assertEqual(MODULE.declared_value(work, "docs", "named"), "example/docs-fixture")
-        self.assertIsNone(MODULE.declared_value(work, "docs", "unnamed"))
+        self.assertEqual(PACKAGE.project.declared_value(work, "docs", "named"), "example/docs-fixture")
+        self.assertIsNone(PACKAGE.project.declared_value(work, "docs", "unnamed"))
         (work / "maelys-release.conf").write_text("[docs]\nnamed\n")
-        self.assertEqual(MODULE.declared_value(work, "docs", "named"), "")
+        self.assertEqual(PACKAGE.project.declared_value(work, "docs", "named"), "")
 
     def test_the_block_renders_the_declared_repository_and_no_other(self) -> None:
         product = Product()
         self.addCleanup(product.close)
         product.write("maelys-release.conf", "[dependencies]\napart\n\n[docs]\nnamed example/docs-fixture\n")
-        decl = MODULE.read_declarations(product.dir, "maelys-fixture", "custom")
+        decl = PACKAGE.reading.read_declarations(MODULE.CONTEXT, product.dir, "maelys-fixture", "custom")
         self.assertEqual((decl.docs_named, decl.documents), (True, "example/docs-fixture"))
-        agents = MODULE.stage(decl, "a" * 40, "v9.9.9")["AGENTS.md"][0]
+        agents = PACKAGE.staging.stage(MODULE.CONTEXT, decl, "a" * 40, "v9.9.9")["AGENTS.md"][0]
         self.assertIn("lives in `example/docs-fixture`, directory", agents)
         self.assertIn("../docs-fixture", agents)
         self.assertNotIn("maelys-docs", agents)
         # And the socle's own texts spell no name: every template and block
         # text, and the conventions.
-        for path in sorted((MODULE.share_dir() / "agents").glob("*.md")) + sorted((MODULE.share_dir() / "templates").glob("*.md")):
+        for path in sorted((PACKAGE.socle_origin.share_dir(MODULE.CONTEXT) / "agents").glob("*.md")) + sorted((PACKAGE.socle_origin.share_dir(MODULE.CONTEXT) / "templates").glob("*.md")):
             self.assertNotIn("maelys-docs", path.read_text(encoding="utf-8"), path.name)
         self.assertNotIn("maelys-docs", (ROOT / "docs" / "conventions.md").read_text(encoding="utf-8"))
 
@@ -7935,7 +7944,7 @@ class DocumentationNameGrammarTest(unittest.TestCase):
         product.git(product.dir, "init", "-q")
         product.git(product.dir, "add", "-A")
         product.git(product.dir, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "fixture")
-        decl = MODULE.read_declarations(product.dir, "maelys-fixture", "custom")
+        decl = PACKAGE.reading.read_declarations(MODULE.CONTEXT, product.dir, "maelys-fixture", "custom")
         said = [c["message"].split(" ")[0] for c in decl.checks if "names the documentation repository" in c["message"]]
         self.assertEqual(said, ["NOTES.txt"])
 
@@ -7960,7 +7969,7 @@ class EmptyCheckoutTest(unittest.TestCase):
         saved = dict(os.environ)
         os.environ.update(self.environment)
         try:
-            return MODULE.pinned_checkout("maelys-release", sha, "bin/maelys-release")
+            return PACKAGE.socle_origin.pinned_checkout("maelys-release", sha, "bin/maelys-release")
         finally:
             os.environ.clear()
             os.environ.update(saved)

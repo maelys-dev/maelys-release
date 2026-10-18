@@ -24,7 +24,8 @@ import shutil
 import unittest
 from unittest import mock
 
-from test_maelys_release import MODULE, ROOT, FakeHost, Product, using_host
+from test_maelys_release import MODULE, PACKAGE, ROOT, FakeHost, Product, using_host
+import maelys_cli  # noqa: E402  -- on the path once the suite loaded the socle
 
 DATED = "# Changelog\n\n## 1.3.0 — 2026-09-04\n\n- Next.\n\n## 1.2.3 — 2026-09-03\n\n- Something.\n"
 UNDATED = DATED.replace("## 1.3.0 — 2026-09-04", "## 1.3.0 — (undated)")
@@ -87,7 +88,7 @@ class BeforeCutTest(unittest.TestCase):
         return [check["message"] for check in said]
 
     def declarations(self, mechanism: str = "custom"):
-        return MODULE.read_declarations(self.dir, "maelys-fixture", mechanism)
+        return PACKAGE.reading.read_declarations(MODULE.CONTEXT, self.dir, "maelys-fixture", mechanism)
 
     def first_stop(self, version: str):
         """What the first stop of `cut` answers without --apply, in process: its refusal, or its gate."""
@@ -96,13 +97,13 @@ class BeforeCutTest(unittest.TestCase):
                 "branch": f"release/v{version}", "base": "main", "gate": [], "checks": [], "ready": False}
         with open(self.product.work / "cut.log", "w", encoding="utf-8") as log:
             try:
-                return MODULE.cut_open(Stub(), self.declarations(), data, log, 1, 1, self.product.signers)
-            except MODULE.Failure as failure:
+                return PACKAGE.cut.cut_open(Stub(), self.declarations(), data, log, 1, 1, self.product.signers)
+            except maelys_cli.Failure as failure:
                 return failure
 
-    def refusal(self, version: str) -> MODULE.Failure:
+    def refusal(self, version: str) -> maelys_cli.Failure:
         answer = self.first_stop(version)
-        self.assertIsInstance(answer, MODULE.Failure, answer)
+        self.assertIsInstance(answer, maelys_cli.Failure, answer)
         return answer
 
     def bump(self, subject: str = "a bump in passing") -> None:
@@ -139,7 +140,7 @@ class BeforeCutTest(unittest.TestCase):
         self.product.write("CHANGELOG.md", DATED)
         self.assertEqual(self.notes(), [])
         passed = self.first_stop("1.3.0")
-        self.assertNotIsInstance(passed, MODULE.Failure, passed)
+        self.assertNotIsInstance(passed, maelys_cli.Failure, passed)
         self.assertEqual(passed[0]["changelog"], "2026-09-04")
 
     def test_the_note_gives_one_rule_for_the_date_and_it_is_not_cuts_other_refusal(self) -> None:
@@ -258,7 +259,7 @@ class BeforeCutTest(unittest.TestCase):
         self.assertLess(ritual.index("`maelys-release check .`"), ritual.index("git tag -s vX.Y.Z"))
         self.product.write("VERSION", "1.3.0\n")
         self.product.write("CHANGELOG.md", DATED)
-        (own,) = MODULE.cut.before_cut(self.declarations("custom"))
+        (own,) = PACKAGE.cut.before_cut(self.declarations("custom"))
         self.assertTrue(own.startswith("VERSION says 1.3.0 and this clone holds no tag v1.3.0"), own)
         self.assertIn("A release prepared by hand stands there between its merge and its tag, as RELEASING.md"
                       " describes: nothing to change, the signed tag is what is left", own)
@@ -268,7 +269,7 @@ class BeforeCutTest(unittest.TestCase):
         self.assertIn("`cut` will refuse 1.3.0 as not coming after the current version", own)
         self.assertIn("a release made with `cut` leaves VERSION at 1.2.3", own)
         # The product the socle releases is the one told what to undo.
-        (released,) = MODULE.cut.before_cut(self.declarations("maelys-release"))
+        (released,) = PACKAGE.cut.before_cut(self.declarations("maelys-release"))
         self.assertIn("set VERSION back to 1.2.3", released)
 
     def test_a_first_release_bumped_by_hand_goes_back_to_zero(self) -> None:
@@ -334,7 +335,7 @@ class BeforeCutTest(unittest.TestCase):
             # In process, on a host that refuses every command: nothing is asked of git.
             decl = self.declarations("maelys-release")
             with mock.patch.dict(os.environ, {variable: "true"}), using_host(FakeHost()) as host:
-                self.assertEqual(MODULE.cut.unpublished_version(decl), [])
+                self.assertEqual(PACKAGE.cut.unpublished_version(decl), [])
                 self.assertEqual(host.commands, [])
             # An empty value is a variable nobody set; and one definition of
             # a job, shared with the address note and the privacy guard:
@@ -498,7 +499,7 @@ class BeforeCutTest(unittest.TestCase):
         self.git("tag", "-d", "v1.2.3")
         self.product.write("CHANGELOG.md", UNDATED.replace("1.3.0", "1.4.0") + "\n")
         for mechanism, expected in (("maelys-release", 2), ("custom", 2), ("none", 0)):
-            self.assertEqual(len(MODULE.cut.before_cut(self.declarations(mechanism))), expected, mechanism)
+            self.assertEqual(len(PACKAGE.cut.before_cut(self.declarations(mechanism))), expected, mechanism)
 
     def test_preflight_reads_version_as_the_tag_to_come_and_does_not_carry_the_note(self) -> None:
         self.git("tag", "-d", "v1.2.3")
@@ -540,9 +541,9 @@ class BeforeCutTest(unittest.TestCase):
         before = self.state()
         answer = self.first_stop("1.3.0")
         # It went all the way: past every refusal, through the fetch and the gate.
-        self.assertNotIsInstance(answer, MODULE.Failure, answer)
+        self.assertNotIsInstance(answer, maelys_cli.Failure, answer)
         data, code = answer
-        self.assertEqual(code, MODULE.EXIT_OK, data["gate"])
+        self.assertEqual(code, maelys_cli.EXIT_OK, data["gate"])
         self.assertEqual(data["next"], f"maelys-release cut {self.dir} 1.3.0 --apply")
         self.assertTrue([item for item in data["gate"] if "--apply would run" in item["message"]], data["gate"])
         self.assertEqual(self.state(), before)
@@ -559,12 +560,12 @@ class BeforeCutTest(unittest.TestCase):
         self.product.write("CHANGELOG.md", DATED)
         self.git("tag", "-d", "v1.2.3")     # a fixture's tag is not a signed one, and that line is the repository's
         data, code = self.first_stop("1.3.0")
-        self.assertEqual(code, MODULE.EXIT_VIOLATIONS)
+        self.assertEqual(code, maelys_cli.EXIT_VIOLATIONS)
         refused = [item["message"] for item in data["gate"] if item["status"] == "fail"]
         self.assertTrue(refused)
         for message in refused:
             self.assertTrue(any(word in message for word in ("tag.gpgsign", "user.signingkey", "signing key")), message)
-        self.assertIn("cut: not ready", MODULE.text_cut(dict(data, socle=None)))
+        self.assertIn("cut: not ready", PACKAGE.cut.text_cut(dict(data, socle=None)))
 
 
 class ScaffoldEntryTest(unittest.TestCase):
@@ -731,8 +732,8 @@ class SaidToTheAgentTest(unittest.TestCase):
     def test_no_selector_asks_everyone(self) -> None:
         """A prose-only change is taken with the next release: a selector true of every
         repository turned `adopt` to ASKS and a `check` from the new socle to FAIL."""
-        decl = MODULE.Declarations(pathlib.Path("/nonexistent"), "p")
-        self.assertNotIn("managed-block", MODULE.impact_selectors(decl))
+        decl = PACKAGE.declarations.Declarations(pathlib.Path("/nonexistent"), "p")
+        self.assertNotIn("managed-block", PACKAGE.impacts.impact_selectors(decl))
         self.assertNotIn("managed-block", (ROOT / "docs" / "conventions.md").read_text(encoding="utf-8"))
 
 

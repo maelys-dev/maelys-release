@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 import unittest
 
-from test_maelys_release import MODULE, ROOT
+from test_maelys_release import PACKAGE, ROOT
 from maelys_socle import workflows as rules
 
 RELEASE = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
@@ -48,7 +48,7 @@ class ReleaseVerifiesProvenanceTest(unittest.TestCase):
         template = (ROOT / "share" / "templates" / "RELEASING.md").read_text(encoding="utf-8")
         given = re.search(r"`(gh attestation verify ASSET --repo\s+OWNER/REPO --signer-repo (\S+))`", template)
         self.assertTrue(given, "RELEASING.md no longer gives the command this step runs")
-        self.assertEqual(given.group(2), MODULE.SOCLE_REPOSITORY)
+        self.assertEqual(given.group(2), PACKAGE.constants.SOCLE_REPOSITORY)
         self.assertIn('gh attestation verify "dist/$name" --repo "${GITHUB_REPOSITORY}" --signer-repo "$SOCLE"',
                       self.step())
         # The signer is read from the job, never spelled: a fork of the

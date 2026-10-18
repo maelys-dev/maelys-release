@@ -26,6 +26,17 @@ import subprocess
 import sys
 import tempfile
 
+
+def socle_host(module):
+    """The host module of a candidate, read where it lives.
+
+    An entry point names nothing of its package any more: one candidate is
+    loaded per interpreter, so its host is the package's, in sys.modules. A
+    host module -- or a stand-in that carries the Host class, as a test
+    hands one -- is its own answer.
+    """
+    return module if hasattr(module, "Host") else sys.modules["maelys_socle.host"]
+
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 INPUTS = pathlib.Path(__file__).parent / 'api' / 'inputs'
 
@@ -99,13 +110,13 @@ def run_command(module, argv, project, source, host):
     paths = {str(project): '<PRODUCT>', str(source): '<SOCLE>'}
     before = files_at(project)
     out, err = io.StringIO(), io.StringIO()
-    previous = module.host.HOST
-    module.host.HOST = host
+    previous = socle_host(module).HOST
+    socle_host(module).HOST = host
     try:
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             code = module.APP.main(argv)
     finally:
-        module.host.HOST = previous
+        socle_host(module).HOST = previous
     after = files_at(project)
     if '--apply' not in argv and before != after:
         raise RuntimeError('a plan modified the fixture')
@@ -132,12 +143,12 @@ def state_of(module, reply):
     always was.
     """
     if reply['state'] == 'absent' and reply.get('message'):
-        return module.host.Absent(reply['message'])
+        return socle_host(module).Absent(reply['message'])
     return reply['state']
 
 
 def replay_host(module, events, responses, project, source):
-    class ReplayHost(module.Host):
+    class ReplayHost(socle_host(module).Host):
         def __init__(self):
             self.position = 0
 

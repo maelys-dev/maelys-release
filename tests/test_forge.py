@@ -19,7 +19,7 @@ from unittest.mock import patch
 
 import test_maelys_release as fixtures
 
-MODULE = fixtures.MODULE
+PACKAGE = fixtures.PACKAGE
 # The script imports the function `forge`; the module is the package's.
 FORGE = sys.modules["maelys_socle.forge"]
 CHECKOUTS = sys.modules["maelys_socle.checkouts"]
@@ -27,7 +27,7 @@ ROOT = fixtures.ROOT
 SOCLE = ROOT / "bin" / "maelys_socle"
 
 
-class RecordingHost(MODULE.Host):
+class RecordingHost(PACKAGE.host.Host):
     """Answers every command with an empty success, and keeps what was asked."""
 
     def __init__(self, gh: bool = True) -> None:

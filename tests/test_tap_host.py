@@ -14,7 +14,7 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from unittest.mock import patch
 
-from test_maelys_release import MODULE, FakeHost, using_host
+from test_maelys_release import MODULE, PACKAGE, FakeHost, using_host
 from test_tap_workflow import FORMULA, REPOSITORY, Tap
 
 
@@ -68,7 +68,7 @@ class TapHost(FakeHost):
                 competitor = self.tap.clone("competitor")
                 self.tap.commit_formula(competitor, "maelys-fixture",
                                         "class MaelysFixture < Formula\n  # competing release\nend\n", push=True)
-        return MODULE.Host.run(self, command, cwd=cwd, env=self.environment)
+        return PACKAGE.host.Host.run(self, command, cwd=cwd, env=self.environment)
 
 
 class TapHostTest(unittest.TestCase):

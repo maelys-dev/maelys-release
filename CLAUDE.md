@@ -113,7 +113,10 @@ the fleet at each product's next adoption.
   it; a module that needs one above it, or its own layer, imports the
   module (`from . import reading`) and reads it at call time. A function
   that reads the running socle takes the context first; nothing finds the
-  root from its own file.
+  root from its own file. The suite reads the package as `PACKAGE` and the
+  entry point it loads as `MODULE` only for what the entry point is -- its
+  program, its context, the root of its socle; it installs a host
+  (`PACKAGE.host.HOST`) and never replaces a function.
 - **Use `git -C /abs/path` for every git call**, never a `cd` chain: a script
   that changed directory once tagged the wrong repository.
 - **`docs/cli.md` and `docs/cli-contract.json` are generated**, from
