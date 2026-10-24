@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.65.0 — 2026-10-24
 
 - **`migrate --site URL` names the product's site in the README.** Without
   a public destination the pointer could only say the prose left, and the
