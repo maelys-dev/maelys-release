@@ -89,6 +89,16 @@ def plan_with_declarations(invocation: Invocation, context: Context) -> tuple[di
                       "--documents-repository OWNER/NAME names where the prose moves; none was given."
                       if not repository else f"--documents-repository is OWNER/NAME, not {repository!r}.",
                       "Pass the documentation repository maelys-platform names, with the list it produces.")
+    # Where a reader of the README finds the prose: the product's public
+    # site, which maelys-platform's inventory declares and the socle never
+    # reads. Without it the pointer can only say the prose left.
+    site = str(invocation.option("--site", "") or "").strip()
+    if site and not re.fullmatch(r"https://[A-Za-z0-9.-]+\.[A-Za-z]{2,}(?::[0-9]+)?(?:/[^\s<>()\[\]]*)?", site):
+        raise Failure("VALIDATION_FAILED", f"--site is an https URL a reader can open, not {site!r}.",
+                      "Pass the site the product declares, e.g. --site https://datalog.maelys.dev.")
+    if site and (names_documentation(site) or repository.lower() in site.lower()):
+        raise Failure("VALIDATION_FAILED", f"--site {site} names the documentation repository, which is private.",
+                      "Pass the product's public site, not the repository the prose moves to.")
     moving, unknown = [], []
     for record in records:
         relative = record["path"]
@@ -131,7 +141,8 @@ def plan_with_declarations(invocation: Invocation, context: Context) -> tuple[di
     commit = git("rev-parse", "HEAD", cwd=project, check=False)
     return {"mode": "plan", "product": product, "project": str(project), "repository": repository,
             "version": version, "tag": tag, "commit": commit,
-            "moving": moving, "staying": staying, "documents": len(moving)}, decl
+            "moving": moving, "staying": staying, "documents": len(moving),
+            **({"site": site} if site else {})}, decl
 
 
 def push_branch(clone: pathlib.Path, remote: str, branch: str) -> None:
@@ -477,7 +488,8 @@ def rewrite_readme(clone: pathlib.Path, product: str, data: dict) -> str:
     before opening it. The managed AGENTS.md block is where an agent reads
     the destination; the README is read by strangers. When the destination
     cannot be checked, the socle assumes it cannot be opened: naming it
-    wrongly is worse than naming nothing.
+    wrongly is worse than naming nothing. A site given with `--site` is what
+    a stranger opens, and the line names it.
     """
     readme = clone / "README.md"
     if not readme.is_file():
@@ -523,8 +535,11 @@ def rewrite_readme(clone: pathlib.Path, product: str, data: dict) -> str:
     dropped += definitions
     if not dropped and not unlinked:
         return "unchanged: it named none of them"
-    public = destination_is_public(data["repository"])
-    if public:
+    site = data.get("site", "")
+    public = True if site else destination_is_public(data["repository"])
+    if site:
+        pointer = f"The documentation of {product} is at <{site}>.\n"
+    elif public:
         pointer = f"The documentation of {product} is in `{data['repository']}`, directory `{product}/`.\n"
     else:
         pointer = f"The documentation of {product} is no longer kept in this repository.\n"
@@ -539,11 +554,14 @@ def rewrite_readme(clone: pathlib.Path, product: str, data: dict) -> str:
     if unlinked:
         said.append(f"{unlinked} link{'s' if unlinked != 1 else ''} in prose unlinked, their text kept")
     done = ", ".join(said)
+    if site:
+        return f"{done}, the pointer naming the site {site}"
     if public:
         return done
     reason = "is private" if public is False else "could not be checked, so it is assumed private"
     return (f"{done}, the pointer naming no repository:"
-            f" {data['repository']} {reason}. Point the README at the product's site by hand")
+            f" {data['repository']} {reason}. Point the README at the product's site by hand,"
+            " or run migrate again with --site URL")
 
 
 def describe_the_clone(project: pathlib.Path, product: str, data: dict) -> None:
@@ -707,6 +725,8 @@ def text_migrate(data: dict) -> str:
              for entry in data["moving"]]
     lines.extend(f"stays    {entry['path']}  ({entry['reason']})" for entry in data["staying"])
     label = data["tag"] or data["commit"][:7]
+    if data.get("site"):
+        lines.append(f"site     the README will point at {data['site']}")
     if data["mode"] == "plan":
         lines.append(f"migrate: plan only; {data['documents']} documents of {data['product']} {label}"
                      f" would move to {data['repository']}/{data['product']}/, with their history")

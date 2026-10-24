@@ -1775,6 +1775,27 @@ class MigrateTest(unittest.TestCase):
         # The operator's checkout is not written to at all.
         self.assertTrue((self.product.dir / "docs" / "architecture.md").is_file())
 
+    def test_a_site_is_an_https_url_that_does_not_name_the_documentation(self) -> None:
+        plan = self.migrate("--site", "https://fixture.maelys.dev/docs/")["data"]
+        self.assertEqual(plan["site"], "https://fixture.maelys.dev/docs/")
+        self.assertNotIn("site", self.migrate()["data"])
+        text = self.product.run("migrate", self.dir, "--product", "maelys-fixture", "--documents",
+                                self.records("architecture.md", "guide.md"), "--documents-repository",
+                                "maelys-dev/maelys-docs", "--site", "https://fixture.maelys.dev").stdout
+        self.assertIn("site     the README will point at https://fixture.maelys.dev", text)
+        for site in ("http://fixture.maelys.dev", "fixture.maelys.dev", "https://fixture.maelys.dev/a b",
+                     "https://github.com/maelys-dev/maelys-docs"):
+            error = self.migrate("--site", site, expect=1)["error"]
+            self.assertEqual(error["code"], "VALIDATION_FAILED", site)
+            self.assertIn("--site", error["message"], site)
+
+    def test_the_readme_of_a_migration_with_a_site_names_it(self) -> None:
+        data = self.migrate("--apply", "--site", "https://fixture.maelys.dev")["data"]
+        readme = (pathlib.Path(data["kept"]) / "product" / "README.md").read_text()
+        self.assertIn("The documentation of maelys-fixture is at <https://fixture.maelys.dev>.", readme)
+        self.assertIn("the pointer naming the site https://fixture.maelys.dev", data["readme"])
+        self.assertIn("## Licence", readme)
+
     def test_an_untagged_product_describes_no_release(self) -> None:
         self.product.git(self.product.dir, "tag", "-d", "v1.2.3")
         error = self.migrate("--apply", expect=1)["error"]
@@ -3834,7 +3855,8 @@ class ImpactLinesTest(unittest.TestCase):
         decl = PACKAGE.reading.read_declarations(MODULE.CONTEXT, self.product.dir, "maelys-fixture", "maelys-release")
         self.assertIs(PACKAGE.impacts.asks_this(decl, ["migrated-readme"], {}), False)
         for pointer in ("The documentation of maelys-fixture is no longer kept in this repository.",
-                        "The documentation of maelys-fixture is in `maelys-dev/maelys-docs`, directory `maelys-fixture/`."):
+                        "The documentation of maelys-fixture is in `maelys-dev/maelys-docs`, directory `maelys-fixture/`.",
+                        "The documentation of maelys-fixture is at <https://fixture.maelys.dev>."):
             self.product.write("README.md", f"# Fixture\n\n## Documentation\n\n{pointer}\n")
             decl = PACKAGE.reading.read_declarations(MODULE.CONTEXT, self.product.dir, "maelys-fixture",
                                                      "maelys-release")
@@ -7116,6 +7138,24 @@ class UnitTest(unittest.TestCase):
                              "[^1]: See the paper by Knuth.\n\n```sh\ncat [file](../Makefile)\n```\n"
                              "![flow](https://github.com/o/p/raw/v1.0.0/docs/img/flow.png) and"
                              " [the root](https://github.com/o/p/blob/v1.0.0/src/x.c).\n")
+
+    def test_the_readme_pointer_names_the_site_it_is_given(self) -> None:
+        """Without a site the pointer can only say the prose left, and the
+        report asks a hand to name the site; given one, the README names it,
+        and the destination is not even asked about."""
+        import tempfile
+        data = {"repository": "maelys-dev/maelys-docs", "moving": [{"path": "docs/architecture.md"}],
+                "site": "https://datalog.maelys.dev"}
+        with using_host(FakeHost({})) as fake, tempfile.TemporaryDirectory() as clone:
+            readme = pathlib.Path(clone) / "README.md"
+            readme.write_text("# P\n\n## Documentation\n\n- [architecture](docs/architecture.md): how.\n")
+            report = PACKAGE.migration.rewrite_readme(pathlib.Path(clone), "maelys-datalog", data)
+            written = readme.read_text()
+        self.assertEqual(written, "# P\n\n## Documentation\n\n"
+                                  "The documentation of maelys-datalog is at <https://datalog.maelys.dev>.\n")
+        self.assertEqual(report, "1 link lines replaced by one pointer, the pointer naming the site"
+                                 " https://datalog.maelys.dev")
+        self.assertNotIn("by hand", report)
 
     def test_environment_gate_verifies_the_answer_a_repository_gave(self) -> None:
         """The socle checks the gate a repository asked for; it does not

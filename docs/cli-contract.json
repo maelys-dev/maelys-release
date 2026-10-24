@@ -364,6 +364,18 @@
                 "summary": "Repository the prose moves to."
               },
               {
+                "argument": {
+                  "name": "URL",
+                  "type": "string"
+                },
+                "conflictsWith": [],
+                "long": "--site",
+                "repeatable": false,
+                "required": false,
+                "requires": [],
+                "summary": "Public site of the product the README points at (an https URL); without it the README says only that the prose left."
+              },
+              {
                 "conflictsWith": [],
                 "long": "--push",
                 "repeatable": false,
@@ -381,7 +393,7 @@
               }
             ],
             "passthrough": false,
-            "synopsis": "migrate DIR [--product NAME] [--documents FILE] [--documents-repository REPOSITORY] [--push] [--apply]"
+            "synopsis": "migrate DIR [--product NAME] [--documents FILE] [--documents-repository REPOSITORY] [--site URL] [--push] [--apply]"
           },
           "outputMode": "json-envelope",
           "outputSchema": {
@@ -525,6 +537,9 @@
                 },
                 "type": "array"
               },
+              "site": {
+                "type": "string"
+              },
               "staying": {
                 "items": {
                   "properties": {
@@ -568,7 +583,7 @@
             "migrate"
           ],
           "purpose": "Move a product's prose into the documentation repository with its history and out of the product; plan without --apply.",
-          "usage": "migrate DIR [--product NAME] [--documents FILE] [--documents-repository REPOSITORY] [--push] [--apply]"
+          "usage": "migrate DIR [--product NAME] [--documents FILE] [--documents-repository REPOSITORY] [--site URL] [--push] [--apply]"
         },
         {
           "available": true,
