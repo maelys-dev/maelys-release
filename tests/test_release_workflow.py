@@ -302,6 +302,7 @@ if __name__ == "__main__":
     unittest.main()
 
 
+
 class MarkerOnAReplayTest(unittest.TestCase):
     """A marker is written once, and a replay of the build does not move it.
 
@@ -352,4 +353,78 @@ class MarkerOnAReplayTest(unittest.TestCase):
         self.assertIn("needs.record.result != 'success'", said)
         self.assertIn('said="published, and the release carries no marker for it"', said)
         self.assertIn('said="not published"', said)
+
+
+
+@unittest.skipUnless(shutil.which("jq"), "jq is not installed")
+class ExpiredArtifactsTest(unittest.TestCase):
+    """An approval after the artifacts expired says so, and how to replay.
+
+    The artifacts are kept one day and the release environment can hold
+    publish for thirty. Approved on the second day, the download found no
+    artifact and succeeded, and the assemble step failed on a missing
+    *.sha256: nothing named the cause, and nothing said what to run.
+    """
+
+    MATRIX = {"include": [{"target": "linux-x86_64", "package": True},
+                          {"target": "linux-arm64", "package": True},
+                          {"target": "macos-arm64", "package": True},
+                          {"target": "docs", "package": False}]}
+
+    def setUp(self) -> None:
+        self.work = pathlib.Path(tempfile.mkdtemp(prefix="maelys-release-expired-test."))
+        self.addCleanup(shutil.rmtree, self.work, True)
+        self.script = self.work / "every-target.sh"
+        self.script.write_text(step_script("Every target handed its artifact"), encoding="utf-8")
+
+    def check(self, matrix: dict) -> subprocess.CompletedProcess:
+        return subprocess.run([BASH, str(self.script)], cwd=self.work, capture_output=True, text=True,
+                              env={"PATH": os.environ["PATH"], "MATRIX": json.dumps(matrix), "TAG": "v1.2.3",
+                                   "GITHUB_REPOSITORY": "maelys-dev/maelys-fixture"})
+
+    def artifact(self, directory: str) -> None:
+        (self.work / directory).mkdir(parents=True, exist_ok=True)
+        (self.work / directory / "p-1.2.3.tar.gz").write_text("bytes", encoding="utf-8")
+
+    def test_the_step_stands_between_the_download_and_the_assembly(self) -> None:
+        text = WORKFLOW.read_text(encoding="utf-8")
+        publish = text.split("\n  publish:\n", 1)[1]
+        steps = [line.strip()[len("- name: "):] for line in publish.splitlines() if line.startswith("      - name: ")]
+        at = steps.index("Every target handed its artifact")
+        self.assertEqual(steps[at - 1:at + 2],
+                         ["Collect what build produced", "Every target handed its artifact", "Assemble and verify"])
+
+    def test_every_artifact_there_passes(self) -> None:
+        for target in ("linux-x86_64", "linux-arm64", "macos-arm64"):
+            self.artifact(f"incoming/dist-{target}")
+        done = self.check(self.MATRIX)
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        self.assertEqual(done.stdout, "")
+
+    def test_none_there_says_they_expired_and_gives_the_replay(self) -> None:
+        done = self.check(self.MATRIX)
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("::error::the artifacts build handed to publish are gone for: linux-x86_64 linux-arm64"
+                      " macos-arm64.", done.stdout)
+        self.assertIn("approved after it expired; nothing was published", done.stdout)
+        self.assertIn("gh workflow run release.yml --repo maelys-dev/maelys-fixture --ref v1.2.3 -f tag=v1.2.3",
+                      done.stdout)
+        self.assertNotIn("docs", done.stdout)                     # a target that packages nothing hands nothing
+
+    def test_one_missing_among_several_is_named(self) -> None:
+        self.artifact("incoming/dist-linux-x86_64")
+        self.artifact("incoming/dist-macos-arm64")
+        done = self.check(self.MATRIX)
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("are gone for: linux-arm64.", done.stdout)
+
+    def test_a_single_target_reads_the_files_download_put_in_incoming_itself(self) -> None:
+        single = {"include": [{"target": "linux-x86_64", "package": True}]}
+        self.artifact("incoming")
+        done = self.check(single)
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        (self.work / "incoming" / "p-1.2.3.tar.gz").unlink()
+        done = self.check(single)
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("are gone for: linux-x86_64.", done.stdout)
 

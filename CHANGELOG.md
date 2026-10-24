@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+- **`publish` says the artifacts expired, and how to replay.** `build`
+  hands its archives to `publish` as artifacts kept one day, and the
+  release environment can hold `publish` for thirty. Approved after the
+  day, the download found nothing and succeeded, and the assembly failed on
+  a missing `*.sha256` that named no cause. A step between the two now
+  names the targets whose artifact is gone, says nothing was published, and
+  gives the replay on the tag, `gh workflow run release.yml --repo REPO
+  --ref vX.Y.Z -f tag=vX.Y.Z`; the replay builds again and waits for a new
+  approval, to be given within the day. The retention stays one day:
+  nothing deletes the artifacts after a publication, since that would take
+  `actions: write`, which a caller does not grant, and a longer retention
+  would keep every release's archives that long.
+- **Impact.** [asks: nothing] [writes: nothing] Nothing for a product to
+  do. Its release reads the new step once it pins this version; until
+  then, approve within 24 hours of the tag, or replay as above.
+
 ## 0.64.7 — 2026-10-24
 
 - **Built on maelys-cli v0.10.0 and agent-cli-spec v2.19.0** (from v0.7.0
