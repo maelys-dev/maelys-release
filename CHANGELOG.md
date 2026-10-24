@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.64.7 — 2026-10-24
 
 - **Built on maelys-cli v0.10.0 and agent-cli-spec v2.19.0** (from v0.7.0
   and v2.15.1). The help of the socle is laid out for a person: a command's
