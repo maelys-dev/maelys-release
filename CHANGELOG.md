@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.64.8 — 2026-10-24
 
 - **`publish` says the artifacts expired, and how to replay.** `build`
   hands its archives to `publish` as artifacts kept one day, and the
