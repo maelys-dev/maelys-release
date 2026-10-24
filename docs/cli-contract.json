@@ -455,6 +455,27 @@
                 },
                 "type": "array"
               },
+              "outward": {
+                "type": "integer"
+              },
+              "outwardLeft": {
+                "items": {
+                  "properties": {
+                    "names": {
+                      "type": "string"
+                    },
+                    "path": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "names"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
               "product": {
                 "type": "string"
               },

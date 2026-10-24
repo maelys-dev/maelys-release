@@ -2213,6 +2213,7 @@ evaluate**: `[asks: nothing]`, or one or more selectors right after
 | `shared-ci` | calls `check-product.yml` |
 | `cli-reference` | carries `docs/cli.reference` or `docs/cli.md` |
 | `signed-on-default-branch` | declares that commit verification |
+| `migrated-readme` | carries in its README the pointer `migrate` wrote |
 | `old-legs` | still requires a leg under its name before 0.54.0 — asks GitHub, unknown offline |
 | `public` | is a public repository — asks GitHub, unknown offline |
 | `classic-protection` | carries a classic branch protection — asks GitHub, unknown offline |
@@ -2395,9 +2396,12 @@ review.
   The documentation policy of maelys-platform still names the old layout,
   which is a correction for that repository.
 - **The product loses the documents**, on a branch for a pull request, never
-  a write into the operator's checkout. The README's links to the moved
-  documents are replaced by one line naming where they went; the socle
-  rewrites no other part of a README it cannot write. The commit that
+  a write into the operator's checkout. The README's lines that were links
+  to the moved documents -- an item of a list or a row of a table led by
+  one, a reference definition -- are replaced by one line naming where they
+  went; a link inside a sentence loses its link and keeps its text, and a
+  path its prose names stays and is reported. The socle rewrites no other
+  part of a README it cannot write. The commit that
   carries this is under the rule of the files it carries: it names the
   documentation repository only for a product that declares `[docs] named`,
   because a commit message of a public repository is as public as its
@@ -2405,8 +2409,17 @@ review.
 - **Every Markdown file of the product is pointed away**, not the README
   alone. A link whose target left keeps its text and loses its link, since
   the destination is a private repository; a path named in prose becomes the
-  path it now has. A document that is itself moving keeps its own relative
-  links, which stay valid where it lands.
+  path it now has. A link is read from the file that carries it: a document
+  that stays under `docs/` and links `guide.md`, or a changelog that links
+  `docs/guide.md#usage`, links a document that left as surely as
+  `docs/guide.md` does.
+- **A moved document keeps its relative links to the others that move**,
+  which stay valid where it lands. **A link to a file that stays** --
+  `../src/window.c`, `../include/window.h`, a document that does not move --
+  names nothing in the documentation repository: it becomes a link to that
+  file of the product on its forge, at the tag the prose was taken from (or
+  its commit, past the tag). A product whose origin is not on the forge
+  keeps those links, and each is reported.
 - **What the socle will not rewrite, it names with its line.** A header, a
   Makefile or a script says what it says for reasons the socle does not
   know, so those references are reported, in the plan and in the commit that

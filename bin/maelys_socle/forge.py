@@ -24,6 +24,7 @@ import os
 import pathlib
 import re
 import subprocess
+import urllib.parse
 
 from . import host
 from .constants import SOCLE_REPOSITORY
@@ -53,6 +54,10 @@ class Forge:
 
     def clone_base(self) -> str:
         """Where a repository of the fleet is cloned from, as the managed script reads it."""
+        raise NotImplementedError
+
+    def file_url(self, repository: str, ref: str, path: str, raw: bool = False) -> str:
+        """PATH of `owner/name` at REF: its page for a reader who follows a link, the file itself when RAW."""
         raise NotImplementedError
 
     def clone_url(self, repository: str, token: str = "") -> str:
@@ -98,6 +103,11 @@ class GitHub(Forge):
         # MAELYS_GIT_BASE is what a test and a mirror point at another place:
         # the managed script reads the same variable.
         return os.environ.get("MAELYS_GIT_BASE", f"https://github.com/{FLEET_OWNER}")
+
+    def file_url(self, repository: str, ref: str, path: str, raw: bool = False) -> str:
+        # blob/ names a directory too: GitHub answers it with the tree. An
+        # image needs the bytes, which raw/ serves.
+        return f"https://github.com/{repository}/{'raw' if raw else 'blob'}/{ref}/{urllib.parse.quote(path)}"
 
     def clone_url(self, repository: str, token: str = "") -> str:
         return (f"https://x-access-token:{token}@github.com/{repository}.git" if token

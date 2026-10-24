@@ -94,6 +94,11 @@ def build(context: Context) -> SocleProgram:
                                                    "properties": {"path": {"type": "string"},
                                                                   "line": {"type": "integer"},
                                                                   "names": {"type": "string"}}}},
+                                               "outward": {"type": "integer"},
+                                               "outwardLeft": {"type": "array", "items": {
+                                                   "type": "object", "required": ["path", "names"],
+                                                   "properties": {"path": {"type": "string"},
+                                                                  "names": {"type": "string"}}}},
                                                "documentsBranch": {"type": "string"}, "documentsCommit": {"type": "string"},
                                                "productBranch": {"type": "string"}, "productCommit": {"type": "string"},
                                                "pushed": {"type": "boolean"}, "kept": {"type": "string"}}}),

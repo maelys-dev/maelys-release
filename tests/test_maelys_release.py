@@ -1815,6 +1815,18 @@ class MigrateTest(unittest.TestCase):
                          [("examples/README.md", 1)])
         self.assertIn("BY HAND  examples/README.md:1 still names docs/guide.md", PACKAGE.migration.text_migrate(data))
 
+    def test_a_path_the_readme_names_in_prose_stays_and_is_reported(self) -> None:
+        # The README never names the destination, declared or not: the path
+        # its prose names stays, and whoever reviews says where it points.
+        self.product.write("maelys-release.conf", "[docs]\nnamed example/docs-fixture\n" + APART)
+        self.product.write("README.md", "# Fixture\n\nThe format is in `docs/guide.md`, read first.\n")
+        self.commit()
+        data = self.migrate("--apply", names=("guide.md",))["data"]
+        readme = (pathlib.Path(data["kept"]) / "product" / "README.md").read_text()
+        self.assertIn("The format is in `docs/guide.md`, read first.\n", readme)
+        self.assertNotIn("maelys-docs", readme)
+        self.assertEqual([(entry["path"], entry["line"]) for entry in data["remaining"]], [("README.md", 3)])
+
     def test_a_document_that_moves_keeps_its_own_relative_links(self) -> None:
         self.product.write("docs/other.md", "Also [guide](guide.md), which travels with it.\n")
         self.commit()
@@ -3817,6 +3829,16 @@ class ImpactLinesTest(unittest.TestCase):
         self.assertTrue(own.dependencies, "it still pins: that is what makes the two selectors differ")
         self.assertIs(PACKAGE.impacts.asks_this(own, ["pins"], {}), True)
         self.assertIs(PACKAGE.impacts.asks_this(own, ["checkout-script"], {}), False)
+
+    def test_a_readme_migrate_pointed_away_is_what_migrated_readme_reads(self) -> None:
+        decl = PACKAGE.reading.read_declarations(MODULE.CONTEXT, self.product.dir, "maelys-fixture", "maelys-release")
+        self.assertIs(PACKAGE.impacts.asks_this(decl, ["migrated-readme"], {}), False)
+        for pointer in ("The documentation of maelys-fixture is no longer kept in this repository.",
+                        "The documentation of maelys-fixture is in `maelys-dev/maelys-docs`, directory `maelys-fixture/`."):
+            self.product.write("README.md", f"# Fixture\n\n## Documentation\n\n{pointer}\n")
+            decl = PACKAGE.reading.read_declarations(MODULE.CONTEXT, self.product.dir, "maelys-fixture",
+                                                     "maelys-release")
+            self.assertIs(PACKAGE.impacts.asks_this(decl, ["migrated-readme"], {}), True, pointer)
 
     def test_every_marker_names_selectors_the_socle_evaluates(self) -> None:
         known = set(PACKAGE.impacts.impact_selectors(PACKAGE.declarations.Declarations(pathlib.Path("/nonexistent"), "p")))
@@ -6949,6 +6971,152 @@ class UnitTest(unittest.TestCase):
                     self.assertIn("naming no repository", report)
                     self.assertIn("site", report)
 
+    def test_the_readme_loses_a_link_in_a_sentence_and_keeps_the_sentence(self) -> None:
+        """0.64.7 dropped every line that named a moved document, and the
+        README of datalog lost the middle of six sentences. A line that was
+        a link -- an item or a row led by one, a reference definition -- is
+        what the pointer replaces; a link in prose keeps its text."""
+        import tempfile
+        data = {"repository": "maelys-dev/maelys-docs",
+                "moving": [{"path": "docs/architecture.md"}, {"path": "docs/guide.md"}]}
+        readme_text = ("# P\n\nThe format is described in [the guide](docs/guide.md), which a\n"
+                       "reader follows before [the layers](./docs/architecture.md#layers) and\n"
+                       "the [schema](docs/schema.json), which stays.\n\n"
+                       "- [guide](docs/guide.md): usage.\n"
+                       "| [architecture](docs/architecture.md) | how |\n"
+                       "- Read it with [the map][arch] first.\n\n"
+                       "[arch]: docs/architecture.md \"Architecture\"\n\n## Licence\n\nMPL-2.0.\n")
+        answer = ("ok", {"visibility": "private"})
+        with using_host(FakeHost({"repos/maelys-dev/maelys-docs": answer})), tempfile.TemporaryDirectory() as clone:
+            readme = pathlib.Path(clone) / "README.md"
+            readme.write_text(readme_text)
+            report = PACKAGE.migration.rewrite_readme(pathlib.Path(clone), "maelys-egress", data)
+            written = readme.read_text()
+        self.assertIn("The format is described in the guide, which a\n"
+                      "reader follows before the layers and\n"
+                      "the [schema](docs/schema.json), which stays.\n", written)
+        self.assertIn("- Read it with the map first.\n", written)
+        for gone in ("docs/guide.md", "docs/architecture.md", "[arch]", "| how |", ": usage."):
+            self.assertNotIn(gone, written)
+        self.assertIn("## Licence\n\nMPL-2.0.\n", written)
+        self.assertIn("no longer kept in this repository", written)
+        self.assertTrue(report.startswith("3 link lines replaced by one pointer,"
+                                          " 3 links in prose unlinked, their text kept,"
+                                          " the pointer naming no repository"), report)
+
+    def test_a_link_to_a_moved_document_is_found_from_where_it_is_written(self) -> None:
+        """0.64.7 compared a target with `docs/x.md` as written: the documents
+        that stayed under docs/ kept their relative links to the ones that
+        left, and a CHANGELOG link with an anchor escaped too (datalog)."""
+        import tempfile
+        data = {"repository": "maelys-dev/maelys-docs", "moving": [{"path": "docs/guide.md"},
+                                                                    {"path": "docs/architecture/window.md"}]}
+        with tempfile.TemporaryDirectory() as directory:
+            clone = pathlib.Path(directory)
+            (clone / "docs" / "architecture").mkdir(parents=True)
+            (clone / "docs" / "compatibility.md").write_text(
+                "Read [the guide](guide.md), [its usage](../docs/guide.md#usage) and\n"
+                "[the window](architecture/window.md), beside [the schema](schema.json).\n")
+            (clone / "docs" / "architecture" / "other.md").write_text("See [it](window.md) and [up](../guide.md).\n")
+            (clone / "CHANGELOG.md").write_text("- Moved: [the guide](docs/guide.md#section), [web](https://x.org/docs/guide.md).\n")
+            rewritten = PACKAGE.migration.rewrite_markdown(clone, "p", data, False)
+            self.assertEqual(rewritten, ["CHANGELOG.md", "docs/architecture/other.md", "docs/compatibility.md"])
+            self.assertEqual((clone / "docs" / "compatibility.md").read_text(),
+                             "Read the guide, its usage and\nthe window, beside [the schema](schema.json).\n")
+            self.assertEqual((clone / "docs" / "architecture" / "other.md").read_text(), "See it and up.\n")
+            self.assertEqual((clone / "CHANGELOG.md").read_text(),
+                             "- Moved: the guide, [web](https://x.org/docs/guide.md).\n")
+
+    def test_a_moved_document_links_what_stays_in_the_product_at_its_tag(self) -> None:
+        """A moved document's relative link to a file that stays names
+        nothing where it lands: datalog carried 18 into maelys-docs."""
+        import tempfile
+        moved = {"docs/guide.md", "docs/architecture/window.md"}
+        text = ("[the source](../src/window.c) and [the window](architecture/window.md#keys),\n"
+                "[compatibility](compatibility.md#abi), [web](https://x.org), [top](#top),\n"
+                "![diagram](<../images/a b.png> \"A\")\n\n[header]: ../include/window.h \"Header\"\n")
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            (root / "p" / "architecture").mkdir(parents=True)
+            (root / "p" / "guide.md").write_text(text)
+            (root / "p" / "architecture" / "window.md").write_text("Back to [the guide](../guide.md).\n")
+            count, left = PACKAGE.migration.point_outward(root, "p", moved, "maelys-dev/p", "v1.2.3")
+            self.assertEqual((count, left), (4, []))
+            base = "https://github.com/maelys-dev/p/blob/v1.2.3/"
+            self.assertEqual((root / "p" / "guide.md").read_text(),
+                             f"[the source]({base}src/window.c) and [the window](architecture/window.md#keys),\n"
+                             f"[compatibility]({base}docs/compatibility.md#abi), [web](https://x.org), [top](#top),\n"
+                             f"![diagram]({base.replace('/blob/', '/raw/')}images/a%20b.png \"A\")\n\n[header]: {base}include/window.h \"Header\"\n")
+            self.assertEqual((root / "p" / "architecture" / "window.md").read_text(), "Back to [the guide](../guide.md).\n")
+            # Without a repository on the forge, nothing is invented: the
+            # links stay and each is reported.
+            (root / "p" / "guide.md").write_text(text)
+            count, left = PACKAGE.migration.point_outward(root, "p", moved, "", "v1.2.3")
+            self.assertEqual(count, 0)
+            self.assertEqual([entry["names"] for entry in left],
+                             ["../src/window.c", "compatibility.md#abi", "<../images/a b.png>", "../include/window.h"])
+            self.assertEqual((root / "p" / "guide.md").read_text(), text)
+
+    def test_the_link_rewrites_leave_code_footnotes_and_other_labels_alone(self) -> None:
+        """What a review of the first shape found: a footnote read as a
+        definition, an index in C losing its brackets, a link in a shell
+        block rewritten, a root-relative link missed."""
+        unlink = PACKAGE.migration.unlink_moved
+        moved = {"docs/design.md"}
+        # A footnote is prose, never a definition: it stays, and its marker too.
+        text = "Footnote[^1].\n\n[^1]: docs/design.md explains why the parser is slow.\n"
+        self.assertEqual(unlink(text, "README.md", moved), (text, 0, 0))
+        # Code is code: a fenced block and a code span keep every bracket.
+        text = ("[1]: docs/design.md\n\nSee [the design][1] or [1].\n\n"
+                "```c\nint x = a[1]; /* [Design](docs/design.md) */\n```\n\nAnd `b[1]`, [x] stays.\n")
+        self.assertEqual(unlink(text, "README.md", moved),
+                         ("\nSee the design or 1.\n\n```c\nint x = a[1]; /* [Design](docs/design.md) */\n```\n\n"
+                          "And `b[1]`, [x] stays.\n", 2, 1))
+        # The first definition of a label is the one Markdown reads.
+        text = "[d]: other.md\n[d]: docs/design.md\n\nSee [d].\n"
+        self.assertEqual(unlink(text, "README.md", moved), ("[d]: other.md\n\nSee [d].\n", 0, 1))
+        # A path from the root is a path of the repository.
+        self.assertEqual(unlink("[Design](/docs/design.md).\n", "docs/other.md", moved), ("Design.\n", 1, 0))
+        self.assertIsNone(PACKAGE.migration.link_path("README.md", "//cdn.example/x.md"))
+
+    def test_the_readme_drops_a_line_only_when_a_link_leads_it(self) -> None:
+        import tempfile
+        data = {"repository": "maelys-dev/maelys-docs", "moving": [{"path": "docs/design.md"}]}
+        text = ("# P\n\n*[Design](docs/design.md)* is where the parser is explained, read it first.\n\n"
+                "- [Design][1]\n- [Other](docs/other.md)\n\n| Doc | What |\n|---|---|\n"
+                "| [Design](docs/design.md) | how |\n\n```md\n- [Design](docs/design.md)\n```\n\n[1]: docs/design.md\n")
+        with using_host(FakeHost({"repos/maelys-dev/maelys-docs": ("ok", {"visibility": "private"})})), \
+                tempfile.TemporaryDirectory() as clone:
+            readme = pathlib.Path(clone) / "README.md"
+            readme.write_text(text)
+            PACKAGE.migration.rewrite_readme(pathlib.Path(clone), "p", data)
+            written = readme.read_text()
+        # Emphasis is not a bullet: the sentence stays, without its link.
+        self.assertIn("*Design* is where the parser is explained, read it first.\n", written)
+        # A reference leads an item as a link does; the item goes.
+        self.assertNotIn("- Design", written.split("```")[0])
+        self.assertIn("- [Other](docs/other.md)\n", written)
+        # A table whose rows all went keeps no orphan header.
+        self.assertNotIn("| Doc | What |", written)
+        # The fenced example stays as written.
+        self.assertIn("```md\n- [Design](docs/design.md)\n```", written)
+
+    def test_an_image_of_a_moved_document_names_the_file_not_its_page(self) -> None:
+        self.assertEqual(PACKAGE.forge.forge().file_url("o/p", "v1.0.0", "docs/img/flow.png", raw=True),
+                         "https://github.com/o/p/raw/v1.0.0/docs/img/flow.png")
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            (root / "p").mkdir()
+            (root / "p" / "a.md").write_text("[^1]: See the paper by Knuth.\n\n```sh\ncat [file](../Makefile)\n```\n"
+                                             "![flow](img/flow.png) and [the root](/src/x.c).\n")
+            count, left = PACKAGE.migration.point_outward(root, "p", {"docs/a.md"}, "o/p", "v1.0.0")
+            self.assertEqual((count, left), (2, []))
+            self.assertEqual((root / "p" / "a.md").read_text(),
+                             "[^1]: See the paper by Knuth.\n\n```sh\ncat [file](../Makefile)\n```\n"
+                             "![flow](https://github.com/o/p/raw/v1.0.0/docs/img/flow.png) and"
+                             " [the root](https://github.com/o/p/blob/v1.0.0/src/x.c).\n")
+
     def test_environment_gate_verifies_the_answer_a_repository_gave(self) -> None:
         """The socle checks the gate a repository asked for; it does not
         choose one in its place. Only a promise unkept is a failure."""
@@ -7448,9 +7616,11 @@ class NamingNoPrivateRepositoryTest(unittest.TestCase):
         self.assertEqual(PACKAGE.migration.rewrite_markdown(clone, "p", self.DATA, True), ["AGENTS.md"])
         self.assertEqual((clone / "AGENTS.md").read_text(encoding="utf-8"),
                          "Read the guide; it is maelys-docs/p/guide.md.\n")
-        # Markdown is what the socle rewrites: named, none of it is reported.
+        # Markdown is what the socle rewrites: named, none of it is reported
+        # -- but the README, which never names the destination, keeps the
+        # path its prose names and reports it.
         remaining, _ = PACKAGE.migration.surviving_references(clone, self.DATA, True)
-        self.assertEqual(remaining, [])
+        self.assertEqual(remaining, [{"path": "README.md", "line": 1, "names": "docs/guide.md"}])
 
     def test_an_unnamed_destination_keeps_the_path_and_reports_it(self) -> None:
         clone = self.clone()

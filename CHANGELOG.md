@@ -14,9 +14,42 @@
   nothing deletes the artifacts after a publication, since that would take
   `actions: write`, which a caller does not grant, and a longer retention
   would keep every release's archives that long.
-- **Impact.** [asks: nothing] [writes: nothing] Nothing for a product to
-  do. Its release reads the new step once it pins this version; until
-  then, approve within 24 hours of the tag, or replay as above.
+- **`migrate` takes a link out of a sentence and leaves the sentence.** The
+  README rewrite dropped every line that named a document that left, so a
+  link inside a paragraph took the line of prose with it, and the README of
+  datalog lost the middle of six sentences. A line that was a link -- an
+  item of a list or a row of a table led by one, a reference definition --
+  is still what the one pointer replaces; a link inside a sentence loses
+  its link and keeps its text, as `migrate` already did in every other
+  Markdown file, and a reference to a definition that went keeps its text
+  too. A path the README names in prose stays as it was and is reported
+  with its line, whether or not `[docs] named` is declared: the README
+  never names the destination.
+- **`migrate` reads a link from the file that carries it.** It compared a
+  target with `docs/x.md` as written, so the documents that stayed under
+  `docs/` kept their relative links (`x.md`, `../docs/x.md`) to the ones
+  that left, a link with an anchor (`docs/x.md#part`) escaped too, and
+  nothing reported either. A link is now resolved against its own file,
+  anchor and `./` included, in the README as in every other Markdown file.
+- **A moved document's link to a file that stays names that file where it
+  stays.** A relative link from the prose to `../src/...`, `../include/...`
+  or a document that does not move named nothing in the documentation
+  repository: datalog carried eighteen, rewritten by hand. Each becomes a
+  link to the file of the product on its forge, at the tag the prose was
+  taken from, or at its commit past the tag; a link between two moved
+  documents stays relative. A product whose origin is not on the forge
+  keeps them, and each is reported (`outwardLeft`). The forge says what
+  that page is (`Forge.file_url`).
+- **Impact.** [asks: migrated-readme] [writes: migrate] A product migrated
+  with 0.64.7 or earlier may carry three marks of it: a README paragraph
+  that lost a line where it linked a document that moved (read the commit
+  `docs: the prose leaves this repository`, or `moves to`, for removed
+  lines that were prose, and put them back without the link); a document
+  left under `docs/`, or a changelog, still linking one that left; and, in
+  the documentation repository, a moved document linking `../src/...` or
+  another file of the product that is not there. The release reads the
+  new step of `publish` once a product pins this version; until then,
+  approve within 24 hours of the tag, or replay as above.
 
 ## 0.64.7 — 2026-10-24
 

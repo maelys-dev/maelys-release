@@ -66,11 +66,27 @@ def impact_selectors(decl: "Declarations") -> dict:
             # mechanism, carries none, and a line about the script asked it
             # a gesture it had no file to make.
             "checkout-script": bool(decl.dependencies) and decl.mechanism != "none" and not decl.own_ci,
+            # The pointer `migrate` writes in the README is what says the
+            # prose left: a product that never migrated carries none.
+            "migrated-readme": migrated_readme(decl),
             # Named after who is concerned, not who asked: 0.57.2's line named
             # maelys-warden for [docs] unnamed, and maelys-egress, public and
             # concerned, read "nothing".
             "public": lambda: repository_visibility(decl.project, "public"),
             "classic-protection": lambda: classic_protection(decl.project)}
+
+
+MIGRATE_POINTER = re.compile(r"^The documentation of \S+ (?:is no longer kept in this repository\."
+                             r"|is in `[^`]+`, directory `[^`]+/`\.)$", re.MULTILINE)
+
+
+def migrated_readme(decl: "Declarations") -> bool:
+    """Whether the README carries the pointer `migrate` wrote when the prose left."""
+    readme = decl.project / "README.md"
+    try:
+        return bool(MIGRATE_POINTER.search(readme.read_text(encoding="utf-8")))
+    except (OSError, UnicodeDecodeError):
+        return False
 
 
 def asks_this(decl: "Declarations", asks: list[str] | None, cache: dict) -> bool | None:
