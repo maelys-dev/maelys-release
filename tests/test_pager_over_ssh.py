@@ -77,7 +77,8 @@ class PagerOverSshTest(unittest.TestCase):
         self.assertNotIn("--pager", (ROOT / "share" / "agents" / "claude-skill.md").read_text(encoding="utf-8"))
 
     def test_the_option_the_block_names_exists(self) -> None:
-        said = self.product.run("help", "conventions").stdout
+        # The general help gives the global options whole (maelys-cli 0.9.0).
+        said = self.product.run("help").stdout
         self.assertIn("--pager auto|always|never", said)
         # And the other way an agent has of saying it, which the framework documents.
         self.assertIn("never in a pipe, in JSON or under --non-interactive", " ".join(said.split()))

@@ -421,17 +421,21 @@ class ContractTest(unittest.TestCase):
 
     def test_help(self) -> None:
         text = self.product.run("help").stdout
-        # The framework owns the page's layout, and changed it in 0.6.0: the
-        # overview names each command with its summary, and the usage is on
-        # the command's own page, wrapped. What this repository holds is what
-        # it declared -- the command is listed, its usage carries these
-        # words in this order, and a hidden option stays out of both.
+        # The framework owns the page's layout, and changed it in 0.6.0 and
+        # 0.9.0: the overview names each command with its summary, the
+        # command's own page shows a usage where the optional options are
+        # [options], and describe keeps the whole usage. What this repository
+        # holds is what it declared -- the command is listed, its usage
+        # carries these words in this order, and a hidden option stays out of
+        # the help and of the usage.
         self.assertRegex(text, r"(?m)^  adopt\s+Write the conventions of the socle into a product")
         usage = " ".join(self.product.run("help", "adopt").stdout.split())
+        self.assertIn("adopt DIR [options]", usage)
         self.assertIn("adopt DIR [--product NAME] [--mechanism MECHANISM] [--allow-untagged] [--allow-lock] [--apply]",
-                      usage)
+                      self.product.json("describe", "adopt")["data"]["commands"][0]["usage"])
         self.assertNotIn("--socle-sha", text)                       # hidden: parsed, described, never shown
         self.assertNotIn("--socle-sha", usage)
+        self.assertNotIn("--socle-sha", self.product.json("describe", "adopt")["data"]["commands"][0]["usage"])
         self.assertEqual(self.product.run("--help").stdout, text)
         self.assertIn("OPTIONS", self.product.run("help", "adopt").stdout)
         self.assertEqual(self.product.run("adopt", "--help").stdout, self.product.run("help", "adopt").stdout)

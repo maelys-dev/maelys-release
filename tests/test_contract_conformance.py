@@ -61,10 +61,16 @@ class ConformanceTest(unittest.TestCase):
         # from this machine was a failure of the program -- fish, here.
         failed = [f"{check['name']} ({check['detail']})" for check in report["checks"] if check["passed"] is False]
         self.assertEqual(failed, [], "\n".join(failed))
-        # And a skip is only ever a tool this machine lacks: anything else
-        # the kit declines to judge is something to read, not to wave through.
+        # And a skip is only ever a tool this machine lacks, or one of these
+        # two, read here once (kit of 2.17.0): the socle has no family of
+        # commands and declares no example, both optional in the contract.
+        # Anything else the kit declines to judge is something to read, not
+        # to wave through.
+        absent = {"help of a family (no command of several segments has a prefix that is not itself a command)",
+                  "help COMMAND_ID shows the examples (no command declares examples)"}
         skipped = [f"{check['name']} ({check['detail']})" for check in report["checks"] if check["passed"] is None]
-        self.assertEqual([entry for entry in skipped if "is not installed" not in entry], [], "\n".join(skipped))
+        self.assertEqual([entry for entry in skipped if "is not installed" not in entry and entry not in absent], [],
+                         "\n".join(skipped))
         self.assertGreater(report["counts"]["passed"], 500)
 
 
