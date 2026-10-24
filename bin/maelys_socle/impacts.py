@@ -77,7 +77,7 @@ def impact_selectors(decl: "Declarations") -> dict:
 
 
 MIGRATE_POINTER = re.compile(r"^The documentation of \S+ (?:is no longer kept in this repository\."
-                             r"|is in `[^`]+`, directory `[^`]+/`\.)$", re.MULTILINE)
+                             r"|is in `[^`]+`, directory `[^`]+/`\.|is at <https://[^>\s]+>\.)$", re.MULTILINE)
 
 
 def migrated_readme(decl: "Declarations") -> bool:

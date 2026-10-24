@@ -2444,6 +2444,14 @@ not, and the report says what a human must still do: point the README at
 the product's site. An unreachable answer is read as private, because naming
 a destination wrongly is worse than naming none.
 
+**`--site URL` names that site in the pointer**, so no hand is left to do
+it: `The documentation of maelys-datalog is at <https://datalog.maelys.dev>.`
+The socle reads no inventory of sites: maelys-platform declares them in
+`inventories/web-sites.json` and passes the one of the product it lists the
+documents of. The URL is refused unless it is `https`, and refused when it
+names the documentation repository, which is the private reference the
+pointer exists to keep out of the README.
+
 The managed `AGENTS.md` block is the other half of this: an agent reads the
 destination there, where the reader is an agent that has access, while the
 README is read by strangers.

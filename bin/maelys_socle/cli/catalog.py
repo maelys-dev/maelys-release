@@ -65,6 +65,9 @@ def build(context: Context) -> SocleProgram:
                                             cli.argument("FILE"), default="-"),
                                  cli.option("--documents-repository", "Repository the prose moves to.",
                                             cli.argument("REPOSITORY")),
+                                 cli.option("--site", "Public site of the product the README points at"
+                                            " (an https URL); without it the README says only that the"
+                                            " prose left.", cli.argument("URL")),
                                  cli.flag("--push", "Send both branches; without it nothing leaves this machine.")],
                         schema={"type": "object", "additionalProperties": False,
                                 "required": ["mode", "product", "project", "repository", "version", "tag", "commit",
@@ -73,6 +76,7 @@ def build(context: Context) -> SocleProgram:
                                                "project": {"type": "string"}, "repository": {"type": "string"},
                                                "version": {"type": "string"}, "tag": {"type": "string"},
                                                "commit": {"type": "string"}, "documents": {"type": "integer"},
+                                               "site": {"type": "string"},
                                                "moving": {"type": "array", "items": {
                                                    "type": "object", "required": ["path", "destination", "referencedBy"],
                                                    "properties": {"path": {"type": "string"},

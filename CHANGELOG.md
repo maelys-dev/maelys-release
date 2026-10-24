@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+- **`migrate --site URL` names the product's site in the README.** Without
+  a public destination the pointer could only say the prose left, and the
+  report asked a hand to point the README at the product's site, which
+  datalog's README needed. With `--site`, the pointer reads `The
+  documentation of PRODUCT is at <URL>.` and the destination's visibility
+  is not even asked. The socle reads no inventory: maelys-platform declares
+  each site in `inventories/web-sites.json` and passes the product's. The
+  URL must be `https`, and may not name the documentation repository.
+  `site` appears in the plan, and the `migrated-readme` selector reads the
+  new pointer as it reads the two others.
+- **Impact.** [asks: nothing] [writes: migrate] Nothing for a product to
+  do. maelys-platform may pass `--site` from its inventory when it lists a
+  product's prose.
+
 ## 0.64.8 — 2026-10-24
 
 - **`publish` says the artifacts expired, and how to replay.** `build`
