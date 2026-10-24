@@ -8,11 +8,11 @@ Common contract: `agent-cli/v2`. For the machine-readable detail run
 
 | Identifier | Usage | Effect | Output | Purpose |
 | --- | --- | --- | --- | --- |
-| help | `help [COMMAND_ID] \| --help` | read | json-envelope | Show the help of the program or of one command. |
+| help | `help [COMMAND_ID] \| --help` | read | json-envelope | Show the help of the program, of one command or of one family. |
 | version | `version \| --version` | read | json-envelope | Show the product, program, version and contract. |
-| describe | `describe [COMMAND_ID] [--summary] [--prefix PREFIX]` | read | json-envelope | Show the machine-readable catalog, or one descriptor. |
+| describe | `describe [COMMAND_ID] [--summary] [--prefix PREFIX]` | read | json-envelope | Show the machine-readable catalog, its summary or one descriptor. |
 | completion | `completion SHELL` | read | json-envelope | Print the shell completion script generated from the catalog. |
-| complete.candidates | `__complete [WORDS...]` | read | json-records | Completion candidates for the words given after --. |
+| complete.candidates | `__complete [WORDS...]` | read | json-records | Return completion candidates for a partial command line. |
 | migrate | `migrate DIR [--product NAME] [--documents FILE] [--documents-repository REPOSITORY] [--push] [--apply]` | preview then apply with --apply | json-envelope | Move a product's prose into the documentation repository with its history and out of the product; plan without --apply. |
 | new | `new DIR [--product NAME] [--mechanism MECHANISM] [--depends DEPENDENCY] [--apply]` | preview then apply with --apply | json-envelope | Create a Maelys repository in an empty directory: licence, version, changelog, pins, and the files of the socle; plan without --apply. |
 | adopt | `adopt DIR [--product NAME] [--mechanism MECHANISM] [--allow-untagged] [--allow-lock] [--apply]` | preview then apply with --apply | json-envelope | Write the conventions of the socle into a product, and its release files when it publishes through the socle; plan without --apply. |

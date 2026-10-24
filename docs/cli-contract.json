@@ -21,7 +21,7 @@
               {
                 "name": "COMMAND_ID",
                 "required": false,
-                "summary": "Command identifier, the family of commands under one, or `conventions`.",
+                "summary": "Stable command identifier whose help is shown, or the family of commands under an identifier.",
                 "variadic": false
               }
             ],
@@ -31,6 +31,7 @@
           },
           "outputMode": "json-envelope",
           "outputSchema": {
+            "additionalProperties": false,
             "properties": {
               "commands": {
                 "items": {
@@ -51,7 +52,7 @@
           "pattern": [
             "help"
           ],
-          "purpose": "Show the help of the program or of one command.",
+          "purpose": "Show the help of the program, of one command or of one family.",
           "usage": "help [COMMAND_ID] | --help"
         },
         {
@@ -74,6 +75,27 @@
           },
           "outputMode": "json-envelope",
           "outputSchema": {
+            "additionalProperties": false,
+            "properties": {
+              "cliApi": {
+                "type": "integer"
+              },
+              "contract": {
+                "const": "agent-cli/v2"
+              },
+              "framework": {
+                "type": "string"
+              },
+              "product": {
+                "type": "string"
+              },
+              "program": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              }
+            },
             "required": [
               "product",
               "program",
@@ -115,7 +137,7 @@
               {
                 "name": "COMMAND_ID",
                 "required": false,
-                "summary": "Command identifier.",
+                "summary": "Stable command identifier returned by the catalog.",
                 "variadic": false
               }
             ],
@@ -126,7 +148,7 @@
                 "repeatable": false,
                 "required": false,
                 "requires": [],
-                "summary": "Every descriptor without its schema and exit codes."
+                "summary": "Return the compact command inventory without output schemas."
               },
               {
                 "argument": {
@@ -143,7 +165,7 @@
                 "requires": [
                   "--summary"
                 ],
-                "summary": "Select the command namespace PREFIX."
+                "summary": "Restrict the summary to one command namespace: the command named PREFIX and every command whose identifier starts with PREFIX followed by a dot."
               }
             ],
             "passthrough": false,
@@ -151,6 +173,8 @@
           },
           "outputMode": "json-envelope",
           "outputSchema": {
+            "additionalProperties": true,
+            "description": "Command catalog, summary or single descriptor.",
             "required": [
               "schemaVersion",
               "kind",
@@ -162,7 +186,7 @@
           "pattern": [
             "describe"
           ],
-          "purpose": "Show the machine-readable catalog, or one descriptor.",
+          "purpose": "Show the machine-readable catalog, its summary or one descriptor.",
           "usage": "describe [COMMAND_ID] [--summary] [--prefix PREFIX]"
         },
         {
@@ -187,7 +211,7 @@
                 ],
                 "name": "SHELL",
                 "required": true,
-                "summary": "Shell.",
+                "summary": "Shell whose completion script is printed.",
                 "type": "choice",
                 "variadic": false
               }
@@ -198,6 +222,19 @@
           },
           "outputMode": "json-envelope",
           "outputSchema": {
+            "additionalProperties": false,
+            "properties": {
+              "script": {
+                "type": "string"
+              },
+              "shell": {
+                "enum": [
+                  "bash",
+                  "zsh",
+                  "fish"
+                ]
+              }
+            },
             "required": [
               "shell",
               "script"
@@ -227,7 +264,7 @@
               {
                 "name": "WORDS",
                 "required": false,
-                "summary": "Words typed so far.",
+                "summary": "Command line words after the program name; the last one is the prefix being completed.",
                 "variadic": true
               }
             ],
@@ -237,6 +274,21 @@
           },
           "outputMode": "json-records",
           "outputSchema": {
+            "additionalProperties": false,
+            "properties": {
+              "count": {
+                "type": "integer"
+              },
+              "records": {
+                "items": {
+                  "required": [
+                    "word"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            },
             "required": [
               "count",
               "records"
@@ -246,7 +298,7 @@
           "pattern": [
             "__complete"
           ],
-          "purpose": "Completion candidates for the words given after --.",
+          "purpose": "Return completion candidates for a partial command line.",
           "usage": "__complete [WORDS...]"
         },
         {
@@ -325,7 +377,7 @@
                 "repeatable": false,
                 "required": false,
                 "requires": [],
-                "summary": "Apply the reviewed plan instead of only planning it."
+                "summary": "Apply the reviewed plan; without it the command only plans."
               }
             ],
             "passthrough": false,
@@ -596,7 +648,7 @@
                 "repeatable": false,
                 "required": false,
                 "requires": [],
-                "summary": "Apply the reviewed plan instead of only planning it."
+                "summary": "Apply the reviewed plan; without it the command only plans."
               }
             ],
             "passthrough": false,
@@ -887,7 +939,7 @@
                 "repeatable": false,
                 "required": false,
                 "requires": [],
-                "summary": "Apply the reviewed plan instead of only planning it."
+                "summary": "Apply the reviewed plan; without it the command only plans."
               }
             ],
             "passthrough": false,
@@ -1825,7 +1877,7 @@
                 "repeatable": false,
                 "required": false,
                 "requires": [],
-                "summary": "Apply the reviewed plan instead of only planning it."
+                "summary": "Apply the reviewed plan; without it the command only plans."
               }
             ],
             "passthrough": false,
@@ -3110,7 +3162,7 @@
                 "repeatable": false,
                 "required": false,
                 "requires": [],
-                "summary": "Apply the reviewed plan instead of only planning it."
+                "summary": "Apply the reviewed plan; without it the command only plans."
               }
             ],
             "passthrough": false,
@@ -3328,7 +3380,7 @@
                 "repeatable": false,
                 "required": false,
                 "requires": [],
-                "summary": "Apply the reviewed plan instead of only planning it."
+                "summary": "Apply the reviewed plan; without it the command only plans."
               }
             ],
             "passthrough": false,
@@ -4244,7 +4296,7 @@
                 "repeatable": false,
                 "required": false,
                 "requires": [],
-                "summary": "Apply the reviewed plan instead of only planning it."
+                "summary": "Apply the reviewed plan; without it the command only plans."
               }
             ],
             "passthrough": false,
@@ -4568,7 +4620,8 @@
       },
       "product": "Maelys Release",
       "program": "maelys-release",
-      "schemaVersion": 1
+      "schemaVersion": 1,
+      "x-maelys-summary": "release socle of the Maelys repositories"
     }
   }
 }
