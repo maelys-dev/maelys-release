@@ -1371,7 +1371,11 @@ published, push to any branch, and create tags. The build runs the product's
 own code and whatever its toolchain pulled in, so a compromise there held
 the repository rather than a draft.
 
-The bytes cross the run as workflow artifacts, kept one day. `publish`
+The bytes cross the run as workflow artifacts, kept one day, while the
+release environment can hold `publish` for thirty: **approve within the day
+after the tag**. An approval given later finds them gone, and `publish` says
+so before it assembles anything, names the targets whose artifact expired,
+and gives the replay on the tag (below); nothing is published. `publish`
 verifies what `build` produced: the earlier `sha256sum -c` compared
 artifacts against `.sha256` files that came from the same draft, uploaded by
 the same job, which proved consistency and not integrity.
@@ -3689,7 +3693,8 @@ a replay stops.
 **A replay therefore runs the socle that tag pinned, never a corrected one.**
 The workflow file it uses is the one at `vX.Y.Z`, and that file names a socle
 commit. So the replay is for a run that failed for a reason outside the code:
-a cancelled job, an approval that expired, a tap push lost to a race with
+a cancelled job, an approval that expired or came after the artifacts did,
+a tap push lost to a race with
 another product. **If the socle itself was at fault, the remedy is a new
 patch release of the product carrying the corrected pin** — a published tag
 is never moved, and replaying it would only repeat the fault. This page said

@@ -545,8 +545,10 @@ jobs:
           name: dist-${{ matrix.target }}
           path: dist/
           if-no-files-found: error
-          # The artifacts exist to cross one run, not to be kept: publish
-          # deletes them, and a day is the ceiling if it never runs.
+          # The artifacts exist to cross one run, not to be kept, and nothing
+          # deletes them: that would take actions: write, which a caller does
+          # not grant. A day is what they cost; publish says when an approval
+          # came after it.
           retention-days: 1
 
   publish:
@@ -571,6 +573,33 @@ jobs:
         with:
           pattern: dist-*
           path: incoming
+      - name: Every target handed its artifact
+        # The artifacts are kept one day, and the release environment can
+        # hold this job for thirty. Approved after the day, the download
+        # above finds no artifact and succeeds, and the step below failed on
+        # a missing *.sha256 that said nothing of the cause. Nothing is
+        # published yet: the tag is replayed, and approved within the day.
+        # One artifact is downloaded into incoming/ itself, several each
+        # into incoming/dist-TARGET.
+        shell: bash
+        env:
+          MATRIX: ${{ needs.verify.outputs.matrix }}
+          TAG: ${{ needs.verify.outputs.tag }}
+        run: |
+          set -euo pipefail
+          targets="$(jq -r '.include[] | select(.package) | .target' <<<"$MATRIX")"
+          missing=""
+          if [ "$(printf '%s\n' "$targets" | wc -l)" -eq 1 ]; then
+            test -n "$(find incoming -type f 2>/dev/null | head -n 1)" || missing=" $targets"
+          else
+            for target in $targets; do
+              test -d "incoming/dist-$target" || missing="$missing $target"
+            done
+          fi
+          if [ -n "$missing" ]; then
+            echo "::error::the artifacts build handed to publish are gone for:$missing. They are kept one day, and this publication was approved after it expired; nothing was published. Replay the release on its tag, then approve it within the day: gh workflow run release.yml --repo $GITHUB_REPOSITORY --ref $TAG -f tag=$TAG"
+            exit 1
+          fi
       - name: Assemble and verify
         # Word splitting of manifest_patterns is bash's, not the runner's default.
         shell: bash
