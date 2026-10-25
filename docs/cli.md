@@ -14,7 +14,7 @@ Common contract: `agent-cli/v2`. For the machine-readable detail run
 | completion | `completion SHELL` | read | json-envelope | Print the shell completion script generated from the catalog. |
 | complete.candidates | `__complete [WORDS...]` | read | json-records | Return completion candidates for a partial command line. |
 | migrate | `migrate DIR [--product NAME] [--documents FILE] [--documents-repository REPOSITORY] [--site URL] [--push] [--apply]` | preview then apply with --apply | json-envelope | Move a product's prose into the documentation repository with its history and out of the product; plan without --apply. |
-| new | `new DIR [--product NAME] [--mechanism MECHANISM] [--depends DEPENDENCY] [--apply]` | preview then apply with --apply | json-envelope | Create a Maelys repository in an empty directory: licence, version, changelog, pins, and the files of the socle; plan without --apply. |
+| new | `new DIR [--product NAME] [--mechanism MECHANISM] [--depends DEPENDENCY...] [--apply]` | preview then apply with --apply | json-envelope | Create a Maelys repository in an empty directory: licence, version, changelog, pins, and the files of the socle; plan without --apply. |
 | adopt | `adopt DIR [--product NAME] [--mechanism MECHANISM] [--allow-untagged] [--allow-lock] [--apply]` | preview then apply with --apply | json-envelope | Write the conventions of the socle into a product, and its release files when it publishes through the socle; plan without --apply. |
 | check | `check DIR [--product NAME] [--mechanism MECHANISM] [--docs-contract] [--history]` | read | json-envelope | Report the conventions of a product and, when it publishes through the socle, its release mechanism; exit 2 on any violation. |
 | outgoing | `outgoing DIR [--pre-push REMOTE]` | read | json-envelope | Report the commits about to leave whose author or committer address git made up on this machine; exit 2 when there is one. |
@@ -43,4 +43,5 @@ Global options:
 - `--verbose`: Add the details of the run on stderr in text mode; silent in JSON.
 - `--pager auto|always|never`: Page the text rendering when stdout is a terminal; never in a pipe, in JSON or under --non-interactive.
 - `--field NAME`: Render one top-level member of data instead of the whole result, by the text or jsonl rendering rules.
+- `--lang TAG`: Language of the human text.
 - `--help`: Show the help of the selected command.
