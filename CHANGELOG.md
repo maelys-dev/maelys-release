@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.65.1 — 2026-10-25
 
 - **Built on maelys-cli v0.12.3 and agent-cli-spec v2.21.0** (from v0.10.0
   and v2.19.0). The command line gains the global option `--lang TAG`
