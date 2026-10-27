@@ -2393,8 +2393,6 @@ review.
   anything is written, as is a listed document that was never committed: it
   has no history to move. The plan itself writes nothing and is answered on
   any tree.
-  The documentation policy of maelys-platform still names the old layout,
-  which is a correction for that repository.
 - **The product loses the documents**, on a branch for a pull request, never
   a write into the operator's checkout. The README's lines that were links
   to the moved documents -- an item of a list or a row of a table led by
