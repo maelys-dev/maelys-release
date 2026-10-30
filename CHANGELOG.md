@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- **`docs/conventions.md` no longer says maelys-platform's documentation
+  policy names the old pin layout.** The sentence was written on
+  2026-09-09 when `migrate` stopped writing `adapter/<PRODUCT>_PIN`, and
+  the policy was corrected that same day: it names
+  `dependencies/<product>.pin` and calls `adapter/<NAME>_PIN` a drift. A
+  paragraph inserted later had also left the sentence under the bullet on
+  `--apply`, far from the pin it was about.
+- **Impact.** [asks: nothing] [writes: nothing] Nothing for a product to
+  do. Documentation only.
+
 ## 0.65.1 — 2026-10-25
 
 - **Built on maelys-cli v0.12.3 and agent-cli-spec v2.21.0** (from v0.10.0
