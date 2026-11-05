@@ -96,6 +96,30 @@ def socle_identity(context: Context, sha: str, tag: str) -> tuple[str, str]:
     return git("rev-parse", "HEAD", cwd=root), git("describe", "--tags", "--exact-match", cwd=root, check=False) or "untagged"
 
 
+def running_commit(context: Context) -> "str | None":
+    """The commit of the running socle's workflows, or None when nobody can say.
+
+    A product's job that calls the socle at a commit is drawn from this
+    socle's own `.github/workflows` only when the two are the same: a
+    checkout answers with HEAD while its workflows hold no change, committed
+    or not; an archive with the commit INSTALLED.pin carries. Unlike
+    `socle_identity`, nothing here refuses: a commit that cannot be named
+    leaves the call unread, and `declarations` says so.
+    """
+    root = context.socle_root()
+    if (root / ".git").exists():
+        status = run(["git", "status", "--porcelain", "--", ".github/workflows"], cwd=root)
+        if status.returncode != 0 or status.stdout.strip():
+            return None
+        head = git("rev-parse", "HEAD", cwd=root, check=False)
+        return head if re.fullmatch(r"[0-9a-f]{40}", head) else None
+    try:
+        recorded = archived_identity(context, root)
+    except Failure:
+        return None
+    return recorded[0] if recorded else None
+
+
 def socle_data(context: Context, sha: str, tag: str) -> dict:
     return identity.socle_data(sha, tag, context)
 

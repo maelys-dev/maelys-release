@@ -22,7 +22,7 @@ from ..tap import handle_tap
 from .program import SocleProgram
 from .schemas import (
     CHECKS_SCHEMA, CHECK_SCHEMA, CUT_SCHEMA, DIR_OPERAND, DOCS_CONTRACT_OPTION, FILES_SCHEMA, MECHANISM_OPTION,
-    MECHANISM_SCHEMA, PRIVACY_SCHEMA, SOCLE_OPTIONS, SOCLE_SCHEMA, STATUS_LINE, STRINGS,
+    MECHANISM_SCHEMA, PRIVACY_SCHEMA, SOCLE_OPTIONS, SOCLE_SCHEMA, STATUS_LINE, STRINGS, WORKFLOW_GRAPH,
 )
 from .texts import TEXT
 
@@ -237,12 +237,15 @@ def build(context: Context) -> SocleProgram:
                                         "workflows": {"type": "array", "items": {
                                             "type": "object", "additionalProperties": False,
                                             "required": ["file", "events", "branches", "tags", "jobs",
-                                                         "runners", "unresolved", "delegates"],
+                                                         "runners", "unresolved", "delegates", "graph",
+                                                         "graphUnresolved"],
                                             "properties": {"file": {"type": "string"}, "events": STRINGS,
                                                            "branches": STRINGS, "tags": STRINGS,
                                                            "jobs": STRINGS, "runners": STRINGS,
                                                            "unresolved": STRINGS,
-                                                           "delegates": {"type": "boolean"}}}},
+                                                           "delegates": {"type": "boolean"},
+                                                           "graph": WORKFLOW_GRAPH,
+                                                           "graphUnresolved": STRINGS}}},
                                         "carried": {"type": "object", "additionalProperties": False,
                                                     "required": ["dependencies", "calls", "unresolved"],
                                                     "properties": {

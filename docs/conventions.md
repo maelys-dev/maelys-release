@@ -1034,6 +1034,24 @@ Three fields exist for that observer rather than for the product:
   shared CI calls `declarations` on a runner with no access to the API, so
   what a repository's **settings** say — its branch protection above all —
   belongs to `preflight` and to the fleet observer, never here.
+  Each record also holds `graph`, one node per job in file order: `job`,
+  `name` (its own `name:` when that is a plain value, `null` when it is
+  absent or an expression GitHub evaluates), `needs` (the jobs of the same
+  file it waits on), `conditional` (it has an `if:`), `uses` (its job-level
+  call, or `null`) and `called`. Only a job's own keys are read, never a
+  step's nor a `with:`'s. `called` holds the called workflow's own graph,
+  with its `file` and where it was read `from`: `project` for a call of
+  `./.github/workflows/` in the same tree, `socle` for a call of
+  `maelys-dev/maelys-release` at the commit of the socle answering — a
+  checkout whose `.github/workflows` holds no change, or an archive whose
+  `INSTALLED.pin` names it. A call of the socle at any other commit, a call
+  of another repository, and a call inside a called workflow (a call is
+  followed one level) keep their `uses` with `called: null`.
+  **What could not be read is in `graphUnresolved`**, one line per job: a
+  `needs` holding an expression or naming no job of the file, and every
+  call left unread. An empty `needs` with nothing in `graphUnresolved` for
+  that job means the job waits on nothing; an observer must not read the
+  first without the second.
 - **`runners`** holds the runner labels a repository's own workflows select,
   what the socle could not resolve, and whether the repository delegates.
   Reading `runs-on` for a label is not enough: a matrix hides it, and a

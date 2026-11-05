@@ -147,7 +147,10 @@ def handle_declarations(invocation: Invocation, context: Context) -> tuple[dict,
             "pinned": pinned_socle(project),
             "managedBy": stamp.group(1) if stamp else "",
             "runners": read_runners(project),
-            "workflows": read_workflows(project),
+            # A call of the socle is drawn from this socle's tree when it
+            # names this socle's commit, asked of git only if a call needs it.
+            "workflows": read_workflows(project, (context.socle_root(),
+                                                  lambda: socle_origin.running_commit(context))),
             "carried": read_carried(project),
             "dependencies": decl.dependencies,
             # The pins on a third party's commit that no tag carries, apart

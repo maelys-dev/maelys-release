@@ -3124,6 +3124,175 @@ class WorkflowReadingTest(unittest.TestCase):
         self.assertIn("merge_group", odd[0])
 
 
+class WorkflowGraphTest(unittest.TestCase):
+    """Each workflow's jobs and what each waits on, for an observer that never reads the files.
+
+    Three answers, never two: a `needs` the socle cannot read as a job of
+    the same file is not drawn as no dependency, it is named under
+    `graphUnresolved`.
+    """
+
+    RUNNING = "a" * 40
+    SOCLE = "maelys-dev/maelys-release/.github/workflows/"
+
+    def setUp(self) -> None:
+        work = pathlib.Path(tempfile.mkdtemp(prefix="maelys-release-graph."))
+        self.addCleanup(shutil.rmtree, work, True)
+        self.project = work / "product"
+        self.socle = work / "socle"
+        (self.project / ".github" / "workflows").mkdir(parents=True)
+        (self.socle / ".github" / "workflows").mkdir(parents=True)
+        (self.socle / ".github" / "workflows" / "release.yml").write_text(
+            "on:\n  workflow_call:\njobs:\n  verify:\n    runs-on: ubuntu-26.04\n"
+            "  build:\n    needs: verify\n    runs-on: ubuntu-26.04\n", encoding="utf-8")
+
+    def read(self, text: str, socle: object = None, name: str = "ci.yml") -> dict:
+        (self.project / ".github" / "workflows" / name).write_text(text, encoding="utf-8")
+        return next(record for record in PACKAGE.product_workflows.read_workflows(self.project, socle)
+                    if record["file"] == name)
+
+    def node(self, record: dict, job: str) -> dict:
+        return next(node for node in record["graph"] if node["job"] == job)
+
+    def test_the_three_shapes_of_needs(self) -> None:
+        record = self.read("on: push\njobs:\n"
+                           "  a:\n    runs-on: x\n"
+                           "  b:\n    needs: a\n    runs-on: x\n"
+                           "  c:\n    needs: [a, 'b']   # both\n    runs-on: x\n"
+                           "  d:\n    needs:\n      - a\n      - \"c\"\n    runs-on: x\n"
+                           "  e:\n    needs:\n    - d\n    runs-on: x\n"
+                           "  f:\n    needs: []\n    runs-on: x\n")
+        self.assertEqual([(node["job"], node["needs"]) for node in record["graph"]],
+                         [("a", []), ("b", ["a"]), ("c", ["a", "b"]), ("d", ["a", "c"]), ("e", ["d"]), ("f", [])])
+        self.assertEqual(record["graphUnresolved"], [])
+        # Additive: the names stay a list of names, which consumers rely on.
+        self.assertEqual(record["jobs"], ["a", "b", "c", "d", "e", "f"])
+
+    def test_what_names_no_job_of_the_file_is_unresolved_not_absent(self) -> None:
+        record = self.read("on: push\njobs:\n"
+                           "  a:\n    runs-on: x\n"
+                           "  b:\n    needs: ${{ fromJSON(inputs.after) }}\n    runs-on: x\n"
+                           "  c:\n    needs: [a, ghost]\n    runs-on: x\n"
+                           "  d:\n    needs: [a,\n      c]\n    runs-on: x\n"
+                           "  e:\n    needs:\n      - a\n      - ${{ inputs.other }}\n    runs-on: x\n")
+        self.assertEqual(self.node(record, "b")["needs"], [])
+        self.assertEqual(self.node(record, "c")["needs"], ["a"])
+        self.assertEqual(self.node(record, "d")["needs"], [])
+        self.assertEqual(self.node(record, "e")["needs"], ["a"])
+        self.assertEqual(record["graphUnresolved"], [
+            "ci.yml: job b: an expression GitHub evaluates in needs: ${{ fromJSON(inputs.after) }}",
+            "ci.yml: job c: needs ghost, which is not a job of this file",
+            "ci.yml: job d: a value the socle does not read in needs: [a,",
+            "ci.yml: job e: an expression GitHub evaluates in needs: ${{ inputs.other }}",
+        ])
+
+    def test_only_the_jobs_own_keys_are_read(self) -> None:
+        """A step's name, a with: input called needs and a step's if belong to no job."""
+        record = self.read("on: push\njobs:\n"
+                           "  a:\n    runs-on: x\n    steps:\n      - name: first\n        if: always()\n"
+                           "        with:\n          needs: b\n"
+                           "  b:\n    name: Build it\n    if: github.ref == 'refs/heads/main'\n    runs-on: x\n"
+                           "    steps:\n    - name: compact\n      uses: actions/checkout@v4\n"
+                           "  c:\n    name: 'check (${{ matrix.leg }})'\n    runs-on: x\n"
+                           "  d:\n    name: \"Quoted\"  # comment\n    runs-on: x\n")
+        a, b, c, d = record["graph"]
+        self.assertEqual((a["name"], a["needs"], a["conditional"], a["uses"]), (None, [], False, None))
+        self.assertEqual((b["name"], b["conditional"], b["uses"]), ("Build it", True, None))
+        self.assertIsNone(c["name"], "a name GitHub evaluates is not guessed")
+        self.assertEqual(d["name"], "Quoted")
+        self.assertEqual(record["graphUnresolved"], [])
+
+    def test_a_call_of_the_products_own_tree_is_read_one_level(self) -> None:
+        self.read("on:\n  workflow_call:\njobs:\n"
+                  "  render:\n    runs-on: x\n"
+                  "  publish:\n    needs: render\n    if: always()\n    uses: ./.github/workflows/deeper.yml\n",
+                  name="called.yml")
+        record = self.read("on: push\njobs:\n"
+                           "  first:\n    runs-on: x\n"
+                           "  call:\n    needs: first\n    uses: ./.github/workflows/called.yml\n"
+                           "    with:\n      uses: nothing\n"
+                           "  missing:\n    uses: ./.github/workflows/absent.yml\n")
+        call = self.node(record, "call")
+        self.assertEqual(call["uses"], "./.github/workflows/called.yml")
+        self.assertEqual(call["called"]["file"], "called.yml")
+        self.assertEqual(call["called"]["from"], "project")
+        self.assertEqual(call["called"]["graph"], [
+            {"job": "render", "name": None, "needs": [], "conditional": False, "uses": None, "called": None},
+            {"job": "publish", "name": None, "needs": ["render"], "conditional": True,
+             "uses": "./.github/workflows/deeper.yml", "called": None},
+        ])
+        self.assertIsNone(self.node(record, "missing")["called"])
+        self.assertEqual(record["graphUnresolved"], [
+            "ci.yml: job call: in project called.yml, job publish: calls ./.github/workflows/deeper.yml,"
+            " not followed: a call is read one level deep",
+            "ci.yml: job missing: calls ./.github/workflows/absent.yml, which is not in this tree",
+        ])
+
+    def test_a_call_of_the_socle_is_read_at_the_running_commit_only(self) -> None:
+        text = ("on: push\njobs:\n"
+                f"  release:\n    uses: {self.SOCLE}release.yml@{self.RUNNING} # v9.9.9\n"
+                f"  other:\n    needs: release\n    uses: {self.SOCLE}release.yml@{'b' * 40} # v1.0.0\n"
+                "  foreign:\n    uses: someone/else/.github/workflows/x.yml@v1\n")
+        record = self.read(text, (self.socle, self.RUNNING))
+        release = self.node(record, "release")
+        self.assertEqual(release["uses"], f"{self.SOCLE}release.yml@{self.RUNNING}")
+        self.assertEqual(release["called"]["from"], "socle")
+        self.assertEqual([(node["job"], node["needs"]) for node in release["called"]["graph"]],
+                         [("verify", []), ("build", ["verify"])])
+        self.assertIsNone(self.node(record, "other")["called"])
+        self.assertIsNone(self.node(record, "foreign")["called"])
+        self.assertEqual(record["graphUnresolved"], [
+            "ci.yml: job other: calls the socle at bbbbbbbbbbbb, and is read here by another socle",
+            "ci.yml: job foreign: calls someone/else/.github/workflows/x.yml@v1,"
+            " a workflow of another repository, not read here",
+        ])
+        for socle in (None, (self.socle, None)):
+            with self.subTest(socle=socle):
+                record = self.read(text, socle)
+                self.assertIsNone(self.node(record, "release")["called"])
+                self.assertIn(f"ci.yml: job release: calls the socle at {'a' * 12}, and is read here by a socle"
+                              " whose commit is unknown", record["graphUnresolved"])
+
+    def test_the_running_commit_is_asked_once_and_only_for_a_call_of_the_socle(self) -> None:
+        asked = []
+
+        def commit() -> str:
+            asked.append(1)
+            return self.RUNNING
+
+        self.read("on: push\njobs:\n  a:\n    runs-on: x\n", (self.socle, commit))
+        self.assertEqual(asked, [])
+        self.read("on: push\njobs:\n"
+                  f"  a:\n    uses: {self.SOCLE}release.yml@{self.RUNNING}\n"
+                  f"  b:\n    uses: {self.SOCLE}release.yml@{self.RUNNING}\n", (self.socle, commit), "two.yml")
+        self.assertEqual(asked, [1])
+
+    def test_the_running_commit_is_named_only_when_the_workflows_are_its_own(self) -> None:
+        context = PACKAGE.context.Context(socle_root=lambda: self.socle, socle_version=lambda: "9.9.9")
+        (self.socle / ".git").mkdir()
+        answers = {"status": "", "head": self.RUNNING + "\n"}
+
+        def run(command, cwd=None, env=None):
+            if command[:3] == ["git", "status", "--porcelain"]:
+                self.assertEqual(command[3:], ["--", ".github/workflows"])
+                return subprocess.CompletedProcess(command, 0, answers["status"], "")
+            if command == ["git", "rev-parse", "HEAD"]:
+                return subprocess.CompletedProcess(command, 0, answers["head"], "")
+            raise AssertionError(command)
+
+        with using_host(FakeHost(run=run)):
+            self.assertEqual(PACKAGE.socle_origin.running_commit(context), self.RUNNING)
+            answers["status"] = " M .github/workflows/release.yml\n"
+            self.assertIsNone(PACKAGE.socle_origin.running_commit(context))
+        (self.socle / ".git").rmdir()
+        with using_host(FakeHost()):
+            self.assertIsNone(PACKAGE.socle_origin.running_commit(context))
+            (self.socle / "INSTALLED.pin").write_text(f"v9.9.9\n{self.RUNNING}\n", encoding="utf-8")
+            self.assertEqual(PACKAGE.socle_origin.running_commit(context), self.RUNNING)
+            (self.socle / "INSTALLED.pin").write_text(f"v1.0.0\n{self.RUNNING}\n", encoding="utf-8")
+            self.assertIsNone(PACKAGE.socle_origin.running_commit(context))
+
+
 class StrategyNoteTest(unittest.TestCase):
     """A workflow that runs twice on every pull request, named."""
 
