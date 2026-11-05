@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- **`declarations` draws each workflow's job graph.** Every record of
+  `workflows` gains `graph`, one node per job in file order — its id, its
+  `name` when that is a plain value and not an expression, the jobs of the
+  same file its `needs` names, whether it has an `if`, and the workflow its
+  job-level `uses` calls — and `graphUnresolved`, what could not be read.
+  A fleet observer draws each product's workflows from this without
+  reading a release-mechanism file itself. Only a job's own keys are read,
+  never a step's or a `with:`'s. A `needs` holding an expression, or naming
+  no job of the file, is not drawn as no dependency: it is named under
+  `graphUnresolved`. A call of the product's own `./.github/workflows/` is
+  followed one level; a call of the socle is followed only when it names
+  the commit of the socle answering — a checkout whose workflows hold no
+  change, or an archive whose `INSTALLED.pin` carries it — and is
+  otherwise named as read by another socle. Any other call stays unread
+  and says so. `jobs` and every other field are unchanged.
+- **Impact.** [asks: nothing] [writes: nothing] Nothing for a product to
+  do. A reader of `declarations` finds two more members on each workflow.
+
 - **`docs/conventions.md` no longer says maelys-platform's documentation
   policy names the old pin layout.** The sentence was written on
   2026-09-09 when `migrate` stopped writing `adapter/<PRODUCT>_PIN`, and

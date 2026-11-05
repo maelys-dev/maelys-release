@@ -670,3 +670,85 @@ def caller_faults(caller: str, job: str, needs: dict, secrets: list) -> list:
         elif not re.search(rf"^\s*{re.escape(secret)}:", passed, re.M):
             faults.append(f"{job} does not pass {secret}, which the workflow it calls declares")
     return faults
+
+
+# ---- the keys of one job ----------------------------------------------------
+
+DIRECT_KEY = re.compile(r"^( *)([A-Za-z_][A-Za-z0-9_-]*):(?:[ \t](.*))?$")
+JOB_ID = re.compile(r"[A-Za-z_][A-Za-z0-9_-]*")
+
+
+def direct_keys(body: str) -> dict:
+    """{key: (line index, inline value)} of a job's own keys, from its body.
+
+    A job's own keys stand at the shallowest indentation of its body;
+    `needs:`, `name:`, `if:` or `uses:` deeper down belong to a step, to a
+    `with:` or to a strategy, never to the job. Blank lines and comments do
+    not set the level. The first of two keys of one name is kept: YAML
+    refuses the second, and the socle does not choose between them.
+    """
+    lines = body.split("\n")
+    depths = [len(line) - len(line.lstrip(" ")) for line in lines
+              if line.strip() and not line.lstrip().startswith("#")]
+    if not depths:
+        return {}
+    level = min(depths)
+    keys: dict = {}
+    for index, line in enumerate(lines):
+        match = DIRECT_KEY.match(line.rstrip())
+        if match and len(match.group(1)) == level and match.group(2) not in keys:
+            keys[match.group(2)] = (index, yaml_scalar(match.group(3) or ""))
+    return keys
+
+
+def unquoted(value: str) -> "str | None":
+    """A one-line scalar without its quotes; None when it is not one the socle reads."""
+    if value[:1] == "'":
+        return value[1:-1].replace("''", "'") if len(value) >= 2 and value[-1] == "'" else None
+    if value[:1] == '"':
+        return value[1:-1] if len(value) >= 2 and value[-1] == '"' and "\\" not in value else None
+    if not value or value[0] in "|>[]{}&*!%@`,?:-#":
+        return None
+    return value
+
+
+def job_needs(body: str) -> "list | None":
+    """[(value as written, the job id it names or None)] of a job's `needs:`, or None without one.
+
+    Three shapes: a scalar, an inline `[a, b]`, a `- a` list below the key,
+    indented or at the key's own level. What is not a job id -- an
+    expression, a value spread over lines, a mapping -- names None and is
+    kept as written, never dropped: an unread `needs` read as none would
+    draw a job that waits on nothing.
+    """
+    keys = direct_keys(body)
+    if "needs" not in keys:
+        return None
+    index, inline = keys["needs"]
+    if inline:
+        if inline.startswith("[") and not inline.endswith("]") or inline.startswith("{"):
+            return [(inline, None)]
+        items = [item.strip() for item in inline[1:-1].split(",")] if inline.startswith("[") else [inline]
+        # `needs: []` waits on nothing, and says so.
+        values = [item for item in items if item]
+    else:
+        lines = body.split("\n")
+        indent = len(lines[index]) - len(lines[index].lstrip(" "))
+        values = []
+        for line in lines[index + 1:]:
+            if not line.strip() or line.lstrip().startswith("#"):
+                continue
+            depth = len(line) - len(line.lstrip(" "))
+            item = re.fullmatch(r"\s*-\s+(.+?)\s*", line)
+            if depth < indent or depth == indent and not item:
+                break
+            if not item:
+                return [("a value below needs: that is not a list of job ids", None)]
+            values.append(yaml_scalar(item.group(1)))
+        if not values:
+            return [("needs: with no value", None)]
+    read = []
+    for value in values:
+        plain = unquoted(value)
+        read.append((value, plain if plain is not None and JOB_ID.fullmatch(plain) else None))
+    return read

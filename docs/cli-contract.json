@@ -2300,6 +2300,120 @@
                     "file": {
                       "type": "string"
                     },
+                    "graph": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "called": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "file": {
+                                "type": "string"
+                              },
+                              "from": {
+                                "enum": [
+                                  "project",
+                                  "socle"
+                                ]
+                              },
+                              "graph": {
+                                "items": {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "called": {
+                                      "type": "null"
+                                    },
+                                    "conditional": {
+                                      "type": "boolean"
+                                    },
+                                    "job": {
+                                      "type": "string"
+                                    },
+                                    "name": {
+                                      "type": [
+                                        "string",
+                                        "null"
+                                      ]
+                                    },
+                                    "needs": {
+                                      "items": {
+                                        "type": "string"
+                                      },
+                                      "type": "array"
+                                    },
+                                    "uses": {
+                                      "type": [
+                                        "string",
+                                        "null"
+                                      ]
+                                    }
+                                  },
+                                  "required": [
+                                    "job",
+                                    "name",
+                                    "needs",
+                                    "conditional",
+                                    "uses",
+                                    "called"
+                                  ],
+                                  "type": "object"
+                                },
+                                "type": "array"
+                              }
+                            },
+                            "required": [
+                              "file",
+                              "from",
+                              "graph"
+                            ],
+                            "type": [
+                              "object",
+                              "null"
+                            ]
+                          },
+                          "conditional": {
+                            "type": "boolean"
+                          },
+                          "job": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "needs": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "uses": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "job",
+                          "name",
+                          "needs",
+                          "conditional",
+                          "uses",
+                          "called"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "graphUnresolved": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
                     "jobs": {
                       "items": {
                         "type": "string"
@@ -2333,7 +2447,9 @@
                     "jobs",
                     "runners",
                     "unresolved",
-                    "delegates"
+                    "delegates",
+                    "graph",
+                    "graphUnresolved"
                   ],
                   "type": "object"
                 },

@@ -28,6 +28,24 @@ VERDICT_SCHEMA = {"type": "object", "required": ["valid", "violations"],
 SOCLE_SCHEMA = {"type": "object", "required": ["version", "tag", "sha"],
                 "properties": {"version": {"type": "string"}, "tag": {"type": "string"}, "sha": {"type": "string"}}}
 STRINGS = {"type": "array", "items": {"type": "string"}}
+
+
+def job_node(called: dict) -> dict:
+    """One job of a workflow graph; `called` is the schema of the workflow it calls."""
+    return {"type": "object", "additionalProperties": False,
+            "required": ["job", "name", "needs", "conditional", "uses", "called"],
+            "properties": {"job": {"type": "string"}, "name": {"type": ["string", "null"]},
+                           "needs": STRINGS, "conditional": {"type": "boolean"},
+                           "uses": {"type": ["string", "null"]}, "called": called}}
+
+
+# A call is followed one level: the jobs of a called workflow call nothing
+# the socle reads.
+CALLED_GRAPH = {"type": "array", "items": job_node({"type": "null"})}
+WORKFLOW_GRAPH = {"type": "array", "items": job_node({
+    "type": ["object", "null"], "additionalProperties": False, "required": ["file", "from", "graph"],
+    "properties": {"file": {"type": "string"}, "from": {"enum": ["project", "socle"]},
+                   "graph": CALLED_GRAPH}})}
 # One line of a gate or of a verdict: ok, note or fail, and what it says.
 STATUS_LINE = {"type": "object", "required": ["status", "message"],
                "properties": {"status": {"type": "string"}, "message": {"type": "string"}}}

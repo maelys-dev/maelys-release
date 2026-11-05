@@ -14,7 +14,8 @@ import re
 
 from .constants import SOCLE_REPOSITORY
 from .workflows import (
-    block_list, file_runners, job_names, names_alone, sub_block, top_block, workflow_events, yaml_scalar,
+    block_list, direct_keys, file_runners, job_names, job_needs, names_alone, sub_block, top_block, unquoted,
+    workflow_events, workflow_jobs, yaml_scalar,
 )
 
 
@@ -150,15 +151,133 @@ def read_carried(project: pathlib.Path) -> dict:
             "calls": calls, "unresolved": unresolved}
 
 
-def read_workflows(project: pathlib.Path) -> list:
-    """Every workflow of the repository: what starts it, and what it runs."""
+# ---- how the jobs of a workflow follow one another -----------------------------
+#
+# A fleet observer draws each workflow's jobs and what each waits on, and
+# never reads a release-mechanism file itself: it asks `declarations`. So
+# the graph is read here, from a job's own keys only, and every value the
+# socle cannot read as a job of the same file goes to `graphUnresolved`
+# instead of to `needs`. An unread `needs` drawn as none is a job shown
+# starting first that in fact waits.
+
+LOCAL_CALL = re.compile(r"\./\.github/workflows/([A-Za-z0-9._-]+\.ya?ml)")
+SOCLE_CALL = re.compile(rf"{re.escape(SOCLE_REPOSITORY)}/\.github/workflows/([A-Za-z0-9._-]+\.ya?ml)@(\S+)")
+# `socle` below is (root of the running socle, its commit or None when nobody
+# can say). The commit may be given as a function of no argument, asked once
+# and only when a call names the socle: declarations of a product that calls
+# no socle have no reason to ask git anything.
+
+
+def graph_nodes(text: str, prefix: str, follow) -> tuple[list, list]:
+    """(one node per job in file order, what could not be read, in the same order).
+
+    `prefix` starts every unresolved entry, so that one inside a called
+    workflow says which call it was read through. `follow(node)` resolves
+    the call of a node that has one, and returns what it could not read.
+    """
+    jobs = workflow_jobs(text)
+    nodes: list = []
+    unresolved: list = []
+    for job, body in jobs.items():
+        keys = direct_keys(body)
+        # A name holding an expression is GitHub's to evaluate: none is
+        # guessed, and a reader falls back on the id as GitHub itself does
+        # for a job with no name.
+        name = unquoted(keys["name"][1]) if "name" in keys else None
+        if name is not None and "${{" in name:
+            name = None
+        needs: list = []
+        for value, named in job_needs(body) or []:
+            if named is None:
+                what = "an expression GitHub evaluates" if "${{" in value else "a value the socle does not read"
+                unresolved.append(f"{prefix}job {job}: {what} in needs: {value}")
+            elif named in jobs:
+                needs.append(named)
+            else:
+                unresolved.append(f"{prefix}job {job}: needs {named}, which is not a job of this file")
+        uses = unquoted(keys["uses"][1]) if "uses" in keys else None
+        if "uses" in keys and uses is None:
+            unresolved.append(f"{prefix}job {job}: uses {keys['uses'][1] or 'a block'}, which the socle does not read")
+        node = {"job": job, "name": name, "needs": needs, "conditional": "if" in keys, "uses": uses, "called": None}
+        if uses is not None:
+            unresolved.extend(follow(node))
+        nodes.append(node)
+    return nodes, unresolved
+
+
+def called_file(uses: str, project: pathlib.Path, socle: "tuple[pathlib.Path, object] | None",
+                commit: list) -> "tuple[str, pathlib.Path] | str":
+    """(from, path) of the workflow a job calls, or why it is not read.
+
+    A call of the product's own tree is read from it. A call of the socle is
+    read from the running socle's tree only when the commit it names is the
+    running socle's: any other commit may hold another file, and drawing it
+    would draw this socle's jobs under another's name. `commit` caches the
+    running socle's commit once asked.
+    """
+    local = LOCAL_CALL.fullmatch(uses)
+    if local:
+        path = project / ".github" / "workflows" / local.group(1)
+        return ("project", path) if path.is_file() else f"calls {uses}, which is not in this tree"
+    called = SOCLE_CALL.fullmatch(uses)
+    if called:
+        ref = called.group(2)
+        if socle is not None and not commit:
+            commit.append(socle[1]() if callable(socle[1]) else socle[1])
+        if socle is None or commit[0] is None:
+            return f"calls the socle at {ref[:12]}, and is read here by a socle whose commit is unknown"
+        if ref != commit[0]:
+            return f"calls the socle at {ref[:12]}, and is read here by another socle"
+        path = socle[0] / ".github" / "workflows" / called.group(1)
+        if not path.is_file():
+            return f"calls {called.group(1)}, which the socle at {ref[:12]} does not hold"
+        return "socle", path
+    if "@" in uses:
+        return f"calls {uses}, a workflow of another repository, not read here"
+    return f"uses {uses}, which the socle does not read"
+
+
+def workflow_graph(name: str, text: str, project: pathlib.Path, socle: "tuple[pathlib.Path, object] | None",
+                   commit: list) -> tuple[list, list]:
+    """(graph, graphUnresolved) of one workflow file, its calls followed one level."""
+
+    def follow(node: dict) -> list:
+        prefix = f"{name}: job {node['job']}: "
+        found = called_file(node["uses"], project, socle, commit)
+        if isinstance(found, str):
+            return [prefix + found]
+        origin, path = found
+
+        # One level: a call inside the called workflow keeps its `uses`, and
+        # says it was not followed rather than reading as a job that runs
+        # nothing.
+        def unfollowed(inner: dict) -> list:
+            return [f"{prefix}in {origin} {path.name}, job {inner['job']}: calls {inner['uses']},"
+                    " not followed: a call is read one level deep"]
+
+        inner, unresolved = graph_nodes(path.read_text(encoding="utf-8"), f"{prefix}in {origin} {path.name}, ",
+                                        unfollowed)
+        node["called"] = {"file": path.name, "from": origin, "graph": inner}
+        return unresolved
+
+    return graph_nodes(text, f"{name}: ", follow)
+
+
+def read_workflows(project: pathlib.Path, socle: "tuple[pathlib.Path, object] | None" = None) -> list:
+    """Every workflow of the repository: what starts it, and what it runs.
+
+    `socle` is the running socle, which a call naming its commit is read
+    from; without it, every call of the socle is unresolved.
+    """
     workflows = project / ".github" / "workflows"
     observed = []
+    commit: list = []
     for path in sorted(workflows.glob("*.y*ml")) if workflows.is_dir() else []:
         text = path.read_text(encoding="utf-8")
         on = top_block(text, "on")
         push = sub_block(on, "push")
         labels, unresolved = file_runners(path.name, text)
+        graph, graph_unresolved = workflow_graph(path.name, text, project, socle, commit)
         observed.append({
             "file": path.name,
             "events": workflow_events(text),
@@ -170,5 +289,7 @@ def read_workflows(project: pathlib.Path) -> list:
             "runners": labels,
             "unresolved": unresolved,
             "delegates": bool(re.search(rf"^\s*uses:\s*{re.escape(SOCLE_REPOSITORY)}/", text, re.M)),
+            "graph": graph,
+            "graphUnresolved": graph_unresolved,
         })
     return observed
