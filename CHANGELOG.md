@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.66.0 — 2026-11-06
 
 - **`declarations` draws each workflow's job graph.** Every record of
   `workflows` gains `graph`, one node per job in file order — its id, its
@@ -17,9 +17,6 @@
   change, or an archive whose `INSTALLED.pin` carries it — and is
   otherwise named as read by another socle. Any other call stays unread
   and says so. `jobs` and every other field are unchanged.
-- **Impact.** [asks: nothing] [writes: nothing] Nothing for a product to
-  do. A reader of `declarations` finds two more members on each workflow.
-
 - **`docs/conventions.md` no longer says maelys-platform's documentation
   policy names the old pin layout.** The sentence was written on
   2026-09-09 when `migrate` stopped writing `adapter/<PRODUCT>_PIN`, and
@@ -28,7 +25,8 @@
   paragraph inserted later had also left the sentence under the bullet on
   `--apply`, far from the pin it was about.
 - **Impact.** [asks: nothing] [writes: nothing] Nothing for a product to
-  do. Documentation only.
+  do. A reader of `declarations` finds two more members on each workflow;
+  the rest is documentation.
 
 ## 0.65.1 — 2026-10-25
 
