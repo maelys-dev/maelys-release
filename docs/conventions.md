@@ -58,6 +58,27 @@ never read, never regenerated and never reported. Taking the CI does not
 mean taking the mechanism, and a repository whose mechanism is `none`
 keeps its workflows to itself.
 
+**A product that deploys rather than publishes.** A site or a Worker goes
+out by a deploy job of its own, not by an archive the socle publishes, so
+its mechanism is `custom` and the conventions are all it takes. A deploy
+from a branch is not a version: such a product may keep `VERSION` at
+`0.0.0`, its changes under `## Unreleased`, and `check` holds nothing
+against it — measured on a `[ci] own` repository at `0.0.0`, with and
+without a deploy workflow. A product that chooses to deploy from a signed
+tag does it in three points, and none of them is a new mechanism:
+
+- **the gate**: a job that calls
+  `maelys-dev/maelys-release/.github/workflows/verify-tag.yml@SHA # vX.Y.Z`
+  before the deploy job, which `needs:` it. It refuses what `release.yml`
+  refuses, with the same words, and the next section says what that is;
+- **the environment**: the deploy job runs in an environment named
+  `release` whose deployment policy admits the tags `v*` alone. `protect`
+  arms that environment only for a product the socle releases, so a
+  deployed product sets it once, by the two calls written under
+  *Protecting a default branch without typing its checks*;
+- **the version**: `cut DIR X.Y.Z --apply` prepares it as for any product,
+  and the signed tag stays the operator's.
+
 No `release.yml` is not an invitation: maelys-warden publishes through its
 own `qualify-1.0.yml` and `publish-1.0.yml` and carries none, and writing
 one into it uninvited would be the socle claiming a repository that never
@@ -1465,6 +1486,66 @@ product needed no separate attestation for those files, which confused the
 provenance of an SBOM **file** with a proof that the SBOM describes the
 archive beside it. A verifier could confirm both files left this workflow
 and nothing more. maelys-http reported it.
+
+### The tag gate, for a product that deploys
+
+What the release verifies of a tag is one file,
+`.github/scripts/verify-tag.sh`, and two workflows run it.
+`release.yml` runs it in its `verify` job before anything is built.
+`verify-tag.yml`, a reusable workflow of its own, runs it for a product that
+deploys its own way — a site, a Worker — and calls it before its deploy
+job:
+
+```yaml
+jobs:
+  tag:
+    uses: maelys-dev/maelys-release/.github/workflows/verify-tag.yml@SHA # vX.Y.Z
+  deploy:
+    needs: tag
+    environment: release
+    # needs.tag.outputs.tag, .version and .commit say what was verified
+```
+
+**Neither carries a copy.** Both fetch the script from the socle at the
+commit their job runs, `job.workflow_sha`, through the same contents call
+that reads `share/allowed-signers` at that commit, after checking that the
+commit is one. The fetching step is the only part both write out, and it
+is the same in both, byte for byte; a test holds it, and it refuses a file
+whose first line is not the gate's. The two workflows cannot drift apart. A
+correction of the gate reaches a product the socle releases at its next
+adoption, which moves its `release.yml` pin; a product that calls
+`verify-tag.yml` writes that line itself, and neither `adopt` nor `check`
+reads or moves it — it moves the pin when it moves to a new socle, or it
+keeps the gate, and the allowed signers, of the socle it named.
+
+**`release.yml` calls nothing new.** Its `verify` job keeps its steps,
+their names and the matrix; each step runs one check of the script, with
+the words it had. One thing moved: the commit of the socle is checked, and
+the gate fetched, before the tag is read, so a run with no socle commit says
+so first, and a gate that cannot be read is a refusal of its own.
+Calling `verify-tag.yml` from `release.yml` instead would have nested a
+reusable workflow inside one a product calls, and what GitHub resolves for
+a `./` call and fills in `job.workflow_sha` two levels down was measured
+nowhere. The gate decides which allowed signers are read: it is not where
+to find that out.
+
+**The pin is read where the caller writes it.** The gate refuses a run of
+another socle than the one the tag pinned, which is how a replay started
+from a branch is stopped. The pin is a `uses:` line, never a mention: every
+`uses:` of the workflow in the file must name a commit, the same one, the
+one this job runs — a comment naming the commit beside a `uses:` of a
+branch does not pass. For `release.yml` the line is the product's
+`release.yml` and its `uses:` of `release.yml@SHA`. For `verify-tag.yml` it
+is the caller's own `uses:` of `verify-tag.yml@SHA`, in the workflow file
+GitHub names as `github.workflow_ref`: the top-level workflow of the run,
+which must be a file of the same repository under `.github/workflows/`. A
+gate called through an intermediate workflow of the product's own is read
+in the top one, which does not pin it, and is refused.
+
+`verify-tag.yml` holds no secret and asks for `contents: read` alone. It
+takes the same `tag` and `commit_verification` as `release.yml`, and a
+`runner` — a JSON label or label array — that needs `bash`, `git`, `gh`,
+`jq` and `ssh-keygen`. A repository on self-hosted runners names its own.
 
 ### What `check` and `adopt` verify, and what they do not
 

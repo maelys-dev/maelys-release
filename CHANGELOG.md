@@ -1,5 +1,41 @@
 # Changelog
 
+## Unreleased
+
+- **The tag gate can be called alone: `verify-tag.yml`.** A product that
+  deploys its own way — a site or a Worker, whose mechanism is `custom` —
+  could deploy from a signed tag only by copying what `release.yml`'s
+  `verify` job checks, and the copy would have diverged at the socle's
+  first correction. The checks now live in one file,
+  `.github/scripts/verify-tag.sh`, and two workflows run it: `release.yml`,
+  whose `verify` job keeps its steps, their names, the matrix and every
+  refusal's words, and the new reusable `verify-tag.yml`, which a product
+  calls before its deploy job and whose outputs are the tag, the version
+  and the commit. Both fetch the script from the socle at the commit their
+  job runs, as they read `share/allowed-signers`, and the step that fetches
+  it is the same in both. `release.yml` does not call `verify-tag.yml`:
+  nesting a reusable workflow inside one a product calls rests on what
+  GitHub resolves two levels down, which was measured nowhere. The gate
+  reads its pin where its caller writes it — the caller's `uses:` of
+  `verify-tag.yml`, in the workflow GitHub names as `github.workflow_ref` —
+  holds no secret and asks for `contents: read` alone. `docs/conventions.md`
+  says how a deployed product fits the conventions: `VERSION` may stay at
+  `0.0.0` while it deploys from a branch, and deploying from a tag is the
+  gate, an environment `release` limited to `v*` that the product sets
+  itself — `protect` arms it only for a product the socle releases — and
+  `cut`. Three things `release.yml` does differently: the socle commit
+  is checked and the gate fetched before the tag is read, so a run with no
+  socle commit says so first and a gate that cannot be read is a refusal of
+  its own; the pin is read on a `uses:` line, never in a comment, and every
+  such line must name the same commit; and the base64 decoding reads its
+  input on stdin, which a macOS runner's `base64` also accepts. `adopt`
+  and `check` neither read nor move a product's `verify-tag.yml` line: a
+  product that calls the gate moves its pin itself.
+- **Impact.** [asks: nothing] [writes: nothing] Nothing for a product the
+  socle releases: its `release.yml` runs the same checks, with the same
+  words. A `custom` product that deploys from a tag may call
+  `verify-tag.yml`, and moves that pin itself.
+
 ## 0.66.0 — 2026-11-06
 
 - **`declarations` draws each workflow's job graph.** Every record of

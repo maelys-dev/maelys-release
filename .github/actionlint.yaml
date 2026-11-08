@@ -18,3 +18,9 @@ paths:
       # pilot a version. actionlint 1.7.12 does not carry the job context's
       # new members. Narrow on purpose: this file, these two names.
       - 'property "workflow_(sha|repository)" is not defined'
+  .github/workflows/verify-tag.yml:
+    ignore:
+      # The gate release.yml runs, called alone: the same two names, for the
+      # same reason -- the socle commit whose allowed signers and gate are
+      # read is the one this job runs.
+      - 'property "workflow_(sha|repository)" is not defined'
