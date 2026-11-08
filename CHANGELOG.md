@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.67.0 — 2026-11-08
 
 - **The tag gate can be called alone: `verify-tag.yml`.** A product that
   deploys its own way — a site or a Worker, whose mechanism is `custom` —
