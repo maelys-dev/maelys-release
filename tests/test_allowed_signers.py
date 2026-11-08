@@ -32,6 +32,9 @@ from maelys_socle.release_checks import (  # noqa: E402
 
 SIGNERS = ROOT / "share" / "allowed-signers"
 WORKFLOW = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+# The checks themselves: release.yml and verify-tag.yml fetch this one file
+# from the socle at the commit their job runs.
+GATE = (ROOT / ".github" / "scripts" / "verify-tag.sh").read_text(encoding="utf-8")
 
 # What a line to run looks like, whatever the words around it: git's own
 # command on its configuration, with or without options before it, the two
@@ -392,30 +395,36 @@ class ReleaseWorkflowSignatureTest(unittest.TestCase):
         # The comment keeps the name, because it records why; what must
         # not come back is the expression.
         self.assertNotIn("${{ github.job_workflow", step)
-        self.assertIn("contents/share/allowed-signers?ref=${SOCLE_SHA}", step)
+        self.assertNotIn("${{ github.job_workflow", GATE)
+        # The step runs the gate's check, on the line of release.yml.
+        self.assertIn('run: bash "$RUNNER_TEMP/verify-tag.sh" signer', step)
+        self.assertIn("PIN_FILE: .github/workflows/release.yml", step)
+        self.assertIn("PIN_WORKFLOW: release.yml", step)
+        gate = GATE.split("check_signer() {", 1)[1].split("\n}\n", 1)[0]
+        self.assertIn("contents/share/allowed-signers?ref=${SOCLE_SHA}", gate)
         # And the socle that runs must be the one this tag pinned: a replay
         # started from a branch runs another socle, and is refused here
         # rather than by the environment after three builds.
-        self.assertIn("release\\.yml@[0-9a-f]{40}", step)
-        self.assertIn('"$SOCLE_SHA") ;;', step)
-        self.assertIn("replay it with --ref", step)
+        self.assertIn('${SOCLE}/\\.github/workflows/${PIN_WORKFLOW//./\\\\.}@[0-9a-f]{40}', gate)
+        self.assertIn('"$SOCLE_SHA") ;;', gate)
+        self.assertIn("replay it with --ref", gate)
         # Every way out is a refusal, and none falls back to GitHub's verdict.
         for guard in ('test -n "$SOCLE_SHA"', 'test -n "$SOCLE"', 'test -s "$signers"',
                       'test -s "$RUNNER_TEMP/signature"', 'test -n "$principal"'):
-            self.assertIn(guard, step, guard)
-        self.assertIn("ssh-keygen -Y find-principals", step)
-        self.assertIn("ssh-keygen -Y verify", step)
-        self.assertIn("-n git", step)
+            self.assertIn(guard, gate, guard)
+        self.assertIn("ssh-keygen -Y find-principals", gate)
+        self.assertIn("ssh-keygen -Y verify", gate)
+        self.assertIn("-n git", gate)
         # Judged at the moment GitHub saw the tag -- which the signer does
         # not write -- and never at the tagger date, which is inside the
         # payload the signer signs.
-        self.assertIn(".verification.verified_at", step)
-        self.assertNotIn("awk '/^tagger /", step)
-        self.assertIn('test -n "$seen"', step)
-        self.assertEqual(step.count('-O "verify-time=${signed_at}"'), 2)
+        self.assertIn(".verification.verified_at", gate)
+        self.assertNotIn("awk '/^tagger /", gate)
+        self.assertIn('test -n "$seen"', gate)
+        self.assertEqual(gate.count('-O "verify-time=${signed_at}"'), 2)
         # jq -j: the payload is signed byte for byte.
-        self.assertIn("jq -rj .verification.payload", step)
-        self.assertRegex(step, r"set -euo pipefail")
+        self.assertIn("jq -rj .verification.payload", gate)
+        self.assertRegex(GATE, r"set -euo pipefail")
 
 
 class BackdatedTagTest(unittest.TestCase):

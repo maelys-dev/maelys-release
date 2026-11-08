@@ -202,7 +202,9 @@ class NoJobHangsForSixHoursTest(unittest.TestCase):
                 # Far under the six hours it replaces, and not so tight that
                 # the longest green build of the fleet (8 minutes) meets it.
                 self.assertTrue(10 <= int(bound.group(1)) <= 60, f"{name}:{job} {bound.group(1)}")
-        self.assertEqual(read, 16, "the jobs of this repository that run on a runner")
+        # 17 since verify-tag.yml, whose one job is the gate release.yml's
+        # verify runs, and is bounded as it is.
+        self.assertEqual(read, 17, "the jobs of this repository that run on a runner")
 
     def test_apt_get_update_is_cut_when_it_never_returns(self) -> None:
         """`update || warning` covers an update that fails. The one egress
