@@ -101,8 +101,10 @@ jobs:
             >"$RUNNER_TEMP/verify-tag.b64" \
             || refuse "${SOCLE} at ${SOCLE_SHA} has no .github/scripts/verify-tag.sh, or this token cannot read it"
           base64 -d <"$RUNNER_TEMP/verify-tag.b64" >"$RUNNER_TEMP/verify-tag.sh"
-          test -s "$RUNNER_TEMP/verify-tag.sh" \
-            || refuse "${SOCLE} at ${SOCLE_SHA} carries an empty .github/scripts/verify-tag.sh"
+          # A path that holds no file answers no content, which decodes to
+          # three bytes of nothing: the first line says it is the gate.
+          test "$(head -n 1 "$RUNNER_TEMP/verify-tag.sh")" = "#!/usr/bin/env bash" \
+            || refuse "${SOCLE} at ${SOCLE_SHA} served no .github/scripts/verify-tag.sh that reads as the gate"
       - name: Name the workflow that calls this gate
         id: caller
         env:

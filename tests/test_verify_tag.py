@@ -214,6 +214,49 @@ class VerifyTagScriptTest(unittest.TestCase):
         self.refused(self.gate("signer", PIN_FILE=".github/workflows/release.yml", PIN_WORKFLOW="verify-tag.yml"),
                      f"v1.2.3 names no {SOCLE} commit in .github/workflows/release.yml")
 
+    def deploy(self, text: str) -> None:
+        (self.product / ".github" / "workflows" / "deploy.yml").write_text(text, encoding="utf-8")
+
+    def test_a_mention_of_the_commit_is_not_a_pin(self) -> None:
+        """A comment naming the commit beside a `uses:` of a branch passes nothing."""
+        self.deploy(f"jobs:\n  tag:\n    # {SOCLE}/.github/workflows/verify-tag.yml@{SOCLE_SHA}\n"
+                    f"    uses: {SOCLE}/.github/workflows/verify-tag.yml@main\n")
+        self.refused(self.gate("signer", PIN_FILE=".github/workflows/deploy.yml", PIN_WORKFLOW="verify-tag.yml"),
+                     f".github/workflows/deploy.yml calls {SOCLE}/.github/workflows/verify-tag.yml at main,"
+                     " which is not a commit: the socle judging v1.2.3 is pinned by nothing")
+        self.deploy(f"jobs:\n  tag:\n    # {SOCLE}/.github/workflows/verify-tag.yml@{SOCLE_SHA}\n")
+        self.refused(self.gate("signer", PIN_FILE=".github/workflows/deploy.yml", PIN_WORKFLOW="verify-tag.yml"),
+                     f"v1.2.3 names no {SOCLE} commit in .github/workflows/deploy.yml")
+
+    def test_every_call_of_the_gate_must_name_the_same_commit(self) -> None:
+        self.deploy(f"jobs:\n  a:\n    uses: {SOCLE}/.github/workflows/verify-tag.yml@{SOCLE_SHA}\n"
+                    f"  b:\n    uses: {SOCLE}/.github/workflows/verify-tag.yml@{OTHER_SHA}\n")
+        done = self.gate("signer", PIN_FILE=".github/workflows/deploy.yml", PIN_WORKFLOW="verify-tag.yml")
+        self.refused(done, f"this run executes {SOCLE} at {SOCLE_SHA} but v1.2.3 pinned")
+        self.assertIn(OTHER_SHA, done.stderr)
+
+    def test_a_quoted_or_listed_uses_line_is_a_pin(self) -> None:
+        for line in (f'    uses: "{SOCLE}/.github/workflows/verify-tag.yml@{SOCLE_SHA}" # v9.9.9',
+                     f"    - uses: '{SOCLE}/.github/workflows/verify-tag.yml@{SOCLE_SHA}'"):
+            self.deploy(f"jobs:\n  tag:\n{line}\n")
+            done = self.gate("signer", PIN_FILE=".github/workflows/deploy.yml", PIN_WORKFLOW="verify-tag.yml")
+            self.assertEqual(done.returncode, 0, line + done.stderr)
+
+    def test_a_signature_that_does_not_verify_stops(self) -> None:
+        verification = self.table[f"repos/{REPOSITORY}/git/tags/{self.tag_object}"]["verification"]
+        verification["payload"] = verification["payload"].replace("v1.2.3", "v1.2.4")
+        done = self.gate("signer")
+        self.assertNotEqual(done.returncode, 0, done.stdout)        # ssh-keygen's own refusal, not the script's
+        self.assertNotIn("is signed by signer@example.org", done.stdout)
+
+    def test_a_signature_that_is_not_ssh_or_undated_is_refused(self) -> None:
+        verification = self.table[f"repos/{REPOSITORY}/git/tags/{self.tag_object}"]["verification"]
+        signature, verification["signature"] = verification["signature"], "-----BEGIN PGP SIGNATURE-----\nx\n"
+        self.refused(self.gate("signer"), "v1.2.3 carries no ssh signature")
+        verification["signature"] = signature
+        verification["verified_at"] = "yesterday"
+        self.refused(self.gate("signer"), "v1.2.3 has an unreadable verified_at: yesterday")
+
     def test_the_workflow_named_must_be_a_file_name(self) -> None:
         for name in ("", "release.yml|.*", "../x.yml"):
             self.refused(self.gate("signer", PIN_WORKFLOW=name), "the gate was given no socle workflow")
@@ -223,7 +266,6 @@ class VerifyTagScriptTest(unittest.TestCase):
     def test_an_unsigned_commit_is_refused(self) -> None:
         self.table[f"repos/{REPOSITORY}/commits/{self.head}"]["commit"]["verification"]["verified"] = False
         self.refused(self.gate("commit", MODE="signed"), f"the commit {self.head} is not signed and verified by GitHub")
-        self.assertEqual(self.gate("commit", MODE="signed").returncode, 1)
 
     def test_a_commit_that_never_landed_on_the_default_branch_is_refused(self) -> None:
         origin = self.dir / "origin.git"
@@ -262,6 +304,63 @@ class VerifyTagScriptTest(unittest.TestCase):
         self.refused(self.gate("everything"), "usage: verify-tag.sh tag|signer|commit|caller")
 
 
+def run_block(text: str) -> str:
+    """The `run: |` block of a step's text, dedented."""
+    lines = text.splitlines()
+    at = next(i for i, line in enumerate(lines) if line.strip() == "run: |")
+    indent = len(lines[at]) - len(lines[at].lstrip()) + 2
+    body = []
+    for line in lines[at + 1:]:
+        if line.strip() and not line.startswith(" " * indent):
+            break
+        body.append(line[indent:])
+    return "\n".join(body) + "\n"
+
+
+@unittest.skipUnless(shutil.which("jq") and shutil.which("base64"), "the fetch needs jq and base64")
+class FetchTheGateTest(unittest.TestCase):
+    """The step both workflows write out, run as it is written."""
+
+    def setUp(self) -> None:
+        self.dir = pathlib.Path(tempfile.mkdtemp(prefix="maelys-fetch-gate-"))
+        self.addCleanup(shutil.rmtree, self.dir, True)
+        bin_dir = self.dir / "bin"
+        bin_dir.mkdir()
+        (bin_dir / "gh").write_text(FAKE_GH, encoding="utf-8")
+        (bin_dir / "gh").chmod(0o755)
+        self.script = self.dir / "fetch.sh"
+        self.script.write_text(run_block(step(RELEASE, "Fetch the tag gate of the socle")), encoding="utf-8")
+        self.env = {"PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}", "RUNNER_TEMP": str(self.dir),
+                    "FAKE_GH_TABLE": str(self.dir / "table.json"), "TAG": "v1.2.3", "SOCLE": SOCLE,
+                    "SOCLE_SHA": SOCLE_SHA}
+        self.path = f"repos/{SOCLE}/contents/.github/scripts/verify-tag.sh?ref={SOCLE_SHA}"
+
+    def fetch(self, table: dict, **env: str) -> subprocess.CompletedProcess:
+        (self.dir / "table.json").write_text(json.dumps(table), encoding="utf-8")
+        return subprocess.run([BASH, str(self.script)], capture_output=True, text=True, env={**self.env, **env})
+
+    def test_the_gate_is_fetched_at_the_commit_the_job_runs(self) -> None:
+        content = base64.encodebytes(GATE.read_bytes()).decode()          # wrapped, as GitHub serves it
+        done = self.fetch({self.path: {"content": content}})
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual((self.dir / "verify-tag.sh").read_bytes(), GATE.read_bytes())
+
+    def test_nothing_is_read_without_a_commit(self) -> None:
+        done = self.fetch({}, SOCLE_SHA="")
+        self.assertIn("the socle judging v1.2.3 is unknown: job.workflow_sha is empty", done.stderr)
+        self.assertFalse((self.dir / "verify-tag.b64").exists())
+        done = self.fetch({}, SOCLE_SHA="main")
+        self.assertIn("the socle judging v1.2.3 is not a commit: main", done.stderr)
+
+    def test_a_missing_or_contentless_gate_is_refused(self) -> None:
+        done = self.fetch({})
+        self.assertEqual(done.returncode, 1)
+        self.assertIn(f"{SOCLE} at {SOCLE_SHA} has no .github/scripts/verify-tag.sh", done.stderr)
+        done = self.fetch({self.path: {"type": "dir"}})
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("served no .github/scripts/verify-tag.sh that reads as the gate", done.stderr)
+
+
 class GateWiringTest(unittest.TestCase):
     """Where each workflow runs the gate, and what it gives it."""
 
@@ -272,7 +371,7 @@ class GateWiringTest(unittest.TestCase):
         self.assertIn("SOCLE_SHA: ${{ job.workflow_sha }}", fetch)
         self.assertIn("contents/.github/scripts/verify-tag.sh?ref=${SOCLE_SHA}", fetch)
         self.assertLess(fetch.index('test "${#SOCLE_SHA}" = 40'), fetch.index("gh api"))
-        self.assertIn('test -s "$RUNNER_TEMP/verify-tag.sh"', fetch)
+        self.assertIn('test "$(head -n 1 "$RUNNER_TEMP/verify-tag.sh")" = "#!/usr/bin/env bash"', fetch)
 
     def test_each_check_runs_the_gate_after_it_is_fetched(self) -> None:
         for name, workflow, checks in (("release.yml", RELEASE, ("tag", "signer", "commit")),

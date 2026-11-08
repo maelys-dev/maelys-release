@@ -405,7 +405,10 @@ class ReleaseWorkflowSignatureTest(unittest.TestCase):
         # And the socle that runs must be the one this tag pinned: a replay
         # started from a branch runs another socle, and is refused here
         # rather than by the environment after three builds.
-        self.assertIn('${SOCLE}/\\.github/workflows/${PIN_WORKFLOW//./\\\\.}@[0-9a-f]{40}', gate)
+        # On a `uses:` line of that workflow, never in a comment, and every such
+        # line must name a commit: tests/test_verify_tag.py runs each refusal.
+        self.assertIn('uses:[[:space:]]*[${quotes}]?${escaped}/\\.github/workflows/${PIN_WORKFLOW//./\\\\.}@', gate)
+        self.assertIn("which is not a commit", gate)
         self.assertIn('"$SOCLE_SHA") ;;', gate)
         self.assertIn("replay it with --ref", gate)
         # Every way out is a refusal, and none falls back to GitHub's verdict.

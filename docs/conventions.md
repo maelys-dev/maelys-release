@@ -1510,12 +1510,19 @@ jobs:
 commit their job runs, `job.workflow_sha`, through the same contents call
 that reads `share/allowed-signers` at that commit, after checking that the
 commit is one. The fetching step is the only part both write out, and it
-is the same in both, byte for byte; a test holds it. A correction of the
-gate therefore reaches a product at its next adoption, whichever of the two
-it calls, and the two cannot drift apart.
+is the same in both, byte for byte; a test holds it, and it refuses a file
+whose first line is not the gate's. The two workflows cannot drift apart. A
+correction of the gate reaches a product the socle releases at its next
+adoption, which moves its `release.yml` pin; a product that calls
+`verify-tag.yml` writes that line itself, and neither `adopt` nor `check`
+reads or moves it — it moves the pin when it moves to a new socle, or it
+keeps the gate, and the allowed signers, of the socle it named.
 
 **`release.yml` calls nothing new.** Its `verify` job keeps its steps,
-their names and the matrix; each step runs one check of the script.
+their names and the matrix; each step runs one check of the script, with
+the words it had. One thing moved: the commit of the socle is checked, and
+the gate fetched, before the tag is read, so a run with no socle commit says
+so first, and a gate that cannot be read is a refusal of its own.
 Calling `verify-tag.yml` from `release.yml` instead would have nested a
 reusable workflow inside one a product calls, and what GitHub resolves for
 a `./` call and fills in `job.workflow_sha` two levels down was measured
@@ -1524,7 +1531,10 @@ to find that out.
 
 **The pin is read where the caller writes it.** The gate refuses a run of
 another socle than the one the tag pinned, which is how a replay started
-from a branch is stopped. For `release.yml` the line is the product's
+from a branch is stopped. The pin is a `uses:` line, never a mention: every
+`uses:` of the workflow in the file must name a commit, the same one, the
+one this job runs — a comment naming the commit beside a `uses:` of a
+branch does not pass. For `release.yml` the line is the product's
 `release.yml` and its `uses:` of `release.yml@SHA`. For `verify-tag.yml` it
 is the caller's own `uses:` of `verify-tag.yml@SHA`, in the workflow file
 GitHub names as `github.workflow_ref`: the top-level workflow of the run,

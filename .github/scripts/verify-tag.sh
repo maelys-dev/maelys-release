@@ -17,8 +17,9 @@
 #   verify-tag.sh commit  the tag's commit, as commit_verification asks
 #   verify-tag.sh caller  the workflow file that calls verify-tag.yml, for `signer` to read
 #
-# Run from the product's checkout at the tag. Every refusal says why on
-# stderr and exits 1, and none of them falls back to GitHub's verdict.
+# Run from the product's checkout at the tag. Every refusal exits non-zero,
+# says why on stderr where the script words it -- ssh-keygen and git speak for
+# themselves -- and none of them falls back to GitHub's verdict.
 set -euo pipefail
 
 refuse() { echo "$1" >&2; exit 1; }
@@ -61,7 +62,7 @@ check_tag() {
 #                       release.yml, the caller of the gate for verify-tag.yml
 #      PIN_WORKFLOW     the socle workflow that line calls: release.yml or verify-tag.yml
 check_signer() {
-  local pattern pinned signers ref seen signed_at principal
+  local escaped quotes line ref_of one pinned signers ref seen signed_at principal
   test -n "$SOCLE_SHA" || refuse "the socle judging ${TAG} is unknown: job.workflow_sha is empty"
   test -n "$SOCLE" || refuse "the socle judging ${TAG} is unknown: job.workflow_repository is empty"
   case "$SOCLE_SHA" in
@@ -76,8 +77,24 @@ check_signer() {
   # started from the tag, which is the only replay the conventions allow --
   # and one started from a branch is refused here, in seconds, rather than
   # by the environment after three builds.
-  pattern="${SOCLE}/\.github/workflows/${PIN_WORKFLOW//./\\.}@[0-9a-f]{40}"
-  pinned="$( { grep -Eo "$pattern" "$PIN_FILE" || true; } | sed -E 's/.*@//' | sort -u)"
+  #
+  # The pin is a `uses:` line, never a mention: a comment naming the commit
+  # beside a `uses:` of a branch would otherwise pass while the branch sits
+  # there. And every `uses:` of that workflow in the file must name a
+  # commit, the same one: one of them on a branch or a tag is a socle
+  # nobody pinned.
+  escaped="${SOCLE//./\\.}"
+  quotes="\"'"
+  line="^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]*[${quotes}]?${escaped}/\.github/workflows/${PIN_WORKFLOW//./\\.}@"
+  ref_of="$( { grep -E "$line" "$PIN_FILE" || true; } | sed -E "s|.*${PIN_WORKFLOW//./\\.}@([^[:space:]#${quotes}]*).*|\1|" | sort -u)"
+  while IFS= read -r one; do
+    case "$one" in
+      "") ;;
+      *[!0-9a-f]*) refuse "${PIN_FILE} calls ${SOCLE}/.github/workflows/${PIN_WORKFLOW} at ${one}, which is not a commit: the socle judging ${TAG} is pinned by nothing" ;;
+      *) test "${#one}" = 40 || refuse "${PIN_FILE} calls ${SOCLE}/.github/workflows/${PIN_WORKFLOW} at ${one}, which is not a commit: the socle judging ${TAG} is pinned by nothing" ;;
+    esac
+  done <<<"$ref_of"
+  pinned="$ref_of"
   case "$pinned" in
     "$SOCLE_SHA") ;;
     "") refuse "${TAG} names no ${SOCLE} commit in ${PIN_FILE}: the socle judging it is not the one it pinned" ;;
@@ -157,9 +174,9 @@ check_commit() {
 # env: WORKFLOW_REF GITHUB_REPOSITORY GITHUB_OUTPUT
 check_caller() {
   local path file
+  test -n "${WORKFLOW_REF:-}" || refuse "GitHub did not name the workflow calling this gate: github.workflow_ref is empty"
   path="${WORKFLOW_REF%%@*}"
   file="${path#"${GITHUB_REPOSITORY}/"}"
-  test -n "$WORKFLOW_REF" || refuse "GitHub did not name the workflow calling this gate: github.workflow_ref is empty"
   test "$path" = "${GITHUB_REPOSITORY}/${file}" \
     || refuse "the workflow calling this gate is not one of ${GITHUB_REPOSITORY}: ${WORKFLOW_REF}"
   case "$file" in

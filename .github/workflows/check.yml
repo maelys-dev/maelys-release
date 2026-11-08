@@ -34,7 +34,7 @@ jobs:
       - if: runner.os == 'Linux'
         run: actionlint .github/workflows/*.yml
       - if: runner.os == 'Linux'
-        run: shellcheck share/templates/checkout-dependency.sh share/templates/checkout-dependencies.sh
+        run: shellcheck share/templates/checkout-dependency.sh share/templates/checkout-dependencies.sh .github/scripts/verify-tag.sh
       - name: Contract of the CLI
         run: |
           python3 -m py_compile bin/maelys-release && python3 -m compileall -q bin/maelys_socle

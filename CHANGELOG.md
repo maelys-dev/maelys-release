@@ -23,11 +23,18 @@
   `0.0.0` while it deploys from a branch, and deploying from a tag is the
   gate, an environment `release` limited to `v*` that the product sets
   itself — `protect` arms it only for a product the socle releases — and
-  `cut`. The base64 decoding of the allowed signers reads its input on
-  stdin, which a macOS runner's `base64` also accepts.
+  `cut`. Three things `release.yml` does differently: the socle commit
+  is checked and the gate fetched before the tag is read, so a run with no
+  socle commit says so first and a gate that cannot be read is a refusal of
+  its own; the pin is read on a `uses:` line, never in a comment, and every
+  such line must name the same commit; and the base64 decoding reads its
+  input on stdin, which a macOS runner's `base64` also accepts. `adopt`
+  and `check` neither read nor move a product's `verify-tag.yml` line: a
+  product that calls the gate moves its pin itself.
 - **Impact.** [asks: nothing] [writes: nothing] Nothing for a product the
-  socle releases: its `release.yml` runs the same checks. A `custom`
-  product that deploys from a tag may call `verify-tag.yml`.
+  socle releases: its `release.yml` runs the same checks, with the same
+  words. A `custom` product that deploys from a tag may call
+  `verify-tag.yml`, and moves that pin itself.
 
 ## 0.66.0 — 2026-11-06
 
