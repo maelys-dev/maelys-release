@@ -1227,16 +1227,19 @@ A file can also leave while still holding the old version: a study that
 moved with the bump and now says which `VERSION` it was verified on, a line
 that must stay as it is. Nothing in the tree tells that history from an
 omission, so the operator says which, for one release, by name:
-`maelys-release cut DIR X.Y.Z --left PATH`, repeatable. The word is accepted
+`maelys-release cut DIR X.Y.Z --left PATH`, repeatable, the path relative to
+`DIR`. The word is accepted
 only where it changes the verdict — a file the previous bump moved the
 version in, that is in the tree, holds the old version and not the new one
 — and refused anywhere else, so a `--left` kept in a release script fails
 the next cut instead of covering a file for good. It is judged again after
-`after-version` has run: a named file that then holds the new version, or
-neither, stops the release, since a command that moved every old version to
+`after-version` has run: a named file that then holds the new version, holds
+neither, or is gone stops the release, since a command that moved every old version to
 the new one would have rewritten the history it keeps. What it covers is
 cited line by line, in the audit and in the description of the pull request,
-where the merge is decided. It is needed once: a bump made by `cut` moves the
+where the merge is decided. It is read when the release commit is written:
+a run that resumes an open pull request says so and judges no name. It is
+needed once: a bump made by `cut` moves the
 version in `VERSION` and in what `after-version` touches, so the file is no
 longer judged at the release after. `[cut]` declares a command and not a
 list of files for the same reason — a permanent exemption would outlive the
@@ -1246,7 +1249,9 @@ again.
 The plan holds the same audit on the tree as it is, before anything is
 written. Without `after-version`, `--apply` writes `VERSION` alone, so that
 reading is the one `--apply` will make: a carrier it refuses makes the plan
-refuse too, with exit 2 and `ready: false`, and says how to lift it. With
+refuse too, with exit 2 and `ready: false`, and says how to lift it. The
+audit needs no key, so it is said beside the signing lines of an operator
+who is not the signer, not hidden behind them. With
 `after-version`, what the command rewrites is unknown until it runs; the plan
 names each carrier `--apply` will judge after it and stays ready.
 

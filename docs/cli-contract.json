@@ -3300,7 +3300,7 @@
                 "repeatable": true,
                 "required": false,
                 "requires": [],
-                "summary": "A file the previous bump moved the version in that now keeps the old one as history, not as the version it announces; accepted only for a file the audit would refuse."
+                "summary": "A file the previous bump moved the version in that now keeps the old one as history, not as the version it announces; accepted only for a file the audit would refuse, named relative to DIR."
               },
               {
                 "argument": {

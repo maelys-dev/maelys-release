@@ -12,15 +12,17 @@
   accepted only for a file the audit would refuse — a carrier of the
   previous bump, in the tree, holding the old version and not the new —
   and refused anywhere else, so it cannot outlive its release; it is judged
-  again after `[cut] after-version`, which must not rewrite the history it
-  keeps; and each line it covers is cited in the audit and in the
-  description of the pull request. A refused carrier is now cited by line,
+  again after `[cut] after-version`, which must not rewrite, empty or
+  remove the history it keeps; and each line it covers is cited in the
+  audit and in the description of the pull request. A run that resumes an
+  open pull request notes that the word is not judged there. A refused carrier is now cited by line,
   and the refusal names `--left` beside `after-version`.
 - **The plan of `cut` says what `--apply` will refuse.** It noted that a
   carrier would stop `--apply`, and said `ready: true` with exit 0. It now
-  holds the audit on the tree as it is: without `[cut] after-version`, a
-  carrier still holding the old version makes the plan refuse, `ready:
-  false` and exit 2, as `--apply` would; with it, the plan names each
+  holds the audit on the tree as it is, beside the signing lines rather
+  than after them: without `[cut] after-version`, a carrier still holding
+  the old version makes the plan refuse, `ready: false` and exit 2, as
+  `--apply` would; with it, the plan names each
   carrier `--apply` will judge after the command and stays ready. A product
   whose plan was ready is unchanged unless its next cut would have refused.
   The result of `cut` declares `left` and the `bump` it already returned.

@@ -322,7 +322,8 @@ def build(context: Context) -> SocleProgram:
                                             " version by default.", cli.argument("FILE"), requires=("--tag",)),
                                  cli.option("--left", "A file the previous bump moved the version in that now"
                                             " keeps the old one as history, not as the version it announces;"
-                                            " accepted only for a file the audit would refuse.",
+                                            " accepted only for a file the audit would refuse, named"
+                                            " relative to DIR.",
                                             cli.argument("PATH"), repeatable=True, conflicts_with=("--tag",)),
                                  cli.option("--timeout", "Minutes to wait for the checks of a commit.",
                                             cli.argument("MINUTES", "integer", minimum=1, maximum=240), default="30"),

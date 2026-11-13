@@ -3015,7 +3015,52 @@ class CutTest(unittest.TestCase):
                          ["VERSION"])
         body = (self.product.work / "fake-bin" / "body.md").read_text(encoding="utf-8")
         self.assertIn("`--left` named what keeps 1.2.3 as history", body)
-        self.assertIn(cited, body)
+        self.assertIn(f"- `docs/ui-model.md`, {cited}", body)
+        # Run again once the pull request exists, the command resumes: the
+        # word is not judged there, and says so rather than passing silently.
+        (self.product.work / "fake-bin" / "pulls.json").write_text(json.dumps(
+            [{"number": 1, "url": "https://example.invalid/pull/1", "state": "OPEN",
+              "mergeCommit": None, "headRefOid": data["commit"]}]), encoding="utf-8")
+        resumed, _ = self.cut(**{"--left": ["no/such/file.md"]})
+        self.assertNotIn("left", resumed)
+        self.assertTrue(any(entry["message"].startswith("--left is read when the release commit is written")
+                            for entry in resumed["gate"]), resumed["gate"])
+
+    def test_the_plan_names_a_carrier_to_whoever_is_not_the_signer(self) -> None:
+        """The audit needs no key: it is said beside the signing lines, not after them."""
+        self.previous_release("1.2.2", "1.2.3", "include/version.h")
+        self.product.write("CHANGELOG.md",
+                           "# Changelog\n\n## 1.3.0 — 2026-09-03\n\n- Next.\n\n## 1.2.3 — 2026-09-03\n\n- Something.\n")
+        data, code = self.cut()
+        self.assertEqual(code, maelys_cli.EXIT_VIOLATIONS)
+        refused = [entry["message"] for entry in data["gate"] if entry["status"] == "fail"]
+        self.assertTrue(any("tag.gpgsign" in message or "signingkey" in message for message in refused), refused)
+        self.assertTrue(any(message.startswith("include/version.h carries the version") for message in refused),
+                        refused)
+
+    def test_left_stops_an_after_version_that_rewrites_the_history(self) -> None:
+        """Through cut itself: the word, the command, the refusal, VERSION restored."""
+        if not self.signing_key():
+            self.skipTest("ssh-keygen is needed to sign the bump commit")
+        self.fake_gh()
+        self.history()
+        self.product.write("scripts/everywhere.sh",
+                           "#!/bin/sh\nsed -i.bak \"s/1\\.2\\.3/$(cat VERSION)/\" docs/ui-model.md"
+                           " && rm docs/ui-model.md.bak\n", executable=True)
+        self.product.write("maelys-release.conf", "[cut]\nafter-version sh scripts/everywhere.sh\n" + APART)
+        self.product.git(self.dir, "add", "-A")
+        self.product.git(self.dir, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "a command that rewrites")
+        self.product.git(self.dir, "push", "-q", "origin", "main")
+        # The plan cannot know what the command will rewrite: it notes and stays ready.
+        data, code = self.cut(**{"--left": ["docs/ui-model.md"]})
+        self.assertEqual(code, maelys_cli.EXIT_OK, data)
+        failure = self.refusal(**{"--apply": True, "--left": ["docs/ui-model.md"]})
+        self.assertEqual(failure.code, "PRECONDITION_FAILED")
+        self.assertIn("now holds 1.3.0", failure.message)
+        self.assertIn("Drop --left docs/ui-model.md,", failure.hint)
+        self.assertNotIn("Declare 'after-version", failure.hint)
+        self.assertEqual(self.product.read("VERSION"), "1.2.3\n")
+        self.assertNotIn("release/v1.3.0", self.product.git(self.dir, "branch", "--list"))
 
     def test_left_is_refused_wherever_it_would_change_nothing(self) -> None:
         """Accepted only where the audit refuses, so it cannot outlive its release."""
@@ -3031,22 +3076,42 @@ class CutTest(unittest.TestCase):
         for name, words in (("README.md", "did not move the version there"),
                             ("include/version.h", "already holds 1.3.0"),
                             ("docs/ui-model.md", "holds neither"),
-                            ("docs/gone.md", "no longer in the tree")):
-            with self.subTest(name=name), self.assertRaises(maelys_cli.Failure) as raised:
-                left(self.dir, "1.2.3", "1.3.0", [name])
-            self.assertEqual(raised.exception.code, "VALIDATION_FAILED")
-            self.assertIn(words, raised.exception.message)
+                            ("docs/gone.md", "no longer in the tree"),
+                            ("/elsewhere/docs/ui-model.md", "outside")):
+            with self.subTest(name=name):
+                with self.assertRaises(maelys_cli.Failure) as raised:
+                    left(self.dir, "1.2.3", "1.3.0", [name])
+                self.assertEqual(raised.exception.code, "VALIDATION_FAILED")
+                self.assertIn(words, raised.exception.message)
+
+    def test_left_reads_a_path_as_the_audit_spells_it(self) -> None:
+        self.previous_release("1.2.2", "1.2.3", "docs/ui-model.md")
+        for name in ("docs/ui-model.md", "./docs/ui-model.md", "docs/./ui-model.md",
+                     str(self.dir / "docs" / "ui-model.md")):
+            with self.subTest(name=name):
+                self.assertEqual(PACKAGE.cut.left_carriers(self.dir, "1.2.3", "1.3.0", [name]),
+                                 ["docs/ui-model.md"])
+
+    def test_a_line_is_numbered_as_git_numbers_it(self) -> None:
+        """A form feed is not a line break to git, nor to the reviewer reading the pull request."""
+        self.assertEqual(PACKAGE.cut.lines_holding("one\fstill one\nverified on 1.2.3\n", "1.2.3"),
+                         [(2, "verified on 1.2.3")])
 
     def test_left_is_judged_again_after_the_write(self) -> None:
         """An after-version that rewrote the history, or removed it, refuses."""
         self.previous_release("1.2.2", "1.2.3", "docs/ui-model.md")
         for text, words in (("verified on 1.3.0.\n", "now holds 1.3.0"),
-                            ("verified on nothing.\n", "holds neither")):
-            self.product.write("docs/ui-model.md", text)
-            audit, stale = PACKAGE.cut.bump_audit(self.dir, "1.2.3", "1.3.0", ["docs/ui-model.md"])
-            self.assertEqual(stale, ["docs/ui-model.md"])
-            self.assertEqual(audit[0][0], "fail")
-            self.assertIn(words, audit[0][1])
+                            ("verified on nothing.\n", "holds neither"),
+                            (None, "no longer in the tree")):
+            with self.subTest(words=words):
+                if text is None:
+                    (self.dir / "docs" / "ui-model.md").unlink()
+                else:
+                    self.product.write("docs/ui-model.md", text)
+                audit, stale = PACKAGE.cut.bump_audit(self.dir, "1.2.3", "1.3.0", ["docs/ui-model.md"])
+                self.assertEqual(stale, ["docs/ui-model.md"])
+                self.assertEqual(audit[0][0], "fail")
+                self.assertIn(words, audit[0][1])
 
     def test_a_declared_after_version_satisfies_the_audit(self) -> None:
         if not self.signing_key():
