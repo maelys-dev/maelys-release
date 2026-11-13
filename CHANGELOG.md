@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.68.0 — 2026-11-13
 
 - **`cut --left PATH`: a file that keeps the old version as history.**
   The audit of `cut` refused any file the previous bump moved the version
