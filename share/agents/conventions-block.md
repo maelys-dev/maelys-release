@@ -54,12 +54,12 @@ rules below hold whatever that mechanism is; the complete conventions are in
   `origin`. What it says of the version, the entry, the worktree and the
   files the last bump moved the version in is about what was prepared:
   fix that, or name with `--left PATH` a file that keeps the old version
-  as history rather than the version it announces. Its lines on `tag.gpgsign`,
-  `user.signingkey` and the signing key are the signer's own, and exit 2
-  on those alone is expected of anyone else: leave them, and never
-  configure a key to turn them green. It does not run what only `--apply`
-  runs: the verify command, `[cut] after-version`, GitHub's verdict on the
-  commit, the checks.
+  as history rather than the version it announces. Its lines on
+  `tag.gpgsign`, `user.signingkey` and the signing key are the signer's
+  own, and exit 2 on those alone is expected of anyone else: leave them,
+  and never configure a key to turn them green. It does not run what only
+  `--apply` runs: the verify command, `[cut] after-version`, GitHub's
+  verdict on the commit, the checks.
 - A branch is named after the change it carries, with the prefix that
   change would take in a commit message (`fix/`, `docs/`, `release/`…),
   never after the tool that created it: a name says what changes, not who
