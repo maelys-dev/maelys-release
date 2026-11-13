@@ -207,7 +207,66 @@ def version_carriers(project: pathlib.Path, commit: str, old: str, new: str) -> 
     return sorted(set(carriers))
 
 
-def bump_audit(project: pathlib.Path, old: str, new: str) -> tuple[list[tuple[str, str]], list[str]]:
+def lines_holding(text: str, version: str) -> list[tuple[int, str]]:
+    """The lines of TEXT that hold VERSION, numbered from one."""
+    pattern = version_pattern(version)
+    return [(number, line.strip()) for number, line in enumerate(text.splitlines(), 1) if pattern.search(line)]
+
+
+def cited(lines: list[tuple[int, str]], limit: int = 5) -> str:
+    """LINES as a reader checks them: the number, then what the line says."""
+    shown = [f"line {number}: {text[:160]}" for number, text in lines[:limit]]
+    return "; ".join(shown) + (f"; and {len(lines) - limit} more" if len(lines) > limit else "")
+
+
+def left_carriers(project: pathlib.Path, old: str, new: str, named: list[str]) -> list[str]:
+    """The files --left names, each one the audit would refuse, or a refusal.
+
+    A file the previous bump moved the version in, and that still holds the
+    old one, is a carrier this cut forgot -- unless what it holds is
+    history: a study that says which version it was verified on, a record
+    of a migration. Nothing in the tree tells the two apart, so the
+    operator says which, for this release, by name. The word is accepted
+    only where it changes the verdict: a name the audit would accept, note,
+    or never judge is refused, so a --left left in a release script fails
+    the next cut instead of silently covering a file for good. The audit
+    only reads the previous bump, and a bump made by cut moves the version
+    in VERSION and in what [cut] after-version touches: the file stops
+    being judged at the release after this one.
+    """
+    names = sorted({name.removeprefix("./") for name in named})
+    if not names:
+        return []
+    commit, was, became = previous_bump(project)
+    carriers = version_carriers(project, commit, was, became) if commit else []
+    for name in names:
+        if name not in carriers:
+            raise Failure("VALIDATION_FAILED",
+                          f"--left {name}: " + (f"the bump {was} -> {became} did not move the version there,"
+                                                if commit else "no previous bump says where the version lives,")
+                          + " so the audit does not judge it.",
+                          "Name only a file the plan refuses as still holding the old version.")
+        path = project / name
+        if not path.is_file():
+            raise Failure("VALIDATION_FAILED", f"--left {name}: the file is no longer in the tree, which the audit"
+                                               " already only notes.", f"Drop --left {name}.")
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if version_pattern(new).search(text):
+            raise Failure("VALIDATION_FAILED", f"--left {name}: it already holds {new}, which the audit accepts.",
+                          f"Drop --left {name}.")
+        if not version_pattern(old).search(text):
+            raise Failure("VALIDATION_FAILED", f"--left {name}: it holds neither {old} nor {new}, which the audit"
+                                               " already only notes.", f"Drop --left {name}.")
+    return names
+
+
+def about(message: str, names: list[str]) -> str:
+    """The name among NAMES an audit message is about; empty when none."""
+    return next((name for name in names if message.startswith(name + " ")), "")
+
+
+def bump_audit(project: pathlib.Path, old: str, new: str,
+               left: list[str] | None = None) -> tuple[list[tuple[str, str]], list[str]]:
     """What cut has just written, held against what the previous bump moved.
 
     cut writes VERSION and runs [cut] after-version, and nothing then reads
@@ -241,13 +300,31 @@ def bump_audit(project: pathlib.Path, old: str, new: str) -> tuple[list[tuple[st
         except OSError as error:
             found.append(("note", f"{name} cannot be read: {error}"))
             continue
+        if name in (left or ()):
+            # Judged again after the write: [cut] after-version runs between
+            # the word and this reading, and a command that moved every old
+            # version to the new one would have rewritten the history the
+            # operator said this file keeps.
+            if version_pattern(new).search(text):
+                stale.append(name)
+                found.append(("fail", f"{name} was named by --left and now holds {new}: it carries the version"
+                                      " after all, or [cut] after-version rewrote the history it keeps"))
+            elif version_pattern(old).search(text):
+                found.append(("note", f"{name} still holds {old}, kept as history by --left rather than the"
+                                      f" version it announces: {cited(lines_holding(text, old))}"))
+            else:
+                stale.append(name)
+                found.append(("fail", f"{name} was named by --left and holds neither {old} nor {new} any more:"
+                                      " the history it kept is gone"))
+            continue
         if version_pattern(new).search(text):
             found.append(("ok", f"{name} carries {new}"))
         elif version_pattern(old).search(text):
             # The version is still there, one release behind. Nothing else
             # explains that, so this is the omission the audit exists for.
             stale.append(name)
-            found.append(("fail", f"{name} carries the version and still holds {old}"))
+            numbers = ", ".join(str(number) for number, _ in lines_holding(text, old))
+            found.append(("fail", f"{name} carries the version and still holds {old}, at line {numbers}"))
         else:
             # Neither version is in the file, and that has two readings: a
             # carrier this cut forgot and whose contents moved on anyway, or
@@ -256,9 +333,8 @@ def bump_audit(project: pathlib.Path, old: str, new: str) -> tuple[list[tuple[st
             # -- a place the version reaches since the previous bump is
             # invisible -- costs a missed detection the product's own checks
             # still catch. Its twin, a place the version leaves, would cost a
-            # refusal nothing downstream can lift: [cut] declares a command,
-            # not a list, so the operator's only ways out would be to make a
-            # file carry a version it should not, or to cut outside the tool.
+            # refusal: --left lifts one only where the old version is still
+            # there to cite, and here there is nothing left to cite.
             # maelys-cli found it in their own history: 0.1.0 -> 0.2.0 moved
             # the version in a generated CLI reference that no longer carries
             # it at all.
@@ -654,6 +730,9 @@ def cut_open(invocation: Invocation, decl: Declarations, data: dict, log, timeou
                       else f"No tag v{decl.version} exists: VERSION says what was published last. Set it to the"
                            f" version last published (0.0.0 when none), commit, and cut {version} with its dated entry.")
     data["previousVersion"] = decl.version
+    left = left_carriers(project, decl.version, version, list(invocation.option("--left", None) or []))
+    if left:
+        data["left"] = left
     # The bump in progress is the only change the release commit may carry:
     # anything else in the worktree would ride into a tagged commit unread.
     unexpected = sorted(path for path, code in worktree_paths(project).items()
@@ -694,18 +773,30 @@ def cut_open(invocation: Invocation, decl: Declarations, data: dict, log, timeou
             data["gate"].append({"status": "note",
                                  "message": f"--apply would run {decl.verify_command.replace('TARGET', host_target())}"
                                             " here before writing anything"})
-        # Said before anything is written, so a product that needs
-        # [cut] after-version learns it from the plan rather than from a
-        # pull request its own checks refuse.
-        commit, was, became = previous_bump(project)
-        elsewhere = version_carriers(project, commit, was, became) if commit else []
-        if elsewhere and not decl.after_version:
-            data["gate"].append({"status": "note",
-                                 "message": f"the bump {was} -> {became} moved the version in "
-                                            + ", ".join(elsewhere)
-                                            + " as well, and no [cut] after-version is declared:"
-                                              " --apply would write VERSION alone and refuse"})
-        data["next"] = f"{PROGRAM} cut {project} {version} --apply"
+        # The audit --apply holds after the write, held here on the tree as
+        # it is. Without [cut] after-version, --apply writes VERSION alone,
+        # so this reading is the one --apply will make, and a carrier it
+        # refuses makes the plan refuse: a plan that said ready to a cut
+        # that then refused was reported as misleading. With the command,
+        # what it rewrites is unknown until it runs: the plan names what
+        # --apply will judge, and stays ready.
+        if previous_bump(project)[0]:
+            audit, stale = bump_audit(project, decl.version, version, left)
+            for status, message in audit:
+                if status == "ok":
+                    continue
+                if status == "fail" and decl.after_version:
+                    status, message = "note", f"{message}: --apply judges it once [cut] after-version has run"
+                elif status == "fail":
+                    name = about(message, stale)
+                    message += (": --apply would write VERSION alone and refuse. Declare [cut] after-version"
+                                f" to regenerate it, or pass --left {name} if what it holds is history"
+                                " rather than the version it announces")
+                data["gate"].append({"status": status, "message": message})
+            if stale and not decl.after_version:
+                data["ready"] = False
+                return data, EXIT_VIOLATIONS
+        data["next"] = f"{PROGRAM} cut {project} {version} --apply" + "".join(f" --left {name}" for name in left)
         return data, EXIT_OK
     # The gate a product declared for the release runners is held here too,
     # before a branch and a pull request exist. maelys-datalog found the gap
@@ -749,23 +840,30 @@ def cut_open(invocation: Invocation, decl: Declarations, data: dict, log, timeou
         data["regenerated"] = [path for path in touched if path != "VERSION"]
     # The write is now complete, and this is the last moment it costs
     # nothing to be wrong: no branch, no pull request, no run.
-    audit, stale = bump_audit(project, decl.version, version)
+    audit, stale = bump_audit(project, decl.version, version, left)
     data["bump"] = [{"status": status, "message": message} for status, message in audit]
     for status, message in audit:
         print(f"{status:<8} {message}", file=log)
     log.flush()
     if stale:
         (project / "VERSION").write_text(decl.version + "\n", encoding="utf-8")
-        left = [path for path in touched if path not in ("VERSION", "CHANGELOG.md")]
+        changed = [path for path in touched if path not in ("VERSION", "CHANGELOG.md")]
+        forgot = [name for name in stale if name not in left]
+        named = [name for name in stale if name in left]
         raise Failure("PRECONDITION_FAILED",
-                      f"VERSION was written and {', '.join(stale)} did not follow:"
-                      f" the previous bump moved the version there too.",
+                      "VERSION was written and the audit refused it: "
+                      + "; ".join(message for status, message in audit if status == "fail") + ".",
                       "VERSION is restored"
-                      + (f"; {' '.join(left)} is left changed" if left else "")
-                      + ". Declare 'after-version COMMAND' in the [cut] section of "
-                      + DECLARATION_FILE + " so the product regenerates them, then cut again."
-                      " Without it the commit is red by construction wherever a check compares the two,"
-                      " and silent wherever none does.")
+                      + (f"; {' '.join(changed)} is left changed" if changed else "")
+                      + "."
+                      + (" Declare 'after-version COMMAND' in the [cut] section of " + DECLARATION_FILE
+                         + " so the product regenerates " + ", ".join(forgot) + ", then cut again: without it"
+                         " the commit is red by construction wherever a check compares the two, and silent"
+                         " wherever none does. A file that holds the old version as history, and no longer"
+                         " announces the current one, is named instead: "
+                         + " ".join(f"--left {name}" for name in forgot) + "." if forgot else "")
+                      + (f" Drop --left {' '.join(named)}, or keep [cut] after-version off the history"
+                         " it names." if named else ""))
     git("switch", "-q", "-c", branch, cwd=project)
     git("add", "--", "VERSION", "CHANGELOG.md", *touched, cwd=project)
     git("-c", "commit.gpgsign=true", "commit", "-q", "-S", "-m", f"{product} {version}", cwd=project)
@@ -779,7 +877,13 @@ def cut_open(invocation: Invocation, decl: Declarations, data: dict, log, timeou
         # The body reaches gh through a file: a changelog entry holds
         # backticks, and a shell once read five of them as commands.
         body_file = pathlib.Path(temp) / "body.md"
-        body_file.write_text(f"## {version} — {date}\n\n{body}\n\n---\n\nOpened by `{PROGRAM} cut`."
+        # A word given to the audit is a word the reviewer reads: each line
+        # it covers, by number, where the merge is decided.
+        kept = "".join(f"\n- {message}" for status, message in audit
+                       if status == "note" and about(message, left))
+        kept = (f"\n\n`--left` named what keeps {decl.version} as history rather than the version"
+                f" it announces:\n{kept}" if kept else "")
+        body_file.write_text(f"## {version} — {date}\n\n{body}{kept}\n\n---\n\nOpened by `{PROGRAM} cut`."
                              f" The tag is signed on the merge commit of this pull request, once its checks are"
                              f" green, by `{PROGRAM} cut {project.name} {version} --tag --apply`.\n", encoding="utf-8")
         created = forge().open_pull_request(project, repository, base, branch, f"{product} {version}", body_file)

@@ -1216,18 +1216,39 @@ It lags by one release, and the two directions do not cost the same. A
 place the version **reached** since the previous bump is invisible here: a
 missed detection, which the product's own checks still catch. A place the
 version **left** is the dangerous one — a file that has stopped carrying the
-version reads exactly like one this cut forgot. Refusing there would block a
-release with nothing downstream to lift it, since `[cut]` declares a command
-and not a list of files, so the operator's only ways out would be to make a
-file carry a version it should no longer carry, or to cut outside the tool.
-The audit therefore splits the two by force of evidence: a file that **still
-holds the old version** is an omission and stops the release; a file that
-holds **neither** version is a note. maelys-cli found the case in their own
-history, where a generated CLI reference carried the version at `0.1.0 ->
-0.2.0` and carries none today. The plan says what it found before anything is
-written, so a product that needs `after-version` learns it from
-`maelys-release cut DIR X.Y.Z` rather than from a pull request its own
-checks refuse.
+version reads exactly like one this cut forgot. The audit therefore splits
+the two by force of evidence: a file that **still holds the old version** is
+an omission and stops the release; a file that holds **neither** version is
+a note. maelys-cli found the second case in their own history, where a
+generated CLI reference carried the version at `0.1.0 -> 0.2.0` and carries
+none today.
+
+A file can also leave while still holding the old version: a study that
+moved with the bump and now says which `VERSION` it was verified on, a line
+that must stay as it is. Nothing in the tree tells that history from an
+omission, so the operator says which, for one release, by name:
+`maelys-release cut DIR X.Y.Z --left PATH`, repeatable. The word is accepted
+only where it changes the verdict — a file the previous bump moved the
+version in, that is in the tree, holds the old version and not the new one
+— and refused anywhere else, so a `--left` kept in a release script fails
+the next cut instead of covering a file for good. It is judged again after
+`after-version` has run: a named file that then holds the new version, or
+neither, stops the release, since a command that moved every old version to
+the new one would have rewritten the history it keeps. What it covers is
+cited line by line, in the audit and in the description of the pull request,
+where the merge is decided. It is needed once: a bump made by `cut` moves the
+version in `VERSION` and in what `after-version` touches, so the file is no
+longer judged at the release after. `[cut]` declares a command and not a
+list of files for the same reason — a permanent exemption would outlive the
+history it was written for, and hide the day the file carried the version
+again.
+
+The plan holds the same audit on the tree as it is, before anything is
+written. Without `after-version`, `--apply` writes `VERSION` alone, so that
+reading is the one `--apply` will make: a carrier it refuses makes the plan
+refuse too, with exit 2 and `ready: false`, and says how to lift it. With
+`after-version`, what the command rewrites is unknown until it runs; the plan
+names each carrier `--apply` will judge after it and stays ready.
 
 maelys-cli reported the gap, from a `VERSION` and a header compared by `make
 check-version`: the refusal arrived after the branch was pushed and the pull

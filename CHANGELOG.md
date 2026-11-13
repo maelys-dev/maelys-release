@@ -1,5 +1,37 @@
 # Changelog
 
+## Unreleased
+
+- **`cut --left PATH`: a file that keeps the old version as history.**
+  The audit of `cut` refused any file the previous bump moved the version
+  in and that still held the old one, and nothing could lift the refusal:
+  a product's study that moved `0.21.0 -> 0.22.0` with its bump, and now
+  says which `VERSION` it was verified on, stopped the cut of `0.23.0`, with
+  falsifying the line or cutting outside the tool as the only ways out.
+  `--left PATH`, repeatable, names such a file for one release. It is
+  accepted only for a file the audit would refuse — a carrier of the
+  previous bump, in the tree, holding the old version and not the new —
+  and refused anywhere else, so it cannot outlive its release; it is judged
+  again after `[cut] after-version`, which must not rewrite the history it
+  keeps; and each line it covers is cited in the audit and in the
+  description of the pull request. A refused carrier is now cited by line,
+  and the refusal names `--left` beside `after-version`.
+- **The plan of `cut` says what `--apply` will refuse.** It noted that a
+  carrier would stop `--apply`, and said `ready: true` with exit 0. It now
+  holds the audit on the tree as it is: without `[cut] after-version`, a
+  carrier still holding the old version makes the plan refuse, `ready:
+  false` and exit 2, as `--apply` would; with it, the plan names each
+  carrier `--apply` will judge after the command and stays ready. A product
+  whose plan was ready is unchanged unless its next cut would have refused.
+  The result of `cut` declares `left` and the `bump` it already returned.
+- **Impact.** [asks: nothing] [writes: cut] Nothing for a product to do:
+  its next adoption rewrites the managed block of `AGENTS.md` and
+  `CLAUDE.md` and the skill, which say that what the plan says of the
+  files the last bump moved the version in is about what was prepared,
+  and name `--left` — a change to a managed text, hence a minor. `cut`
+  writes one thing more on GitHub: with `--left`, the pull request's
+  description cites the lines it covers.
+
 ## 0.67.0 — 2026-11-08
 
 - **The tag gate can be called alone: `verify-tag.yml`.** A product that
