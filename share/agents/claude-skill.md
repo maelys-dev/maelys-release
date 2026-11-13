@@ -39,12 +39,15 @@ there is normative).
    release as `cut` will and changes no file of the product and nothing
    on GitHub — it fetches, so it needs `gh`, the network and a `main`
    level with `origin`. Run it that way first. What it says of the
-   version, the entry and the worktree is about what was prepared: fix
-   that. Its lines on `tag.gpgsign`, `user.signingkey` and the signing
-   key are the signer's own, and exit 2 on those alone is expected of
-   anyone else: leave them, and never configure a key to turn them
-   green. The verify command, `[cut] after-version`, GitHub's verdict on
-   the release commit and the checks run under `--apply` only.
+   version, the entry, the worktree and the files the last bump moved
+   the version in is about what was prepared: fix that, or name with
+   `--left PATH` a file that keeps the old version as history rather
+   than the version it announces. Its lines on `tag.gpgsign`,
+   `user.signingkey` and the signing key are the signer's own, and exit
+   2 on those alone is expected of anyone else: leave them, and never
+   configure a key to turn them green. The verify command, `[cut]
+   after-version`, GitHub's verdict on the release commit and the
+   checks run under `--apply` only.
 3. Merge that pull request under this repository's own rules. `cut` never
    merges its own: a command that did would work only where the default
    branch is unprotected.

@@ -3213,6 +3213,13 @@
                   "--message",
                   "--tag"
                 ]
+              },
+              {
+                "kind": "at-most-one",
+                "options": [
+                  "--left",
+                  "--tag"
+                ]
               }
             ],
             "operands": [
@@ -3283,6 +3290,20 @@
               },
               {
                 "argument": {
+                  "name": "PATH",
+                  "type": "string"
+                },
+                "conflictsWith": [
+                  "--tag"
+                ],
+                "long": "--left",
+                "repeatable": true,
+                "required": false,
+                "requires": [],
+                "summary": "A file the previous bump moved the version in that now keeps the old one as history, not as the version it announces; accepted only for a file the audit would refuse, named relative to DIR."
+              },
+              {
+                "argument": {
                   "maximum": 240,
                   "minimum": 1,
                   "name": "MINUTES",
@@ -3322,7 +3343,7 @@
               }
             ],
             "passthrough": false,
-            "synopsis": "cut DIR VERSION [--product NAME] [--mechanism MECHANISM] [--tag] [--message FILE] [--timeout MINUTES] [--apply]"
+            "synopsis": "cut DIR VERSION [--product NAME] [--mechanism MECHANISM] [--tag] [--message FILE] [--left PATH...] [--timeout MINUTES] [--apply]"
           },
           "outputMode": "json-envelope",
           "outputSchema": {
@@ -3333,6 +3354,25 @@
               },
               "branch": {
                 "type": "string"
+              },
+              "bump": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "message"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
               },
               "changelog": {
                 "type": "string"
@@ -3379,6 +3419,12 @@
                     "message"
                   ],
                   "type": "object"
+                },
+                "type": "array"
+              },
+              "left": {
+                "items": {
+                  "type": "string"
                 },
                 "type": "array"
               },
@@ -3471,7 +3517,7 @@
             "cut"
           ],
           "purpose": "Open the release of a version, then sign its tag on the merge commit whose checks passed; plan without --apply.",
-          "usage": "cut DIR VERSION [--product NAME] [--mechanism MECHANISM] [--tag] [--message FILE] [--timeout MINUTES] [--apply]"
+          "usage": "cut DIR VERSION [--product NAME] [--mechanism MECHANISM] [--tag] [--message FILE] [--left PATH...] [--timeout MINUTES] [--apply]"
         },
         {
           "available": true,

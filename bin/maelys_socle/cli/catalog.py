@@ -320,6 +320,11 @@ def build(context: Context) -> SocleProgram:
                                  cli.flag("--tag", "The second stop: read the merged pull request and sign the tag."),
                                  cli.option("--message", "File holding the tag's annotation; the CHANGELOG entry of the"
                                             " version by default.", cli.argument("FILE"), requires=("--tag",)),
+                                 cli.option("--left", "A file the previous bump moved the version in that now"
+                                            " keeps the old one as history, not as the version it announces;"
+                                            " accepted only for a file the audit would refuse, named"
+                                            " relative to DIR.",
+                                            cli.argument("PATH"), repeatable=True, conflicts_with=("--tag",)),
                                  cli.option("--timeout", "Minutes to wait for the checks of a commit.",
                                             cli.argument("MINUTES", "integer", minimum=1, maximum=240), default="30"),
                                  cli.option("--poll", "Seconds between two readings of the checks.",

@@ -128,7 +128,10 @@ CUT_SCHEMA = {"type": "object", "additionalProperties": False,
                                                             "url": {"type": "string"},
                                                             "state": {"type": "string"}}},
                              "pushed": {"type": "boolean"}, "verified": {"type": "boolean"},
-                             "regenerated": STRINGS,
+                             "regenerated": STRINGS, "left": STRINGS,
+                             "bump": {"type": "array", "items": {
+                                 "type": "object", "additionalProperties": False, "required": ["status", "message"],
+                                 "properties": {"status": {"type": "string"}, "message": {"type": "string"}}}},
                              "next": {"type": "string"}}}
 DOCS_CONTRACT_OPTION = cli.flag(
     "--docs-contract", "Refuse prose in docs/ and a CLI reference outside docs/cli.md, instead of noting them.")

@@ -720,7 +720,10 @@ class SaidToTheAgentTest(unittest.TestCase):
             # What it needs.
             self.assertIn("needs `gh`, the network and a `main` level with `origin`", text, name)
             # Whose lines are whose.
-            self.assertIn("What it says of the version, the entry and the worktree is about what was prepared", text, name)
+            self.assertIn("What it says of the version, the entry, the worktree and the files the last bump moved"
+                          " the version in is about what was prepared", text, name)
+            # A carrier that keeps the old version as history is named, never falsified.
+            self.assertIn("name with `--left PATH` a file that keeps the old version as history", text, name)
             self.assertIn("`tag.gpgsign`, `user.signingkey` and the signing key are the signer's own", text, name)
             self.assertIn("exit 2 on those alone is expected of anyone else", text, name)
             self.assertIn("never configure a key to turn them green", text, name)
