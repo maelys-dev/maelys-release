@@ -19,6 +19,15 @@ on:
         required: false
         type: string
         default: make check
+      check_timeout_minutes:
+        description: >-
+          Whole minutes for each check matrix job, including setup; 5–60,
+          default 30. Declared as [ci-timeouts] check MINUTES in
+          maelys-release.conf and written into the call by adopt.
+          Does not change fuzz, sanitizers or the product's extra legs.
+        required: false
+        type: number
+        default: 30
       sanitizer_command:
         description: >-
           Run on Linux x86_64 with clang; empty disables the job.
@@ -138,10 +147,20 @@ jobs:
     # Bounded, because nothing else can bound it: GitHub refuses
     # timeout-minutes on a job that calls a reusable workflow, so a product
     # cannot cut a job of the socle that hangs, and the default is six hours.
-    # About five times the longest green run measured across the fleet --
-    # docs/conventions.md, under Continuous integration, has the table.
-    timeout-minutes: 30
+    # Keep even a direct caller's invalid input bounded before the first
+    # step can reject it. Fractions fall back to 30 here and fail below;
+    # invalid values never reach checkout or a product command.
+    timeout-minutes: ${{ inputs.check_timeout_minutes >= 5 && inputs.check_timeout_minutes <= 60 && !contains(toJSON(inputs.check_timeout_minutes), '.') && inputs.check_timeout_minutes || 30 }}
     steps:
+      - name: Validate check timeout
+        shell: bash
+        env:
+          CHECK_TIMEOUT_MINUTES: ${{ toJSON(inputs.check_timeout_minutes) }}
+        run: |
+          if [[ ! "$CHECK_TIMEOUT_MINUTES" =~ ^([5-9]|[1-5][0-9]|60)$ ]]; then
+            echo "::error::check_timeout_minutes must be an integer from 5 to 60; declare [ci-timeouts] check MINUTES and run adopt" >&2
+            exit 1
+          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
@@ -461,4 +480,3 @@ jobs:
       - name: Sanitizers with clang
         shell: bash
         run: ${{ inputs.sanitizer_command }}
-

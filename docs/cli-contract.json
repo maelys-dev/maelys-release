@@ -2117,9 +2117,34 @@
                 },
                 "type": "array"
               },
+              "ciTimeouts": {
+                "additionalProperties": false,
+                "properties": {
+                  "check": {
+                    "maximum": 60,
+                    "minimum": 5,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "check"
+                ],
+                "type": "object"
+              },
               "declared": {
                 "additionalProperties": false,
                 "properties": {
+                  "ciTimeouts": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "check": {
+                        "maximum": 60,
+                        "minimum": 5,
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  },
                   "manifestPatterns": {
                     "items": {
                       "type": "string"
@@ -2479,7 +2504,8 @@
               "workflows",
               "carried",
               "unreleased",
-              "checks"
+              "checks",
+              "ciTimeouts"
             ],
             "type": "object"
           },

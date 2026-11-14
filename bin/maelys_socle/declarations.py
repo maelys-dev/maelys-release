@@ -152,6 +152,9 @@ class Declarations:
         # first cut used that name, and the report looping over it appended
         # to the very list it walked until the self-test was killed.
         self.legs: list[tuple[str, str, str]] = []
+        # Explicit minutes for shared CI jobs; absent means the workflow's
+        # default, not a declaration made on the product's behalf.
+        self.ci_timeouts: dict[str, int] = {}
         # "reviewer", "none", or "" when this repository has not chosen.
         self.gate = ""
         # What cut runs between writing VERSION and the bump commit, for a
@@ -429,7 +432,11 @@ def unreleased_refusal(pin: dict, located: bool) -> str:
     return ""
 
 
-def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[tuple[str, str]], str, str, str]:
+class CITimeoutError(ValueError):
+    """A shared-CI violation also applies to products with their own release."""
+
+
+def parse_release(text: str) -> tuple:
     """The declaration file: [targets], [manifest], [sbom], [runners], [dependencies], [commit], [channels], [gate] and [cut].
 
     A target line naming no label keeps the runner release.yml holds for that
@@ -445,8 +452,9 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
     macOS jobs use on a private repository. [sbom] holds one glob, the document a build leaves in dist/ beside the
     packages it describes; the release then attests that document against
     the files the document itself names. [channels] names one 'CHANNEL REGISTRY' per line, each rendered into a
-    channel.yml job that runs once the release is published. [cut] holds
-    'after-version COMMAND', run by cut between writing VERSION and the
+    channel.yml job that runs once the release is published.
+    [ci-timeouts] holds 'check MINUTES', the bounded budget of each shared
+    check job. [cut] holds 'after-version COMMAND', run by cut between writing VERSION and the
     bump commit, for a product that materialises its version somewhere
     else as well.
     """
@@ -463,6 +471,7 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
     after_version = ""
     package: list[str] = []
     checks: list[tuple[str, str, str]] = []
+    ci_timeouts: dict[str, int] = {}
     own_ci = False
     docs_unnamed = False
     privacy_declared = False
@@ -475,7 +484,7 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
         if line.startswith("["):
             if line in ("[targets]", "[manifest]", "[sbom]", "[runners]", "[dependencies]",
                         "[commit]", "[channels]", "[gate]", "[cut]", "[package]", "[check]", "[ci]", "[docs]",
-                        "[privacy]"):
+                        "[privacy]", "[ci-timeouts]"):
                 section = line[1:-1]
                 continue
             # A section this socle does not know is named and skipped, never
@@ -487,6 +496,16 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
             section = "unknown"
             continue
         if section == "unknown":
+            continue
+        if section == "ci-timeouts":
+            words = line.split()
+            if len(words) != 2 or words[0] != "check":
+                raise CITimeoutError(f"[ci-timeouts] holds 'check MINUTES', not {line!r}, at line {number}")
+            if words[0] in ci_timeouts:
+                raise CITimeoutError(f"[ci-timeouts] names check twice, at line {number}")
+            if not re.fullmatch(r"[1-9][0-9]?", words[1]) or not 5 <= int(words[1]) <= 60:
+                raise CITimeoutError(f"[ci-timeouts] check requires an integer from 5 to 60 minutes, at line {number}")
+            ci_timeouts["check"] = int(words[1])
             continue
         if not section:
             raise ValueError(f"line outside a [targets], [manifest], [sbom], [runners],"
@@ -676,8 +695,11 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
     if section and not unknown and not targets and not manifest and not channels \
             and not gate and not after_version and not sbom and not runners and not apart \
             and not commit_verification and not package and not checks and not own_ci and not docs_unnamed \
-            and not privacy_declared:
+            and not privacy_declared and not ci_timeouts:
         raise ValueError(f"{DECLARATION_FILE} declares no target, archive kind, channel, gate or cut command")
+    if own_ci and ci_timeouts:
+        raise CITimeoutError("[ci-timeouts] bounds the shared CI, and [ci] own says this repository calls none:"
+                             " declare one or the other")
     if own_ci and checks:
         raise ValueError("[check] legs run from the ci.yml job that calls the shared CI, and [ci] own says"
                          " this repository calls none: declare one or the other")
@@ -687,7 +709,7 @@ def parse_release(text: str) -> tuple[list[tuple[str, object]], list[str], list[
             raise ValueError(f"[package] names {name}, which is not a target of this release"
                              f" ({', '.join(known)})")
     return (targets, manifest, channels, channel_gates, sbom, macos_runner, runners, apart,
-            commit_verification, gate, after_version, unknown, package, checks)
+            commit_verification, gate, after_version, unknown, package, checks, ci_timeouts)
 
 
 def parse_cli_declarations(text: str) -> tuple[list[str], list[str], str]:

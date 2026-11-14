@@ -100,7 +100,7 @@ def declared_legs(project: pathlib.Path) -> list[str]:
     if not release.is_file():
         return []
     try:
-        return [name for name, _, _ in parse_release(release.read_text(encoding="utf-8"))[-1]]
+        return [name for name, _, _ in parse_release(release.read_text(encoding="utf-8"))[13]]
     except ValueError:
         return []
 

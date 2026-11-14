@@ -1121,11 +1121,11 @@ class ProductNeedsTest(unittest.TestCase):
         # Effective and declared are not the same answer: folding them makes a
         # fleet read "everyone targets these three" where nobody declared one.
         self.assertEqual(data["targets"], ["linux-x86_64", "linux-arm64", "macos-arm64"])
-        self.assertEqual(data["declared"], {"targets": [], "manifestPatterns": [], "sbomPattern": "", "macosRunner": [], "dependenciesApart": True, "commitVerification": "", "legs": []})
+        self.assertEqual(data["declared"], {"targets": [], "manifestPatterns": [], "sbomPattern": "", "macosRunner": [], "dependenciesApart": True, "commitVerification": "", "ciTimeouts": {}, "legs": []})
         self.product.write("maelys-release.conf", "[targets]\nlinux-arm64\n\n[manifest]\n*.wasm\n" + APART)
         data = self.product.json("declarations", self.dir)["data"]
         self.assertEqual(data["declared"], {"targets": ["linux-arm64"],
-                                            "manifestPatterns": ["*.wasm"], "sbomPattern": "", "macosRunner": [], "dependenciesApart": True, "commitVerification": "", "legs": []})
+                                            "manifestPatterns": ["*.wasm"], "sbomPattern": "", "macosRunner": [], "dependenciesApart": True, "commitVerification": "", "ciTimeouts": {}, "legs": []})
         self.assertEqual(data["manifestPatterns"], "*.tar.gz *.deb *.rpm *.wasm")
 
     def test_the_contract_carries_the_pin_its_file_and_the_stamp(self) -> None:
@@ -5894,9 +5894,9 @@ class PackageTargetsTest(unittest.TestCase):
 
     def test_the_section_names_targets_of_this_release(self) -> None:
         declared = "[targets]\nlinux-x86_64\nlinux-arm64\nmacos-arm64\n\n[package]\nlinux-x86_64\n"
-        self.assertEqual(PACKAGE.declarations.parse_release(declared)[-2], ["linux-x86_64"])
+        self.assertEqual(PACKAGE.declarations.parse_release(declared)[12], ["linux-x86_64"])
         # Without [targets], the socle's three targets are the release's.
-        self.assertEqual(PACKAGE.declarations.parse_release("[package]\nmacos-arm64\n")[-2], ["macos-arm64"])
+        self.assertEqual(PACKAGE.declarations.parse_release("[package]\nmacos-arm64\n")[12], ["macos-arm64"])
         for text, expected in (("[package]\nwasm32\n", "not a target of this release"),
                                ("[package]\nlinux-x86_64 linux-x86_64\n", "twice")):
             with self.assertRaises(ValueError) as refusal:
@@ -6099,7 +6099,7 @@ class ProductLegsTest(unittest.TestCase):
         return decl
 
     def test_names_are_one_each_on_a_known_platform(self) -> None:
-        self.assertEqual(PACKAGE.declarations.parse_release("[check]\nagent-off linux make check AGENT=off\n")[-1],
+        self.assertEqual(PACKAGE.declarations.parse_release("[check]\nagent-off linux make check AGENT=off\n")[13],
                          [("agent-off", "linux", "make check AGENT=off")])
         for text in ("[check]\nAgent linux true\n", "[check]\nx windows true\n", "[check]\nx linux\n",
                      "[check]\nx linux true\nx macos true\n"):
@@ -6938,7 +6938,7 @@ class RunnerDeclarationTest(unittest.TestCase):
         return PACKAGE.declarations.parse_release(textwrap.dedent(text))
 
     def test_labels_are_read(self) -> None:
-        *_, runner, runners, _, _, _, _, unknown, _, _ = self.parse("[runners]\nmacos self-hosted macOS ARM64\n")
+        *_, runner, runners, _, _, _, _, unknown, _, _, _ = self.parse("[runners]\nmacos self-hosted macOS ARM64\n")
         self.assertEqual(runner, ["self-hosted", "macOS", "ARM64"])
         self.assertEqual(runners, {"macos": ["self-hosted", "macOS", "ARM64"]})
         self.assertEqual(unknown, [])
@@ -6947,7 +6947,7 @@ class RunnerDeclarationTest(unittest.TestCase):
         """A private repository that forbids hosted runners could point the
         macOS leg elsewhere and not the two Linux ones, which are half its
         matrix and all of its fuzz and sanitizers jobs."""
-        *_, runners, _, _, _, _, unknown, _, _ = self.parse(
+        *_, runners, _, _, _, _, unknown, _, _, _ = self.parse(
             "[runners]\nlinux-x86_64 self-hosted Linux X64\nlinux-arm64 lima-arm64\n")
         self.assertEqual(runners, {"linux-x86_64": ["self-hosted", "Linux", "X64"],
                                    "linux-arm64": ["lima-arm64"]})
@@ -7019,7 +7019,7 @@ class SbomDeclarationTest(unittest.TestCase):
         return PACKAGE.declarations.parse_release(textwrap.dedent(text))
 
     def test_one_glob_is_read(self) -> None:
-        _, _, _, _, sbom, _, _, _, _, _, _, unknown, _, _ = self.parse("""\
+        _, _, _, _, sbom, _, _, _, _, _, _, unknown, _, _, _ = self.parse("""\
             [sbom]
             *.spdx.json
             """)
@@ -7033,7 +7033,7 @@ class SbomDeclarationTest(unittest.TestCase):
         self.assertIn("holds one glob", str(refusal.exception))
 
     def test_the_section_is_optional(self) -> None:
-        _, _, _, _, sbom, _, _, _, _, _, _, _, _, _ = self.parse("[manifest]\n*.wasm\n")
+        _, _, _, _, sbom, _, _, _, _, _, _, _, _, _, _ = self.parse("[manifest]\n*.wasm\n")
         self.assertEqual(sbom, "")
 
     def test_it_renders_into_the_workflow(self) -> None:
@@ -7285,23 +7285,23 @@ class UnitTest(unittest.TestCase):
 
     def test_parse_release(self) -> None:
         self.assertEqual(PACKAGE.declarations.parse_release("[targets]\nlinux-arm64\nwasm32 ubuntu-26.04\n"),
-                         ([("linux-arm64", ""), ("wasm32", "ubuntu-26.04")], [], [], {}, "", [], {}, False, "", "", "", [], [], []))
+                         ([("linux-arm64", ""), ("wasm32", "ubuntu-26.04")], [], [], {}, "", [], {}, False, "", "", "", [], [], [], {}))
         self.assertEqual(PACKAGE.declarations.parse_release("[targets]\nmacos-arm64 self-hosted ARM64\n"),
-                         ([("macos-arm64", ["self-hosted", "ARM64"])], [], [], {}, "", [], {}, False, "", "", "", [], [], []))
-        self.assertEqual(PACKAGE.declarations.parse_release("[manifest]\n*.wasm\n"), ([], ["*.wasm"], [], {}, "", [], {}, False, "", "", "", [], [], []))
+                         ([("macos-arm64", ["self-hosted", "ARM64"])], [], [], {}, "", [], {}, False, "", "", "", [], [], [], {}))
+        self.assertEqual(PACKAGE.declarations.parse_release("[manifest]\n*.wasm\n"), ([], ["*.wasm"], [], {}, "", [], {}, False, "", "", "", [], [], [], {}))
         self.assertEqual(PACKAGE.declarations.parse_release("[channels]\nnpm github-packages\n"),
-                         ([], [], [("npm", "github-packages")], {}, "", [], {}, False, "", "", "", [], [], []))
-        self.assertEqual(PACKAGE.declarations.parse_release("[gate]\nnone\n"), ([], [], [], {}, "", [], {}, False, "", "none", "", [], [], []))
-        self.assertEqual(PACKAGE.declarations.parse_release("[gate]\nreviewer\n"), ([], [], [], {}, "", [], {}, False, "", "reviewer", "", [], [], []))
-        self.assertEqual(PACKAGE.declarations.parse_release("# nothing declared\n"), ([], [], [], {}, "", [], {}, False, "", "", "", [], [], []))
+                         ([], [], [("npm", "github-packages")], {}, "", [], {}, False, "", "", "", [], [], [], {}))
+        self.assertEqual(PACKAGE.declarations.parse_release("[gate]\nnone\n"), ([], [], [], {}, "", [], {}, False, "", "none", "", [], [], [], {}))
+        self.assertEqual(PACKAGE.declarations.parse_release("[gate]\nreviewer\n"), ([], [], [], {}, "", [], {}, False, "", "reviewer", "", [], [], [], {}))
+        self.assertEqual(PACKAGE.declarations.parse_release("# nothing declared\n"), ([], [], [], {}, "", [], {}, False, "", "", "", [], [], [], {}))
         # A section this socle does not know is named and skipped, never fatal:
         # a product pins the socle by commit, and losing its targets in
         # silence on an older socle is worse than an unapplied section.
         self.assertEqual(PACKAGE.declarations.parse_release("[targets]\nlinux-arm64\n[bsd]\nx\n"),
-                         ([("linux-arm64", "")], [], [], {}, "", [], {}, False, "", "", "", ["[bsd] at line 3"], [], []))
+                         ([("linux-arm64", "")], [], [], {}, "", [], {}, False, "", "", "", ["[bsd] at line 3"], [], [], {}))
         # A version materialised twice: the command that regenerates the second.
         self.assertEqual(PACKAGE.declarations.parse_release("[cut]\nafter-version bash scripts/header.sh\n"),
-                         ([], [], [], {}, "", [], {}, False, "", "", "bash scripts/header.sh", [], [], []))
+                         ([], [], [], {}, "", [], {}, False, "", "", "bash scripts/header.sh", [], [], [], {}))
         for text in ("linux-arm64\n",                      # outside a section
                      "[targets]\nwasm32\n",                # no runner and no default
                      "[targets]\nWASM\n",                  # not a target name

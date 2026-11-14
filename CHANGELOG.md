@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+- **A declared budget for the shared check matrix.** `[ci-timeouts] check
+  MINUTES` accepts an integer from 5 to 60, with 30 unchanged when absent.
+  `adopt` manages the corresponding input of the product's `ci.yml` in both
+  directions; every matrix job receives that budget including setup. The
+  reusable workflow refuses invalid direct inputs before checkout and
+  keeps them bounded while doing so. Fuzz, sanitizers, extra legs, release
+  jobs and product test watchdogs retain their own limits. `declarations`
+  distinguishes the explicit mapping from the effective default.
+  `rehearse --check` follows the numeric budget of the actual call for its
+  repeated Check step and refuses invalid values before starting Docker;
+  this does not rehearse the elapsed time of the whole CI job.
+- **Impact.** [asks: nothing] [writes: nothing] Existing products keep their
+  30-minute check budget and unchanged generated calls. A product that
+  needs another budget declares it and adopts; no workflow edit by hand,
+  tag or release is performed by this change. Product CI qualification of
+  the candidate is still required before the socle is tagged.
+
 ## 0.68.0 — 2026-11-13
 
 - **`cut --left PATH`: a file that keeps the old version as history.**

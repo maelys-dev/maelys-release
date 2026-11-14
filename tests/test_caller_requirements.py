@@ -198,6 +198,14 @@ class NoJobHangsForSixHoursTest(unittest.TestCase):
                     self.assertIsNone(bound, f"{name}:{job} calls a workflow; GitHub refuses a bound there")
                     continue
                 read += 1
+                if (name, job) == ("check-product.yml", "check"):
+                    # This one job accepts a declared budget, but even a
+                    # direct invalid input is bounded before validation runs.
+                    self.assertIn("    timeout-minutes: ${{ inputs.check_timeout_minutes >= 5 && "
+                                  "inputs.check_timeout_minutes <= 60 && "
+                                  "!contains(toJSON(inputs.check_timeout_minutes), '.') && "
+                                  "inputs.check_timeout_minutes || 30 }}\n", body)
+                    continue
                 self.assertIsNotNone(bound, f"{name}:{job} has no timeout-minutes")
                 # Far under the six hours it replaces, and not so tight that
                 # the longest green build of the fleet (8 minutes) meets it.

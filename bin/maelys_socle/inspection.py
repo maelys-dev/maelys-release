@@ -142,9 +142,11 @@ def handle_declarations(invocation: Invocation, context: Context) -> tuple[dict,
                          "macosRunner": list(decl.macos_runner),
                          "dependenciesApart": decl.dependencies_apart,
                          "commitVerification": decl.commit_verification,
+                         "ciTimeouts": dict(decl.ci_timeouts),
                          "legs": [{"name": name, "platform": platform, "command": command}
                                   for name, platform, command in decl.legs]},
             "pinned": pinned_socle(project),
+            "ciTimeouts": {"check": decl.ci_timeouts.get("check", 30)},
             "managedBy": stamp.group(1) if stamp else "",
             "runners": read_runners(project),
             # A call of the socle is drawn from this socle's tree when it

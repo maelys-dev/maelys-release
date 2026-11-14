@@ -149,6 +149,22 @@ def ci_macos_runner(text: str, labels) -> str:
     the declaration in both directions. Everything else is left byte for
     byte, blank lines and comments included.
     """
+    values = {}
+    for key in SOCLE_RUNNER_KEYS:
+        declared = labels.get(key) if isinstance(labels, dict) else (labels if key == "macos" else None)
+        if declared:
+            values[RUNNER_INPUTS[key]] = f"'{runner_json(declared)}'"
+    return ci_call_inputs(text, RUNNER_INPUTS.values(), values)
+
+
+def ci_check_timeout(text: str, timeouts: dict[str, int]) -> str:
+    """Only this input of the product's call is managed by [ci-timeouts]."""
+    values = {"check_timeout_minutes": str(timeouts["check"])} if "check" in timeouts else {}
+    return ci_call_inputs(text, ("check_timeout_minutes",), values)
+
+
+def ci_call_inputs(text: str, managed, values: dict[str, str]) -> str:
+    """Set or remove declared inputs, preserving the rest of the socle call."""
     lines = text.splitlines(keepends=True)
     at = next((index for index, line in enumerate(lines) if CI_USES.search(line)), None)
     if at is None:
@@ -174,14 +190,13 @@ def ci_macos_runner(text: str, labels) -> str:
         if stripped and (len(lines[end]) - len(lines[end].lstrip())) < body:
             break
         end += 1
-    names = tuple(f"{name}:" for name in RUNNER_INPUTS.values())
+    names = tuple(f"{name}:" for name in managed)
     for index in reversed([i for i in range(with_at + 1, end)
-                           if lines[i].strip().startswith(names)]):
+                           if len(lines[i]) - len(lines[i].lstrip()) == body
+                           and lines[i].strip().startswith(names)]):
         del lines[index]
-    for key in reversed(SOCLE_RUNNER_KEYS):
-        declared = labels.get(key) if isinstance(labels, dict) else (labels if key == "macos" else None)
-        if declared:
-            lines.insert(with_at + 1, f"{' ' * body}{RUNNER_INPUTS[key]}: '{runner_json(declared)}'\n")
+    for key, value in reversed(list(values.items())):
+        lines.insert(with_at + 1, f"{' ' * body}{key}: {value}\n")
     return "".join(lines)
 
 
@@ -351,7 +366,8 @@ def ci_workflow(decl: Declarations, sha: str, tag: str, version: str) -> str:
     # text. They were not: this rendered the runner lines after `product:`
     # and the writer inserts them first, so a product that declared a runner
     # would have drifted against its own freshly created ci.yml.
-    return ci_legs(ci_macos_runner("\n".join(lines) + "\n", decl.runners), decl, sha, tag)
+    return ci_legs(ci_check_timeout(ci_macos_runner("\n".join(lines) + "\n", decl.runners),
+                                    decl.ci_timeouts), decl, sha, tag)
 
 
 def matrix_values(text: str, key: str) -> list[str]:
