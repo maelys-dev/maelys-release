@@ -17,7 +17,7 @@ from .project import spelled
 from .reading import DOCS_BULLET, DOCS_UNNAMED_BULLET
 from .socle_origin import share_dir
 from .texts import managed_block, names_documentation, touches
-from .workflows import ci_legs, ci_macos_runner, ci_workflow, release_workflow
+from .workflows import ci_check_timeout, ci_legs, ci_macos_runner, ci_workflow, release_workflow
 
 
 def render_text(template: pathlib.Path, mapping: dict[str, str]) -> str:
@@ -114,8 +114,9 @@ def stage(context: Context, decl: Declarations, sha: str, tag: str) -> dict[str,
         existing = ci.read_text(encoding="utf-8")
         if CI_USES.search(existing):
             updated = CARRY_USES.sub(rf"\g<1>{sha} # {tag}", CI_USES.sub(rf"\g<1>{sha} # {tag}", existing))
-            staged[".github/workflows/ci.yml"] = (ci_legs(ci_macos_runner(updated, decl.runners), decl, sha, tag),
-                                                  False)
+            staged[".github/workflows/ci.yml"] = (
+                ci_legs(ci_check_timeout(ci_macos_runner(updated, decl.runners), decl.ci_timeouts), decl, sha, tag),
+                False)
     return staged
 
 

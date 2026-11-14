@@ -446,10 +446,36 @@ class AsTheLegTest(Rehearsed):
                          re.escape(update.group(1)) + r" -q >/dev/null \\\n\s+\|\| echo " + re.escape(update.group(2)))
 
     def test_the_step_is_bounded_as_its_job_is(self) -> None:
-        self.assertEqual(re.search(r"^    timeout-minutes: (\d+)$", self.job, re.MULTILINE).group(1),
+        default = re.search(r"      check_timeout_minutes:\n(?:        .*\n)*?        default: (.+)\n",
+                            WORKFLOW.read_text(encoding="utf-8"))
+        self.assertEqual(default.group(1),
                          str(constants.CHECK_JOB_MINUTES))
         self.assertEqual(self.environment("linux-arm64", "--check")["CHECK_MINUTES"], str(constants.CHECK_JOB_MINUTES))
         self.assertIn('timeout -k 10 "${CHECK_MINUTES}m"', rehearse.CHECK_STEP)
+
+    def test_a_declared_budget_reaches_the_rehearsal_and_its_timeout_diagnostic(self) -> None:
+        conf = self.product.read("maelys-release.conf")
+        self.product.write("maelys-release.conf", conf + "\n[ci-timeouts]\ncheck 45\n")
+        self.product.run("adopt", str(self.product.dir), "--apply")
+        self.assertEqual(self.environment("linux-arm64", "--check")["CHECK_MINUTES"], "45")
+        _, _, err, _ = self.invoke("linux-arm64", "--check", status=124)
+        self.assertIn("cut after 45 minutes, the bound of the job", err)
+
+    def test_the_rehearsal_reads_the_actual_call_budget(self) -> None:
+        # Even before adoption (when check would report drift), this is the
+        # budget the job will use; rehearsal must not silently assume 30.
+        self.passes("      check_timeout_minutes: 60\n")
+        self.assertEqual(self.environment("linux-arm64", "--check")["CHECK_MINUTES"], "60")
+
+    def test_invalid_call_budgets_are_refused_before_docker_even_with_an_override(self) -> None:
+        original = self.ci.read_text(encoding="utf-8")
+        for value in ("0", "61", "30.5", "'45'", "${{ inputs.minutes }}", "|-\n        45"):
+            for override in ((), ("--check-command", "true")):
+                with self.subTest(value=value, override=override):
+                    self.ci.write_text(original, encoding="utf-8")
+                    self.passes(f"      check_timeout_minutes: {value}\n")
+                    error = self.refusal("linux-arm64", "--check", *override)
+                    self.assertIn("check_timeout_minutes", error["message"])
 
     def test_the_legs_are_the_ones_the_workflow_runs(self) -> None:
         legs = re.findall(r"^\s+- leg: (\S+)$", self.job, re.MULTILINE)

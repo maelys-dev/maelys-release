@@ -304,6 +304,7 @@ PLAIN_KEY = r"[A-Za-z_][A-Za-z0-9_-]*"
 # tables against the workflows, so a step added there fails here until
 # somebody has said which of the four it is.
 CHECK_JOB_STEPS = {
+    "Validate check timeout": "own",
     "Fetch the socle this workflow comes from": "own",
     "Carried dependencies": "left",
     "Point the pinned checkouts at the carried bundles": "left",
@@ -516,6 +517,8 @@ class Leg:
 
     def __init__(self, caller: str = "", command: str = "", where: str = "", carried: bool = False) -> None:
         self.caller, self.command, self.where, self.carried = caller, command, where, carried
+        self.minutes: int | None = CHECK_JOB_MINUTES
+        self.timeout_line = 0
 
 
 def refused(line: int, why: str) -> Failure:
@@ -544,6 +547,14 @@ def check_leg(project: pathlib.Path, context: Context | None, with_line: bool = 
     if call is None:
         return Leg()
     leg = Leg(call.job, carried="carried_dependencies" in call.inputs)
+    if "check_timeout_minutes" in call.inputs:
+        rest, number, below, _ = call.inputs["check_timeout_minutes"]
+        value = re.split(r"\s+#", rest.strip(), maxsplit=1)[0]
+        leg.timeout_line = number
+        # This input is a number, not a command string. Read the literal
+        # adopt writes, never evaluate an expression from the product.
+        leg.minutes = (int(value) if re.fullmatch(r"([5-9]|[1-5][0-9]|60)", value)
+                       and not any(significant(line) for line in below) else None)
     if not with_line or context is None:
         return leg
     if "check_command" in call.inputs:
@@ -668,6 +679,12 @@ def handle_rehearse(invocation: Invocation, context: Context) -> tuple[dict, int
                           f"{project} publishes through a {mechanism} mechanism and its {CI_FILE} does not call"
                           " check-product.yml: there is no leg of the shared CI to rehearse.",
                           f"'{PROGRAM} check {project}' verifies the conventions of such a product.")
+        if leg.minutes is None:
+            raise Failure("PRECONDITION_FAILED",
+                          f"{CI_FILE} line {leg.timeout_line}: check_timeout_minutes is not a literal integer"
+                          " from 5 to 60. Nothing was run.",
+                          "Declare [ci-timeouts] check MINUTES and run adopt; an overridden command does not"
+                          " override the budget.")
     else:
         leg = lenient_leg(project, context)
         as_the_job = package_command == PACKAGE_DEFAULT
@@ -705,7 +722,7 @@ def handle_rehearse(invocation: Invocation, context: Context) -> tuple[dict, int
                 "-e", f"PACKAGE_COMMAND={package_command}", "-e", f"REHEARSE_MODE={mode}"]
     if mode == "check":
         command += ["-e", f"CHECK_COMMAND={check_command}", "-e", f"CHECK_SHOWN={shown(check_command)}",
-                    "-e", f"CHECK_MINUTES={CHECK_JOB_MINUTES}"]
+                    "-e", f"CHECK_MINUTES={leg.minutes}"]
     command += [image, "bash", "-c", REHEARSAL]
     # The container's output is a log: it stays on stdout for a human and
     # moves to stderr when the envelope owns stdout.
@@ -726,7 +743,7 @@ def handle_rehearse(invocation: Invocation, context: Context) -> tuple[dict, int
                       " legs and the rehearsal both install.")
     if completed.returncode == 124 and mode == "check":
         raise Failure("PROCESS_FAILED",
-                      f"The check of {target} was cut after {CHECK_JOB_MINUTES} minutes, the bound of the job"
+                      f"The check of {target} was cut after {leg.minutes} minutes, the bound of the job"
                       " (exit 124).",
                       "A leg that runs this long is cut on the runner too; an emulated target is slower than"
                       " the runner, and --check-command narrows what is run.")
@@ -818,4 +835,3 @@ def text_rehearse(data: dict) -> str:
                      + " ".join(data["differs"]))
     verdict = "ok" if data["matches"] is not False else "the marker differs"
     return "\n".join(lines) + f"\nrehearse: {data['channel']} of {data['product']} {data['tag']}: {verdict}\n"
-

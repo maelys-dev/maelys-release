@@ -12,7 +12,7 @@ from . import authorship, dependencies
 from .constants import AGENT_BRANCHES, CARRY_USES, CI_USES, CLI_DECLARATIONS, CLI_GENERATOR, CLI_REFERENCE, DECLARATION_FILE, DOCUMENTS_REPOSITORY, FORMER_DECLARATION_FILE, FUZZ_DIRECTORIES, FUZZ_TARGET, GENERATED_HEAD_LINES, LEGACY_CLI_REFERENCES, LEGS_JOB, LEGS_USES, PROGRAM, PROSE_SUFFIXES, PUBLISHED_DOWNLOAD, RUNNER_INPUTS, SOCLE_MANIFEST_PATTERNS, SOCLE_MECHANISM, SOCLE_REPOSITORY, SOCLE_RUNNER_KEYS, SOCLE_TARGETS, UNPUBLISHED
 from .context import Context
 from .cut import entry_heading
-from .declarations import Declarations, PIN_ATTRIBUTES, parse_cli_declarations, parse_packages, parse_pin, parse_release, version_tuple
+from .declarations import CITimeoutError, Declarations, PIN_ATTRIBUTES, parse_cli_declarations, parse_packages, parse_pin, parse_release, version_tuple
 from .dependencies import BESIDE_CALL, CHECKOUT_SCRIPTS, DEPENDENCIES_VARIABLE, SOCLE_NAME, SOCLE_VARIABLE, sibling_readers
 from .github import github_repository
 from .host import git
@@ -573,7 +573,7 @@ def read_declaration_file(decl: Declarations) -> None:
             decl.targets, decl.manifest_patterns, decl.channels, decl.channel_gates, \
                 decl.sbom_pattern, decl.macos_runner, decl.runners, decl.dependencies_apart, \
                 decl.commit_verification, decl.gate, decl.after_version, unknown, decl.package, \
-                decl.legs = \
+                decl.legs, decl.ci_timeouts = \
                 parse_release(release.read_text(encoding="utf-8"))
             for section in unknown:
                 decl.add("missing", f"{release.name}: section {section} is not one this socle knows"
@@ -597,6 +597,14 @@ def read_declaration_file(decl: Declarations) -> None:
             for name, platform, command in decl.legs:
                 decl.add("ok", f"{release.name} [check] {name} on {platform}: {command} — runs as"
                                f" '{LEGS_JOB} / {name}', from the job of ci.yml adopt writes", "conventions")
+            if decl.ci_timeouts:
+                if decl.mechanism == "none" or ci.is_file() and not decl.calls_socle_ci:
+                    decl.add("missing", f"{release.name} [ci-timeouts] declares a shared check budget, but this"
+                                        " repository does not call check-product.yml: no job would use it",
+                             "conventions")
+                else:
+                    decl.add("ok", f"{release.name} [ci-timeouts] check: {decl.ci_timeouts['check']} minutes"
+                                   " per matrix job, including setup", "conventions")
             ci_text = ci.read_text(encoding="utf-8") if decl.legs and ci.is_file() else ""
             if decl.legs and ci_text and not decl.calls_socle_ci:
                 decl.add("missing", f"{release.name} [check] declares legs, and .github/workflows/ci.yml does"
@@ -623,7 +631,8 @@ def read_declaration_file(decl: Declarations) -> None:
             read_dependencies_apart(decl, release)
             read_runner_declarations(decl, release)
         except ValueError as error:
-            decl.add("missing", f"{release.name}: {error}")
+            decl.add("missing", f"{release.name}: {error}",
+                     "conventions" if isinstance(error, CITimeoutError) else "release")
 
 
 def read_dependencies_apart(decl: Declarations, release: pathlib.Path) -> None:

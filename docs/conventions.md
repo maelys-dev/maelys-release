@@ -1793,10 +1793,44 @@ does not say where either came from.
   | every `publish` | 1.9 min | 15 min |
   | the socle's own (`check.yml`, `formula.yml`, the carry) | — | 20 min |
 
-  The bounds are fixed, not declared by a product: a build that legitimately
-  outgrows one is reported here, and the answer is a declaration then, not
-  a guess now. A product bounds **its own** jobs in its own `ci.yml`, where
-  `timeout-minutes` is its to write.
+  These remain the defaults. A product whose shared `check` jobs need a
+  different budget declares whole minutes, from 5 to 60:
+
+  ```ini
+  [ci-timeouts]
+  check 45
+  ```
+
+  `adopt` writes `check_timeout_minutes: 45` into the call of
+  `check-product.yml` in `ci.yml`; never add `timeout-minutes` to that
+  reusable-workflow call. The budget applies separately to every job of
+  the three-leg check matrix, including checkout, dependencies, build and
+  verification. It does not change `fuzz`, `sanitizers`, `[check]` extra
+  legs, release jobs, or a product's own test watchdogs. Removing the
+  declaration removes the input on the next adoption and restores 30.
+  Duplicate or unknown keys, fractions, out-of-range values and `[ci] own`
+  alongside this declaration are refused. The reusable workflow also
+  rejects invalid direct inputs before checkout and retains a bounded
+  timeout even for a caller that bypasses adoption.
+
+  `declarations` reports the explicit mapping in `declared.ciTimeouts`
+  (empty when absent), and the effective shared-workflow budget in
+  `ciTimeouts.check` (30 when absent). This describes the declared contract,
+  not a measurement of a run or a claim that a repository calls that job;
+  `workflows` reports the calls. A declared budget with no shared CI call
+  is a violation. Harness supplied the first measured need: a green Linux
+  job near 30 minutes followed by a run cancelled at that limit. Raising
+  the job budget does not qualify or fix failures reported before that
+  cancellation.
+
+  `rehearse --check` reads the numeric budget of the actual `ci.yml` call
+  and refuses an invalid or unevaluated value before starting Docker,
+  including with `--check-command`. It gives the repeated Check step that
+  many minutes; it does not reproduce the job's total elapsed time, whose
+  budget also covers setup. Without that input the rehearsal keeps 30.
+
+  The other shared bounds remain fixed. A product bounds **its own** jobs
+  in its own `ci.yml`, where `timeout-minutes` is its to write.
 - **`apt-get update` is cut after two minutes.** The steps read
   `sudo timeout -k 10 120 apt-get update || warning`, where they read
   `sudo apt-get update || warning`. The second form covers an update that
